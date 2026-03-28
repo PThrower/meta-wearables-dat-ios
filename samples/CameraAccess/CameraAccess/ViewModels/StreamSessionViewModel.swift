@@ -33,6 +33,10 @@ class StreamSessionViewModel: ObservableObject {
   @Published var errorMessage: String = ""
   @Published var hasActiveDevice: Bool = false
 
+  // TRIBE v2 Brain Prediction
+  @Published var brainService: TribeBrainService
+  @Published var showBrainOverlay: Bool = true
+
   var isStreaming: Bool {
     streamingStatus != .stopped
   }
@@ -61,6 +65,9 @@ class StreamSessionViewModel: ObservableObject {
       frameRate: 24)
     streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
 
+    // Initialize TRIBE v2 brain service
+    self.brainService = TribeBrainService()
+
     // Monitor device availability
     deviceMonitorTask = Task { @MainActor in
       for await device in deviceSelector.activeDeviceStream() {
@@ -86,6 +93,11 @@ class StreamSessionViewModel: ObservableObject {
           self.currentVideoFrame = image
           if !self.hasReceivedFirstFrame {
             self.hasReceivedFirstFrame = true
+          }
+
+          // Process frame for TRIBE v2 brain prediction
+          if self.brainService.isEnabled {
+            await self.brainService.processFrame(image)
           }
         }
       }
@@ -139,6 +151,8 @@ class StreamSessionViewModel: ObservableObject {
 
   func startSession() async {
     await streamSession.start()
+    // Start TRIBE v2 brain prediction
+    brainService.start()
   }
 
   private func showError(_ message: String) {
@@ -148,6 +162,8 @@ class StreamSessionViewModel: ObservableObject {
 
   func stopSession() async {
     await streamSession.stop()
+    // Stop TRIBE v2 brain prediction
+    await brainService.stop()
   }
 
   func dismissError() {

@@ -11,7 +11,7 @@
 //
 // Main UI for video streaming from Meta wearable devices using the DAT SDK.
 // This view demonstrates the complete streaming API: video streaming with real-time display, photo capture,
-// and error handling.
+// error handling, and TRIBE v2 brain prediction visualization.
 //
 
 import MWDATCore
@@ -20,6 +20,7 @@ import SwiftUI
 struct StreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  @State private var showTelemetryDebug = false
 
   var body: some View {
     ZStack {
@@ -43,11 +44,26 @@ struct StreamView: View {
           .foregroundColor(.white)
       }
 
+      // TRIBE v2 Brain Activity Overlay
+      if viewModel.showBrainOverlay && viewModel.brainService.isEnabled {
+        VStack {
+          BrainActivityOverlay(
+            prediction: viewModel.brainService.currentPrediction,
+            isMockMode: viewModel.brainService.isMockMode,
+            connectionStatus: viewModel.brainService.connectionStatus
+          )
+          .padding()
+          .padding(.top, 40)
+
+          Spacer()
+        }
+      }
+
       // Bottom controls layer
 
       VStack {
         Spacer()
-        ControlsView(viewModel: viewModel)
+        ControlsView(viewModel: viewModel, showTelemetryDebug: $showTelemetryDebug)
       }
       .padding(.all, 24)
     }
@@ -69,30 +85,82 @@ struct StreamView: View {
         )
       }
     }
+    // Telemetry debug sheet
+    .sheet(isPresented: $showTelemetryDebug) {
+      TelemetryDebugView(brainService: viewModel.brainService)
+    }
   }
 }
 
 // Extracted controls for clarity
 struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
+  @Binding var showTelemetryDebug: Bool
+
   var body: some View {
-    // Controls row
-    HStack(spacing: 8) {
-      CustomButton(
-        title: "Stop streaming",
-        style: .destructive,
-        isDisabled: false
-      ) {
-        Task {
-          await viewModel.stopSession()
+    VStack(spacing: 12) {
+      // Brain service controls row
+      HStack(spacing: 12) {
+        // Toggle brain overlay
+        Button(action: {
+          viewModel.showBrainOverlay.toggle()
+        }) {
+          Label(
+            viewModel.showBrainOverlay ? "Hide Brain" : "Show Brain",
+            systemImage: viewModel.showBrainOverlay ? "brain" : "brain.slash"
+          )
+          .font(.caption)
+          .foregroundColor(.white)
         }
+        .buttonStyle(.bordered)
+        .tint(.blue)
+
+        // Status indicator
+        if viewModel.brainService.isEnabled {
+          HStack(spacing: 4) {
+            Circle()
+              .fill(viewModel.brainService.isMockMode ? Color.orange : Color.green)
+              .frame(width: 8, height: 8)
+            Text(viewModel.brainService.isMockMode ? "Mock" : "Live")
+              .font(.caption2)
+              .foregroundColor(.gray)
+          }
+        }
+
+        Spacer()
+
+        // Telemetry debug button
+        Button(action: {
+          showTelemetryDebug = true
+        }) {
+          Image(systemName: "chart.bar.fill")
+            .foregroundColor(.white)
+        }
+        .buttonStyle(.bordered)
+        .tint(.purple)
       }
 
-      // Photo button
-      CircleButton(icon: "camera.fill", text: nil) {
-        viewModel.capturePhoto()
+      // Main controls row
+      HStack(spacing: 8) {
+        CustomButton(
+          title: "Stop streaming",
+          style: .destructive,
+          isDisabled: false
+        ) {
+          Task {
+            await viewModel.stopSession()
+          }
+        }
+
+        // Photo button
+        CircleButton(icon: "camera.fill", text: nil) {
+          viewModel.capturePhoto()
+        }
+        .accessibilityIdentifier("capture_photo_button")
       }
-      .accessibilityIdentifier("capture_photo_button")
     }
+    .padding(16)
+    .background(Color.black.opacity(0.6))
+    .cornerRadius(16)
   }
 }
