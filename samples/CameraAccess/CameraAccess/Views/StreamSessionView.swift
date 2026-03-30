@@ -19,6 +19,7 @@ struct StreamSessionView: View {
   @ObservedObject private var wearablesViewModel: WearablesViewModel
   @StateObject private var viewModel: StreamSessionViewModel
   @ObservedObject private var telemetryService: TelemetryService
+  @State private var orientation: UIInterfaceOrientation?
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService) {
     self.wearables = wearables
@@ -54,6 +55,20 @@ struct StreamSessionView: View {
         .padding(8)
     }
     #endif
+    .onAppear {
+      if viewModel.isStreaming {
+        OrientationLock.shared.unlock()
+      } else {
+        OrientationLock.shared.lock(to: .portrait)
+      }
+    }
+    .onChange(of: viewModel.isStreaming) { streaming in
+      if streaming {
+        OrientationLock.shared.unlock()
+      } else {
+        OrientationLock.shared.lock(to: .portrait)
+      }
+    }
   }
 }
 
@@ -85,6 +100,9 @@ struct DebugPanel: View {
         row("Devices", "\(wearablesVM.devices.count) found")
         row("Active", viewModel.hasActiveDevice ? "YES" : "NO")
         row("Selected", viewModel.selectedDeviceId ?? "auto")
+        if viewModel.isRetrying {
+          row("Retry", "\(viewModel.retryCount)/3")
+        }
 
         if !wearablesVM.deviceInfos.isEmpty {
           Divider().background(.white.opacity(0.2))
@@ -140,3 +158,32 @@ struct DebugPanel: View {
   }
 }
 #endif
+
+// MARK: - Orientation Lock
+
+final class OrientationLock: ObservableObject {
+  static let shared = OrientationLock()
+  private var isLocked = true
+
+  func lock(to orientation: UIInterfaceOrientationMask) {
+    isLocked = true
+    if #available(iOS 16.0, *) {
+      DispatchQueue.main.async {
+        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
+      }
+    } else {
+      UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+    }
+  }
+
+  func unlock() {
+    isLocked = false
+    if #available(iOS 16.0, *) {
+      DispatchQueue.main.async {
+        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+        windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .all)) { _ in }
+      }
+    }
+  }
+}

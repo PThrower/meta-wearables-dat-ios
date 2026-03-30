@@ -44,9 +44,15 @@ struct StreamView: View {
             .scaleEffect(1.5)
             .foregroundColor(.white)
 
-          Text(String(describing: viewModel.streamingStatus).uppercased())
-            .font(.system(size: 12, weight: .medium, design: .monospaced))
-            .foregroundColor(.white.opacity(0.6))
+          if viewModel.isRetrying {
+            Text("RETRYING \(viewModel.retryCount)/3...")
+              .font(.system(size: 12, weight: .bold, design: .monospaced))
+              .foregroundColor(.yellow)
+          } else {
+            Text(String(describing: viewModel.streamingStatus).uppercased())
+              .font(.system(size: 12, weight: .medium, design: .monospaced))
+              .foregroundColor(.white.opacity(0.6))
+          }
 
           if let lastError = viewModel.errorLog.last {
             Text(lastError)

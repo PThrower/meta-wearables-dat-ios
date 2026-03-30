@@ -13,6 +13,7 @@
 // Initiates streaming
 //
 
+import MWDATCamera
 import MWDATCore
 import SwiftUI
 
@@ -74,6 +75,11 @@ struct NonStreamView: View {
           .padding(.horizontal, 24)
           .padding(.bottom, 8)
         }
+
+        // Stream config
+        StreamConfigSection(viewModel: viewModel)
+          .padding(.horizontal, 24)
+          .padding(.bottom, 8)
 
         HStack(spacing: 8) {
           Image(systemName: "hourglass")
@@ -218,6 +224,78 @@ struct DevicePickerSection: View {
     case .connecting: return (.yellow, "CONNECTING")
     case .disconnected: return (.red, "DISCONNECTED")
     case nil: return (.gray, "UNKNOWN")
+    }
+  }
+}
+
+// MARK: - Stream Config
+
+struct StreamConfigSection: View {
+  @ObservedObject var viewModel: StreamSessionViewModel
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("STREAM SETTINGS")
+        .font(.system(size: 11, weight: .bold, design: .monospaced))
+        .foregroundColor(.white.opacity(0.5))
+
+      // Resolution picker
+      HStack(spacing: 6) {
+        Text("Resolution")
+          .font(.system(size: 13))
+          .foregroundColor(.white.opacity(0.7))
+          .frame(width: 80, alignment: .leading)
+
+        ForEach(StreamingResolution.allCases, id: \.self) { res in
+          Button {
+            viewModel.selectedResolution = res
+          } label: {
+            Text(resLabel(res))
+              .font(.system(size: 12, weight: viewModel.selectedResolution == res ? .bold : .regular, design: .monospaced))
+              .foregroundColor(viewModel.selectedResolution == res ? .white : .white.opacity(0.5))
+              .padding(.horizontal, 10)
+              .padding(.vertical, 6)
+              .background(viewModel.selectedResolution == res ? Color.blue.opacity(0.8) : Color.white.opacity(0.08))
+              .cornerRadius(6)
+          }
+        }
+      }
+
+      // Frame rate picker
+      HStack(spacing: 6) {
+        Text("Frame Rate")
+          .font(.system(size: 13))
+          .foregroundColor(.white.opacity(0.7))
+          .frame(width: 80, alignment: .leading)
+
+        ForEach([UInt(24), 30, 60], id: \.self) { fps in
+          Button {
+            viewModel.selectedFrameRate = fps
+          } label: {
+            Text("\(fps) fps")
+              .font(.system(size: 12, weight: viewModel.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
+              .foregroundColor(viewModel.selectedFrameRate == fps ? .white : .white.opacity(0.5))
+              .padding(.horizontal, 10)
+              .padding(.vertical, 6)
+              .background(viewModel.selectedFrameRate == fps ? Color.blue.opacity(0.8) : Color.white.opacity(0.08))
+              .cornerRadius(6)
+          }
+        }
+      }
+
+      // Current config summary
+      Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} RAW codec")
+        .font(.system(size: 10, design: .monospaced))
+        .foregroundColor(.white.opacity(0.3))
+        .padding(.top, 2)
+    }
+  }
+
+  private func resLabel(_ res: StreamingResolution) -> String {
+    switch res {
+    case .high: return "HIGH"
+    case .medium: return "MED"
+    case .low: return "LOW"
     }
   }
 }

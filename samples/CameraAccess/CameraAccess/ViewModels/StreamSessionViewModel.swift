@@ -11,7 +11,7 @@
 //
 // Core view model demonstrating video streaming from Meta wearable devices using the DAT SDK.
 // This class showcases the key streaming patterns: device selection, session management,
-// video frame handling, photo capture, and error handling.
+// video frame handling, photo capture, and error handling with auto-retry.
 //
 
 import MWDATCamera
@@ -35,6 +35,18 @@ class StreamSessionViewModel: ObservableObject {
   @Published var hasActiveDevice: Bool = false
   @Published var selectedDeviceId: DeviceIdentifier?
 
+  // Retry state
+  @Published var isRetrying: Bool = false
+  @Published var retryCount: Int = 0
+
+  // Stream config (user-adjustable)
+  @Published var selectedResolution: StreamingResolution = .high {
+    didSet { rebuildSessionWithNewConfig() }
+  }
+  @Published var selectedFrameRate: UInt = 30 {
+    didSet { rebuildSessionWithNewConfig() }
+  }
+
   var isStreaming: Bool {
     streamingStatus != .stopped
   }
@@ -52,19 +64,32 @@ class StreamSessionViewModel: ObservableObject {
   private let wearables: WearablesInterface
   private var currentSelector: any DeviceSelector
   private var deviceMonitorTask: Task<Void, Never>?
+  private var retryTask: Task<Void, Never>?
   private weak var telemetryService: TelemetryService?
 
-  private let streamConfig = StreamSessionConfig(
-    videoCodec: VideoCodec.raw,
-    resolution: StreamingResolution.low,
-    frameRate: 24)
+  private var streamConfig: StreamSessionConfig {
+    StreamSessionConfig(
+      videoCodec: VideoCodec.raw,
+      resolution: selectedResolution,
+      frameRate: selectedFrameRate)
+  }
+
+  // MARK: - Retry constants
+
+  private static let maxRetries = 3
+  private static let retryableErrors: Set<String> = [
+    "internalError", "timeout", "deviceNotConnected", "videoStreamingError"
+  ]
 
   init(wearables: WearablesInterface, telemetryService: TelemetryService? = nil) {
     self.wearables = wearables
     self.telemetryService = telemetryService
     // Start with auto-select
     self.currentSelector = AutoDeviceSelector(wearables: wearables)
-    self.streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
+    self.streamSession = StreamSession(
+      streamSessionConfig: StreamSessionConfig(videoCodec: .raw, resolution: .high, frameRate: 30),
+      deviceSelector: currentSelector
+    )
 
     setupSessionListeners()
     telemetryService?.attachToStreamSession(streamSession)
@@ -133,6 +158,8 @@ class StreamSessionViewModel: ObservableObject {
           self.currentVideoFrame = image
           if !self.hasReceivedFirstFrame {
             self.hasReceivedFirstFrame = true
+            // First frame received — cancel any pending retry
+            self.cancelRetry()
           }
         }
       }
@@ -150,7 +177,13 @@ class StreamSessionViewModel: ObservableObject {
         self.errorLog.append(logEntry)
         if self.errorLog.count > 50 { self.errorLog.removeFirst(self.errorLog.count - 50) }
         self.errorMessage = "\(rawError) | \(state) | \(device)"
-        self.showError = true
+
+        // Auto-retry on transient errors
+        if self.shouldRetry(error: error) {
+          self.scheduleRetry()
+        } else {
+          self.showError = true
+        }
       }
     }
 
@@ -163,6 +196,59 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
     }
+  }
+
+  // MARK: - Auto-Retry
+
+  private func shouldRetry(error: StreamSessionError) -> Bool {
+    let errorStr = String(describing: error)
+    return Self.retryableErrors.contains(errorStr) && retryCount < Self.maxRetries
+  }
+
+  private func scheduleRetry() {
+    cancelRetry()
+    retryCount += 1
+    isRetrying = true
+    let delay = UInt64(pow(2.0, Double(retryCount))) * 500_000_000 // exponential: 1s, 2s, 4s
+
+    NSLog("[StreamSession] Auto-retry \(retryCount)/\(Self.maxRetries) in \(delay / 1_000_000_000)s")
+
+    retryTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      try? await Task.sleep(nanoseconds: delay)
+      guard !Task.isCancelled else { return }
+      NSLog("[StreamSession] Executing retry \(self.retryCount)/\(Self.maxRetries)")
+      await self.streamSession.start()
+    }
+  }
+
+  private func cancelRetry() {
+    retryTask?.cancel()
+    retryTask = nil
+    isRetrying = false
+    retryCount = 0
+  }
+
+  // MARK: - Config
+
+  private func rebuildSessionWithNewConfig() {
+    guard !isStreaming else { return }
+    NSLog("[StreamSession] Rebuilding session with resolution=\(String(describing: selectedResolution)) fps=\(selectedFrameRate)")
+
+    deviceMonitorTask?.cancel()
+
+    streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
+    setupSessionListeners()
+    telemetryService?.attachToStreamSession(streamSession)
+
+    deviceMonitorTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      for await device in self.currentSelector.activeDeviceStream() {
+        self.hasActiveDevice = device != nil
+      }
+    }
+
+    updateStatusFromState(streamSession.state)
   }
 
   // MARK: - Actions
@@ -187,6 +273,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func startSession() async {
+    cancelRetry()
     await streamSession.start()
   }
 
@@ -196,6 +283,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func stopSession() async {
+    cancelRetry()
     await streamSession.stop()
   }
 
@@ -227,6 +315,7 @@ class StreamSessionViewModel: ObservableObject {
       streamingStatus = .waiting
     case .streaming:
       streamingStatus = .streaming
+      cancelRetry()
     }
   }
 
