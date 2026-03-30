@@ -21,9 +21,29 @@ import SwiftUI
 import MWDATMockDevice
 #endif
 
+struct DeviceInfo {
+    let name: String
+    let type: DeviceType
+    let linkState: LinkState
+    let compatibility: Compatibility
+}
+
+extension DeviceType {
+    var displayName: String {
+        switch self {
+        case .rayBanMeta: return "Ray-Ban Meta"
+        case .oakleyMetaHSTN: return "Oakley Meta HSTN"
+        case .oakleyMetaVanguard: return "Oakley Meta Vanguard"
+        case .metaRayBanDisplay: return "Meta Ray-Ban Display"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
 @MainActor
 class WearablesViewModel: ObservableObject {
   @Published var devices: [DeviceIdentifier]
+  @Published var deviceInfos: [DeviceIdentifier: DeviceInfo] = [:]
   @Published var hasMockDevice: Bool
   @Published var registrationState: RegistrationState
   @Published var showGettingStartedSheet: Bool = false
@@ -35,6 +55,7 @@ class WearablesViewModel: ObservableObject {
   private var setupDeviceStreamTask: Task<Void, Never>?
   private let wearables: WearablesInterface
   private var compatibilityListenerTokens: [DeviceIdentifier: AnyListenerToken] = [:]
+  private var linkStateTokens: [DeviceIdentifier: AnyListenerToken] = [:]
 
   init(wearables: WearablesInterface) {
     self.wearables = wearables
@@ -75,8 +96,38 @@ class WearablesViewModel: ObservableObject {
         #if DEBUG
         self.hasMockDevice = !MockDeviceKit.shared.pairedDevices.isEmpty
         #endif
-        // Monitor compatibility for each device
+        // Monitor compatibility and link state for each device
         monitorDeviceCompatibility(devices: devices)
+        updateDeviceInfos(devices: devices)
+      }
+    }
+  }
+
+  private func updateDeviceInfos(devices: [DeviceIdentifier]) {
+    let deviceSet = Set(devices)
+    linkStateTokens = linkStateTokens.filter { deviceSet.contains($0.key) }
+
+    for deviceId in devices {
+      guard let device = wearables.deviceForIdentifier(deviceId) else { continue }
+
+      let name = device.nameOrId()
+      let type = device.deviceType()
+      let state = device.linkState
+      let compat = device.compatibility()
+
+      deviceInfos[deviceId] = DeviceInfo(name: name, type: type, linkState: state, compatibility: compat)
+
+      if linkStateTokens[deviceId] == nil {
+        let token = device.addLinkStateListener { [weak self] linkState in
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            if var info = self.deviceInfos[deviceId] {
+              info = DeviceInfo(name: info.name, type: info.type, linkState: linkState, compatibility: info.compatibility)
+              self.deviceInfos[deviceId] = info
+            }
+          }
+        }
+        linkStateTokens[deviceId] = token
       }
     }
   }
@@ -98,6 +149,13 @@ class WearablesViewModel: ObservableObject {
         if compatibility == .deviceUpdateRequired {
           Task { @MainActor in
             self.showError("Device '\(deviceName)' requires an update to work with this app")
+          }
+        }
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          if var info = self.deviceInfos[deviceId] {
+            info = DeviceInfo(name: info.name, type: info.type, linkState: info.linkState, compatibility: compatibility)
+            self.deviceInfos[deviceId] = info
           }
         }
       }

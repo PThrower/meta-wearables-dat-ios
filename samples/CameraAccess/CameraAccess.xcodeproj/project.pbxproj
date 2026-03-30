@@ -35,6 +35,10 @@
 		E6DA451E2E79A63100E3F688 /* CardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA45172E79A63100E3F688 /* CardView.swift */; };
 		E6DA451F2E79A63100E3F688 /* MockDeviceKitView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6DA451A2E79A63100E3F688 /* MockDeviceKitView.swift */; };
 		E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */; };
+		TELE00012EB918740097D0E1 /* TelemetryTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00022EB918740097D0E1 /* TelemetryTypes.swift */; };
+		TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00042EB918740097D0E1 /* TelemetryLogger.swift */; };
+		TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00062EB918740097D0E1 /* TelemetryService.swift */; };
+		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -98,6 +102,10 @@
 		E6DA45182E79A63100E3F688 /* MockDeviceCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceCardView.swift; sourceTree = "<group>"; };
 		E6DA451A2E79A63100E3F688 /* MockDeviceKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitView.swift; sourceTree = "<group>"; };
 		E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonStreamView.swift; sourceTree = "<group>"; };
+		TELE00022EB918740097D0E1 /* TelemetryTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryTypes.swift; sourceTree = "<group>"; };
+		TELE00042EB918740097D0E1 /* TelemetryLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryLogger.swift; sourceTree = "<group>"; };
+		TELE00062EB918740097D0E1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
+		TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryHUDView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -178,6 +186,7 @@
 				8FD96B752E6F0A9800F56AB1 /* StreamSessionView.swift */,
 				E6A188472EB918740097D0E1 /* StreamView.swift */,
 				E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */,
+				TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -186,6 +195,7 @@
 			isa = PBXGroup;
 			children = (
 				E66CC01A2F3E1A9300B07379 /* TestResources */,
+				TELE00092EB918740097D0E1 /* Services */,
 				8FD96B702E6F0A9800F56AB1 /* ViewModels */,
 				8FD96B762E6F0A9800F56AB1 /* Views */,
 				8FD96B772E6F0A9800F56AB1 /* Assets.xcassets */,
@@ -234,6 +244,16 @@
 				E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */,
 			);
 			path = MockDeviceKit;
+			sourceTree = "<group>";
+		};
+		TELE00092EB918740097D0E1 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				TELE00022EB918740097D0E1 /* TelemetryTypes.swift */,
+				TELE00042EB918740097D0E1 /* TelemetryLogger.swift */,
+				TELE00062EB918740097D0E1 /* TelemetryService.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -401,6 +421,10 @@
 				8FFD5FF52E8422580035E446 /* CircleButton.swift in Sources */,
 				8FFD5FF62E8422580035E446 /* CustomButton.swift in Sources */,
 				E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */,
+				TELE00012EB918740097D0E1 /* TelemetryTypes.swift in Sources */,
+				TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */,
+				TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */,
+				TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

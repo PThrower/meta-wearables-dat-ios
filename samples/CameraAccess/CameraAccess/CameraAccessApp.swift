@@ -31,14 +31,15 @@ struct CameraAccessApp: App {
   #endif
   private let wearables: WearablesInterface
   @StateObject private var wearablesViewModel: WearablesViewModel
+  @StateObject private var telemetryService = TelemetryService()
 
   init() {
+    NSLog("[CameraAccess] App init starting")
     do {
       try Wearables.configure()
+      NSLog("[CameraAccess] Wearables.configure() succeeded")
     } catch {
-      #if DEBUG
-      NSLog("[CameraAccess] Failed to configure Wearables SDK: \(error)")
-      #endif
+      NSLog("[CameraAccess] CRITICAL: Wearables.configure() failed: \(error)")
     }
 
     #if DEBUG
@@ -64,14 +65,22 @@ struct CameraAccessApp: App {
 
     let wearables = Wearables.shared
     self.wearables = wearables
+    NSLog("[CameraAccess] Wearables.shared obtained, registrationState=\(String(describing: wearables.registrationState))")
     self._wearablesViewModel = StateObject(wrappedValue: WearablesViewModel(wearables: wearables))
+    self._telemetryService = StateObject(wrappedValue: {
+      let service = TelemetryService()
+      service.attachToWearables(wearables)
+      NSLog("[CameraAccess] TelemetryService created and attached")
+      return service
+    }())
+    NSLog("[CameraAccess] App init complete")
   }
 
   var body: some Scene {
     WindowGroup {
       // Main app view with access to the shared Wearables SDK instance
       // The Wearables.shared singleton provides the core DAT API
-      MainAppView(wearables: Wearables.shared, viewModel: wearablesViewModel)
+      MainAppView(wearables: Wearables.shared, viewModel: wearablesViewModel, telemetryService: telemetryService)
         // Show error alerts for view model failures
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {

@@ -20,6 +20,7 @@ import SwiftUI
 struct StreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  @State private var showErrorLog = false
 
   var body: some View {
     ZStack {
@@ -38,13 +39,40 @@ struct StreamView: View {
         }
         .edgesIgnoringSafeArea(.all)
       } else {
-        ProgressView()
-          .scaleEffect(1.5)
-          .foregroundColor(.white)
+        VStack(spacing: 16) {
+          ProgressView()
+            .scaleEffect(1.5)
+            .foregroundColor(.white)
+
+          Text(String(describing: viewModel.streamingStatus).uppercased())
+            .font(.system(size: 12, weight: .medium, design: .monospaced))
+            .foregroundColor(.white.opacity(0.6))
+
+          if let lastError = viewModel.errorLog.last {
+            Text(lastError)
+              .font(.system(size: 10, design: .monospaced))
+              .foregroundColor(.red.opacity(0.8))
+              .multilineTextAlignment(.center)
+              .padding(.horizontal, 24)
+          }
+        }
+      }
+
+      // Inline error banner at top
+      if !viewModel.errorMessage.isEmpty {
+        VStack {
+          ErrorBanner(
+            message: viewModel.errorMessage,
+            errorCount: viewModel.errorLog.count,
+            onTap: { showErrorLog.toggle() }
+          )
+          Spacer()
+        }
+        .padding(.top, 8)
+        .padding(.horizontal, 8)
       }
 
       // Bottom controls layer
-
       VStack {
         Spacer()
         ControlsView(viewModel: viewModel)
@@ -58,6 +86,10 @@ struct StreamView: View {
         }
       }
     }
+    // Error log sheet
+    .sheet(isPresented: $showErrorLog) {
+      ErrorLogSheet(errorLog: viewModel.errorLog)
+    }
     // Show captured photos from DAT SDK in a preview sheet
     .sheet(isPresented: $viewModel.showPhotoPreview) {
       if let photo = viewModel.capturedPhoto {
@@ -67,6 +99,89 @@ struct StreamView: View {
             viewModel.dismissPhotoPreview()
           }
         )
+      }
+    }
+  }
+}
+
+// MARK: - Error Banner
+
+struct ErrorBanner: View {
+  let message: String
+  let errorCount: Int
+  let onTap: () -> Void
+
+  var body: some View {
+    Button(action: onTap) {
+      HStack(spacing: 8) {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundColor(.yellow)
+
+        Text(message)
+          .font(.system(size: 12, weight: .medium, design: .monospaced))
+          .foregroundColor(.white)
+          .lineLimit(2)
+          .multilineTextAlignment(.leading)
+
+        Spacer()
+
+        if errorCount > 1 {
+          Text("\(errorCount)")
+            .font(.system(size: 10, weight: .bold, design: .monospaced))
+            .foregroundColor(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.red.opacity(0.8))
+            .cornerRadius(8)
+        }
+
+        Image(systemName: "list.bullet")
+          .foregroundColor(.white.opacity(0.6))
+          .font(.system(size: 11))
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .background(Color.black.opacity(0.85))
+      .cornerRadius(8)
+      .overlay(
+        RoundedRectangle(cornerRadius: 8)
+          .stroke(Color.red.opacity(0.5), lineWidth: 1)
+      )
+    }
+  }
+}
+
+// MARK: - Error Log Sheet
+
+struct ErrorLogSheet: View {
+  let errorLog: [String]
+  @Environment(\.dismiss) var dismiss
+
+  var body: some View {
+    NavigationView {
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 6) {
+          if errorLog.isEmpty {
+            Text("No errors logged")
+              .foregroundColor(.secondary)
+              .padding()
+          } else {
+            ForEach(errorLog.reversed(), id: \.self) { entry in
+              Text(entry)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.red)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+            }
+          }
+        }
+      }
+      .navigationTitle("Error Log")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Button("Done") { dismiss() }
+        }
       }
     }
   }

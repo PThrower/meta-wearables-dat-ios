@@ -20,15 +20,17 @@ import SwiftUI
 struct MainAppView: View {
   let wearables: WearablesInterface
   @ObservedObject private var viewModel: WearablesViewModel
+  @ObservedObject private var telemetryService: TelemetryService
 
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel) {
+  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService) {
     self.wearables = wearables
     self.viewModel = viewModel
+    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
   }
 
   var body: some View {
     if viewModel.registrationState == .registered || viewModel.hasMockDevice {
-      StreamSessionView(wearables: wearables, wearablesVM: viewModel)
+      StreamSessionView(wearables: wearables, wearablesVM: viewModel, telemetryService: telemetryService)
     } else {
       // User not registered - show registration/onboarding flow
       HomeScreenView(viewModel: viewModel)

@@ -31,7 +31,9 @@ class StreamSessionViewModel: ObservableObject {
   @Published var streamingStatus: StreamingStatus = .stopped
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
+  @Published var errorLog: [String] = []
   @Published var hasActiveDevice: Bool = false
+  @Published var selectedDeviceId: DeviceIdentifier?
 
   var isStreaming: Bool {
     streamingStatus != .stopped
@@ -48,36 +50,81 @@ class StreamSessionViewModel: ObservableObject {
   private var errorListenerToken: AnyListenerToken?
   private var photoDataListenerToken: AnyListenerToken?
   private let wearables: WearablesInterface
-  private let deviceSelector: AutoDeviceSelector
+  private var currentSelector: any DeviceSelector
   private var deviceMonitorTask: Task<Void, Never>?
+  private weak var telemetryService: TelemetryService?
 
-  init(wearables: WearablesInterface) {
+  private let streamConfig = StreamSessionConfig(
+    videoCodec: VideoCodec.raw,
+    resolution: StreamingResolution.low,
+    frameRate: 24)
+
+  init(wearables: WearablesInterface, telemetryService: TelemetryService? = nil) {
     self.wearables = wearables
-    // Let the SDK auto-select from available devices
-    self.deviceSelector = AutoDeviceSelector(wearables: wearables)
-    let config = StreamSessionConfig(
-      videoCodec: VideoCodec.raw,
-      resolution: StreamingResolution.low,
-      frameRate: 24)
-    streamSession = StreamSession(streamSessionConfig: config, deviceSelector: deviceSelector)
+    self.telemetryService = telemetryService
+    // Start with auto-select
+    self.currentSelector = AutoDeviceSelector(wearables: wearables)
+    self.streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
+
+    setupSessionListeners()
+    telemetryService?.attachToStreamSession(streamSession)
 
     // Monitor device availability
-    deviceMonitorTask = Task { @MainActor in
-      for await device in deviceSelector.activeDeviceStream() {
+    deviceMonitorTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      for await device in self.currentSelector.activeDeviceStream() {
         self.hasActiveDevice = device != nil
       }
     }
 
-    // Subscribe to session state changes using the DAT SDK listener pattern
-    // State changes tell us when streaming starts, stops, or encounters issues
+    updateStatusFromState(streamSession.state)
+  }
+
+  // MARK: - Device Selection
+
+  func selectDevice(_ deviceId: DeviceIdentifier?) {
+    guard !isStreaming else { return }
+    selectedDeviceId = deviceId
+
+    // Stop monitoring old selector
+    deviceMonitorTask?.cancel()
+
+    // Create new selector
+    if let deviceId {
+      let selector = SpecificDeviceSelector(device: deviceId)
+      currentSelector = selector
+      NSLog("[StreamSession] Selected device: \(deviceId)")
+    } else {
+      let selector = AutoDeviceSelector(wearables: wearables)
+      currentSelector = selector
+      NSLog("[StreamSession] Using auto device selector")
+    }
+
+    // Rebuild session with new selector
+    streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
+    setupSessionListeners()
+    telemetryService?.attachToStreamSession(streamSession)
+
+    // Re-monitor device availability
+    deviceMonitorTask = Task { @MainActor [weak self] in
+      guard let self else { return }
+      for await device in self.currentSelector.activeDeviceStream() {
+        self.hasActiveDevice = device != nil
+      }
+    }
+
+    updateStatusFromState(streamSession.state)
+  }
+
+  // MARK: - Session Listeners
+
+  private func setupSessionListeners() {
     stateListenerToken = streamSession.statePublisher.listen { [weak self] state in
       Task { @MainActor [weak self] in
         self?.updateStatusFromState(state)
       }
     }
 
-    // Subscribe to video frames from the device camera
-    // Each VideoFrame contains the raw camera data that we convert to UIImage
     videoFrameListenerToken = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
       Task { @MainActor [weak self] in
         guard let self else { return }
@@ -91,22 +138,22 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    // Subscribe to streaming errors
-    // Errors include device disconnection, streaming failures, etc.
     errorListenerToken = streamSession.errorPublisher.listen { [weak self] error in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        let newErrorMessage = formatStreamingError(error)
-        if newErrorMessage != self.errorMessage {
-          showError(newErrorMessage)
-        }
+        let rawError = String(describing: error)
+        let state = String(describing: self.streamingStatus)
+        let device = self.selectedDeviceId ?? "auto"
+        let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        let logEntry = "[\(timestamp)] \(rawError) | state=\(state) | device=\(device)"
+        NSLog("[StreamSession] ERROR: \(logEntry)")
+        self.errorLog.append(logEntry)
+        if self.errorLog.count > 50 { self.errorLog.removeFirst(self.errorLog.count - 50) }
+        self.errorMessage = "\(rawError) | \(state) | \(device)"
+        self.showError = true
       }
     }
 
-    updateStatusFromState(streamSession.state)
-
-    // Subscribe to photo capture events
-    // PhotoData contains the captured image in the requested format (JPEG/HEIC)
     photoDataListenerToken = streamSession.photoDataPublisher.listen { [weak self] photoData in
       Task { @MainActor [weak self] in
         guard let self else { return }
@@ -117,6 +164,8 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
   }
+
+  // MARK: - Actions
 
   func handleStartStreaming() async {
     let permission = Permission.camera
@@ -156,6 +205,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func capturePhoto() {
+    telemetryService?.recordPhotoRequest()
     streamSession.capturePhoto(format: .jpeg)
   }
 
@@ -164,10 +214,14 @@ class StreamSessionViewModel: ObservableObject {
     capturedPhoto = nil
   }
 
+  // MARK: - State
+
   private func updateStatusFromState(_ state: StreamSessionState) {
+    NSLog("[StreamSession] State: \(String(describing: state)) | device=\(selectedDeviceId ?? "auto")")
     switch state {
     case .stopped:
       currentVideoFrame = nil
+      hasReceivedFirstFrame = false
       streamingStatus = .stopped
     case .waitingForDevice, .starting, .stopping, .paused:
       streamingStatus = .waiting
@@ -176,7 +230,7 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  private func formatStreamingError(_ error: StreamSessionError) -> String {
+  private static func formatStreamingError(_ error: StreamSessionError) -> String {
     switch error {
     case .internalError:
       return "An internal error occurred. Please try again."
