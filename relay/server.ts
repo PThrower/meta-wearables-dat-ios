@@ -1,7 +1,8 @@
 /**
  * Bun WebSocket relay server for DAT SDK video frames.
  * Publisher (iOS app) sends FRLY-encoded JPEG frames to /publish
- * Viewers (browser) connect to / to receive decoded frames
+ * Viewers (browser) connect to /view to receive frames
+ * HTML viewer at /
  * Stats at /stats
  *
  * Wire protocol: [4B "FRLY"][8B seq][4B width][4B height][1B quality][8B timestamp_ms][JPEG payload]
@@ -29,7 +30,7 @@ canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 const c = document.getElementById("c");
 const ctx = c.getContext("2d");
 const hud = document.getElementById("hud");
-let ws, fps = 0, drops = 0, lastT = 0, frames = [];
+let ws, fps = 0, drops = 0, frames = [];
 
 function readU32LE(d, o) { return d[o] | (d[o+1] << 8) | (d[o+2] << 16) | (d[o+3] << 24); }
 function readU64LE(d, o) {
@@ -39,9 +40,9 @@ function readU64LE(d, o) {
 }
 
 function connect() {
-  ws = new WebSocket("ws://" + location.host + "/publish");
+  ws = new WebSocket("ws://" + location.host + "/view");
   ws.binaryType = "arraybuffer";
-  ws.onopen = () => { hud.innerHTML = "<span>CONNECTED</span>"; };
+  ws.onopen = () => { hud.innerHTML = "<span>CONNECTED - waiting for stream...</span>"; };
   ws.onmessage = (e) => {
     const d = new Uint8Array(e.data);
     if (d.length < 29) return;
@@ -50,7 +51,6 @@ function connect() {
     const seq = readU64LE(d, 4);
     const w = readU32LE(d, 12);
     const h = readU32LE(d, 16);
-    const quality = d[20];
     const ts = readU64LE(d, 21);
     const jpeg = d.slice(29);
     const now = performance.now();
@@ -82,7 +82,23 @@ connect();
 </script>
 </body></html>`;
 
+function getWifiIp(): string {
+  const os = require("os");
+  const nets = os.networkInterfaces();
+  for (const addrs of Object.values(nets)) {
+    for (const a of (addrs ?? [])) {
+      if (a.family === "IPv4" && !a.internal && a.address.startsWith("172.")) {
+        return a.address;
+      }
+    }
+  }
+  return "127.0.0.1";
+}
+
+const wifiIp = getWifiIp();
+
 const server = Bun.serve({
+  hostname: "0.0.0.0",
   port: PORT,
   fetch(req, server) {
     const url = new URL(req.url);
@@ -93,6 +109,7 @@ const server = Bun.serve({
         viewers: viewers.size,
         frameCount,
         lastFrameTime: lastFrameTime ? new Date(lastFrameTime).toISOString() : null,
+        ip: wifiIp,
       }), { headers: { "Content-Type": "application/json" } });
     }
 
@@ -100,14 +117,18 @@ const server = Bun.serve({
       return new Response(VIEWER_HTML, { headers: { "Content-Type": "text/html" } });
     }
 
-    return server.upgrade(req);
+    // /publish and /view get upgraded to WebSocket
+    // Pass role in data so the open handler knows who's who
+    const role = url.pathname === "/publish" ? "publish" : "view";
+    return server.upgrade(req, { data: { role } });
   },
   websocket: {
     open(ws) {
-      const url = new URL(ws.url);
-      if (url.pathname === "/publish") {
+      // Bun may not set ws.url — use data passed from fetch to distinguish roles
+      const role = (ws.data as { role?: string })?.role;
+      if (role === "publish") {
         publishers.set("ios", ws);
-        console.log("[Relay] Publisher connected");
+        console.log(`[Relay] Publisher connected (${publishers.size})`);
       } else {
         viewers.add(ws);
         console.log(`[Relay] Viewer connected (${viewers.size})`);
@@ -118,6 +139,9 @@ const server = Bun.serve({
         console.log("[Relay] Text:", message);
         return;
       }
+      // Only publishers send frames
+      if (publishers.get("ios") !== ws) return;
+
       frameCount++;
       lastFrameTime = Date.now();
       for (const viewer of viewers) {
@@ -130,12 +154,12 @@ const server = Bun.serve({
         console.log("[Relay] Publisher disconnected");
       } else {
         viewers.delete(ws);
-        console.log(`[Relay] Viewer disconnected (${viewers.size})`);
+        console.log(`[Relay] Viewer disconnected (${viewers.size} remaining)`);
       }
     },
   },
 });
 
-console.log(`[Relay] Server on :${PORT}`);
-console.log(`[Relay] Publisher: ws://172.31.29.240:${PORT}/publish`);
-console.log(`[Relay] Viewer:   http://172.31.29.240:${PORT}`);
+console.log(`[Relay] Server on 0.0.0.0:${PORT}`);
+console.log(`[Relay] Publisher: ws://${wifiIp}:${PORT}/publish`);
+console.log(`[Relay] Viewer:   http://${wifiIp}:${PORT}`);
