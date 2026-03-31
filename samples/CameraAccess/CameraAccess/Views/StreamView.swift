@@ -209,6 +209,38 @@ struct ControlsView: View {
         }
       }
 
+      // Record button
+      CircleButton(
+        icon: viewModel.isRecording ? "stop.circle.fill" : "record.circle",
+        text: nil
+      ) {
+        Task {
+          if viewModel.isRecording {
+            await viewModel.stopRecording()
+          } else {
+            await viewModel.startRecording()
+          }
+        }
+      }
+      .foregroundColor(viewModel.isRecording ? .red : .white)
+      .accessibilityIdentifier("record_button")
+
+      // Relay button
+      CircleButton(
+        icon: viewModel.isRelaying ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
+        text: nil
+      ) {
+        Task {
+          if viewModel.isRelaying {
+            await viewModel.stopRelay()
+          } else {
+            await viewModel.startRelay()
+          }
+        }
+      }
+      .foregroundColor(viewModel.isRelaying ? .green : .white)
+      .accessibilityIdentifier("relay_button")
+
       // Photo button
       CircleButton(icon: "camera.fill", text: nil) {
         viewModel.capturePhoto()

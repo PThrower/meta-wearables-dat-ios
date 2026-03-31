@@ -39,6 +39,12 @@
 		TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00042EB918740097D0E1 /* TelemetryLogger.swift */; };
 		TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00062EB918740097D0E1 /* TelemetryService.swift */; };
 		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
+		PIPE00102E91PIPE01 /* FramePipelineTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00202E91PIPE01 /* FramePipelineTypes.swift */; };
+		PIPE00302E91PIPE01 /* FramePipelineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00402E91PIPE01 /* FramePipelineManager.swift */; };
+		PIPE00502E91PIPE01 /* ThrottledStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00602E91PIPE01 /* ThrottledStage.swift */; };
+		PIPE00702E91PIPE01 /* DisplayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00802E91PIPE01 /* DisplayStage.swift */; };
+		PIPE00902E91PIPE01 /* RecordingStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00A02E91PIPE01 /* RecordingStage.swift */; };
+		PIPE00B02E91PIPE02 /* RelayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00C02E91PIPE02 /* RelayStage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -106,6 +112,12 @@
 		TELE00042EB918740097D0E1 /* TelemetryLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryLogger.swift; sourceTree = "<group>"; };
 		TELE00062EB918740097D0E1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
 		TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryHUDView.swift; sourceTree = "<group>"; };
+		PIPE00202E91PIPE01 /* FramePipelineTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePipelineTypes.swift; sourceTree = "<group>"; };
+		PIPE00402E91PIPE01 /* FramePipelineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePipelineManager.swift; sourceTree = "<group>"; };
+		PIPE00602E91PIPE01 /* ThrottledStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThrottledStage.swift; sourceTree = "<group>"; };
+		PIPE00802E91PIPE01 /* DisplayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStage.swift; sourceTree = "<group>"; };
+		PIPE00A02E91PIPE01 /* RecordingStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStage.swift; sourceTree = "<group>"; };
+		PIPE00C02E91PIPE02 /* RelayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -195,6 +207,7 @@
 			isa = PBXGroup;
 			children = (
 				E66CC01A2F3E1A9300B07379 /* TestResources */,
+				PIPE00B02E91PIPE01 /* Pipeline */,
 				TELE00092EB918740097D0E1 /* Services */,
 				8FD96B702E6F0A9800F56AB1 /* ViewModels */,
 				8FD96B762E6F0A9800F56AB1 /* Views */,
@@ -244,6 +257,27 @@
 				E66D30232E7DA71900470B48 /* MockDeviceKitButton.swift */,
 			);
 			path = MockDeviceKit;
+			sourceTree = "<group>";
+		};
+		PIPE00B02E91PIPE01 /* Pipeline */ = {
+			isa = PBXGroup;
+			children = (
+				PIPE00C02E91PIPE01 /* Stages */,
+				PIPE00202E91PIPE01 /* FramePipelineTypes.swift */,
+				PIPE00402E91PIPE01 /* FramePipelineManager.swift */,
+				PIPE00602E91PIPE01 /* ThrottledStage.swift */,
+			);
+			path = Pipeline;
+			sourceTree = "<group>";
+		};
+		PIPE00C02E91PIPE01 /* Stages */ = {
+			isa = PBXGroup;
+			children = (
+				PIPE00802E91PIPE01 /* DisplayStage.swift */,
+				PIPE00A02E91PIPE01 /* RecordingStage.swift */,
+				PIPE00C02E91PIPE02 /* RelayStage.swift */,
+			);
+			path = Stages;
 			sourceTree = "<group>";
 		};
 		TELE00092EB918740097D0E1 /* Services */ = {
@@ -425,6 +459,12 @@
 				TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */,
 				TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */,
 				TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */,
+				PIPE00102E91PIPE01 /* FramePipelineTypes.swift in Sources */,
+				PIPE00302E91PIPE01 /* FramePipelineManager.swift in Sources */,
+				PIPE00502E91PIPE01 /* ThrottledStage.swift in Sources */,
+				PIPE00702E91PIPE01 /* DisplayStage.swift in Sources */,
+				PIPE00902E91PIPE01 /* RecordingStage.swift in Sources */,
+				PIPE00B02E91PIPE02 /* RelayStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

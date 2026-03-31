@@ -10,12 +10,13 @@
 // StreamSessionViewModel.swift
 //
 // Core view model demonstrating video streaming from Meta wearable devices using the DAT SDK.
-// This class showcases the key streaming patterns: device selection, session management,
-// video frame handling, photo capture, and error handling with auto-retry.
+// Video frames are routed through FramePipelineManager to composable pipeline stages
+// (DisplayStage for UI, RecordingStage for .mov capture, etc.).
 //
 
 import MWDATCamera
 import MWDATCore
+import Photos
 import SwiftUI
 
 enum StreamingStatus {
@@ -47,6 +48,13 @@ class StreamSessionViewModel: ObservableObject {
     didSet { rebuildSessionWithNewConfig() }
   }
 
+  // Recording state
+  @Published var isRecording: Bool = false
+
+  // Relay state
+  @Published var isRelaying: Bool = false
+  @Published var relayURL: String = "ws://172.31.29.240:8080/publish"
+
   var isStreaming: Bool {
     streamingStatus != .stopped
   }
@@ -54,11 +62,11 @@ class StreamSessionViewModel: ObservableObject {
   // Photo capture properties
   @Published var capturedPhoto: UIImage?
   @Published var showPhotoPreview: Bool = false
+
   // The core DAT SDK StreamSession - handles all streaming operations
   private var streamSession: StreamSession
-  // Listener tokens are used to manage DAT SDK event subscriptions
+  // Listener tokens for non-video-frame subscriptions (state, error, photo)
   private var stateListenerToken: AnyListenerToken?
-  private var videoFrameListenerToken: AnyListenerToken?
   private var errorListenerToken: AnyListenerToken?
   private var photoDataListenerToken: AnyListenerToken?
   private let wearables: WearablesInterface
@@ -66,6 +74,12 @@ class StreamSessionViewModel: ObservableObject {
   private var deviceMonitorTask: Task<Void, Never>?
   private var retryTask: Task<Void, Never>?
   private weak var telemetryService: TelemetryService?
+
+  // Pipeline
+  private let pipeline = FramePipelineManager()
+  private let recordingStage = RecordingStage()
+  private let relayStage = RelayStage()
+  private var displayStage: DisplayStage!
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -91,7 +105,21 @@ class StreamSessionViewModel: ObservableObject {
       deviceSelector: currentSelector
     )
 
+    // Create display stage with MainActor callback (safe to capture self after all stored props initialized)
+    self.displayStage = DisplayStage { [weak self] image in
+      self?.currentVideoFrame = image
+      guard let self, !self.hasReceivedFirstFrame else { return }
+      self.hasReceivedFirstFrame = true
+      self.cancelRetry()
+    }
+
+    // Register stages
+    pipeline.register(displayStage)
+    pipeline.register(recordingStage)
+    pipeline.register(relayStage)
+
     setupSessionListeners()
+    attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
 
     // Monitor device availability
@@ -128,6 +156,7 @@ class StreamSessionViewModel: ObservableObject {
     // Rebuild session with new selector
     streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
     setupSessionListeners()
+    attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
 
     // Re-monitor device availability
@@ -141,6 +170,13 @@ class StreamSessionViewModel: ObservableObject {
     updateStatusFromState(streamSession.state)
   }
 
+  // MARK: - Pipeline Attachment
+
+  /// Attach the pipeline as the single subscriber to videoFramePublisher.
+  private func attachPipeline() {
+    pipeline.attachToStreamSession(streamSession)
+  }
+
   // MARK: - Session Listeners
 
   private func setupSessionListeners() {
@@ -150,20 +186,7 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    videoFrameListenerToken = streamSession.videoFramePublisher.listen { [weak self] videoFrame in
-      Task { @MainActor [weak self] in
-        guard let self else { return }
-
-        if let image = videoFrame.makeUIImage() {
-          self.currentVideoFrame = image
-          if !self.hasReceivedFirstFrame {
-            self.hasReceivedFirstFrame = true
-            // First frame received — cancel any pending retry
-            self.cancelRetry()
-          }
-        }
-      }
-    }
+    // Video frames are now routed through FramePipelineManager — no inline listener
 
     errorListenerToken = streamSession.errorPublisher.listen { [weak self] error in
       Task { @MainActor [weak self] in
@@ -196,6 +219,73 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
     }
+  }
+
+  // MARK: - Recording
+
+  func startRecording() async {
+    let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyyMMdd_HHmmss"
+    let filename = "recording_\(formatter.string(from: Date())).mov"
+    let url = documentsDir.appendingPathComponent(filename)
+
+    do {
+      try await recordingStage.startRecording(to: url)
+      isRecording = true
+      NSLog("[StreamSession] Recording started: \(filename)")
+    } catch {
+      NSLog("[StreamSession] Recording failed to start: \(error)")
+      errorMessage = "Recording failed: \(error.localizedDescription)"
+      showError = true
+    }
+  }
+
+  func stopRecording() async {
+    let url = await recordingStage.stopRecording()
+    isRecording = false
+    NSLog("[StreamSession] Recording stopped: \(url?.lastPathComponent ?? "nil")")
+
+    // Save to Photos album
+    if let url {
+      do {
+        try await saveToPhotos(url: url)
+      } catch {
+        NSLog("[StreamSession] Failed to save to Photos: \(error)")
+      }
+    }
+  }
+
+  private func saveToPhotos(url: URL) async throws {
+    try await PHPhotoLibrary.shared().performChanges {
+      PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+    }
+  }
+
+  // MARK: - Relay
+
+  func startRelay() async {
+    let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !url.isEmpty else {
+      errorMessage = "Enter a relay URL (e.g. ws://192.168.1.x:8080/publish)"
+      showError = true
+      return
+    }
+    do {
+      try await relayStage.connect(to: url)
+      isRelaying = true
+      NSLog("[StreamSession] Relay connected to \(url)")
+    } catch {
+      errorMessage = "Relay failed: \(error.localizedDescription)"
+      showError = true
+      NSLog("[StreamSession] Relay error: \(error)")
+    }
+  }
+
+  func stopRelay() async {
+    await relayStage.disconnect()
+    isRelaying = false
+    NSLog("[StreamSession] Relay disconnected")
   }
 
   // MARK: - Auto-Retry
@@ -239,6 +329,7 @@ class StreamSessionViewModel: ObservableObject {
 
     streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
     setupSessionListeners()
+    attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
 
     deviceMonitorTask = Task { @MainActor [weak self] in
@@ -283,6 +374,9 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   func stopSession() async {
+    if isRecording {
+      await stopRecording()
+    }
     cancelRetry()
     await streamSession.stop()
   }
