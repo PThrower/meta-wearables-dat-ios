@@ -80,6 +80,7 @@ class StreamSessionViewModel: ObservableObject {
   private let pipeline = FramePipelineManager()
   private let recordingStage = RecordingStage()
   private let relayStage = RelayStage()
+  private let audioStage = AudioStage()
   private var displayStage: DisplayStage!
 
   private var streamConfig: StreamSessionConfig {
@@ -118,6 +119,9 @@ class StreamSessionViewModel: ObservableObject {
     pipeline.register(displayStage)
     pipeline.register(recordingStage)
     pipeline.register(relayStage)
+
+    // Wire audio stage to relay stage for FRAU binary sending
+    Task { await audioStage.setRelayStage(relayStage) }
 
     setupSessionListeners()
     attachPipeline()
@@ -263,7 +267,7 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  // MARK: - Relay
+  // MARK: - Relay (video + audio)
 
   func startRelay() async {
     let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -280,10 +284,19 @@ class StreamSessionViewModel: ObservableObject {
       errorMessage = "Relay failed: \(error.localizedDescription)"
       showError = true
       NSLog("[StreamSession] Relay error: \(error)")
+      return
     }
+
+    // Auto-start audio after relay connects
+    await audioStage.start()
+    NSLog("[StreamSession] Audio relay started")
   }
 
   func stopRelay() async {
+    // Stop audio first (removes mic tap, does NOT deactivate audio session)
+    await audioStage.stop()
+    NSLog("[StreamSession] Audio relay stopped")
+
     await relayStage.disconnect()
     isRelaying = false
     NSLog("[StreamSession] Relay disconnected")
@@ -377,6 +390,9 @@ class StreamSessionViewModel: ObservableObject {
   func stopSession() async {
     if isRecording {
       await stopRecording()
+    }
+    if isRelaying {
+      await stopRelay()
     }
     cancelRetry()
     await streamSession.stop()

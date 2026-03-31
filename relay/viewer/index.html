@@ -18,6 +18,16 @@
     #hud .label { color: rgba(255,255,255,0.5); }
     #hud .value { color: #0f0; font-weight: 600; }
     #hud .warn  { color: #ff0; }
+    #hud .audio-on { color: #0ff; }
+    #audio-meter {
+      display: inline-block; width: 60px; height: 6px;
+      background: rgba(255,255,255,0.15); border-radius: 3px;
+      vertical-align: middle; margin-left: 4px; overflow: hidden;
+    }
+    #audio-meter-fill {
+      height: 100%; width: 0%; background: #0ff; border-radius: 3px;
+      transition: width 0.05s linear;
+    }
     #status {
       position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
       font-size: 12px; color: rgba(255,255,255,0.6); text-align: center;
@@ -52,6 +62,7 @@
     <div><span class="label">SEQ    </span><span class="value" id="h-seq">--</span></div>
     <div><span class="label">LATENCY</span><span class="value" id="h-latency">--</span></div>
     <div><span class="label">DROP   </span><span class="value" id="h-drop">--</span></div>
+    <div><span class="label">AUDIO  </span><span class="value audio-on" id="h-audio">OFF</span><span id="audio-meter"><span id="audio-meter-fill"></span></span></div>
   </div>
 
   <div id="status">Disconnected</div>
@@ -62,9 +73,18 @@
   </div>
 
   <script>
-    const HEADER_SIZE = 29;
+    // --- Wire protocol constants ---
+    const FRLY_HEADER_SIZE = 29;
+    const FRAU_HEADER_SIZE = 21;
+    const FRAU_MAGIC = [0x46, 0x52, 0x41, 0x55]; // "FRAU"
+    const FRLY_MAGIC = [0x46, 0x52, 0x4C, 0x59]; // "FRLY"
+
+    // --- DOM ---
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
+    const meterFill = document.getElementById("audio-meter-fill");
+
+    // --- Video state ---
     let ws = null;
     let frameCount = 0;
     let lastFpsTime = performance.now();
@@ -73,9 +93,64 @@
     let droppedFrames = 0;
     let lastSequence = 0;
 
+    // --- Audio state ---
+    let audioCtx = null;
+    let nextPlayTime = 0;
+    let audioChunkCount = 0;
+    let audioLevel = 0;
+
     function updateHud(id, value) {
       document.getElementById(id).textContent = value;
     }
+
+    // --- Audio playback ---
+
+    function initAudio() {
+      if (audioCtx) return;
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      nextPlayTime = 0;
+    }
+
+    function playAudioChunk(pcmInt16, sampleRate, channels) {
+      if (!audioCtx) initAudio();
+      if (audioCtx.state === "suspended") audioCtx.resume();
+
+      const sampleCount = pcmInt16.length;
+      if (sampleCount === 0) return;
+
+      // Convert Int16 LE to Float32 [-1, 1]
+      const float32 = new Float32Array(sampleCount);
+      let peak = 0;
+      for (let i = 0; i < sampleCount; i++) {
+        float32[i] = pcmInt16[i] / 32768.0;
+        const abs = Math.abs(float32[i]);
+        if (abs > peak) peak = abs;
+      }
+      audioLevel = peak;
+
+      // Create AudioBuffer
+      const audioBuffer = audioCtx.createBuffer(channels, sampleCount / channels, sampleRate);
+      audioBuffer.copyToChannel(float32, 0);
+
+      // Schedule seamless playback
+      const source = audioCtx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioCtx.destination);
+
+      const now = audioCtx.currentTime;
+      if (nextPlayTime < now) {
+        nextPlayTime = now + 0.005; // 5ms initial buffer
+      }
+      source.start(nextPlayTime);
+      nextPlayTime += audioBuffer.duration;
+    }
+
+    function updateAudioMeter() {
+      const pct = Math.min(100, Math.round(audioLevel * 300)); // scale for visibility
+      meterFill.style.width = pct + "%";
+    }
+
+    // --- Connection ---
 
     function connect() {
       const url = document.getElementById("relay-url").value.trim();
@@ -94,61 +169,94 @@
       ws.onmessage = (event) => {
         if (typeof event.data === "string") return; // JSON control messages
         const buf = new Uint8Array(event.data);
-        if (buf.length < HEADER_SIZE) return;
+        if (buf.length < 4) return;
 
-        // Parse header
-        const magic = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
-        if (magic !== "FRLY") return;
+        // Detect message type by magic bytes
+        const m0 = buf[0], m1 = buf[1], m2 = buf[2], m3 = buf[3];
 
-        const sequence = Number(new DataView(buf.buffer, buf.byteOffset + 4, 8).getBigUint64(0, true));
-        const width = new DataView(buf.buffer, buf.byteOffset + 12, 4).getUint32(0, true);
-        const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
-        const quality = buf[20];
-        const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
+        if (m0 === FRAU_MAGIC[0] && m1 === FRAU_MAGIC[1] && m2 === FRAU_MAGIC[2] && m3 === FRAU_MAGIC[3]) {
+          // --- Audio frame (FRAU) ---
+          if (buf.length < FRAU_HEADER_SIZE) return;
 
-        // Detect dropped frames
-        if (lastSequence > 0 && sequence > lastSequence + 1) {
-          droppedFrames += sequence - lastSequence - 1;
+          const view = new DataView(buf.buffer, buf.byteOffset);
+          const codecType = buf[4];
+          const sampleRate = view.getUint32(13, true);
+          const channels = view.getUint16(17, true);
+          const bitsPerSample = view.getUint16(19, true);
+
+          if (codecType !== 0 || bitsPerSample !== 16) return; // Only PCM 16-bit
+
+          const pcmBytes = buf.slice(FRAU_HEADER_SIZE);
+          const pcmInt16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.length / 2);
+
+          playAudioChunk(pcmInt16, sampleRate, channels);
+          audioChunkCount++;
+
+          updateHud("h-audio", "ON");
+          updateAudioMeter();
+          return;
         }
-        lastSequence = sequence;
 
-        // JPEG payload
-        const jpeg = buf.slice(HEADER_SIZE);
-        const blob = new Blob([jpeg], { type: "image/jpeg" });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          if (canvas.width !== width || canvas.height !== height) {
-            canvas.width = width;
-            canvas.height = height;
+        if (m0 === FRLY_MAGIC[0] && m1 === FRLY_MAGIC[1] && m2 === FRLY_MAGIC[2] && m3 === FRLY_MAGIC[3]) {
+          // --- Video frame (FRLY) ---
+          if (buf.length < FRLY_HEADER_SIZE) return;
+
+          const sequence = Number(new DataView(buf.buffer, buf.byteOffset + 4, 8).getBigUint64(0, true));
+          const width = new DataView(buf.buffer, buf.byteOffset + 12, 4).getUint32(0, true);
+          const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
+          const quality = buf[20];
+          const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
+
+          // Detect dropped frames
+          if (lastSequence > 0 && sequence > lastSequence + 1) {
+            droppedFrames += sequence - lastSequence - 1;
           }
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(url);
-        };
-        img.src = url;
+          lastSequence = sequence;
 
-        // FPS counter
-        frameCount++;
-        fpsFrameCount++;
-        const now = performance.now();
-        if (now - lastFpsTime >= 1000) {
-          currentFps = Math.round(fpsFrameCount * 1000 / (now - lastFpsTime));
-          fpsFrameCount = 0;
-          lastFpsTime = now;
+          // JPEG payload
+          const jpeg = buf.slice(FRLY_HEADER_SIZE);
+          const blob = new Blob([jpeg], { type: "image/jpeg" });
+          const url = URL.createObjectURL(blob);
+          const img = new Image();
+          img.onload = () => {
+            if (canvas.width !== width || canvas.height !== height) {
+              canvas.width = width;
+              canvas.height = height;
+            }
+            ctx.drawImage(img, 0, 0);
+            URL.revokeObjectURL(url);
+          };
+          img.src = url;
+
+          // FPS counter
+          frameCount++;
+          fpsFrameCount++;
+          const now = performance.now();
+          if (now - lastFpsTime >= 1000) {
+            currentFps = Math.round(fpsFrameCount * 1000 / (now - lastFpsTime));
+            fpsFrameCount = 0;
+            lastFpsTime = now;
+          }
+
+          const latency = Date.now() - timestampMs;
+          updateHud("h-fps", currentFps.toString());
+          updateHud("h-size", `${width}x${height}`);
+          updateHud("h-seq", sequence.toString());
+          updateHud("h-latency", `${latency}ms`);
+          updateHud("h-drop", droppedFrames.toString());
         }
-
-        const latency = Date.now() - timestampMs;
-        updateHud("h-fps", currentFps.toString());
-        updateHud("h-size", `${width}x${height}`);
-        updateHud("h-seq", sequence.toString());
-        updateHud("h-latency", `${latency}ms`);
-        updateHud("h-drop", droppedFrames.toString());
       };
 
       ws.onclose = () => {
         document.body.className = "disconnected";
         document.getElementById("status").textContent = "Disconnected";
         updateHud("h-status", "CLOSED");
+        updateHud("h-audio", "OFF");
+        meterFill.style.width = "0%";
+        if (audioCtx) {
+          audioCtx.close();
+          audioCtx = null;
+        }
       };
 
       ws.onerror = () => {

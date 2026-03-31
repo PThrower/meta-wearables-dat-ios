@@ -38,6 +38,8 @@ interface Publisher {
   connected: number;
   frameCount: number;
   totalBytes: number;
+  audioCount: number;
+  audioBytes: number;
   timing: FrameTiming;
   lastHeader: { width: number; height: number; quality: number } | null;
 }
@@ -81,6 +83,7 @@ async function loadWasm() {
 // --- Protocol ---
 
 const HEADER_SIZE = 29;
+const AUDIO_HEADER_SIZE = 21;
 
 function freshTiming(): FrameTiming {
   return {
@@ -149,7 +152,7 @@ function fanout(data: Buffer) {
     publisher.lastHeader = { width: header.width, height: header.height, quality: header.quality };
   }
 
-  // WASM throttle check
+  // WASM throttle check (video only)
   if (wasmModule && !wasmModule.should_relay(BigInt(Date.now()))) return;
 
   for (const [id, viewer] of viewers) {
@@ -159,6 +162,20 @@ function fanout(data: Buffer) {
         viewer.frameCount++;
         viewer.totalBytes += data.length;
         updateTiming(viewer.timing, header.sequence, header.timestampMs);
+      }
+    } catch {
+      viewers.delete(id);
+    }
+  }
+}
+
+function fanoutAudio(data: Buffer) {
+  if (viewers.size === 0) return;
+  for (const [id, viewer] of viewers) {
+    try {
+      if (viewer.ws.readyState === WebSocket.OPEN) {
+        viewer.ws.send(data);
+        viewer.totalBytes += data.length;
       }
     } catch {
       viewers.delete(id);
@@ -192,6 +209,9 @@ function stats() {
       frameCount: publisher.frameCount,
       totalBytes: publisher.totalBytes,
       totalMB: Math.round(publisher.totalBytes / 1048576 * 100) / 100,
+      audioCount: publisher.audioCount,
+      audioBytes: publisher.audioBytes,
+      audioMB: Math.round(publisher.audioBytes / 1048576 * 100) / 100,
       uptimeMs: now - publisher.connected,
       latencyMs: publisher.timing.lastReceivedAt > 0
         ? Math.round(now - publisher.timing.lastReceivedAt)
@@ -272,6 +292,8 @@ const server = Bun.serve({
           connected: Date.now(),
           frameCount: 0,
           totalBytes: 0,
+          audioCount: 0,
+          audioBytes: 0,
           timing: freshTiming(),
           lastHeader: null,
         };
@@ -288,9 +310,20 @@ const server = Bun.serve({
 
       if (role === "publish" && publisher?.ws === ws) {
         if (typeof message !== "string") {
-          publisher.frameCount++;
-          publisher.totalBytes += (message as ArrayBuffer).byteLength;
-          fanout(Buffer.from(message as ArrayBuffer));
+          const buf = Buffer.from(message as ArrayBuffer);
+
+          // Check magic bytes: FRAU (0x46 0x52 0x41 0x55) vs FRLY (0x46 0x52 0x4C 0x59)
+          if (buf.length >= 4 && buf[0] === 0x46 && buf[1] === 0x52 && buf[2] === 0x41 && buf[3] === 0x55) {
+            // Audio frame (FRAU)
+            publisher.audioCount++;
+            publisher.audioBytes += buf.length;
+            fanoutAudio(buf);
+          } else {
+            // Video frame (FRLY)
+            publisher.frameCount++;
+            publisher.totalBytes += buf.length;
+            fanout(buf);
+          }
         }
       } else {
         // Viewer control messages

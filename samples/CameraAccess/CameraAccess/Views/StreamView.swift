@@ -225,7 +225,7 @@ struct ControlsView: View {
       .foregroundColor(viewModel.isRecording ? .red : .white)
       .accessibilityIdentifier("record_button")
 
-      // Relay button
+      // Relay button (starts/stops both video + audio relay)
       CircleButton(
         icon: viewModel.isRelaying ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
         text: nil

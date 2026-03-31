@@ -38,12 +38,19 @@ struct CameraAccessApp: App {
   init() {
     NSLog("[CameraAccess] App init starting")
 
-    // Configure audio session to allow background music while streaming from glasses
+    // Configure audio session as .playAndRecord from launch so AudioStage
+    // never needs to change the category mid-stream (which crashes the DAT SDK
+    // Bluetooth video connection). .defaultToSpeaker avoids routing audio to the
+    // earpiece; .mixWithOthers lets background audio keep playing.
     do {
       let audioSession = AVAudioSession.sharedInstance()
-      try audioSession.setCategory(.ambient, options: .mixWithOthers)
+      try audioSession.setCategory(
+        .playAndRecord,
+        mode: .default,
+        options: [.defaultToSpeaker, .mixWithOthers]
+      )
       try audioSession.setActive(true)
-      NSLog("[CameraAccess] Audio session configured with mixWithOthers")
+      NSLog("[CameraAccess] Audio session configured as playAndRecord")
     } catch {
       NSLog("[CameraAccess] Audio session config failed: \(error)")
     }

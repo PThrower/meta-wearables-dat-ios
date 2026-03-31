@@ -231,6 +231,19 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             NSLog("[RelayStage] Send error (\(framesFailed) total): \(error)")
         }
     }
+
+    // MARK: - Raw Data Send (for audio and other binary protocols)
+
+    /// Send pre-built binary data (e.g. FRAU audio frames) over the WebSocket.
+    /// The caller is responsible for building the wire protocol header.
+    func sendRawData(_ data: Data) {
+        guard isConnected, let webSocketTask else { return }
+        webSocketTask.send(.data(data)) { error in
+            if let error {
+                NSLog("[RelayStage] Raw send error: \(error)")
+            }
+        }
+    }
 }
 
 // MARK: - Errors
