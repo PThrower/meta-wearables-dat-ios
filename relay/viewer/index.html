@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaringMind Frame Relay Viewer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; color: #fff; font-family: 'SF Mono', 'Menlo', monospace; overflow: hidden; }
+    #container { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+    canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+    #hud {
+      position: fixed; top: 8px; left: 8px;
+      background: rgba(0,0,0,0.75); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; padding: 8px 12px; font-size: 11px; line-height: 1.6;
+      pointer-events: none; z-index: 10;
+    }
+    #hud .label { color: rgba(255,255,255,0.5); }
+    #hud .value { color: #0f0; font-weight: 600; }
+    #hud .warn  { color: #ff0; }
+    #status {
+      position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+      font-size: 12px; color: rgba(255,255,255,0.6); text-align: center;
+    }
+    #connect-form {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      display: flex; flex-direction: column; gap: 12px; align-items: center;
+    }
+    #connect-form input {
+      background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
+      color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 14px;
+      font-family: inherit; width: 300px; text-align: center;
+    }
+    #connect-form button {
+      background: #0a84ff; color: #fff; border: none; padding: 10px 24px;
+      border-radius: 6px; font-size: 14px; font-family: inherit; cursor: pointer;
+    }
+    #connect-form button:hover { background: #409cff; }
+    .disconnected #connect-form { display: flex; }
+    .connected #connect-form { display: none; }
+  </style>
+</head>
+<body class="disconnected">
+  <div id="container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="hud">
+    <div><span class="label">STATUS </span><span class="value" id="h-status">--</span></div>
+    <div><span class="label">FPS    </span><span class="value" id="h-fps">--</span></div>
+    <div><span class="label">SIZE   </span><span class="value" id="h-size">--</span></div>
+    <div><span class="label">SEQ    </span><span class="value" id="h-seq">--</span></div>
+    <div><span class="label">LATENCY</span><span class="value" id="h-latency">--</span></div>
+    <div><span class="label">DROP   </span><span class="value" id="h-drop">--</span></div>
+  </div>
+
+  <div id="status">Disconnected</div>
+
+  <div id="connect-form">
+    <input id="relay-url" type="text" placeholder="ws://relay-host:8080" value="" />
+    <button onclick="connect()">Connect</button>
+  </div>
+
+  <script>
+    const HEADER_SIZE = 29;
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    let ws = null;
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let fpsFrameCount = 0;
+    let currentFps = 0;
+    let droppedFrames = 0;
+    let lastSequence = 0;
+
+    function updateHud(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function connect() {
+      const url = document.getElementById("relay-url").value.trim();
+      if (!url) return;
+
+      if (ws) ws.close();
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        document.body.className = "connected";
+        document.getElementById("status").textContent = "Connected";
+        updateHud("h-status", "CONNECTED");
+      };
+
+      ws.onmessage = (event) => {
+        if (typeof event.data === "string") return; // JSON control messages
+        const buf = new Uint8Array(event.data);
+        if (buf.length < HEADER_SIZE) return;
+
+        // Parse header
+        const magic = String.fromCharCode(buf[0], buf[1], buf[2], buf[3]);
+        if (magic !== "FRLY") return;
+
+        const sequence = Number(new DataView(buf.buffer, buf.byteOffset + 4, 8).getBigUint64(0, true));
+        const width = new DataView(buf.buffer, buf.byteOffset + 12, 4).getUint32(0, true);
+        const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
+        const quality = buf[20];
+        const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
+
+        // Detect dropped frames
+        if (lastSequence > 0 && sequence > lastSequence + 1) {
+          droppedFrames += sequence - lastSequence - 1;
+        }
+        lastSequence = sequence;
+
+        // JPEG payload
+        const jpeg = buf.slice(HEADER_SIZE);
+        const blob = new Blob([jpeg], { type: "image/jpeg" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+        };
+        img.src = url;
+
+        // FPS counter
+        frameCount++;
+        fpsFrameCount++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+          currentFps = Math.round(fpsFrameCount * 1000 / (now - lastFpsTime));
+          fpsFrameCount = 0;
+          lastFpsTime = now;
+        }
+
+        const latency = Date.now() - timestampMs;
+        updateHud("h-fps", currentFps.toString());
+        updateHud("h-size", `${width}x${height}`);
+        updateHud("h-seq", sequence.toString());
+        updateHud("h-latency", `${latency}ms`);
+        updateHud("h-drop", droppedFrames.toString());
+      };
+
+      ws.onclose = () => {
+        document.body.className = "disconnected";
+        document.getElementById("status").textContent = "Disconnected";
+        updateHud("h-status", "CLOSED");
+      };
+
+      ws.onerror = () => {
+        document.getElementById("status").textContent = "Connection error";
+        updateHud("h-status", "ERROR");
+      };
+    }
+
+    // Auto-connect if URL provided in hash
+    if (location.hash) {
+      document.getElementById("relay-url").value = location.hash.slice(1);
+      connect();
+    }
+  </script>
+</body>
+</html>

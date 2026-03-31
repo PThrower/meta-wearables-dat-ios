@@ -15,6 +15,7 @@
 // of DAT SDK integration including device registration, permissions, and media streaming.
 //
 
+import AVFoundation
 import Foundation
 import MWDATCore
 import UIKit
@@ -36,6 +37,17 @@ struct CameraAccessApp: App {
 
   init() {
     NSLog("[CameraAccess] App init starting")
+
+    // Configure audio session to allow background music while streaming from glasses
+    do {
+      let audioSession = AVAudioSession.sharedInstance()
+      try audioSession.setCategory(.ambient, options: .mixWithOthers)
+      try audioSession.setActive(true)
+      NSLog("[CameraAccess] Audio session configured with mixWithOthers")
+    } catch {
+      NSLog("[CameraAccess] Audio session config failed: \(error)")
+    }
+
     do {
       try Wearables.configure()
       NSLog("[CameraAccess] Wearables.configure() succeeded")

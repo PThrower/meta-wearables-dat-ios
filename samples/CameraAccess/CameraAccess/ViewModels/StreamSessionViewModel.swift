@@ -14,6 +14,7 @@
 // (DisplayStage for UI, RecordingStage for .mov capture, etc.).
 //
 
+import AVFoundation
 import MWDATCamera
 import MWDATCore
 import Photos
@@ -379,6 +380,10 @@ class StreamSessionViewModel: ObservableObject {
     }
     cancelRetry()
     await streamSession.stop()
+
+    // Notify OS to restore background music that was ducked during streaming
+    let audioSession = AVAudioSession.sharedInstance()
+    try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
   }
 
   func dismissError() {

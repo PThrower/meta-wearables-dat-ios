@@ -16,6 +16,38 @@ import CoreMedia
 import Foundation
 import UIKit
 
+// MARK: - WebSocket Delegate
+
+private final class RelayWebSocketDelegate: NSObject, URLSessionWebSocketDelegate, Sendable {
+    let onOpen: @Sendable () -> Void
+    let onClose: @Sendable (Error?) -> Void
+
+    init(onOpen: @Sendable @escaping () -> Void, onClose: @Sendable @escaping (Error?) -> Void) {
+        self.onOpen = onOpen
+        self.onClose = onClose
+        super.init()
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol proto: String?) {
+        NSLog("[RelayStage] WebSocket did open, protocol: \(proto ?? "none")")
+        onOpen()
+    }
+
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        NSLog("[RelayStage] WebSocket closed: \(closeCode.rawValue)")
+        onClose(nil)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            NSLog("[RelayStage] WebSocket connection failed: \(error)")
+            onClose(error)
+        }
+    }
+}
+
+// MARK: - RelayStage
+
 actor RelayStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "relay"
     var config: FrameStageConfig
@@ -24,6 +56,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private var webSocketTask: URLSessionWebSocketTask?
     private var isConnected = false
     private var sequenceNumber: UInt64 = 0
+    private var session: URLSession?
+    private var delegate: RelayWebSocketDelegate?
 
     // JPEG encoding
     private let jpegQuality: CGFloat
@@ -46,20 +80,62 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         disconnect()
 
-        let session = URLSession(configuration: .default)
-        webSocketTask = session.webSocketTask(with: url)
-        webSocketTask?.resume()
+        NSLog("[RelayStage] Connecting to \(urlString) ...")
 
-        // Brief wait for connection to establish
-        try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        // Use delegate to get actual connection events
+        let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            var resumed = false
 
-        isConnected = true
-        NSLog("[RelayStage] Connected to \(urlString)")
+            let delegate = RelayWebSocketDelegate(
+                onOpen: {
+                    guard !resumed else { return }
+                    resumed = true
+                    NSLog("[RelayStage] onOpen fired")
+                    continuation.resume(returning: true)
+                },
+                onClose: { error in
+                    guard !resumed else { return }
+                    resumed = true
+                    if let error {
+                        NSLog("[RelayStage] onClose with error: \(error)")
+                    }
+                    continuation.resume(returning: false)
+                }
+            )
+
+            let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            let task = session.webSocketTask(with: url)
+
+            self.session = session
+            self.delegate = delegate
+            self.webSocketTask = task
+            task.resume()
+
+            // Timeout: if no open/close event in 5 seconds, assume failure
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !resumed else { return }
+                resumed = true
+                NSLog("[RelayStage] Connection timed out after 5s")
+                continuation.resume(returning: false)
+            }
+        }
+
+        if connected {
+            isConnected = true
+            NSLog("[RelayStage] Connected to \(urlString)")
+        } else {
+            disconnect()
+            throw RelayError.connectionFailed(urlString)
+        }
     }
 
     func disconnect() {
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        session?.invalidateAndCancel()
+        session = nil
+        delegate = nil
         isConnected = false
         NSLog("[RelayStage] Disconnected")
     }
@@ -144,6 +220,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func onSendSuccess() {
         framesSent += 1
+        if framesSent % 100 == 1 {
+            NSLog("[RelayStage] Frames sent: \(framesSent)")
+        }
     }
 
     private func onSendError(_ error: Error) {
@@ -159,11 +238,13 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 enum RelayError: LocalizedError {
     case invalidURL(String)
     case notConnected
+    case connectionFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL(let url): return "Invalid relay URL: \(url)"
         case .notConnected: return "Relay not connected"
+        case .connectionFailed(let url): return "Failed to connect to relay: \(url)"
         }
     }
 }
