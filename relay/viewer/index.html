@@ -75,7 +75,7 @@
   <script>
     // --- Wire protocol constants ---
     const FRLY_HEADER_SIZE = 29;
-    const FRAU_HEADER_SIZE = 21;
+    const FRAU_HEADER_SIZE = 29;
     const FRAU_MAGIC = [0x46, 0x52, 0x41, 0x55]; // "FRAU"
     const FRLY_MAGIC = [0x46, 0x52, 0x4C, 0x59]; // "FRLY"
 
@@ -99,6 +99,12 @@
     let audioChunkCount = 0;
     let audioLevel = 0;
 
+    // --- A/V sync state ---
+    // videoClock maps sender timestamps to AudioContext time.
+    // When a video frame arrives, we record: senderTs -> audioCtx.currentTime.
+    // Audio chunks are then scheduled relative to that mapping.
+    let videoClockBase = null; // { senderMs, audioCtxTime }
+
     function updateHud(id, value) {
       document.getElementById(id).textContent = value;
     }
@@ -111,7 +117,7 @@
       nextPlayTime = 0;
     }
 
-    function playAudioChunk(pcmInt16, sampleRate, channels) {
+    function playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs) {
       if (!audioCtx) initAudio();
       if (audioCtx.state === "suspended") audioCtx.resume();
 
@@ -132,17 +138,38 @@
       const audioBuffer = audioCtx.createBuffer(channels, sampleCount / channels, sampleRate);
       audioBuffer.copyToChannel(float32, 0);
 
-      // Schedule seamless playback
+      // Schedule playback synced to video clock
       const source = audioCtx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioCtx.destination);
 
       const now = audioCtx.currentTime;
-      if (nextPlayTime < now) {
-        nextPlayTime = now + 0.005; // 5ms initial buffer
+      let playAt;
+
+      if (videoClockBase && senderTimestampMs > 0) {
+        // Map sender timestamp to AudioContext time using the video clock reference
+        const senderOffsetSec = (senderTimestampMs - videoClockBase.senderMs) / 1000;
+        playAt = videoClockBase.audioCtxTime + senderOffsetSec;
+
+        // If the calculated time is in the past, play ASAP (with small buffer)
+        if (playAt < now) {
+          playAt = now + 0.005;
+        }
+        // Cap look-ahead to 200ms to prevent excessive buffering
+        if (playAt > now + 0.2) {
+          playAt = now + 0.2;
+        }
+      } else {
+        // No video clock yet — fall back to seamless queue
+        if (nextPlayTime < now) {
+          playAt = now + 0.005;
+        } else {
+          playAt = nextPlayTime;
+        }
       }
-      source.start(nextPlayTime);
-      nextPlayTime += audioBuffer.duration;
+
+      source.start(playAt);
+      nextPlayTime = playAt + audioBuffer.duration;
     }
 
     function updateAudioMeter() {
@@ -183,13 +210,14 @@
           const sampleRate = view.getUint32(13, true);
           const channels = view.getUint16(17, true);
           const bitsPerSample = view.getUint16(19, true);
+          const senderTimestampMs = Number(view.getBigUint64(21, true));
 
           if (codecType !== 0 || bitsPerSample !== 16) return; // Only PCM 16-bit
 
           const pcmBytes = buf.slice(FRAU_HEADER_SIZE);
           const pcmInt16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.length / 2);
 
-          playAudioChunk(pcmInt16, sampleRate, channels);
+          playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs);
           audioChunkCount++;
 
           updateHud("h-audio", "ON");
@@ -206,6 +234,15 @@
           const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
           const quality = buf[20];
           const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
+
+          // Update video clock — map sender timestamp to AudioContext time
+          // This is the anchor audio uses to sync its playback.
+          if (audioCtx && timestampMs > 0) {
+            videoClockBase = {
+              senderMs: timestampMs,
+              audioCtxTime: audioCtx.currentTime
+            };
+          }
 
           // Detect dropped frames
           if (lastSequence > 0 && sequence > lastSequence + 1) {
@@ -253,6 +290,7 @@
         updateHud("h-status", "CLOSED");
         updateHud("h-audio", "OFF");
         meterFill.style.width = "0%";
+        videoClockBase = null;
         if (audioCtx) {
           audioCtx.close();
           audioCtx = null;

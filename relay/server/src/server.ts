@@ -83,7 +83,7 @@ async function loadWasm() {
 // --- Protocol ---
 
 const HEADER_SIZE = 29;
-const AUDIO_HEADER_SIZE = 21;
+const AUDIO_HEADER_SIZE = 29;
 
 function freshTiming(): FrameTiming {
   return {

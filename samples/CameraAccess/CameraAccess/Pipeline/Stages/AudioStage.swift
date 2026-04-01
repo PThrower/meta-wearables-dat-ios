@@ -7,9 +7,10 @@
  *
  * Wire protocol per audio chunk:
  *   [4 bytes "FRAU"][1 byte codecType][8 bytes sequence][4 bytes sampleRate]
- *   [2 bytes channels][2 bytes bitsPerSample][PCM payload]
+ *   [2 bytes channels][2 bytes bitsPerSample][8 bytes timestamp_ms][PCM payload]
  *
  * codecType: 0 = raw PCM 16-bit LE
+ * timestamp_ms: same epoch as FRLY video frames — used for A/V sync in viewer
  *
  * Runs on its own actor executor -- never blocks the main thread.
  * Audio session must be pre-configured as .playAndRecord by the app delegate;
@@ -28,8 +29,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var relayStage: RelayStage?
     private var isRunning = false
 
-    // FRAU header size: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) = 21
-    static let frauHeaderSize = 21
+    // FRAU header size: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
+    static let frauHeaderSize = 29
 
     // Audio parameters
     private let targetSampleRate: UInt32 = 48000
@@ -141,7 +142,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         sequenceNumber += 1
 
-        // Build FRAU header (21 bytes)
+        // Build FRAU header (29 bytes)
         var header = Data(capacity: Self.frauHeaderSize)
 
         // Magic "FRAU"
@@ -165,6 +166,10 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         // Bits per sample (2 bytes LE)
         var bps = targetBitsPerSample
         header.append(contentsOf: withUnsafeBytes(of: &bps) { Array($0) })
+
+        // Timestamp ms (8 bytes LE) — same epoch as FRLY video frames
+        var ts = UInt64(Date().timeIntervalSince1970 * 1000)
+        header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
 
         var message = header
         message.append(pcmData)
