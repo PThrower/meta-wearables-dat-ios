@@ -19,6 +19,19 @@
 import { join } from "node:path";
 import { readdir } from "node:fs/promises";
 
+// --- Quality Presets ---
+
+type QualityPreset = "high" | "medium" | "low" | "mini";
+
+const QUALITY_PRESETS: Record<QualityPreset, { maxFps: number; minIntervalMs: number; label: string }> = {
+  high:   { maxFps: 30, minIntervalMs: 33,  label: "High (30 FPS)" },
+  medium: { maxFps: 15, minIntervalMs: 67,  label: "Medium (15 FPS)" },
+  low:    { maxFps: 8,  minIntervalMs: 125, label: "Low (8 FPS)" },
+  mini:   { maxFps: 4,  minIntervalMs: 250, label: "Mini (4 FPS)" },
+};
+
+const DEFAULT_QUALITY: QualityPreset = "high";
+
 // --- Types ---
 
 interface FrameTiming {
@@ -50,6 +63,9 @@ interface Viewer {
   frameCount: number;
   totalBytes: number;
   timing: FrameTiming;
+  quality: QualityPreset;
+  lastSentAt: number;          // timestamp of last sent frame (for throttle)
+  throttledCount: number;      // frames skipped due to throttle
 }
 
 // --- State ---
@@ -58,6 +74,39 @@ let publisher: Publisher | null = null;
 const viewers: Map<string, Viewer> = new Map();
 let wasmModule: any = null;
 const serverStartTime = Date.now();
+
+// --- Stale Connection Cleanup ---
+// If Caddy/proxy swallows TCP close, the server never gets the WebSocket close event.
+// Periodically check for dead connections and clean them up.
+
+const PUBLISHER_TIMEOUT_MS = 15_000; // 15s without a frame = dead
+const VIEWER_TIMEOUT_MS = 30_000;    // 30s without any activity = dead
+
+setInterval(() => {
+  const now = Date.now();
+
+  // Check publisher staleness
+  if (publisher && publisher.timing.lastReceivedAt > 0) {
+    const stale = now - publisher.timing.lastReceivedAt;
+    if (stale > PUBLISHER_TIMEOUT_MS) {
+      console.log(`[relay] Publisher ${publisher.id.slice(0, 8)} stale (${Math.round(stale / 1000)}s), evicting`);
+      try { publisher.ws.close(4002, "publisher stale"); } catch {}
+      publisher = null;
+    }
+  }
+
+  // Check viewer staleness
+  for (const [id, viewer] of viewers) {
+    const stale = viewer.timing.lastReceivedAt > 0
+      ? now - viewer.timing.lastReceivedAt
+      : now - viewer.connected;
+    if (stale > VIEWER_TIMEOUT_MS) {
+      console.log(`[relay] Viewer ${id.slice(0, 8)} stale (${Math.round(stale / 1000)}s), evicting`);
+      try { viewer.ws.close(4003, "viewer stale"); } catch {}
+      viewers.delete(id);
+    }
+  }
+}, 5_000); // Check every 5 seconds
 
 // --- WASM Loading ---
 // Nodejs target from wasm-pack is self-initializing: just import and use.
@@ -155,14 +204,25 @@ function fanout(data: Buffer) {
   // WASM throttle check (video only)
   if (wasmModule && !wasmModule.should_relay(BigInt(Date.now()))) return;
 
+  const now = Date.now();
+
   for (const [id, viewer] of viewers) {
     try {
-      if (viewer.ws.readyState === WebSocket.OPEN) {
-        viewer.ws.send(data);
-        viewer.frameCount++;
-        viewer.totalBytes += data.length;
-        updateTiming(viewer.timing, header.sequence, header.timestampMs);
+      if (viewer.ws.readyState !== WebSocket.OPEN) continue;
+
+      // Per-viewer frame throttle based on quality preset
+      const preset = QUALITY_PRESETS[viewer.quality];
+      const elapsed = viewer.lastSentAt > 0 ? now - viewer.lastSentAt : preset.minIntervalMs;
+      if (elapsed < preset.minIntervalMs) {
+        viewer.throttledCount++;
+        continue;
       }
+
+      viewer.ws.send(data);
+      viewer.frameCount++;
+      viewer.totalBytes += data.length;
+      viewer.lastSentAt = now;
+      updateTiming(viewer.timing, header.sequence, header.timestampMs);
     } catch {
       viewers.delete(id);
     }
@@ -222,7 +282,10 @@ function stats() {
     viewers: viewers.size,
     viewerStats: Object.fromEntries(
       [...viewers.entries()].map(([id, v]) => [id.slice(0, 8), {
+        quality: v.quality,
+        maxFps: QUALITY_PRESETS[v.quality].maxFps,
         frames: v.frameCount,
+        throttled: v.throttledCount,
         totalBytes: v.totalBytes,
         totalMB: Math.round(v.totalBytes / 1048576 * 100) / 100,
         uptimeMs: now - v.connected,
@@ -263,7 +326,7 @@ const server = Bun.serve({
   hostname: "0.0.0.0",
   port: PORT,
   fetch(req, server) {
-    const url = new URL(req.url);
+    const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
 
     if (url.pathname === "/stats") {
       return Response.json({ ...stats(), ip: wifiIp });
@@ -301,7 +364,16 @@ const server = Bun.serve({
       } else {
         const id = crypto.randomUUID();
         (ws.data as any).viewerId = id;
-        viewers.set(id, { ws, connected: Date.now(), frameCount: 0, totalBytes: 0, timing: freshTiming() });
+        viewers.set(id, {
+          ws,
+          connected: Date.now(),
+          frameCount: 0,
+          totalBytes: 0,
+          timing: freshTiming(),
+          quality: DEFAULT_QUALITY,
+          lastSentAt: 0,
+          throttledCount: 0,
+        });
         console.log(`[relay] Viewer connected: ${id.slice(0, 8)} (total: ${viewers.size})`);
       }
     },
@@ -332,6 +404,20 @@ const server = Bun.serve({
             const cmd = JSON.parse(message);
             if (cmd.type === "stats") {
               ws.send(JSON.stringify({ type: "stats", ...stats() }));
+            } else if (cmd.type === "config" && cmd.quality && cmd.quality in QUALITY_PRESETS) {
+              const viewerId = (ws.data as any)?.viewerId;
+              const viewer = viewerId ? viewers.get(viewerId) : undefined;
+              if (viewer) {
+                const newQuality = cmd.quality as QualityPreset;
+                viewer.quality = newQuality;
+                console.log(`[relay] Viewer ${viewerId.slice(0, 8)} quality: ${newQuality} (${QUALITY_PRESETS[newQuality].maxFps} FPS)`);
+                ws.send(JSON.stringify({
+                  type: "quality",
+                  preset: newQuality,
+                  maxFps: QUALITY_PRESETS[newQuality].maxFps,
+                  label: QUALITY_PRESETS[newQuality].label,
+                }));
+              }
             }
           } catch {}
         }

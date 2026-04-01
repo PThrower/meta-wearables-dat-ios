@@ -54,7 +54,7 @@ class StreamSessionViewModel: ObservableObject {
 
   // Relay state
   @Published var isRelaying: Bool = false
-  @Published var relayURL: String = "ws://172.20.10.2:8080/publish"
+  @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
 
   var isStreaming: Bool {
     streamingStatus != .stopped
