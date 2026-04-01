@@ -19,6 +19,19 @@
     #hud .value { color: #0f0; font-weight: 600; }
     #hud .warn  { color: #ff0; }
     #hud .audio-on { color: #0ff; }
+    #quality-bar {
+      position: fixed; top: 8px; right: 8px;
+      background: rgba(0,0,0,0.75); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 6px; padding: 6px 10px; font-size: 11px; z-index: 10;
+      display: none;
+    }
+    #quality-bar label { color: rgba(255,255,255,0.5); margin-right: 6px; }
+    #quality-bar select {
+      background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: inherit;
+    }
+    #quality-bar select option { background: #222; }
+    .connected #quality-bar { display: block; }
     #audio-meter {
       display: inline-block; width: 60px; height: 6px;
       background: rgba(255,255,255,0.15); border-radius: 3px;
@@ -63,6 +76,16 @@
     <div><span class="label">LATENCY</span><span class="value" id="h-latency">--</span></div>
     <div><span class="label">DROP   </span><span class="value" id="h-drop">--</span></div>
     <div><span class="label">AUDIO  </span><span class="value audio-on" id="h-audio">OFF</span><span id="audio-meter"><span id="audio-meter-fill"></span></span></div>
+  </div>
+
+  <div id="quality-bar">
+    <label>QUALITY</label>
+    <select id="quality-select" onchange="setQuality(this.value)">
+      <option value="high">High (30 FPS)</option>
+      <option value="medium">Medium (15 FPS)</option>
+      <option value="low">Low (8 FPS)</option>
+      <option value="mini">Mini (4 FPS)</option>
+    </select>
   </div>
 
   <div id="status">Disconnected</div>
@@ -177,6 +200,14 @@
       meterFill.style.width = pct + "%";
     }
 
+    // --- Quality control ---
+
+    function setQuality(preset) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "config", quality: preset }));
+      }
+    }
+
     // --- Connection ---
 
     function connect() {
@@ -194,7 +225,15 @@
       };
 
       ws.onmessage = (event) => {
-        if (typeof event.data === "string") return; // JSON control messages
+        if (typeof event.data === "string") {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "quality") {
+              document.getElementById("quality-select").value = msg.preset;
+            }
+          } catch {}
+          return;
+        }
         const buf = new Uint8Array(event.data);
         if (buf.length < 4) return;
 
