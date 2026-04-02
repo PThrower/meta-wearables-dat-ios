@@ -91,7 +91,7 @@
   <div id="status">Disconnected</div>
 
   <div id="connect-form">
-    <input id="relay-url" type="text" placeholder="ws://relay-host:8080" value="" />
+    <input id="relay-url" type="text" placeholder="wss://relay-host:8080/view" />
     <button onclick="connect()">Connect</button>
   </div>
 
@@ -342,11 +342,22 @@
       };
     }
 
-    // Auto-connect if URL provided in hash
-    if (location.hash) {
-      document.getElementById("relay-url").value = location.hash.slice(1);
-      connect();
-    }
+    // Auto-detect relay URL from page hostname if served from the relay server
+    (function autoDetect() {
+      const input = document.getElementById("relay-url");
+      if (location.hash) {
+        input.value = location.hash.slice(1);
+        connect();
+        return;
+      }
+      // If served from the relay server itself (not file:// or localhost dev), auto-connect
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const autoUrl = `${proto}//${location.host}/view`;
+      input.value = autoUrl;
+      if (location.hostname && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+        connect();
+      }
+    })();
   </script>
 </body>
 </html>
