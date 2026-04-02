@@ -351,7 +351,7 @@ const server = Bun.serve<WsData>({
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
 
     if (url.pathname === "/stats") {
-      return Response.json({ ...stats(), ip: wifiIp });
+      return Response.json(stats());
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
