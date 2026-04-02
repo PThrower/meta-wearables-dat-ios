@@ -1,0 +1,30 @@
+# Xcode build artifacts
+build/
+DerivedData/
+
+# SPM
+.build/
+.swiftpm/
+Package.resolved
+
+# Node
+node_modules/
+bun.lock
+
+# IDE
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+.mcp.json
+lmdb.db
+lmdb.db-lock
+
+# Relay server local
+relay/server/node_modules/
