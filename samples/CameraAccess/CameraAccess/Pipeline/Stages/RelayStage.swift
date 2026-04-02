@@ -19,6 +19,7 @@ import CoreImage
 import CoreMedia
 import Foundation
 import ImageIO
+import UIKit
 import UniformTypeIdentifiers
 
 // MARK: - WebSocket Delegate
@@ -132,6 +133,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         if connected {
             isConnected = true
+            sendHello()
             startReceiveLoop()
             startKeepAlive()
             NSLog("[RelayStage] Connected to \(urlString)")
@@ -352,6 +354,51 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func markDisconnected() {
         isConnected = false
+    }
+
+    // MARK: - Device Identity
+
+    /// Send device identity to relay server as JSON after WebSocket opens.
+    /// The server stores this on the Publisher object and exposes it via /stats.
+    private func sendHello() {
+        guard let wsTask = webSocketTask else { return }
+
+        let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+        let deviceName = UIDevice.current.name
+        let model = UIDevice.current.model
+        let systemVersion = UIDevice.current.systemVersion
+
+        let hello: [String: String] = [
+            "type": "hello",
+            "deviceId": deviceId,
+            "deviceName": deviceName,
+            "deviceModel": model,
+            "systemVersion": systemVersion,
+            "wearableId": wearableId ?? "",
+            "wearableType": wearableType ?? "",
+        ]
+
+        guard let data = try? JSONSerialization.data(withJSONObject: hello),
+              let str = String(data: data, encoding: .utf8) else { return }
+
+        wsTask.send(.string(str)) { error in
+            if let error {
+                NSLog("[RelayStage] Hello send error: \(error)")
+            } else {
+                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(model) wearable=\(self.wearableType ?? "none")")
+            }
+        }
+    }
+
+    /// Connected wearable device info (set before connect).
+    /// The view model sets these from the DAT SDK device info.
+    var wearableId: String?
+    var wearableType: String?
+
+    /// Set device identity before connecting. Called by StreamSessionViewModel.
+    func setDeviceIdentity(wearableId: String?, wearableType: String?) {
+        self.wearableId = wearableId
+        self.wearableType = wearableType
     }
 }
 

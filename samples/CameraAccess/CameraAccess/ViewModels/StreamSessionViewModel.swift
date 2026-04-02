@@ -277,6 +277,12 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
     do {
+      // Set wearable identity before connecting so hello message includes device info
+      if let deviceId = selectedDeviceId {
+        let device = wearables.deviceForIdentifier(deviceId)
+        let deviceTypeName = device?.deviceType().displayName
+        await relayStage.setDeviceIdentity(wearableId: deviceId, wearableType: deviceTypeName)
+      }
       try await relayStage.connect(to: url)
       isRelaying = true
       NSLog("[StreamSession] Relay connected to \(url)")

@@ -55,6 +55,12 @@ interface Publisher {
   audioBytes: number;
   timing: FrameTiming;
   lastHeader: { width: number; height: number; quality: number } | null;
+  clientIp: string;
+  // Device identity — sent by iOS publisher via {"type":"hello",...}
+  deviceId: string | null;       // iOS identifierForVendor
+  deviceName: string | null;     // iOS device name (e.g. "Starlink", "iPhone")
+  wearableId: string | null;     // Connected wearable device ID (DAT SDK DeviceIdentifier)
+  wearableType: string | null;   // Wearable type (e.g. "Ray-Ban Meta", "Oakley Meta HSTN")
 }
 
 interface Viewer {
@@ -66,6 +72,7 @@ interface Viewer {
   quality: QualityPreset;
   lastSentAt: number;          // timestamp of last sent frame (for throttle)
   throttledCount: number;      // frames skipped due to throttle
+  clientIp: string;
 }
 
 // --- State ---
@@ -266,6 +273,11 @@ function stats() {
     },
     publisher: publisher ? {
       id: publisher.id,
+      clientIp: publisher.clientIp,
+      deviceId: publisher.deviceId,
+      deviceName: publisher.deviceName,
+      wearableId: publisher.wearableId,
+      wearableType: publisher.wearableType,
       frameCount: publisher.frameCount,
       totalBytes: publisher.totalBytes,
       totalMB: Math.round(publisher.totalBytes / 1048576 * 100) / 100,
@@ -282,6 +294,7 @@ function stats() {
     viewers: viewers.size,
     viewerStats: Object.fromEntries(
       [...viewers.entries()].map(([id, v]) => [id.slice(0, 8), {
+        clientIp: v.clientIp,
         quality: v.quality,
         maxFps: QUALITY_PRESETS[v.quality].maxFps,
         frames: v.frameCount,
@@ -338,11 +351,16 @@ const server = Bun.serve({
 
     // /publish and /view get upgraded to WebSocket
     const role = url.pathname === "/publish" ? "publish" : "view";
-    return server.upgrade(req, { data: { role } });
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      || req.headers.get("x-real-ip")
+      || "unknown";
+    return server.upgrade(req, { data: { role, clientIp } });
   },
   websocket: {
     open(ws) {
-      const role = (ws.data as { role?: string })?.role;
+      const data = ws.data as { role?: string; clientIp?: string };
+      const role = data?.role;
+      const clientIp = data?.clientIp || "unknown";
       if (role === "publish") {
         if (publisher && publisher.ws.readyState === WebSocket.OPEN) {
           ws.close(4001, "publisher already connected");
@@ -359,8 +377,13 @@ const server = Bun.serve({
           audioBytes: 0,
           timing: freshTiming(),
           lastHeader: null,
+          clientIp,
+          deviceId: null,
+          deviceName: null,
+          wearableId: null,
+          wearableType: null,
         };
-        console.log(`[relay] Publisher connected: ${id.slice(0, 8)}`);
+        console.log(`[relay] Publisher connected: ${id.slice(0, 8)} ip=${clientIp}`);
       } else {
         const id = crypto.randomUUID();
         (ws.data as any).viewerId = id;
@@ -373,15 +396,28 @@ const server = Bun.serve({
           quality: DEFAULT_QUALITY,
           lastSentAt: 0,
           throttledCount: 0,
+          clientIp,
         });
-        console.log(`[relay] Viewer connected: ${id.slice(0, 8)} (total: ${viewers.size})`);
+        console.log(`[relay] Viewer connected: ${id.slice(0, 8)} ip=${clientIp} (total: ${viewers.size})`);
       }
     },
     message(ws, message) {
       const role = (ws.data as { role?: string })?.role;
 
       if (role === "publish" && publisher?.ws === ws) {
-        if (typeof message !== "string") {
+        if (typeof message === "string") {
+          // Publisher JSON control messages
+          try {
+            const cmd = JSON.parse(message);
+            if (cmd.type === "hello" && publisher) {
+              publisher.deviceId = cmd.deviceId || null;
+              publisher.deviceName = cmd.deviceName || null;
+              publisher.wearableId = cmd.wearableId || null;
+              publisher.wearableType = cmd.wearableType || null;
+              console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${publisher.clientIp}`);
+            }
+          } catch {}
+        } else {
           const buf = Buffer.from(message as ArrayBuffer);
 
           // Check magic bytes: FRAU (0x46 0x52 0x41 0x55) vs FRLY (0x46 0x52 0x4C 0x59)
