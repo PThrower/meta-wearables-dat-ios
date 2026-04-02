@@ -9,5 +9,8 @@
     "start": "bun run src/server.ts"
   },
   "keywords": ["relay", "wasm", "streaming", "caringmind"],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "^1.3.11"
+  }
 }

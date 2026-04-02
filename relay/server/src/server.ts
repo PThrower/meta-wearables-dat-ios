@@ -17,7 +17,16 @@
  */
 
 import { join } from "node:path";
-import { readdir } from "node:fs/promises";
+import os from "node:os";
+import type { ServerWebSocket } from "bun";
+
+// --- WebSocket Data Type (Bun.serve generic) ---
+
+interface WsData {
+  role: string;
+  clientIp: string;
+  viewerId?: string;
+}
 
 // --- Quality Presets ---
 
@@ -46,7 +55,7 @@ interface FrameTiming {
 }
 
 interface Publisher {
-  ws: WebSocket;
+  ws: ServerWebSocket<WsData>;
   id: string;
   connected: number;
   frameCount: number;
@@ -64,7 +73,7 @@ interface Publisher {
 }
 
 interface Viewer {
-  ws: WebSocket;
+  ws: ServerWebSocket<WsData>;
   connected: number;
   frameCount: number;
   totalBytes: number;
@@ -185,19 +194,20 @@ function updateTiming(t: FrameTiming, sequence: number, timestampMs: number): Fr
   return t;
 }
 
-function parseHeader(buf: Buffer) {
+function parseHeader(buf: Uint8Array) {
   if (buf.length < HEADER_SIZE) return null;
   if (buf[0] !== 0x46 || buf[1] !== 0x52 || buf[2] !== 0x4c || buf[3] !== 0x59) return null;
+  const view = new DataView(buf.buffer, buf.byteOffset);
   return {
-    sequence: Number(buf.readBigUInt64LE(4)),
-    width: buf.readUInt32LE(12),
-    height: buf.readUInt32LE(16),
+    sequence: Number(view.getBigUint64(4, true)),
+    width: view.getUint32(12, true),
+    height: view.getUint32(16, true),
     quality: buf[20],
-    timestampMs: Number(buf.readBigUInt64LE(21)),
+    timestampMs: Number(view.getBigUint64(21, true)),
   };
 }
 
-function fanout(data: Buffer) {
+function fanout(data: Uint8Array) {
   if (viewers.size === 0) return;
   const header = parseHeader(data);
   if (!header) return;
@@ -236,7 +246,7 @@ function fanout(data: Buffer) {
   }
 }
 
-function fanoutAudio(data: Buffer) {
+function fanoutAudio(data: Uint8Array) {
   if (viewers.size === 0) return;
   for (const [id, viewer] of viewers) {
     try {
@@ -311,9 +321,8 @@ function stats() {
 // --- Auto-detect WiFi IP ---
 
 function getWifiIp(): string {
-  const os = require("os");
   const nets = os.networkInterfaces();
-  for (const addrs of Object.values(nets)) {
+  for (const addrs of Object.values(nets) as (os.NetworkInterfaceInfo[] | undefined)[]) {
     for (const a of (addrs ?? [])) {
       if (a.family === "IPv4" && !a.internal && !a.address.startsWith("100.") && !a.address.startsWith("169.")) {
         return a.address;
@@ -335,7 +344,7 @@ const viewerHtml = await Bun.file(join(import.meta.dir, "../../viewer/index.html
   "<html><body><h1>Viewer HTML not found</h1></body></html>"
 );
 
-const server = Bun.serve({
+const server = Bun.serve<WsData>({
   hostname: "0.0.0.0",
   port: PORT,
   fetch(req, server) {
@@ -354,13 +363,12 @@ const server = Bun.serve({
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("x-real-ip")
       || "unknown";
-    return server.upgrade(req, { data: { role, clientIp } });
+    server.upgrade(req, { data: { role, clientIp } });
+    return new Response(null, { status: 204 });
   },
   websocket: {
     open(ws) {
-      const data = ws.data as { role?: string; clientIp?: string };
-      const role = data?.role;
-      const clientIp = data?.clientIp || "unknown";
+      const { role, clientIp } = ws.data;
       if (role === "publish") {
         if (publisher && publisher.ws.readyState === WebSocket.OPEN) {
           ws.close(4001, "publisher already connected");
@@ -386,7 +394,7 @@ const server = Bun.serve({
         console.log(`[relay] Publisher connected: ${id.slice(0, 8)} ip=${clientIp}`);
       } else {
         const id = crypto.randomUUID();
-        (ws.data as any).viewerId = id;
+        ws.data.viewerId = id;
         viewers.set(id, {
           ws,
           connected: Date.now(),
@@ -402,7 +410,7 @@ const server = Bun.serve({
       }
     },
     message(ws, message) {
-      const role = (ws.data as { role?: string })?.role;
+      const { role } = ws.data;
 
       if (role === "publish" && publisher?.ws === ws) {
         if (typeof message === "string") {
@@ -418,7 +426,8 @@ const server = Bun.serve({
             }
           } catch {}
         } else {
-          const buf = Buffer.from(message as ArrayBuffer);
+          // Binary frame (Uint8Array in Bun)
+          const buf = message as Uint8Array;
 
           // Check magic bytes: FRAU (0x46 0x52 0x41 0x55) vs FRLY (0x46 0x52 0x4C 0x59)
           if (buf.length >= 4 && buf[0] === 0x46 && buf[1] === 0x52 && buf[2] === 0x41 && buf[3] === 0x55) {
@@ -441,9 +450,9 @@ const server = Bun.serve({
             if (cmd.type === "stats") {
               ws.send(JSON.stringify({ type: "stats", ...stats() }));
             } else if (cmd.type === "config" && cmd.quality && cmd.quality in QUALITY_PRESETS) {
-              const viewerId = (ws.data as any)?.viewerId;
+              const viewerId = ws.data.viewerId;
               const viewer = viewerId ? viewers.get(viewerId) : undefined;
-              if (viewer) {
+              if (viewer && viewerId) {
                 const newQuality = cmd.quality as QualityPreset;
                 viewer.quality = newQuality;
                 console.log(`[relay] Viewer ${viewerId.slice(0, 8)} quality: ${newQuality} (${QUALITY_PRESETS[newQuality].maxFps} FPS)`);
@@ -460,12 +469,12 @@ const server = Bun.serve({
       }
     },
     close(ws) {
-      const role = (ws.data as { role?: string })?.role;
+      const { role } = ws.data;
       if (role === "publish" && publisher?.ws === ws) {
         console.log("[relay] Publisher disconnected");
         publisher = null;
       } else {
-        const id = (ws.data as any)?.viewerId;
+        const id = ws.data.viewerId;
         if (id) {
           viewers.delete(id);
           console.log(`[relay] Viewer disconnected: ${id.slice(0, 8)} (${viewers.size} remaining)`);
