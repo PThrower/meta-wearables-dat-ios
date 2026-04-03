@@ -383,14 +383,14 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
         let deviceName = UIDevice.current.name
-        let model = UIDevice.current.model
+        let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
         let systemVersion = UIDevice.current.systemVersion
 
         let hello: [String: String] = [
             "type": "hello",
             "deviceId": deviceId,
             "deviceName": deviceName,
-            "deviceModel": model,
+            "deviceModel": hardwareModel,
             "systemVersion": systemVersion,
             "wearableId": wearableId ?? "",
             "wearableType": wearableType ?? "",
@@ -403,7 +403,21 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             if let error {
                 NSLog("[RelayStage] Hello send error: \(error)")
             } else {
-                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(model) wearable=\(self.wearableType ?? "none")")
+                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(hardwareModel) wearable=\(self.wearableType ?? "none")")
+            }
+        }
+    }
+
+    // MARK: - Hardware Model
+
+    /// Read the hardware model identifier from `utsname.machine` (e.g. "iPhone14,4").
+    /// Returns the canonical device identifier — no lookup table needed.
+    nonisolated private static func hardwareModelIdentifier() -> String {
+        var info = utsname()
+        uname(&info)
+        return withUnsafePointer(to: &info.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 256) {
+                String(cString: $0)
             }
         }
     }

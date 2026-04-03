@@ -118,15 +118,25 @@
 
     // --- Audio state ---
     let audioCtx = null;
-    let nextPlayTime = 0;
     let audioChunkCount = 0;
     let audioLevel = 0;
+    let audioResumed = false;
 
     // --- A/V sync state ---
-    // videoClock maps sender timestamps to AudioContext time.
-    // When a video frame arrives, we record: senderTs -> audioCtx.currentTime.
-    // Audio chunks are then scheduled relative to that mapping.
     let videoClockBase = null; // { senderMs, audioCtxTime }
+
+    // --- Ring buffer for continuous gapless audio playback ---
+    // Instead of scheduling individual BufferSourceNodes per chunk (which causes
+    // clicks/gaps at boundaries), we use a single ScriptProcessorNode that
+    // continuously drains a ring buffer. Incoming PCM chunks just push into the
+    // buffer. No chunk boundaries in the output = no clicks/ringing.
+    const RING_SIZE = 48000 * 2; // 2 seconds at 48kHz — generous
+    const RING_BUFFER = new Float32Array(RING_SIZE);
+    let ringWritePos = 0;
+    let ringReadPos = 0;
+    let ringFill = 0;       // samples available
+    let ringStarted = false;
+    const PREBUFFER_SAMPLES = 48000 * 0.06; // 60ms pre-buffer before starting output
 
     function updateHud(id, value) {
       document.getElementById(id).textContent = value;
@@ -137,66 +147,110 @@
     function initAudio() {
       if (audioCtx) return;
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-      nextPlayTime = 0;
+      audioResumed = false;
+      ringStarted = false;
+      ringWritePos = 0;
+      ringReadPos = 0;
+      ringFill = 0;
+
+      // ScriptProcessorNode: called by the browser to fill its output buffer.
+      // bufferSize=4096 gives ~85ms at 48kHz — low latency but stable.
+      const processor = audioCtx.createScriptProcessor(4096, 0, 1);
+      processor.onaudioprocess = (e) => {
+        const output = e.outputBuffer.getChannelData(0);
+        const len = output.length;
+
+        if (!ringStarted) {
+          // Not enough data yet — output silence
+          output.fill(0);
+          if (ringFill >= PREBUFFER_SAMPLES) {
+            ringStarted = true;
+          }
+          return;
+        }
+
+        // Drain from ring buffer
+        const toRead = Math.min(len, ringFill);
+        for (let i = 0; i < toRead; i++) {
+          output[i] = RING_BUFFER[ringReadPos];
+          ringReadPos = (ringReadPos + 1) % RING_SIZE;
+        }
+        ringFill -= toRead;
+
+        // Fill remainder with silence if buffer underran
+        if (toRead < len) {
+          for (let i = toRead; i < len; i++) {
+            output[i] = 0;
+          }
+          // Underrun — reset prebuffer so we wait for data again
+          ringStarted = false;
+        }
+      };
+      processor.connect(audioCtx.destination);
+    }
+
+    function ensureAudioResumed() {
+      if (!audioCtx || audioResumed) return;
+      if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+      audioResumed = true;
+    }
+
+    function pushAudioToRing(pcmInt16, sampleRate, channels) {
+      // Convert Int16 to Float32 and push into ring buffer.
+      // If incoming sample rate differs from AudioContext rate (48kHz),
+      // do linear interpolation resampling inline.
+      const inSamples = pcmInt16.length;
+      if (inSamples === 0) return;
+
+      const targetRate = audioCtx.sampleRate;
+      const ratio = targetRate / sampleRate;
+      const outSamples = Math.round(inSamples * ratio);
+
+      for (let i = 0; i < outSamples; i++) {
+        // Linear interpolation resampling
+        const srcPos = i / ratio;
+        const idx0 = Math.floor(srcPos);
+        const idx1 = Math.min(idx0 + 1, inSamples - 1);
+        const frac = srcPos - idx0;
+        const s0 = pcmInt16[idx0] / 32768.0;
+        const s1 = pcmInt16[idx1] / 32768.0;
+        const sample = s0 + (s1 - s0) * frac;
+
+        if (ringFill < RING_SIZE) {
+          RING_BUFFER[ringWritePos] = sample;
+          ringWritePos = (ringWritePos + 1) % RING_SIZE;
+          ringFill++;
+        }
+
+        // Track peak for meter
+        const abs = Math.abs(sample);
+        if (abs > audioLevel) audioLevel = abs;
+      }
     }
 
     function playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs) {
       if (!audioCtx) initAudio();
-      if (audioCtx.state === "suspended") audioCtx.resume();
+      ensureAudioResumed();
 
-      const sampleCount = pcmInt16.length;
-      if (sampleCount === 0) return;
+      if (pcmInt16.length === 0) return;
 
-      // Convert Int16 LE to Float32 [-1, 1]
-      const float32 = new Float32Array(sampleCount);
-      let peak = 0;
-      for (let i = 0; i < sampleCount; i++) {
-        float32[i] = pcmInt16[i] / 32768.0;
-        const abs = Math.abs(float32[i]);
-        if (abs > peak) peak = abs;
+      // Push into ring buffer — handles resampling if needed
+      audioLevel = 0;
+      pushAudioToRing(pcmInt16, sampleRate, channels);
+
+      // Update video clock for A/V sync reference
+      if (audioCtx && senderTimestampMs > 0) {
+        videoClockBase = {
+          senderMs: senderTimestampMs,
+          audioCtxTime: audioCtx.currentTime
+        };
       }
-      audioLevel = peak;
-
-      // Create AudioBuffer
-      const audioBuffer = audioCtx.createBuffer(channels, sampleCount / channels, sampleRate);
-      audioBuffer.copyToChannel(float32, 0);
-
-      // Schedule playback synced to video clock
-      const source = audioCtx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioCtx.destination);
-
-      const now = audioCtx.currentTime;
-      let playAt;
-
-      if (videoClockBase && senderTimestampMs > 0) {
-        // Map sender timestamp to AudioContext time using the video clock reference
-        const senderOffsetSec = (senderTimestampMs - videoClockBase.senderMs) / 1000;
-        playAt = videoClockBase.audioCtxTime + senderOffsetSec;
-
-        // If the calculated time is in the past, play ASAP (with small buffer)
-        if (playAt < now) {
-          playAt = now + 0.005;
-        }
-        // Cap look-ahead to 200ms to prevent excessive buffering
-        if (playAt > now + 0.2) {
-          playAt = now + 0.2;
-        }
-      } else {
-        // No video clock yet — fall back to seamless queue
-        if (nextPlayTime < now) {
-          playAt = now + 0.005;
-        } else {
-          playAt = nextPlayTime;
-        }
-      }
-
-      source.start(playAt);
-      nextPlayTime = playAt + audioBuffer.duration;
     }
 
     function updateAudioMeter() {
-      const pct = Math.min(100, Math.round(audioLevel * 300)); // scale for visibility
+      const pct = Math.min(100, Math.round(audioLevel * 300));
       meterFill.style.width = pct + "%";
     }
 
@@ -330,6 +384,11 @@
         updateHud("h-audio", "OFF");
         meterFill.style.width = "0%";
         videoClockBase = null;
+        ringWritePos = 0;
+        ringReadPos = 0;
+        ringFill = 0;
+        ringStarted = false;
+        audioResumed = false;
         if (audioCtx) {
           audioCtx.close();
           audioCtx = null;
