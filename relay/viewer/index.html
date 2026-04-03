@@ -116,6 +116,12 @@
     let droppedFrames = 0;
     let lastSequence = 0;
 
+    // --- Reconnect state ---
+    let reconnectTimer = null;
+    let reconnectDelay = 1000;    // start at 1s, doubles each attempt
+    const RECONNECT_MAX = 15000;  // cap at 15s
+    let intentionalClose = false;
+
     // --- Audio state ---
     let audioCtx = null;
     let audioChunkCount = 0;
@@ -140,6 +146,23 @@
 
     function updateHud(id, value) {
       document.getElementById(id).textContent = value;
+    }
+
+    function resetStreamState() {
+      frameCount = 0;
+      fpsFrameCount = 0;
+      currentFps = 0;
+      droppedFrames = 0;
+      lastSequence = 0;
+      audioChunkCount = 0;
+      videoClockBase = null;
+      ringWritePos = 0;
+      ringReadPos = 0;
+      ringFill = 0;
+      ringStarted = false;
+      audioResumed = false;
+      meterFill.style.width = "0%";
+      if (audioCtx) { audioCtx.close(); audioCtx = null; }
     }
 
     // --- Audio playback ---
@@ -268,11 +291,15 @@
       const url = document.getElementById("relay-url").value.trim();
       if (!url) return;
 
+      intentionalClose = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (ws) ws.close();
       ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
 
       ws.onopen = () => {
+        reconnectDelay = 1000; // reset backoff on successful connect
+        resetStreamState();
         document.body.className = "connected";
         document.getElementById("status").textContent = "Connected";
         updateHud("h-status", "CONNECTED");
@@ -378,20 +405,21 @@
       };
 
       ws.onclose = () => {
+        resetStreamState();
         document.body.className = "disconnected";
         document.getElementById("status").textContent = "Disconnected";
         updateHud("h-status", "CLOSED");
         updateHud("h-audio", "OFF");
-        meterFill.style.width = "0%";
-        videoClockBase = null;
-        ringWritePos = 0;
-        ringReadPos = 0;
-        ringFill = 0;
-        ringStarted = false;
-        audioResumed = false;
-        if (audioCtx) {
-          audioCtx.close();
-          audioCtx = null;
+
+        // Auto-reconnect with exponential backoff (unless user clicked Connect manually)
+        if (!intentionalClose) {
+          updateHud("h-status", `RECONN ${Math.round(reconnectDelay/1000)}s`);
+          document.getElementById("status").textContent = `Reconnecting in ${Math.round(reconnectDelay/1000)}s...`;
+          reconnectTimer = setTimeout(() => {
+            const url = document.getElementById("relay-url").value.trim();
+            if (url) connect();
+          }, reconnectDelay);
+          reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
         }
       };
 
