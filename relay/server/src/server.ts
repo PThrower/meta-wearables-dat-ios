@@ -167,20 +167,19 @@ function updateTiming(t: FrameTiming, sequence: number, timestampMs: number): Fr
   const now = Date.now();
   if (t.lastReceivedAt > 0) {
     const interval = now - t.lastReceivedAt;
-    if (t.lastReceivedAt > 0 && interval > 0) {
-      // Exponential moving average FPS
+    // Skip same-tick frames (interval=0) to avoid Infinity FPS poisoning the EMA
+    if (interval > 0) {
       const instantFps = 1000 / interval;
       t.fps = t.fps === 0 ? instantFps : t.fps * 0.9 + instantFps * 0.1;
+      if (interval < t.minIntervalMs) t.minIntervalMs = interval;
+      if (interval > t.maxIntervalMs) t.maxIntervalMs = interval;
     }
-    // Jitter = variation of intervals
-    if (t.minIntervalMs === Infinity) {
-      t.jitterMs = 0;
-    } else {
-      const prevAvg = (t.minIntervalMs + t.maxIntervalMs) / 2;
-      t.jitterMs = Math.abs(interval - prevAvg);
+    // Jitter = EMA of absolute deviation from mean interval
+    if (t.minIntervalMs < Infinity && t.maxIntervalMs > 0) {
+      const avg = (t.minIntervalMs + t.maxIntervalMs) / 2;
+      const jitter = Math.abs(interval - avg);
+      t.jitterMs = t.jitterMs === 0 ? jitter : t.jitterMs * 0.9 + jitter * 0.1;
     }
-    if (interval < t.minIntervalMs) t.minIntervalMs = interval;
-    if (interval > t.maxIntervalMs) t.maxIntervalMs = interval;
 
     // Detect dropped frames (sequence gaps)
     const expectedSeq = t.lastSequence + 1;
