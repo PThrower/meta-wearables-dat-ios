@@ -19,6 +19,7 @@
 import { join } from "node:path";
 import os from "node:os";
 import type { ServerWebSocket } from "bun";
+import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
 // --- WebSocket Data Type (Bun.serve generic) ---
 
@@ -92,6 +93,123 @@ let publisher: Publisher | null = null;
 const viewers: Map<string, Viewer> = new Map();
 let wasmModule: any = null;
 const serverStartTime = Date.now();
+
+// --- Object Store & Session Recorder ---
+
+const store: ObjectStore = createObjectStore();
+let recorder: SessionRecorder | null = null;
+
+const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
+
+class SessionRecorder {
+  readonly sessionId: string;
+  private store: ObjectStore;
+  private videoParts: Buffer[] = [];
+  private audioParts: Buffer[] = [];
+  private segIndex = 0;
+  private chunkIndex = 0;
+  private lastFlush = Date.now();
+  private startedAt: number = 0;
+  private flushedSegments = 0;
+  private bytesToBucket = 0;
+  private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private deviceInfo: Record<string, string | null> = {};
+
+  constructor(sessionId: string, store: ObjectStore) {
+    this.sessionId = sessionId;
+    this.store = store;
+  }
+
+  start(params: Record<string, string | null>) {
+    this.startedAt = Date.now();
+    this.lastFlush = this.startedAt;
+    this.deviceInfo = { ...params };
+    this.writeMeta(false);
+    this.flushTimer = setInterval(() => this.tick(), SEGMENT_FLUSH_MS);
+    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} started`);
+  }
+
+  appendVideo(frame: Uint8Array) {
+    // Extract JPEG payload (skip 29-byte FRLY header)
+    const jpeg = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
+    this.videoParts.push(Buffer.from(jpeg));
+  }
+
+  appendAudio(frame: Uint8Array) {
+    // Extract PCM payload (skip 29-byte FRAU header)
+    const pcm = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
+    this.audioParts.push(Buffer.from(pcm));
+  }
+
+  private tick() {
+    this.flushVideo();
+    this.flushAudio();
+  }
+
+  private flushVideo() {
+    if (this.videoParts.length === 0) return;
+    const data = Buffer.concat(this.videoParts);
+    this.videoParts = [];
+    this.segIndex++;
+    this.flushedSegments++;
+    this.bytesToBucket += data.length;
+    const key = `sessions/${this.sessionId}/video/seg-${this.segIndex.toString().padStart(4, "0")}.mjpeg`;
+    this.store.put(key, data).catch(err =>
+      console.error(`[recorder] video write failed:`, err.message)
+    );
+  }
+
+  private flushAudio() {
+    if (this.audioParts.length === 0) return;
+    const data = Buffer.concat(this.audioParts);
+    this.audioParts = [];
+    this.chunkIndex++;
+    this.bytesToBucket += data.length;
+    const key = `sessions/${this.sessionId}/audio/chunk-${this.chunkIndex.toString().padStart(4, "0")}.pcm`;
+    this.store.put(key, data).catch(err =>
+      console.error(`[recorder] audio write failed:`, err.message)
+    );
+  }
+
+  async finish() {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    // Flush remaining buffers
+    this.flushVideo();
+    this.flushAudio();
+    this.writeMeta(true);
+    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} finished: ${this.flushedSegments} video segs, ${this.chunkIndex} audio chunks, ${(this.bytesToBucket / 1048576).toFixed(2)} MB`);
+  }
+
+  private writeMeta(final: boolean) {
+    const meta = {
+      sessionId: this.sessionId,
+      startedAt: new Date(this.startedAt).toISOString(),
+      ...(final ? { finishedAt: new Date().toISOString(), durationMs: Date.now() - this.startedAt } : {}),
+      device: this.deviceInfo,
+      recording: {
+        segmentsWritten: this.flushedSegments,
+        audioChunks: this.chunkIndex,
+        bytesToBucket: this.bytesToBucket,
+      },
+    };
+    this.store.put(`sessions/${this.sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2))).catch(err =>
+      console.error(`[recorder] meta write failed:`, err.message)
+    );
+  }
+
+  getStats() {
+    return {
+      active: true,
+      sessionId: this.sessionId,
+      segmentsWritten: this.flushedSegments,
+      audioChunks: this.chunkIndex,
+      bytesToBucket: this.bytesToBucket,
+    };
+  }
+}
 
 // --- Stale Connection Cleanup ---
 // If Caddy/proxy swallows TCP close, the server never gets the WebSocket close event.
@@ -304,6 +422,7 @@ function stats() {
       video: publisher.lastHeader,
       timing: formatTiming(publisher.timing),
     } : null,
+    recording: recorder ? recorder.getStats() : { active: false },
     viewers: viewers.size,
     viewerStats: Object.fromEntries(
       [...viewers.entries()].map(([id, v]) => [id.slice(0, 8), {
@@ -350,11 +469,56 @@ const viewerHtml = await Bun.file(join(import.meta.dir, "../../viewer/index.html
 const server = Bun.serve<WsData>({
   hostname: "0.0.0.0",
   port: PORT,
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
 
     if (url.pathname === "/stats") {
       return Response.json(stats());
+    }
+
+    // --- Retrieval Endpoints (S3 persistence) ---
+
+    if (url.pathname === "/sessions") {
+      const keys = await store.list("sessions/") as string[];
+    const sessionIds = [...new Set<string>()];
+    for (const key of keys) {
+      if (key.startsWith("sessions/") && key.endsWith("/meta.json")) {
+        sessionIds.add(key.slice("sessions/".length, key.length - "/meta.json".length));
+      }
+    }
+    return Response.json([...sessionIds]);
+    }
+
+    const sessionMatch = url.pathname.match(/^\/session\/([^/]+)$/);
+    if (sessionMatch) {
+      const id = sessionMatch[1];
+      const data = await store.get(`sessions/${id}/meta.json`);
+      if (!data) return Response.json({ error: "Session not found" }, { status: 404 });
+      return new Response(data, { headers: { "Content-Type": "application/json" } });
+    }
+
+    const videoMatch = url.pathname.match(/^\/session\/([^/]+)\/video\/(.+)$/);
+    if (videoMatch) {
+      const [, id, seg] = videoMatch;
+      const key = `sessions/${id}/video/${seg}`;
+      try {
+        const signed = await store.signedUrl(key, 3600);
+        return Response.redirect(signed);
+      } catch {
+        return Response.json({ error: "Not found" }, { status: 404 });
+      }
+    }
+
+    const audioMatch = url.pathname.match(/^\/session\/([^/]+)\/audio\/(.+)$/);
+    if (audioMatch) {
+      const [, id, chunk] = audioMatch;
+      const key = `sessions/${id}/audio/${chunk}`;
+      try {
+        const signed = await store.signedUrl(key, 3600);
+        return Response.redirect(signed);
+      } catch {
+        return Response.json({ error: "Not found" }, { status: 404 });
+      }
     }
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
@@ -397,6 +561,9 @@ const server = Bun.serve<WsData>({
           systemVersion: null,
         };
         console.log(`[relay] Publisher connected: ${id.slice(0, 8)} ip=${clientIp}`);
+        // Start recording session
+        recorder = new SessionRecorder(id, store);
+        recorder.start({});
       } else {
         const id = crypto.randomUUID();
         ws.data.viewerId = id;
@@ -430,6 +597,18 @@ const server = Bun.serve<WsData>({
               publisher.deviceModel = cmd.deviceModel || null;
               publisher.systemVersion = cmd.systemVersion || null;
               console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${publisher.clientIp}`);
+              // Update recorder device info
+              if (recorder) {
+                (recorder as any).deviceInfo = {
+                  deviceId: cmd.deviceId || null,
+                  deviceName: cmd.deviceName || null,
+                  wearableId: cmd.wearableId || null,
+                  wearableType: cmd.wearableType || null,
+                  deviceModel: cmd.deviceModel || null,
+                  systemVersion: cmd.systemVersion || null,
+                };
+                (recorder as any).writeMeta(false);
+              }
             }
           } catch {}
         } else {
@@ -442,11 +621,13 @@ const server = Bun.serve<WsData>({
             publisher.audioCount++;
             publisher.audioBytes += buf.length;
             fanoutAudio(buf);
+            recorder?.appendAudio(buf);
           } else {
             // Video frame (FRLY)
             publisher.frameCount++;
             publisher.totalBytes += buf.length;
             fanout(buf);
+            recorder?.appendVideo(buf);
           }
         }
       } else {
@@ -475,10 +656,15 @@ const server = Bun.serve<WsData>({
         }
       }
     },
-    close(ws) {
+    async close(ws) {
       const { role } = ws.data;
       if (role === "publish" && publisher?.ws === ws) {
         console.log("[relay] Publisher disconnected");
+        // Finish recording session
+        if (recorder) {
+          await recorder.finish();
+          recorder = null;
+        }
         publisher = null;
       } else {
         const id = ws.data.viewerId;

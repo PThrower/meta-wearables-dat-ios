@@ -1,0 +1,32 @@
+{
+  "name": "@ebowwa/object-store",
+  "version": "0.1.0",
+  "description": "Provider-agnostic S3 object storage abstraction (Hetzner, R2, GCS, AWS, memory)",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun && tsc --emitDeclarationOnly",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": ["s3", "object-storage", "hetzner", "cloudflare-r2", "gcs", "aws"],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.772.0",
+    "@aws-sdk/s3-request-presigner": "^3.772.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "typescript": "^5.7.0"
+  }
+}
