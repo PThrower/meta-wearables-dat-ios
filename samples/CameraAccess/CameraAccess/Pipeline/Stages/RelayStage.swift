@@ -76,6 +76,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
+    private var framesDropped: UInt64 = 0
+    private var isEncoding = false
 
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.6) {
         self.config = config
@@ -241,6 +243,16 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             return
         }
 
+        // Backpressure: drop frame if previous encode is still in progress
+        guard !isEncoding else {
+            framesDropped += 1
+            if framesDropped % 100 == 1 {
+                NSLog("[RelayStage] Frame dropped (encoding busy): \(framesDropped) total")
+            }
+            return
+        }
+        isEncoding = true
+
         // Increment sequence first (on actor), then do heavy encoding off-actor
         sequenceNumber += 1
         let seq = sequenceNumber
@@ -252,6 +264,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         // Detach the expensive JPEG encoding + send so actor returns immediately
         Task.detached { [weak self] in
+            defer { Task { [weak self] in await self?.clearEncodingFlag() } }
+
             // Step 1: CVPixelBuffer -> CIImage -> CGImage (CIContext handles YUV->RGB)
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
@@ -354,6 +368,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func markDisconnected() {
         isConnected = false
+    }
+
+    private func clearEncodingFlag() {
+        isEncoding = false
     }
 
     // MARK: - Device Identity

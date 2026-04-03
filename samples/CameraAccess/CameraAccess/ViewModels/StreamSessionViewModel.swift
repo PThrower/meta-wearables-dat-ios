@@ -64,6 +64,10 @@ class StreamSessionViewModel: ObservableObject {
   @Published var capturedPhoto: UIImage?
   @Published var showPhotoPreview: Bool = false
 
+  // Active wearable tracking (captures device identity when using auto-select)
+  private var activeWearableId: DeviceIdentifier?
+  private var activeWearableType: String?
+
   // The core DAT SDK StreamSession - handles all streaming operations
   private var streamSession: StreamSession
   // Listener tokens for non-video-frame subscriptions (state, error, photo)
@@ -127,11 +131,15 @@ class StreamSessionViewModel: ObservableObject {
     attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
 
-    // Monitor device availability
+    // Monitor device availability and capture wearable identity for auto-select
     deviceMonitorTask = Task { @MainActor [weak self] in
       guard let self else { return }
       for await device in self.currentSelector.activeDeviceStream() {
         self.hasActiveDevice = device != nil
+        if let device {
+          self.activeWearableId = device
+          self.activeWearableType = self.wearables.deviceForIdentifier(device)?.deviceType().displayName
+        }
       }
     }
 
@@ -164,18 +172,22 @@ class StreamSessionViewModel: ObservableObject {
     attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
 
-    // Re-monitor device availability
+    // Re-monitor device availability and capture wearable identity
     deviceMonitorTask = Task { @MainActor [weak self] in
       guard let self else { return }
       for await device in self.currentSelector.activeDeviceStream() {
         self.hasActiveDevice = device != nil
+        if let device {
+          self.activeWearableId = device
+          self.activeWearableType = self.wearables.deviceForIdentifier(device)?.deviceType().displayName
+        }
       }
     }
 
     updateStatusFromState(streamSession.state)
   }
 
-  // MARK: - Pipeline Attachment
+  // MARK: - Config
 
   /// Attach the pipeline as the single subscriber to videoFramePublisher.
   private func attachPipeline() {
@@ -277,11 +289,13 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
     do {
-      // Set wearable identity before connecting so hello message includes device info
-      if let deviceId = selectedDeviceId {
-        let device = wearables.deviceForIdentifier(deviceId)
-        let deviceTypeName = device?.deviceType().displayName
-        await relayStage.setDeviceIdentity(wearableId: deviceId, wearableType: deviceTypeName)
+      // Use manually selected device, or fall back to auto-selected active device
+      let wearableId = selectedDeviceId ?? activeWearableId
+      if let wearableId {
+        let deviceTypeName: String? = selectedDeviceId != nil
+          ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
+          : activeWearableType
+        await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
       }
       try await relayStage.connect(to: url)
       isRelaying = true
@@ -356,13 +370,17 @@ class StreamSessionViewModel: ObservableObject {
       guard let self else { return }
       for await device in self.currentSelector.activeDeviceStream() {
         self.hasActiveDevice = device != nil
+        if let device {
+          self.activeWearableId = device
+          self.activeWearableType = self.wearables.deviceForIdentifier(device)?.deviceType().displayName
+        }
       }
     }
 
     updateStatusFromState(streamSession.state)
   }
 
-  // MARK: - Actions
+  // MARK: - Config
 
   func handleStartStreaming() async {
     let permission = Permission.camera
