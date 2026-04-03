@@ -70,6 +70,8 @@ interface Publisher {
   deviceName: string | null;     // iOS device name (e.g. "Starlink", "iPhone")
   wearableId: string | null;     // Connected wearable device ID (DAT SDK DeviceIdentifier)
   wearableType: string | null;   // Wearable type (e.g. "Ray-Ban Meta", "Oakley Meta HSTN")
+  deviceModel: string | null;    // iPhone, iPad, etc.
+  systemVersion: string | null;  // iOS version (e.g. "18.3.2")
 }
 
 interface Viewer {
@@ -285,6 +287,8 @@ function stats() {
       clientIp: publisher.clientIp,
       deviceId: publisher.deviceId,
       deviceName: publisher.deviceName,
+      deviceModel: publisher.deviceModel,
+      systemVersion: publisher.systemVersion,
       wearableId: publisher.wearableId,
       wearableType: publisher.wearableType,
       frameCount: publisher.frameCount,
@@ -389,6 +393,8 @@ const server = Bun.serve<WsData>({
           deviceName: null,
           wearableId: null,
           wearableType: null,
+          deviceModel: null,
+          systemVersion: null,
         };
         console.log(`[relay] Publisher connected: ${id.slice(0, 8)} ip=${clientIp}`);
       } else {
@@ -421,6 +427,8 @@ const server = Bun.serve<WsData>({
               publisher.deviceName = cmd.deviceName || null;
               publisher.wearableId = cmd.wearableId || null;
               publisher.wearableType = cmd.wearableType || null;
+              publisher.deviceModel = cmd.deviceModel || null;
+              publisher.systemVersion = cmd.systemVersion || null;
               console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${publisher.clientIp}`);
             }
           } catch {}
