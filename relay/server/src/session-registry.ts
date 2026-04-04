@@ -21,6 +21,16 @@ export class SessionRegistry {
   private store: ObjectStore;
   private FrameRelayClass: any | null = null; // WASM class constructor, not instance
 
+  // --- Aggregate counters (lifetime, reset on process restart) ---
+  private sessionsStarted = 0;
+  private totalFramesRelayed = 0;
+  private totalDroppedFrames = 0;
+  private peakViewers = 0;
+  private viewersRejected = 0;
+  private publisherReconnects = 0;
+  private framesThrottledWasm = 0;
+  private framesThrottledQuality = 0;
+
   constructor(store: ObjectStore) {
     this.store = store;
   }
@@ -79,6 +89,13 @@ export class SessionRegistry {
       return "publisher already connected";
     }
 
+    // Track reconnects — session already existed with a disconnected publisher
+    if (session.publisher === null && this.sessions.has(sessionId) && session.createdAt < Date.now() - 1000) {
+      this.publisherReconnects++;
+    }
+
+    this.sessionsStarted++;
+
     const id = crypto.randomUUID();
     const publisher: Publisher = {
       ws,
@@ -114,6 +131,11 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
+    // Accumulate dropped frames from publisher timing before clearing
+    if (session.publisher) {
+      this.totalDroppedFrames += session.publisher.timing.droppedFrames;
+    }
+
     if (session.recorder) {
       await session.recorder.finish();
       session.recorder = null;
@@ -143,6 +165,13 @@ export class SessionRegistry {
       clientIp,
     });
     session.lastActivityAt = Date.now();
+
+    // Track peak viewers
+    const totalNow = this.totalViewers();
+    if (totalNow > this.peakViewers) {
+      this.peakViewers = totalNow;
+    }
+
     console.log(`[registry] Viewer connected: ${id.slice(0, 8)} session=${sessionId} (total: ${session.viewers.size})`);
     return id;
   }
@@ -151,6 +180,13 @@ export class SessionRegistry {
   removeViewer(sessionId: string, viewerId: string) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+
+    // Accumulate throttled quality frames before removing
+    const viewer = session.viewers.get(viewerId);
+    if (viewer) {
+      this.framesThrottledQuality += viewer.throttledCount;
+    }
+
     session.viewers.delete(viewerId);
     session.lastActivityAt = Date.now();
     console.log(`[registry] Viewer disconnected: ${viewerId.slice(0, 8)} session=${sessionId} (${session.viewers.size} remaining)`);
@@ -182,11 +218,16 @@ export class SessionRegistry {
       session.metadata.resolution = { width: header.width, height: header.height };
     }
 
+    this.totalFramesRelayed++;
+
     // Per-session WASM throttle (lazy init)
     if (this.FrameRelayClass && !session.wasmThrottle) {
       session.wasmThrottle = new this.FrameRelayClass(30);
     }
-    if (session.wasmThrottle && !session.wasmThrottle.should_relay(BigInt(Date.now()))) return;
+    if (session.wasmThrottle && !session.wasmThrottle.should_relay(BigInt(Date.now()))) {
+      this.framesThrottledWasm++;
+      return;
+    }
 
     const now = Date.now();
 
@@ -208,6 +249,7 @@ export class SessionRegistry {
         updateTiming(viewer.timing, header.sequence, header.timestampMs);
       } catch {
         session.viewers.delete(id);
+        this.viewersRejected++;
       }
     }
   }
@@ -225,6 +267,7 @@ export class SessionRegistry {
         }
       } catch {
         session.viewers.delete(id);
+        this.viewersRejected++;
       }
     }
   }
@@ -243,6 +286,7 @@ export class SessionRegistry {
         const stale = now - session.publisher.timing.lastReceivedAt;
         if (stale > PUBLISHER_TIMEOUT_MS) {
           console.log(`[registry] Publisher ${session.publisher.id.slice(0, 8)} stale (${Math.round(stale / 1000)}s) in session=${sessionId}, evicting`);
+          this.totalDroppedFrames += session.publisher.timing.droppedFrames;
           try { session.publisher.ws.close(4002, "publisher stale"); } catch {}
           session.publisher = null;
           if (session.recorder) {
@@ -261,6 +305,7 @@ export class SessionRegistry {
           console.log(`[registry] Viewer ${viewerId.slice(0, 8)} stale (${Math.round(stale / 1000)}s) in session=${sessionId}, evicting`);
           try { viewer.ws.close(4003, "viewer stale"); } catch {}
           session.viewers.delete(viewerId);
+          this.viewersRejected++;
         }
       }
 
@@ -273,6 +318,17 @@ export class SessionRegistry {
         }
       }
     }
+  }
+
+  // --- Helpers ---
+
+  /** Count total viewers across all sessions */
+  private totalViewers(): number {
+    let count = 0;
+    for (const session of this.sessions.values()) {
+      count += session.viewers.size;
+    }
+    return count;
   }
 
   // --- Query ---
@@ -299,6 +355,7 @@ export class SessionRegistry {
   async stats(wifiIp: string, port: number, serverStartTime: number) {
     const now = Date.now();
     const sessions: Record<string, any> = {};
+    let activePublisherCount = 0;
 
     for (const [id, session] of this.sessions) {
       // Generate signed URL for the session's meta.json (recording bucket)
@@ -306,6 +363,20 @@ export class SessionRegistry {
       try {
         bucketUrl = await this.store.signedUrl(`sessions/${session.publisher?.id ?? id}/meta.json`, 3600);
       } catch {}
+
+      if (session.publisher) activePublisherCount++;
+
+      // Per-session rates
+      const pubUptimeMs = session.publisher ? now - session.publisher.connected : 0;
+      const videoBitrateMbps = session.publisher && pubUptimeMs > 0
+        ? Math.round(session.publisher.totalBytes / pubUptimeMs * 1000 / 125000 * 100) / 100
+        : 0;
+      const audioBitrateKbps = session.publisher && pubUptimeMs > 0
+        ? Math.round(session.publisher.audioBytes / pubUptimeMs * 1000 / 125 * 100) / 100
+        : 0;
+      const framesPerSecond = session.publisher && pubUptimeMs > 1000
+        ? Math.round(session.publisher.frameCount / (pubUptimeMs / 1000) * 10) / 10
+        : 0;
 
       sessions[id] = {
         publisher: session.publisher ? {
@@ -323,13 +394,18 @@ export class SessionRegistry {
           audioCount: session.publisher.audioCount,
           audioBytes: session.publisher.audioBytes,
           audioMB: Math.round(session.publisher.audioBytes / 1048576 * 100) / 100,
-          uptimeMs: now - session.publisher.connected,
+          uptimeMs: pubUptimeMs,
           latencyMs: session.publisher.timing.lastReceivedAt > 0
             ? Math.round(now - session.publisher.timing.lastReceivedAt)
             : null,
           video: session.publisher.lastHeader,
           timing: formatTiming(session.publisher.timing),
         } : null,
+        rates: {
+          videoBitrateMbps,
+          audioBitrateKbps,
+          framesPerSecond,
+        },
         recording: session.recorder ? session.recorder.getStats() : { active: false },
         bucketUrl,
         viewers: session.viewers.size,
@@ -349,13 +425,48 @@ export class SessionRegistry {
       };
     }
 
+    // Aggregate bandwidth across all sessions
+    let totalBytesIn = 0;
+    let totalBytesOut = 0;
+    for (const session of this.sessions.values()) {
+      if (session.publisher) {
+        totalBytesIn += session.publisher.totalBytes + session.publisher.audioBytes;
+      }
+      for (const viewer of session.viewers.values()) {
+        totalBytesOut += viewer.totalBytes;
+      }
+    }
+    const serverUptimeMs = now - serverStartTime;
+    const serverUptimeSec = serverUptimeMs / 1000;
+    const totalBandwidthMbps = serverUptimeSec > 0
+      ? Math.round((totalBytesIn + totalBytesOut) / serverUptimeSec * 8 / 125000 * 100) / 100
+      : 0;
+
     return {
       server: {
-        uptimeMs: now - serverStartTime,
+        uptimeMs: serverUptimeMs,
         wasmLoaded: this.FrameRelayClass !== null,
         sessionCount: this.sessions.size,
         ip: wifiIp,
         port,
+        memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
+        activeConnections: activePublisherCount + this.totalViewers(),
+      },
+      aggregate: {
+        totalViewers: this.totalViewers(),
+        peakViewers: this.peakViewers,
+        totalBandwidthMbps,
+        totalBytesInMB: Math.round(totalBytesIn / 1048576 * 100) / 100,
+        totalBytesOutMB: Math.round(totalBytesOut / 1048576 * 100) / 100,
+        totalFramesRelayed: this.totalFramesRelayed,
+        totalDroppedFrames: this.totalDroppedFrames,
+        sessionsStarted: this.sessionsStarted,
+      },
+      reliability: {
+        viewersRejected: this.viewersRejected,
+        publisherReconnects: this.publisherReconnects,
+        framesThrottledWasm: this.framesThrottledWasm,
+        framesThrottledQuality: this.framesThrottledQuality,
       },
       sessions,
     };
