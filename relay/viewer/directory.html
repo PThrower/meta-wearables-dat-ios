@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaringMind Relay — Live Sessions</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a; color: #e0e0e0;
+      font-family: 'SF Mono', 'Menlo', 'Fira Code', monospace;
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    header h1 {
+      font-size: 16px; font-weight: 600; color: #fff;
+      display: flex; align-items: center; gap: 8px;
+    }
+    header h1::before {
+      content: ''; display: inline-block;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #0f0; box-shadow: 0 0 6px #0f0;
+    }
+    header p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px; }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 12px; padding: 16px 24px;
+    }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px; padding: 16px;
+      cursor: pointer; transition: all 0.15s ease;
+      text-decoration: none; color: inherit;
+      display: block;
+    }
+    .card:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.15);
+      transform: translateY(-1px);
+    }
+    .card-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 12px;
+    }
+    .card-title { font-size: 14px; font-weight: 600; color: #fff; }
+    .card-badge {
+      font-size: 10px; padding: 2px 8px; border-radius: 10px;
+      background: rgba(0,255,0,0.1); color: #0f0;
+      border: 1px solid rgba(0,255,0,0.2);
+    }
+    .card-badge.offline {
+      background: rgba(255,255,0,0.1); color: #ff0;
+      border-color: rgba(255,255,0,0.2);
+    }
+    .card-row {
+      display: flex; justify-content: space-between;
+      font-size: 11px; padding: 2px 0;
+    }
+    .card-row .label { color: rgba(255,255,255,0.4); }
+    .card-row .value { color: #e0e0e0; font-weight: 500; }
+    .empty {
+      text-align: center; padding: 80px 24px;
+      color: rgba(255,255,255,0.3); font-size: 13px;
+    }
+    .empty p { margin-top: 8px; font-size: 11px; }
+    #refresh-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(0,0,0,0.8); border-top: 1px solid rgba(255,255,255,0.08);
+      padding: 8px 24px; font-size: 10px; color: rgba(255,255,255,0.3);
+      display: flex; justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Live Sessions</h1>
+    <p id="subtitle">Loading...</p>
+  </header>
+
+  <div id="grid"></div>
+
+  <div id="refresh-bar">
+    <span id="last-refresh">Last refresh: --</span>
+    <span>Auto-refresh every 5s</span>
+  </div>
+
+  <script>
+    const grid = document.getElementById("grid");
+    const subtitle = document.getElementById("subtitle");
+    const lastRefresh = document.getElementById("last-refresh");
+
+    function formatUptime(ms) {
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ${s % 60}s`;
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    }
+
+    function render(data) {
+      subtitle.textContent = `${data.length} session${data.length !== 1 ? 's' : ''} active`;
+
+      if (data.length === 0) {
+        grid.innerHTML = '<div class="empty">No active sessions<p>Waiting for publishers to connect...</p></div>';
+        return;
+      }
+
+      grid.innerHTML = data.map(s => {
+        const device = s.metadata?.deviceName || s.metadata?.deviceModel || "Unknown Device";
+        const wearable = s.metadata?.wearableType || "";
+        const res = s.metadata?.resolution
+          ? `${s.metadata.resolution.width}x${s.metadata.resolution.height}`
+          : "--";
+        const live = s.publisherConnected;
+        const badgeClass = live ? "" : " offline";
+        const badgeText = live ? "LIVE" : "IDLE";
+
+        return `<a class="card" href="/session/${encodeURIComponent(s.id)}">
+          <div class="card-header">
+            <span class="card-title">${device}</span>
+            <span class="card-badge${badgeClass}">${badgeText}</span>
+          </div>
+          ${wearable ? `<div class="card-row"><span class="label">Wearable</span><span class="value">${wearable}</span></div>` : ""}
+          <div class="card-row"><span class="label">Resolution</span><span class="value">${res}</span></div>
+          <div class="card-row"><span class="label">Viewers</span><span class="value">${s.viewerCount}</span></div>
+          <div class="card-row"><span class="label">Uptime</span><span class="value">${formatUptime(s.uptimeMs)}</span></div>
+          <div class="card-row"><span class="label">Session</span><span class="value">${s.id.slice(0, 8)}</span></div>
+        </a>`;
+      }).join('');
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/sessions");
+        const data = await res.json();
+        // Only show live sessions in the directory
+        const live = data.filter(s => s.live !== false);
+        render(live.length > 0 ? live : data);
+        lastRefresh.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
+      } catch (err) {
+        subtitle.textContent = "Failed to load sessions";
+        console.error(err);
+      }
+    }
+
+    // Use server-injected data if available, otherwise fetch
+    if (window.__SESSIONS && window.__SESSIONS.length > 0) {
+      render(window.__SESSIONS);
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>
