@@ -8,10 +8,10 @@
 
 import type { ServerWebSocket } from "bun";
 import type { ObjectStore } from "@ebowwa/object-store";
-import type { WsData, Publisher, Viewer, Session, SessionMetadata, QualityPreset } from "./types.js";
-import type { SessionRecorder } from "./session-recorder.js";
+import type { WsData, Publisher, Viewer, Session, SessionMetadata } from "./types.js";
+import { SessionRecorder } from "./session-recorder.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
-import { freshTiming, updateTiming, parseHeader, formatTiming, isAudioFrame, isVideoFrame } from "./protocol.js";
+import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
 
 const DEFAULT_SESSION_ID = "default";
 const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no viewers for 60s
@@ -102,7 +102,6 @@ export class SessionRegistry {
     session.lastActivityAt = Date.now();
 
     // Start recorder
-    const { SessionRecorder } = require("./session-recorder.js") as typeof import("./session-recorder.js");
     session.recorder = new SessionRecorder(id, this.store);
     session.recorder.start({});
 
