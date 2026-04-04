@@ -296,11 +296,17 @@ export class SessionRegistry {
   }
 
   /** Platform-wide stats plus per-session breakdown */
-  stats(wifiIp: string, port: number, serverStartTime: number) {
+  async stats(wifiIp: string, port: number, serverStartTime: number) {
     const now = Date.now();
     const sessions: Record<string, any> = {};
 
     for (const [id, session] of this.sessions) {
+      // Generate signed URL for the session's meta.json (recording bucket)
+      let bucketUrl: string | null = null;
+      try {
+        bucketUrl = await this.store.signedUrl(`sessions/${session.publisher?.id ?? id}/meta.json`, 3600);
+      } catch {}
+
       sessions[id] = {
         publisher: session.publisher ? {
           id: session.publisher.id,
@@ -325,6 +331,7 @@ export class SessionRegistry {
           timing: formatTiming(session.publisher.timing),
         } : null,
         recording: session.recorder ? session.recorder.getStats() : { active: false },
+        bucketUrl,
         viewers: session.viewers.size,
         viewerStats: Object.fromEntries(
           [...session.viewers.entries()].map(([vid, v]) => [vid.slice(0, 8), {

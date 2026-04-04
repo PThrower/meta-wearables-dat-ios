@@ -105,7 +105,7 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      return Response.json(registry.stats(wifiIp, PORT, serverStartTime));
+      return Response.json(await registry.stats(wifiIp, PORT, serverStartTime));
     }
 
     // --- Live Sessions (active relay sessions) ---
@@ -232,7 +232,7 @@ const server = Bun.serve<WsData>({
         registry.addViewer(sessionId, ws, clientIp);
       }
     },
-    message(ws, message) {
+    async message(ws, message) {
       const { role, sessionId } = ws.data;
       const session = registry.get(sessionId);
       if (!session) return;
@@ -296,7 +296,8 @@ const server = Bun.serve<WsData>({
           try {
             const cmd = JSON.parse(message);
             if (cmd.type === "stats") {
-              ws.send(JSON.stringify({ type: "stats", ...registry.stats(wifiIp, PORT, serverStartTime) }));
+              const s = await registry.stats(wifiIp, PORT, serverStartTime);
+              ws.send(JSON.stringify({ type: "stats", ...s }));
             } else if (cmd.type === "config" && cmd.quality && cmd.quality in QUALITY_PRESETS) {
               const viewerId = ws.data.viewerId;
               if (!viewerId) return;
