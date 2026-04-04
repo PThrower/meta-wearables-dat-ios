@@ -439,7 +439,15 @@
       }
       // If served from the relay server itself (not file:// or localhost dev), auto-connect
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const autoUrl = `${proto}//${location.host}/view`;
+
+      // Check for session scoping: server injects window.__SESSION_ID for /session/<id> routes
+      // or client can pass ?session=<id> in the page URL
+      const sessionId = window.__SESSION_ID
+        || new URLSearchParams(location.search).get("session")
+        || "";
+
+      const sessionParam = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
+      const autoUrl = `${proto}//${location.host}/view${sessionParam}`;
       input.value = autoUrl;
       if (location.hostname && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
         connect();
