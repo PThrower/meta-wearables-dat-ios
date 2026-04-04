@@ -358,11 +358,13 @@ export class SessionRegistry {
     let activePublisherCount = 0;
 
     for (const [id, session] of this.sessions) {
-      // Generate signed URL for the session's meta.json (recording bucket)
+      // Only sign a URL when there's an active recording
       let bucketUrl: string | null = null;
-      try {
-        bucketUrl = await this.store.signedUrl(`sessions/${session.publisher?.id ?? id}/meta.json`, 3600);
-      } catch {}
+      if (session.recorder && session.publisher) {
+        try {
+          bucketUrl = await this.store.signedUrl(`sessions/${session.publisher.id}/meta.json`, 3600);
+        } catch {}
+      }
 
       if (session.publisher) activePublisherCount++;
 
