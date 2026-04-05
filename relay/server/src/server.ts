@@ -133,10 +133,9 @@ const server = Bun.serve<WsData>({
         return Response.json({ error: "No valid session metadata" }, { status: 404 });
       }
       // Redirect to the actual mp4 export URL
-      const includeAudio = url.searchParams.has("audio");
       const proto = req.headers.get("x-forwarded-proto") || "https";
       const host = req.headers.get("host") || url.host;
-      return Response.redirect(`${proto}://${host}/session/${latestId}/video.mp4${includeAudio ? "?audio" : ""}`);
+      return Response.redirect(`${proto}://${host}/session/${latestId}/video.mp4?audio`);
     }
 
     if (url.pathname === "/latest/export") {
