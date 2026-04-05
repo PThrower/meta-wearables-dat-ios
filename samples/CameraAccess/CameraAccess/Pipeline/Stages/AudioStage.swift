@@ -36,6 +36,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var isRebuilding = false
     private var startupGracePeriod = false
     private var rebuildTask: Task<Void, Never>?
+    private var healthTask: Task<Void, Never>?
+    private var tapFrameCount: UInt64 = 0
 
     // Notification observers
     private var interruptionObserver: NSObjectProtocol?
@@ -115,6 +117,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
 
             Task { [weak self] in
+                await self?.incrementTapCount()
                 await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
             }
         }
@@ -132,7 +135,19 @@ actor AudioStage: @preconcurrency FramePipelineStage {
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 await self?.clearStartupGrace()
             }
-            NSLog("[AudioStage] Started")
+            // Health monitor: log tap activity every 2s to diagnose silent death
+            self.healthTask = Task { [weak self] in
+                var lastCount: UInt64 = 0
+                while true {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    guard let self, await self.isRunning else { return }
+                    let count = await self.tapFrameCount
+                    let engineRunning = await self.engine?.isRunning ?? false
+                    NSLog("[AudioStage] Health: tapFrames=\(count) delta=\(count - lastCount) engineRunning=\(engineRunning) rebuilding=\(await self.isRebuilding) grace=\(await self.startupGracePeriod)")
+                    lastCount = count
+                }
+            }
+            NSLog("[AudioStage] Started — inputNode format: \(inputNode.outputFormat(forBus: 0))")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
             // Clean up taps on failure
@@ -147,6 +162,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         rebuildTask?.cancel()
         rebuildTask = nil
+        healthTask?.cancel()
+        healthTask = nil
 
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
@@ -183,6 +200,10 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
     private func clearStartupGrace() {
         startupGracePeriod = false
+    }
+
+    private func incrementTapCount() {
+        tapFrameCount += 1
     }
 
     /// Handle phone calls, Siri, alarms — pause/resume the engine.

@@ -515,10 +515,10 @@ class StreamSessionViewModel: ObservableObject {
   func startSession() async {
     cancelRetry()
     await streamSession.start()
-    // Auto-start TTS playback when stream begins.
-    // [SAFE] audioPlaybackStage.start() wraps its AVAudioSession calls in Task { @MainActor in }.
-    // TODO: Make this togglable from the UI, or gate behind a debug flag.
-    await audioPlaybackStage.start()
+    // DISABLED: AudioPlaybackStage.tryRouteToGlasses() conflicts with relay audio.
+    // It calls setPreferredInput(hfp) which triggers route changes that kill mic capture.
+    // Re-enable only when relay audio route conflicts are resolved.
+    // await audioPlaybackStage.start()
   }
 
   private func showError(_ message: String) {
