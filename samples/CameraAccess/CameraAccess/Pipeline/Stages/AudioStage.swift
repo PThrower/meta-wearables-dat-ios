@@ -201,6 +201,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     }
 
     /// Handle audio route changes — e.g., glasses disconnecting/reconnecting.
+    /// Reinstalls the inputNode tap when the route changes so the tap format
+    /// matches the new input device (e.g. built-in mic vs glasses HFP mic).
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -221,13 +223,43 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         NSLog("[AudioStage] Route change: \(reasonName)")
 
-        // If glasses disconnected while engine is running, the engine may have
-        // stopped itself. Just log — the engine will use whatever input is now available.
-        if reason == .oldDeviceUnavailable {
-            if isRunning && !(engine?.isRunning ?? false) {
-                NSLog("[AudioStage] Device disconnected — engine stopped by OS")
-                // Don't try to restart with stale tap — let the caller handle
-                // by stopping and re-starting the relay.
+        guard isRunning, let engine else { return }
+
+        // Reinstall input tap with current format after route change.
+        // The old tap may have been installed against a different hardware format.
+        if reason == .override || reason == .newDeviceAvailable || reason == .routeConfigurationChange || reason == .categoryChange {
+            NSLog("[AudioStage] Reinstalling input tap after route change")
+            engine.inputNode.removeTap(onBus: 0)
+
+            guard let targetFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: Double(targetSampleRate),
+                channels: 1,
+                interleaved: false
+            ) else {
+                NSLog("[AudioStage] Failed to recreate target format after route change")
+                return
+            }
+
+            engine.inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
+                guard let floatData = buffer.floatChannelData?[0] else { return }
+                let frameCount = Int(buffer.frameLength)
+                if frameCount == 0 { return }
+
+                let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+
+                Task { [weak self] in
+                    await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
+                }
+            }
+
+            if !engine.isRunning {
+                do {
+                    try engine.start()
+                    NSLog("[AudioStage] Engine restarted after route change")
+                } catch {
+                    NSLog("[AudioStage] Failed to restart engine after route change: \(error)")
+                }
             }
         }
     }
