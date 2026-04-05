@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaringMind — Creator Gallery</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a; color: #e0e0e0;
+      font-family: 'SF Mono', 'Menlo', 'Fira Code', monospace;
+      min-height: 100vh;
+    }
+    header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex; justify-content: space-between; align-items: flex-end;
+    }
+    .header-left h1 {
+      font-size: 16px; font-weight: 600; color: #fff;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .header-left p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px; }
+    .filters {
+      display: flex; gap: 6px;
+    }
+    .filter-btn {
+      font-family: inherit; font-size: 10px;
+      padding: 4px 10px; border-radius: 10px;
+      background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
+      border: 1px solid rgba(255,255,255,0.1);
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .filter-btn:hover { background: rgba(255,255,255,0.1); }
+    .filter-btn.active {
+      background: rgba(0,255,0,0.1); color: #0f0;
+      border-color: rgba(0,255,0,0.3);
+    }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 12px; padding: 16px 24px 60px;
+    }
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px; overflow: hidden;
+      cursor: pointer; transition: all 0.15s ease;
+      text-decoration: none; color: inherit; display: block;
+    }
+    .card:hover {
+      background: rgba(255,255,255,0.08);
+      border-color: rgba(255,255,255,0.15);
+      transform: translateY(-1px);
+    }
+    .card-thumb {
+      width: 100%; aspect-ratio: 16/9;
+      background: #111; object-fit: cover;
+      display: block;
+    }
+    .card-thumb-placeholder {
+      width: 100%; aspect-ratio: 16/9;
+      background: #111; display: flex;
+      align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.15); font-size: 11px;
+    }
+    .card-body { padding: 12px 14px; }
+    .card-top {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 8px;
+    }
+    .card-title { font-size: 13px; font-weight: 600; color: #fff; }
+    .badge {
+      font-size: 9px; padding: 2px 8px; border-radius: 10px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .badge-live {
+      background: rgba(0,255,0,0.1); color: #0f0;
+      border: 1px solid rgba(0,255,0,0.2);
+    }
+    .badge-recorded {
+      background: rgba(255,180,0,0.1); color: #fb0;
+      border: 1px solid rgba(255,180,0,0.2);
+    }
+    .card-meta {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 2px 12px; font-size: 11px;
+    }
+    .card-meta .row {
+      display: flex; justify-content: space-between;
+    }
+    .card-meta .label { color: rgba(255,255,255,0.4); }
+    .card-meta .value { color: #e0e0e0; font-weight: 500; }
+    .card-actions {
+      margin-top: 10px; padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      display: flex; gap: 8px;
+    }
+    .action-btn {
+      font-family: inherit; font-size: 10px;
+      padding: 4px 12px; border-radius: 6px;
+      background: rgba(255,255,255,0.08); color: #e0e0e0;
+      border: 1px solid rgba(255,255,255,0.12);
+      cursor: pointer; transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .action-btn:hover {
+      background: rgba(255,255,255,0.15);
+    }
+    .action-btn.primary {
+      background: rgba(0,255,0,0.1); color: #0f0;
+      border-color: rgba(0,255,0,0.2);
+    }
+    .empty {
+      text-align: center; padding: 80px 24px;
+      color: rgba(255,255,255,0.3); font-size: 13px;
+      grid-column: 1 / -1;
+    }
+    .empty p { margin-top: 8px; font-size: 11px; }
+    #status-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(0,0,0,0.85); border-top: 1px solid rgba(255,255,255,0.08);
+      padding: 8px 24px; font-size: 10px; color: rgba(255,255,255,0.3);
+      display: flex; justify-content: space-between;
+      backdrop-filter: blur(8px);
+    }
+    #status-bar a {
+      color: rgba(255,255,255,0.5); text-decoration: none;
+    }
+    #status-bar a:hover { color: #fff; }
+
+    /* Inline video player overlay */
+    .video-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.9); z-index: 100;
+      align-items: center; justify-content: center;
+    }
+    .video-overlay.active { display: flex; }
+    .video-overlay video {
+      max-width: 90vw; max-height: 85vh; border-radius: 8px;
+    }
+    .video-overlay .close-btn {
+      position: fixed; top: 16px; right: 16px;
+      font-size: 20px; color: #fff; background: rgba(255,255,255,0.1);
+      border: none; border-radius: 50%; width: 36px; height: 36px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>Creator Gallery</h1>
+      <p id="subtitle">Loading...</p>
+    </div>
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">All</button>
+      <button class="filter-btn" data-filter="live">Live</button>
+      <button class="filter-btn" data-filter="recorded">Recorded</button>
+    </div>
+  </header>
+
+  <div id="grid"></div>
+
+  <div id="status-bar">
+    <span id="last-refresh">Last refresh: --</span>
+    <span><a href="/">Directory</a> &middot; <a href="/stats">Stats</a> &middot; Auto-refresh 30s</span>
+  </div>
+
+  <div class="video-overlay" id="videoOverlay">
+    <button class="close-btn" id="closeVideo">&times;</button>
+    <video id="videoPlayer" controls autoplay></video>
+  </div>
+
+  <script>
+    const grid = document.getElementById("grid");
+    const subtitle = document.getElementById("subtitle");
+    const lastRefresh = document.getElementById("last-refresh");
+    const overlay = document.getElementById("videoOverlay");
+    const player = document.getElementById("videoPlayer");
+    const closeBtn = document.getElementById("closeVideo");
+
+    let allSessions = [];
+    let activeFilter = "all";
+
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        activeFilter = btn.dataset.filter;
+        render(filtered());
+      });
+    });
+
+    closeBtn.addEventListener("click", () => {
+      overlay.classList.remove("active");
+      player.pause();
+      player.src = "";
+    });
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeBtn.click();
+    });
+
+    function filtered() {
+      if (activeFilter === "live") return allSessions.filter(s => s.live);
+      if (activeFilter === "recorded") return allSessions.filter(s => !s.live);
+      return allSessions;
+    }
+
+    function formatDuration(ms) {
+      if (!ms) return "--";
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + "s";
+      const m = Math.floor(s / 60);
+      if (m < 60) return m + "m " + (s % 60) + "s";
+      const h = Math.floor(m / 60);
+      return h + "h " + (m % 60) + "m";
+    }
+
+    function formatTime(iso) {
+      if (!iso) return "--";
+      const d = new Date(iso);
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function playVideo(url) {
+      player.src = url;
+      overlay.classList.add("active");
+    }
+
+    function render(sessions) {
+      const liveCount = allSessions.filter(s => s.live).length;
+      const totalCount = allSessions.length;
+      subtitle.textContent = `${totalCount} session${totalCount !== 1 ? "s" : ""} (${liveCount} live)`;
+
+      if (sessions.length === 0) {
+        grid.innerHTML = '<div class="empty">No sessions found<p>Sessions appear here after publishers connect and stream.</p></div>';
+        return;
+      }
+
+      grid.innerHTML = sessions.map(s => {
+        const device = s.device?.deviceName || s.device?.deviceModel || "Unknown Device";
+        const wearable = s.device?.wearableType || "";
+        const badgeClass = s.live ? "badge-live" : "badge-recorded";
+        const badgeText = s.live ? "LIVE" : "RECORDED";
+        const cached = s.exportCached ? "cached" : "on-demand";
+
+        return `<div class="card" data-session="${s.sessionId}">
+          <img class="card-thumb" src="${s.thumbnailUrl}" alt=""
+               onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>No preview</div>'" loading="lazy">
+          <div class="card-body">
+            <div class="card-top">
+              <span class="card-title">${device}</span>
+              <span class="badge ${badgeClass}">${badgeText}</span>
+            </div>
+            <div class="card-meta">
+              ${wearable ? `<div class="row"><span class="label">Wearable</span><span class="value">${wearable}</span></div>` : ""}
+              <div class="row"><span class="label">Duration</span><span class="value">${formatDuration(s.durationMs)}</span></div>
+              <div class="row"><span class="label">Started</span><span class="value">${formatTime(s.startedAt)}</span></div>
+              <div class="row"><span class="label">Segments</span><span class="value">${s.segments} vid / ${s.audioChunks} aud</span></div>
+              <div class="row"><span class="label">MP4</span><span class="value">${cached}</span></div>
+              <div class="row"><span class="label">ID</span><span class="value">${s.sessionId.slice(0, 8)}</span></div>
+            </div>
+            <div class="card-actions">
+              <button class="action-btn primary" onclick="event.stopPropagation(); playVideo('${s.videoUrl}')">Play</button>
+              <a class="action-btn" href="${s.videoUrl}" target="_blank" onclick="event.stopPropagation()">Download</a>
+              ${s.live ? `<a class="action-btn" href="/session/${s.sessionId}" onclick="event.stopPropagation()">Watch Live</a>` : ""}
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/gallery/api");
+        allSessions = await res.json();
+        render(filtered());
+        lastRefresh.textContent = "Last refresh: " + new Date().toLocaleTimeString();
+      } catch (err) {
+        subtitle.textContent = "Failed to load sessions";
+        console.error(err);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

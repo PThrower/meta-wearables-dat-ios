@@ -7,16 +7,19 @@
  * 3. Uses WASM module for frame throttling (falls back to pure JS)
  *
  * Endpoints:
- *   /publish?session=<id>  - WebSocket, iOS publisher connects here
- *   /view?session=<id>     - WebSocket, browser viewers connect here
- *   /sessions              - JSON list of active sessions (live)
- *   /session/<id>          - Serve viewer HTML scoped to a session
- *   /session/<id>/video.mp4 - Export recorded session as mp4 (?audio to include audio)
- *   /session/<id>/export   - JSON metadata about recorded session (segment counts)
- *   /latest/video.mp4      - Redirect to most recent session's mp4 export (?audio)
- *   /latest/export         - JSON metadata for most recent session
- *   /stats                 - JSON stats (platform-wide + per-session)
- *   /                      - Directory page if sessions active, else viewer
+ *   /publish?session=<id>    - WebSocket, iOS publisher connects here
+ *   /view?session=<id>       - WebSocket, browser viewers connect here
+ *   /sessions                - JSON list of active sessions (live)
+ *   /gallery                 - Content creator gallery (all recorded sessions)
+ *   /gallery/api             - JSON feed for gallery with metadata + thumbnails
+ *   /session/<id>            - Serve viewer HTML scoped to a session
+ *   /session/<id>/thumbnail  - First-frame JPEG (cached to R2)
+ *   /session/<id>/video.mp4  - MP4 export (cached to R2 after first build)
+ *   /session/<id>/export     - JSON metadata about recorded session
+ *   /latest/video.mp4        - Redirect to most recent session's mp4 export
+ *   /latest/export           - JSON metadata for most recent session
+ *   /stats                   - JSON stats (platform-wide + per-session + gallery)
+ *   /                        - Directory page if sessions active, else viewer
  *
  * Backward compatible: omitting ?session= routes to "default" session.
  *
@@ -32,8 +35,15 @@ import type { WsData, QualityPreset } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
-import { exportSessionMp4, getSessionExportMeta } from "./session-export.js";
-import { ExportError } from "./session-export.js";
+import {
+  exportSessionMp4,
+  getSessionExportMeta,
+  getSessionThumbnail,
+  getCachedMp4Url,
+  exportAndCacheMp4,
+  getGalleryData,
+  ExportError,
+} from "./session-export.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -93,6 +103,10 @@ const viewerHtml = await Bun.file(join(import.meta.dir, "../../viewer/index.html
 );
 
 const directoryHtml = await Bun.file(join(import.meta.dir, "../../viewer/directory.html")).text().catch(() =>
+  ""
+);
+
+const galleryHtml = await Bun.file(join(import.meta.dir, "../../viewer/gallery.html")).text().catch(() =>
   ""
 );
 
@@ -166,7 +180,25 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      return Response.json(await registry.stats(wifiIp, PORT, serverStartTime));
+      return Response.json(await registry.stats(wifiIp, PORT, serverStartTime, store));
+    }
+
+    // --- Gallery ---
+
+    if (url.pathname === "/gallery") {
+      if (!galleryHtml) return Response.json({ error: "Gallery not available" }, { status: 404 });
+      return new Response(galleryHtml, { headers: { "Content-Type": "text/html" } });
+    }
+
+    if (url.pathname === "/gallery/api") {
+      const active = registry.listActive();
+      const livePublisherIds = new Set<string>();
+      for (const s of active) {
+        const session = registry.get(s.id);
+        if (session?.publisher) livePublisherIds.add(session.publisher.id);
+      }
+      const data = await getGalleryData(store, livePublisherIds);
+      return Response.json(data);
     }
 
     // --- Live Sessions (active relay sessions) ---
@@ -221,19 +253,41 @@ const server = Bun.serve<WsData>({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
-    // --- Session Export (mp4) ---
+    // --- Session Thumbnail ---
+
+    const thumbMatch = url.pathname.match(/^\/session\/([^/]+)\/thumbnail$/);
+    if (thumbMatch) {
+      const sessionId = thumbMatch[1];
+      try {
+        const jpeg = await getSessionThumbnail(sessionId, store);
+        if (!jpeg) return Response.json({ error: "No video data" }, { status: 404 });
+        return new Response(new Uint8Array(jpeg), {
+          headers: {
+            "Content-Type": "image/jpeg",
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
+      } catch (err) {
+        console.error("[thumbnail]", err);
+        return Response.json({ error: "Thumbnail failed" }, { status: 500 });
+      }
+    }
+
+    // --- Session Export (mp4) — serves cached R2 version or builds + caches ---
 
     const mp4Match = url.pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
     if (mp4Match) {
       const sessionId = mp4Match[1];
       const includeAudio = url.searchParams.has("audio");
       try {
-        const { response } = await exportSessionMp4({
-          sessionId,
-          store,
-          includeAudio,
-        });
-        return response;
+        // Serve from R2 cache if available
+        const cachedUrl = await getCachedMp4Url(sessionId, store);
+        if (cachedUrl) {
+          console.log(`[export] Serving cached MP4 for ${sessionId.slice(0, 8)}`);
+          return Response.redirect(cachedUrl);
+        }
+        // Build, stream to client, and persist to R2
+        return await exportAndCacheMp4({ sessionId, store, includeAudio });
       } catch (err) {
         if (err instanceof ExportError) {
           return Response.json({ error: err.message }, { status: err.status });
@@ -429,3 +483,4 @@ console.log(`[relay] Server on 0.0.0.0:${PORT}`);
 console.log(`[relay] Publisher: ws://${wifiIp}:${PORT}/publish[?session=<id>]`);
 console.log(`[relay] Viewer:   http://${wifiIp}:${PORT}[?session=<id>]`);
 console.log(`[relay] Directory: http://${wifiIp}:${PORT}/`);
+console.log(`[relay] Gallery:  http://${wifiIp}:${PORT}/gallery`);
