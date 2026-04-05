@@ -119,6 +119,7 @@ setInterval(() => registry.cleanupStale(), 5_000);
 const server = Bun.serve<WsData>({
   hostname: "0.0.0.0",
   port: PORT,
+  idleTimeout: 120,
   async fetch(req, server) {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
 

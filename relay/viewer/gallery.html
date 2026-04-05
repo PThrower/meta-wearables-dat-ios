@@ -246,9 +246,13 @@
         const badgeText = s.live ? "LIVE" : "RECORDED";
         const cached = s.exportCached ? "cached" : "on-demand";
 
+        const thumb = s.segments > 0
+          ? `<img class="card-thumb" src="${s.thumbnailUrl}" alt=""
+                  onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>No preview</div>'" loading="lazy">`
+          : `<div class="card-thumb-placeholder">No video</div>`;
+
         return `<div class="card" data-session="${s.sessionId}">
-          <img class="card-thumb" src="${s.thumbnailUrl}" alt=""
-               onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>No preview</div>'" loading="lazy">
+          ${thumb}
           <div class="card-body">
             <div class="card-top">
               <span class="card-title">${device}</span>
@@ -263,8 +267,8 @@
               <div class="row"><span class="label">ID</span><span class="value">${s.sessionId.slice(0, 8)}</span></div>
             </div>
             <div class="card-actions">
-              <button class="action-btn primary" onclick="event.stopPropagation(); playVideo('${s.videoUrl}')">Play</button>
-              <a class="action-btn" href="${s.videoUrl}" target="_blank" onclick="event.stopPropagation()">Download</a>
+              ${s.segments > 0 ? `<button class="action-btn primary" onclick="event.stopPropagation(); playVideo('${s.videoUrl}')">Play</button>
+              <a class="action-btn" href="${s.videoUrl}" target="_blank" onclick="event.stopPropagation()">Download</a>` : ""}
               ${s.live ? `<a class="action-btn" href="/session/${s.sessionId}" onclick="event.stopPropagation()">Watch Live</a>` : ""}
             </div>
           </div>
