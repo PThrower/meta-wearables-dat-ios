@@ -134,7 +134,9 @@ const server = Bun.serve<WsData>({
       }
       // Redirect to the actual mp4 export URL
       const includeAudio = url.searchParams.has("audio");
-      return Response.redirect(`${url.origin}/session/${latestId}/video.mp4${includeAudio ? "?audio" : ""}`);
+      const proto = req.headers.get("x-forwarded-proto") || "https";
+      const host = req.headers.get("host") || url.host;
+      return Response.redirect(`${proto}://${host}/session/${latestId}/video.mp4${includeAudio ? "?audio" : ""}`);
     }
 
     if (url.pathname === "/latest/export") {

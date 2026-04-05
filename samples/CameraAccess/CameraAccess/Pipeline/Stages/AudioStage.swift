@@ -5,21 +5,20 @@
  * encodes as PCM 16-bit 48kHz mono, wraps in the FRAU wire protocol,
  * and sends over the relay WebSocket.
  *
- * Also captures system audio output (TTS, media playback) by tapping
- * the engine's outputNode — so recorded sessions include both mic input
- * and any audio played through the session (e.g., TTS hello world from
- * AudioPlaybackStage).
- *
  * Wire protocol per audio chunk:
  *   [4 bytes "FRAU"][1 byte codecType][8 bytes sequence][4 bytes sampleRate]
  *   [2 bytes channels][2 bytes bitsPerSample][8 bytes timestamp_ms][PCM payload]
  *
- * codecType: 0 = mic PCM 16-bit LE, 1 = system/output audio PCM 16-bit LE
- * timestamp_ms: same epoch as FRLY video frames — used for A/V sync in viewer
+ * codecType: 0 = mic PCM 16-bit LE
  *
  * Runs on its own actor executor -- never blocks the main thread.
  * Audio session must be pre-configured as .playAndRecord by the app delegate;
  * this stage never changes the category (which would crash the BT video stream).
+ *
+ * NOTE: Previous version tapped outputNode to capture system audio (TTS), but
+ * this prevented the TTS from actually playing through speakers/glasses.
+ * System audio capture must be done differently — e.g. via AudioPlaybackStage
+ * sending its own FRAU chunks when it speaks, not by tapping the output bus.
  */
 
 import AVFoundation
@@ -48,9 +47,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private let targetBitsPerSample: UInt16 = 16
     private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
 
-    // Codec types for FRAU wire protocol
+    // Codec type for FRAU wire protocol
     private let codecMic: UInt8 = 0      // Microphone input
-    private let codecSystem: UInt8 = 1   // System/output audio (TTS, media)
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -118,56 +116,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             }
         }
 
-        // Install output tap to capture system audio (TTS, media playback).
-        // With .playAndRecord category, AVSpeechSynthesizer output flows through
-        // the audio session — the outputNode tap captures the mixed output.
-        let outputNode = engine.outputNode
-        let outputFormat = outputNode.outputFormat(forBus: 0)
-
-        // Only install output tap if the format is usable (non-zero sample rate)
-        if outputFormat.sampleRate > 0 && outputFormat.channelCount > 0 {
-            // Convert to our target format if needed
-            guard let convertedOutputFormat = AVAudioFormat(
-                commonFormat: .pcmFormatFloat32,
-                sampleRate: Double(targetSampleRate),
-                channels: 1,
-                interleaved: false
-            ) else {
-                NSLog("[AudioStage] Failed to create output tap format")
-                // Continue without output tap — mic still works
-                do {
-                    try engine.start()
-                    self.engine = engine
-                    self.isRunning = true
-                    NSLog("[AudioStage] Started (mic only — output tap format failed)")
-                } catch {
-                    NSLog("[AudioStage] Engine start failed: \(error)")
-                    inputNode.removeTap(onBus: 0)
-                    removeObservers()
-                }
-                return
-            }
-
-            // Use the output node's own format for the tap, then resample ourselves.
-            // This avoids format mismatch errors.
-            let tapFormat = outputFormat.channelCount > 0 ? outputFormat : convertedOutputFormat
-            outputNode.installTap(onBus: 0, bufferSize: bufferSize, format: tapFormat) { [weak self] buffer, _ in
-                guard let floatData = buffer.floatChannelData?[0] else { return }
-                let frameCount = Int(buffer.frameLength)
-                if frameCount == 0 { return }
-
-                // Skip if frame count is unreasonably large (silence buffer)
-                guard frameCount <= 48000 else { return }
-
-                let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
-
-                Task { [weak self] in
-                    await self?.sendFRAU(pcmData, codecType: await self?.codecSystem ?? 1)
-                }
-            }
-            NSLog("[AudioStage] Output tap installed — will capture TTS/system audio")
-        }
-
         do {
             try engine.start()
             self.engine = engine
@@ -187,8 +135,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
-            // Output tap may or may not be installed — remove safely
-            engine.outputNode.removeTap(onBus: 0)
             engine.stop()
         }
         engine = nil
