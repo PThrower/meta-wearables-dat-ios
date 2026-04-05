@@ -11,6 +11,8 @@
  *   /view?session=<id>     - WebSocket, browser viewers connect here
  *   /sessions              - JSON list of active sessions (live)
  *   /session/<id>          - Serve viewer HTML scoped to a session
+ *   /session/<id>/video.mp4 - Export recorded session as mp4 (?audio to include audio)
+ *   /session/<id>/export   - JSON metadata about recorded session (segment counts)
  *   /stats                 - JSON stats (platform-wide + per-session)
  *   /                      - Directory page if sessions active, else viewer
  *
@@ -28,6 +30,7 @@ import type { WsData, QualityPreset } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
+import { exportSessionMp4, getSessionExportMeta, ExportError } from "./session-export.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -158,6 +161,60 @@ const server = Bun.serve<WsData>({
         `<script>window.__SESSION_ID = "${sessionId}";</script></head>`
       );
       return new Response(html, { headers: { "Content-Type": "text/html" } });
+    }
+
+    // --- Session Export (mp4) ---
+
+    const mp4Match = url.pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
+    if (mp4Match) {
+      const sessionId = mp4Match[1];
+      const includeAudio = url.searchParams.has("audio");
+      try {
+        const { stream, cleanup } = await exportSessionMp4({
+          sessionId,
+          store,
+          includeAudio,
+        });
+        // Cleanup temp files once the stream is fully consumed or aborted
+        const reader = stream.getReader();
+        const passThrough = new ReadableStream({
+          async pull(controller) {
+            try {
+              const { done, value } = await reader.read();
+              if (done) { controller.close(); await cleanup(); return; }
+              controller.enqueue(value);
+            } catch (err) {
+              await cleanup();
+              controller.error(err);
+            }
+          },
+          async cancel() {
+            reader.cancel();
+            await cleanup();
+          },
+        });
+        return new Response(passThrough, {
+          headers: {
+            "Content-Type": "video/mp4",
+            "Content-Disposition": `inline; filename="session-${sessionId.slice(0, 8)}.mp4"`,
+          },
+        });
+      } catch (err) {
+        if (err instanceof ExportError) {
+          return Response.json({ error: err.message }, { status: err.status });
+        }
+        console.error("[export] Unexpected error:", err);
+        return Response.json({ error: "Export failed" }, { status: 500 });
+      }
+    }
+
+    // --- Session Export Metadata ---
+
+    const exportMetaMatch = url.pathname.match(/^\/session\/([^/]+)\/export$/);
+    if (exportMetaMatch) {
+      const sessionId = exportMetaMatch[1];
+      const meta = await getSessionExportMeta(sessionId, store);
+      return Response.json(meta);
     }
 
     // --- S3 Retrieval Endpoints ---
