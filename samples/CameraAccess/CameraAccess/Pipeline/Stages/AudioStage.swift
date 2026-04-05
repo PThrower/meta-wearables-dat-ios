@@ -34,6 +34,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var isRunning = false
     private var isPaused = false
     private var isRebuilding = false
+    private var rebuildTask: Task<Void, Never>?
 
     // Notification observers
     private var interruptionObserver: NSObjectProtocol?
@@ -48,8 +49,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private let targetBitsPerSample: UInt16 = 16
     private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
 
-    // Codec type for FRAU wire protocol — captured inline, no await needed
-    private static let codecMic: UInt8 = 0
+    // Codec type for FRAU wire protocol
+    private let codecMic: UInt8 = 0      // Microphone input
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -113,7 +114,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
 
             Task { [weak self] in
-                await self?.sendFRAU(pcmData, codecType: Self.codecMic)
+                await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
             }
         }
 
@@ -134,6 +135,9 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isRunning else { return }
 
+        rebuildTask?.cancel()
+        rebuildTask = nil
+
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -141,6 +145,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         engine = nil
         isRunning = false
         isPaused = false
+        isRebuilding = false
 
         removeObservers()
 
@@ -201,10 +206,17 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         }
     }
 
-    /// Handle audio route changes — e.g., glasses disconnecting/reconnecting.
-    /// Tears down and recreates the engine so the tap format matches the new
-    /// input device. Uses isRebuilding guard to prevent re-entrancy: start()
-    /// can itself trigger a route change as the engine connects to hardware.
+    /// Handle audio route changes — e.g., glasses disconnecting/reconnecting,
+    /// or setPreferredInput() switching between built-in mic and HFP glasses mic.
+    ///
+    /// ROOT CAUSE: AVAudioEngine.inputNode is a lazy singleton. When the hardware
+    /// route changes (setPreferredInput, device connect/disconnect), the inputNode
+    /// retains its OLD format. The tap installed against the old format gets buffers
+    /// in the new format → crash.
+    ///
+    /// FIX: Tear down the entire engine and create a fresh one. The new engine's
+    /// inputNode picks up the current hardware format. Debounced 300ms to coalesce
+    /// rapid-fire notifications.
     private func handleRouteChange(_ notification: Notification) {
         guard let userInfo = notification.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -212,33 +224,83 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        NSLog("[AudioStage] Route change: \(String(describing: reason))")
+        let reasonName: String
+        switch reason {
+        case .unknown: reasonName = "unknown"
+        case .newDeviceAvailable: reasonName = "newDeviceAvailable"
+        case .oldDeviceUnavailable: reasonName = "oldDeviceUnavailable"
+        case .categoryChange: reasonName = "categoryChange"
+        case .override: reasonName = "override"
+        case .routeConfigurationChange: reasonName = "routeConfigurationChange"
+        default: reasonName = "other(\(reasonValue))"
+        }
 
-        guard isRunning, !isRebuilding else { return }
-        guard reason == .override || reason == .newDeviceAvailable
-            || reason == .routeConfigurationChange || reason == .categoryChange else { return }
+        NSLog("[AudioStage] Route change: \(reasonName)")
 
-        // Tear down and recreate the entire engine on route change.
-        // Guard against re-entrancy: start() itself may trigger a route change
-        // as the engine connects to the new hardware path.
-        NSLog("[AudioStage] Rebuilding engine after route change")
-        isRebuilding = true
+        // Skip category changes — we never change the category.
+        // Skip if not running or already rebuilding.
+        guard isRunning && !isRebuilding && reason != .categoryChange else { return }
 
-        // Remove observers before stop/start to avoid the new engine's route
-        // setup from re-triggering this handler during the rebuild.
-        removeObservers()
-
-        Task { [weak self] in
-            guard let self else { return }
-            await self.stop()
-            await self.start()
-            await self.setRebuilding(false)
-            NSLog("[AudioStage] Engine rebuilt after route change")
+        NSLog("[AudioStage] Scheduling engine rebuild (debounce 300ms)")
+        rebuildTask?.cancel()
+        rebuildTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            guard !Task.isCancelled else { return }
+            await self?.rebuildEngine()
         }
     }
 
-    private func setRebuilding(_ value: Bool) {
-        isRebuilding = value
+    /// Tear down current engine and create a fresh one with correct inputNode format.
+    /// Called after route changes when the hardware input device changed.
+    private func rebuildEngine() {
+        guard isRunning && !isRebuilding else { return }
+        isRebuilding = true
+        defer { isRebuilding = false }
+
+        NSLog("[AudioStage] Rebuilding engine for new audio route")
+
+        // Tear down existing engine completely
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+            engine.reset()
+        }
+        engine = nil
+
+        // Create fresh engine — new inputNode picks up current hardware format
+        let newEngine = AVAudioEngine()
+        let inputNode = newEngine.inputNode
+
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: Double(targetSampleRate),
+            channels: 1,
+            interleaved: false
+        ) else {
+            NSLog("[AudioStage] Failed to create target format during rebuild")
+            return
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
+            guard let floatData = buffer.floatChannelData?[0] else { return }
+            let frameCount = Int(buffer.frameLength)
+            if frameCount == 0 { return }
+
+            let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+
+            Task { [weak self] in
+                await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
+            }
+        }
+
+        do {
+            try newEngine.start()
+            self.engine = newEngine
+            NSLog("[AudioStage] Engine rebuilt and started on new route")
+        } catch {
+            NSLog("[AudioStage] Rebuild failed: \(error)")
+            inputNode.removeTap(onBus: 0)
+        }
     }
 
     // MARK: - PCM Conversion

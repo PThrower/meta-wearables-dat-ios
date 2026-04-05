@@ -514,16 +514,11 @@ class StreamSessionViewModel: ObservableObject {
 
   func startSession() async {
     cancelRetry()
-    // Start TTS playback FIRST — it calls tryRouteToGlasses() which changes
-    // the audio route (setPreferredInput). If AudioStage starts before this
-    // route change, the inputNode tap format mismatches the new hardware and
-    // audio capture dies. By routing before the tap, the tap installs against
-    // the correct format from the start.
+    await streamSession.start()
+    // Auto-start TTS playback when stream begins.
     // [SAFE] audioPlaybackStage.start() wraps its AVAudioSession calls in Task { @MainActor in }.
     // TODO: Make this togglable from the UI, or gate behind a debug flag.
     await audioPlaybackStage.start()
-
-    await streamSession.start()
   }
 
   private func showError(_ message: String) {
