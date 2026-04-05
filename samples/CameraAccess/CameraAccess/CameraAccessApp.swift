@@ -43,15 +43,14 @@ struct CameraAccessApp: App {
     // Bluetooth video connection).
     //
     // Options:
-    //   .allowBluetooth — lets iOS route audio to/from BT devices including
-    //     glasses via HFP/A2DP. When glasses are connected, iOS prefers the
-    //     BT audio route. When no glasses, audio falls through to phone speaker.
+    //   .allowBluetoothHFP — required for Meta glasses mic input via HFP protocol.
+    //     Without this, iOS only enables A2DP (output-only) for BT devices.
+    //     HFP provides bidirectional audio (mic input + speaker output) at 8/16kHz.
     //   .defaultToSpeaker — fallback for when no BT device is connected;
     //     avoids routing to the phone earpiece.
     //   .mixWithOthers — background audio from other apps keeps playing.
     //
-    // Note: .allowBluetooth alone is insufficient — the glasses need HFP
-    // explicitly. See Meta docs: https://wearables.developer.meta.com/docs/microphones-and-speakers/
+    // See Meta docs: https://wearables.developer.meta.com/docs/microphones-and-speakers/
     do {
       let audioSession = AVAudioSession.sharedInstance()
       try audioSession.setCategory(

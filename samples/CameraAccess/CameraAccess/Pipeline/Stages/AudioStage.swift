@@ -11,14 +11,15 @@
  *
  * codecType: 0 = mic PCM 16-bit LE
  *
+ * CRITICAL: AVAudioInputNode does NOT support format conversion on its output bus.
+ * When HFP Bluetooth glasses provide 8kHz/16kHz audio, requesting a 48kHz tap
+ * causes the engine's internal converter to silently fail after ~1-2 seconds.
+ * FIX: Install tap at the hardware's native format, then manually convert to 48kHz
+ * using AVAudioConverter.
+ *
  * Runs on its own actor executor -- never blocks the main thread.
  * Audio session must be pre-configured as .playAndRecord by the app delegate;
  * this stage never changes the category (which would crash the BT video stream).
- *
- * NOTE: Previous version tapped outputNode to capture system audio (TTS), but
- * this prevented the TTS from actually playing through speakers/glasses.
- * System audio capture must be done differently — e.g. via AudioPlaybackStage
- * sending its own FRAU chunks when it speaks, not by tapping the output bus.
  */
 
 import AVFoundation
@@ -46,11 +47,10 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     // FRAU header size: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
     static let frauHeaderSize = 29
 
-    // Audio parameters
+    // Audio parameters (output wire format — always 48kHz 16-bit mono)
     private let targetSampleRate: UInt32 = 48000
     private let targetChannels: UInt16 = 1
     private let targetBitsPerSample: UInt16 = 16
-    private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
 
     // Codec type for FRAU wire protocol
     private let codecMic: UInt8 = 0      // Microphone input
@@ -95,8 +95,15 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
 
-        // Request 48kHz mono float32 — engine handles hardware conversion
-        // even if the actual hardware (e.g. HFP at 8kHz) provides a different rate.
+        // Use the hardware's ACTUAL output format, not a fabricated 48kHz one.
+        // AVAudioInputNode does NOT support format conversion on its output bus.
+        // When HFP Bluetooth glasses provide 8kHz/16kHz, requesting 48kHz causes
+        // the engine's internal AUConverterNode to silently fail after ~1-2 seconds.
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
+
+        NSLog("[AudioStage] Hardware input format: \(hardwareFormat)")
+
+        // Our desired output format for the wire protocol
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: Double(targetSampleRate),
@@ -107,14 +114,46 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        // Install mic tap at 48kHz mono, 20ms buffer.
-        // The engine will upsample/downsample from the hardware format as needed.
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
-            guard let floatData = buffer.floatChannelData?[0] else { return }
+        // Create converter from hardware format to 48kHz target
+        let converter = AVAudioConverter(from: hardwareFormat, to: targetFormat)
+        let ratio = targetFormat.sampleRate / hardwareFormat.sampleRate
+
+        // Install tap at HARDWARE format with bufferSize=0 (let engine decide).
+        // This avoids the internal converter that silently fails.
+        inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+            // Convert hardware format -> 48kHz mono float32
+            let outputFrameCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
+            guard let convertedBuffer = AVAudioPCMBuffer(
+                pcmFormat: targetFormat,
+                frameCapacity: max(outputFrameCapacity, 1)
+            ) else { return }
+
+            var newBufferAvailable = true
+            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+                if newBufferAvailable {
+                    outStatus.pointee = .haveData
+                    newBufferAvailable = false
+                    return buffer
+                } else {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+            }
+
+            var error: NSError?
+            let status = converter?.convert(to: convertedBuffer, error: &error, withInputFrom: inputBlock)
+
+            if status == .error {
+                NSLog("[AudioStage] Converter error: \(error?.localizedDescription ?? "unknown")")
+                return
+            }
+            if convertedBuffer.frameLength == 0 { return }
+
+            guard let convertedFloat = convertedBuffer.floatChannelData?[0] else { return }
+            let pcmData = Self.floatToPCM16(convertedFloat, frameCount: Int(convertedBuffer.frameLength))
 
             Task { [weak self] in
                 await self?.incrementTapCount()
@@ -127,9 +166,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             self.engine = engine
             self.isRunning = true
             // Grace period: suppress route-change rebuilds for 500ms after start.
-            // routeAudioInput() and tryRouteToGlasses() both fire route changes
-            // during startup; rebuilding a freshly-created engine is wasteful and
-            // engine.reset() can crash if the tap callback is still active.
             self.startupGracePeriod = true
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 500_000_000)
@@ -147,7 +183,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
                     lastCount = count
                 }
             }
-            NSLog("[AudioStage] Started — inputNode format: \(inputNode.outputFormat(forBus: 0))")
+            NSLog("[AudioStage] Started — hardware format: \(hardwareFormat), target: 48kHz, ratio: \(ratio)")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
             // Clean up taps on failure
@@ -195,8 +231,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             routeChangeObserver = nil
         }
     }
-
-    /// Handle phone calls, Siri, alarms — pause/resume the engine.
 
     private func clearStartupGrace() {
         startupGracePeriod = false
@@ -246,11 +280,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
     /// Handle audio route changes — e.g., glasses disconnecting/reconnecting,
     /// or setPreferredInput() switching between built-in mic and HFP glasses mic.
-    ///
-    /// ROOT CAUSE: AVAudioEngine.inputNode is a lazy singleton. When the hardware
-    /// route changes (setPreferredInput, device connect/disconnect), the inputNode
-    /// retains its OLD format. The tap installed against the old format gets buffers
-    /// in the new format → crash.
     ///
     /// FIX: Tear down the entire engine and create a fresh one. The new engine's
     /// inputNode picks up the current hardware format. Debounced 300ms to coalesce
@@ -312,6 +341,9 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         // Create fresh engine — new inputNode picks up current hardware format
         let newEngine = AVAudioEngine()
         let inputNode = newEngine.inputNode
+        let hardwareFormat = inputNode.outputFormat(forBus: 0)
+
+        NSLog("[AudioStage] Rebuild hardware format: \(hardwareFormat)")
 
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -323,12 +355,43 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
-            guard let floatData = buffer.floatChannelData?[0] else { return }
+        let converter = AVAudioConverter(from: hardwareFormat, to: targetFormat)
+        let ratio = targetFormat.sampleRate / hardwareFormat.sampleRate
+
+        // Install tap at HARDWARE format — same pattern as start()
+        inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+            let outputFrameCapacity = AVAudioFrameCount(Double(frameCount) * ratio)
+            guard let convertedBuffer = AVAudioPCMBuffer(
+                pcmFormat: targetFormat,
+                frameCapacity: max(outputFrameCapacity, 1)
+            ) else { return }
+
+            var newBufferAvailable = true
+            let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+                if newBufferAvailable {
+                    outStatus.pointee = .haveData
+                    newBufferAvailable = false
+                    return buffer
+                } else {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+            }
+
+            var error: NSError?
+            let status = converter?.convert(to: convertedBuffer, error: &error, withInputFrom: inputBlock)
+
+            if status == .error {
+                NSLog("[AudioStage] Converter error (rebuild): \(error?.localizedDescription ?? "unknown")")
+                return
+            }
+            if convertedBuffer.frameLength == 0 { return }
+
+            guard let convertedFloat = convertedBuffer.floatChannelData?[0] else { return }
+            let pcmData = Self.floatToPCM16(convertedFloat, frameCount: Int(convertedBuffer.frameLength))
 
             Task { [weak self] in
                 await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
