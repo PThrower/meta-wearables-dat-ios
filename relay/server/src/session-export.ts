@@ -89,10 +89,17 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
       await writeFile(audioPath, Buffer.concat(audioParts));
     }
 
+    console.log(
+      `[export] Session ${sessionId.slice(0, 8)}: video=${videoParts.reduce((s, b) => s + b.length, 0)} bytes, ` +
+      (hasAudio ? `audio=${audioParts.reduce((s, b) => s + b.length, 0)} bytes` : "no audio")
+    );
+
     // 4. Build ffmpeg command
+    // image2pipe reads concatenated JPEG frames from a file (mjpeg_pipe only works on pipes)
     const args: string[] = [
       "-framerate", "15",
-      "-f", "mjpeg_pipe",
+      "-f", "image2pipe",
+      "-vcodec", "mjpeg",
       "-i", videoPath,
     ];
 
@@ -123,6 +130,8 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
       outPath,
     );
 
+    console.log(`[export] ffmpeg ${args.join(" ")}`);
+
     // 5. Run ffmpeg
     const proc = Bun.spawn([ffmpegPath, ...args], {
       stdout: "pipe",
@@ -133,7 +142,7 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
     const stderr = await new Response(proc.stderr).text();
 
     if (exitCode !== 0) {
-      console.error(`[export] ffmpeg exited ${exitCode}: ${stderr.slice(0, 500)}`);
+      console.error(`[export] ffmpeg exited ${exitCode}: ${stderr.slice(0, 1000)}`);
       throw new ExportError(`ffmpeg failed (code ${exitCode})`, 500);
     }
 
