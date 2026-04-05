@@ -304,11 +304,20 @@ const server = Bun.serve<WsData>({
       const sessionId = mp4Match[1];
       const includeAudio = url.searchParams.has("audio");
       try {
-        // Serve from R2 cache if available
+        // Serve from R2 cache — proxy through server to avoid cross-origin block
         const cachedUrl = await getCachedMp4Url(sessionId, store);
         if (cachedUrl) {
           console.log(`[export] Serving cached MP4 for ${sessionId.slice(0, 8)}`);
-          return Response.redirect(cachedUrl);
+          const r2Resp = await fetch(cachedUrl);
+          if (r2Resp.ok && r2Resp.body) {
+            return new Response(r2Resp.body, {
+              headers: {
+                "Content-Type": "video/mp4",
+                "Content-Length": r2Resp.headers.get("Content-Length") || "",
+                "Cache-Control": "public, max-age=86400",
+              },
+            });
+          }
         }
         // Build, stream to client, and persist to R2
         return await exportAndCacheMp4({ sessionId, store, includeAudio });

@@ -11,82 +11,34 @@
  *
  * codecType: 0 = mic PCM 16-bit LE
  *
- * DESIGN:
- * - Kept as `actor` — previous `final class` conversion caused thread safety crashes.
- * - Tap callback builds FRAU packet inline via static function (no actor hop).
- *   Only one Task per callback for the RelayStage.sendRawData() actor hop.
- *   Previous pattern created two actor hops per 20ms callback, overflowing the
- *   AudioStage mailbox and killing the tap after ~10 seconds.
- * - Thread-safe counters via os_unfair_lock (priority donation, no inversion).
- *   NOT NSLock (which caused priority inversion crash on the audio render thread).
- * - Watchdog detects tap stall after 4 seconds and rebuilds engine.
- * - Route change handler triggers engine rebuild on device connect/disconnect.
- * - NO AVAudioEngineConfigurationChange observer (fired during teardown, crashed).
+ * Runs on its own actor executor -- never blocks the main thread.
+ * Audio session must be pre-configured as .playAndRecord by the app delegate;
+ * this stage never changes the category (which would crash the BT video stream).
+ *
+ * NOTE: Previous version tapped outputNode to capture system audio (TTS), but
+ * this prevented the TTS from actually playing through speakers/glasses.
+ * System audio capture must be done differently — e.g. via AudioPlaybackStage
+ * sending its own FRAU chunks when it speaks, not by tapping the output bus.
  */
 
 import AVFoundation
 import Foundation
-import os
-
-// MARK: - AtomicCounter (os_unfair_lock, safe for audio render thread)
-
-final class AtomicCounter: @unchecked Sendable {
-    private var _value: UInt64 = 0
-    private let lock: os_unfair_lock_t
-
-    init() {
-        lock = .allocate(capacity: 1)
-        lock.initialize(to: os_unfair_lock())
-    }
-
-    deinit { lock.deallocate() }
-
-    @discardableResult func increment() -> UInt64 {
-        os_unfair_lock_lock(lock)
-        _value += 1
-        let v = _value
-        os_unfair_lock_unlock(lock)
-        return v
-    }
-
-    var value: UInt64 {
-        os_unfair_lock_lock(lock)
-        defer { os_unfair_lock_unlock(lock) }
-        return _value
-    }
-
-    func reset() {
-        os_unfair_lock_lock(lock)
-        _value = 0
-        os_unfair_lock_unlock(lock)
-    }
-}
-
-// MARK: - AudioStage
 
 actor AudioStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "audio"
     var config: FrameStageConfig
 
     private var engine: AVAudioEngine?
+    private var sequenceNumber: UInt64 = 0
     private var relayStage: RelayStage?
     private var isRunning = false
     private var isPaused = false
-    private var isRebuilding = false
-
-    // Thread-safe counters: nonisolated so the tap callback and watchdog
-    // can access them without an actor hop.
-    nonisolated let _seq = AtomicCounter()
-    nonisolated let _tapCount = AtomicCounter()
-
-    private var rebuildTask: Task<Void, Never>?
-    private var watchdogTask: Task<Void, Never>?
 
     // Notification observers
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
-    // FRAU header: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
+    // FRAU header size: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
     static let frauHeaderSize = 29
 
     // Audio parameters
@@ -94,6 +46,9 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private let targetChannels: UInt16 = 1
     private let targetBitsPerSample: UInt16 = 16
     private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
+
+    // Codec type for FRAU wire protocol
+    private let codecMic: UInt8 = 0      // Microphone input
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -109,11 +64,21 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         // Audio stage does not process video frames
     }
 
-    // MARK: - Start / Stop
-
+    // THREADING REVIEW [FIXED]:
+    // AVAudioSession permission check moved to StreamSessionViewModel.checkMicPermission()
+    // which runs on @MainActor — the correct isolation context for iOS 17+.
+    // This method no longer calls any @MainActor-isolated APIs.
     func start() async {
         guard !isRunning else { return }
 
+        // Audio session is pre-configured as .playAndRecord by CameraAccessApp.
+        // Mic permission is checked by the caller (StreamSessionViewModel) before
+        // crossing to this actor — no AVAudioSession calls needed here.
+
+        // Observe audio interruptions (phone calls, Siri, alarms)
+        // and route changes (glasses disconnect, BT switching).
+        // These run on the main thread via NotificationCenter; we dispatch
+        // to this actor for safe state mutation.
         let nc = NotificationCenter.default
         interruptionObserver = nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             Task { await self?.handleInterruption(notification) }
@@ -125,6 +90,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
 
+        // Request 48kHz mono float32 — engine handles hardware conversion
+        // even if the actual hardware (e.g. HFP at 8kHz) provides a different rate.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: Double(targetSampleRate),
@@ -135,34 +102,24 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        guard let relay = self.relayStage else {
-            NSLog("[AudioStage] No relay stage set — cannot start")
-            removeObservers()
-            return
-        }
-
-        // Capture counters and relay directly — no `self` in the hot path
-        let seq = self._seq
-        let tapCount = self._tapCount
-
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { buffer, _ in
+        // Install mic tap at 48kHz mono, 20ms buffer.
+        // The engine will upsample/downsample from the hardware format as needed.
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
             guard let floatData = buffer.floatChannelData?[0] else { return }
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            let pcmData = AudioStage.floatToPCM16(floatData, frameCount: frameCount)
-            tapCount.increment()
-            let s = seq.increment()
-            let packet = AudioStage.buildFRAU(pcmData, codecType: 0, sequence: s, sampleRate: 48000)
+            let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
 
-            Task { await relay.sendRawData(packet) }
+            Task { [weak self] in
+                await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
+            }
         }
 
         do {
             try engine.start()
             self.engine = engine
             self.isRunning = true
-            startWatchdog()
             NSLog("[AudioStage] Started")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
@@ -174,11 +131,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isRunning else { return }
 
-        watchdogTask?.cancel()
-        watchdogTask = nil
-        rebuildTask?.cancel()
-        rebuildTask = nil
-
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -186,125 +138,13 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         engine = nil
         isRunning = false
         isPaused = false
-        isRebuilding = false
 
         removeObservers()
+
         NSLog("[AudioStage] Stopped")
     }
 
-    // MARK: - Watchdog
-
-    private func startWatchdog() {
-        watchdogTask?.cancel()
-        watchdogTask = Task { [weak self] in
-            var lastCount: UInt64 = 0
-            var stallChecks = 0
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard let self else { return }
-                let result = await self.watchdogTick(lastCount: lastCount, stallChecks: stallChecks)
-                guard result.running else { return }
-                lastCount = result.count
-                stallChecks = result.stallChecks
-            }
-        }
-    }
-
-    private func watchdogTick(lastCount: UInt64, stallChecks: Int) -> (running: Bool, count: UInt64, stallChecks: Int) {
-        guard isRunning else { return (false, 0, 0) }
-        let count = _tapCount.value
-        let engineRunning = engine?.isRunning ?? false
-        NSLog("[AudioStage] Watchdog: taps=\(count) delta=\(count - lastCount) engine=\(engineRunning) rebuild=\(isRebuilding)")
-
-        var s = stallChecks
-        if count == lastCount && !isRebuilding {
-            s += 1
-            if s >= 2 {
-                NSLog("[AudioStage] Watchdog: tap stalled 4s — rebuilding")
-                rebuildEngine()
-                s = 0
-            }
-        } else {
-            s = 0
-        }
-        return (true, count, s)
-    }
-
-    // MARK: - Rebuild
-
-    private func scheduleRebuild(reason: String) {
-        guard isRunning && !isRebuilding else { return }
-        NSLog("[AudioStage] Scheduling rebuild: \(reason)")
-        rebuildTask?.cancel()
-        rebuildTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard !Task.isCancelled else { return }
-            await self?.rebuildEngine()
-        }
-    }
-
-    private func rebuildEngine() {
-        guard isRunning && !isRebuilding else { return }
-        isRebuilding = true
-
-        NSLog("[AudioStage] Rebuilding engine")
-
-        if let engine {
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
-        engine = nil
-        _tapCount.reset()
-
-        let newEngine = AVAudioEngine()
-        let inputNode = newEngine.inputNode
-
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(targetSampleRate),
-            channels: 1,
-            interleaved: false
-        ) else {
-            NSLog("[AudioStage] Rebuild: failed to create format")
-            isRebuilding = false
-            return
-        }
-
-        guard let relay = self.relayStage else {
-            NSLog("[AudioStage] Rebuild: no relay stage")
-            isRebuilding = false
-            return
-        }
-
-        let seq = self._seq
-        let tapCount = self._tapCount
-
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { buffer, _ in
-            guard let floatData = buffer.floatChannelData?[0] else { return }
-            let frameCount = Int(buffer.frameLength)
-            if frameCount == 0 { return }
-
-            let pcmData = AudioStage.floatToPCM16(floatData, frameCount: frameCount)
-            tapCount.increment()
-            let s = seq.increment()
-            let packet = AudioStage.buildFRAU(pcmData, codecType: 0, sequence: s, sampleRate: 48000)
-
-            Task { await relay.sendRawData(packet) }
-        }
-
-        do {
-            try newEngine.start()
-            self.engine = newEngine
-            isRebuilding = false
-            NSLog("[AudioStage] Rebuild complete — hw: \(inputNode.outputFormat(forBus: 0).sampleRate)Hz")
-        } catch {
-            NSLog("[AudioStage] Rebuild failed: \(error)")
-            inputNode.removeTap(onBus: 0)
-            isRebuilding = false
-        }
-    }
-
-    // MARK: - Notification Observers
+    // MARK: - Audio Notifications
 
     private func removeObservers() {
         if let obs = interruptionObserver {
@@ -372,11 +212,10 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         NSLog("[AudioStage] Route change: \(reasonName)")
 
-        switch reason {
-        case .oldDeviceUnavailable, .newDeviceAvailable, .routeConfigurationChange:
-            scheduleRebuild(reason: reasonName)
-        default:
-            break
+        if reason == .oldDeviceUnavailable {
+            if isRunning && !(engine?.isRunning ?? false) {
+                NSLog("[AudioStage] Device disconnected — engine stopped by OS")
+            }
         }
     }
 
@@ -396,39 +235,37 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
     // MARK: - FRAU Wire Protocol
 
-    nonisolated private static func buildFRAU(_ pcmData: Data, codecType: UInt8, sequence: UInt64, sampleRate: UInt32) -> Data {
-        guard pcmData.count > 0 else { return Data() }
+    private func sendFRAU(_ pcmData: Data, codecType: UInt8) {
+        guard let relayStage else { return }
+        guard pcmData.count > 0 else { return }
 
-        var header = Data(capacity: frauHeaderSize)
+        sequenceNumber += 1
 
-        // Magic "FRAU"
+        var header = Data(capacity: Self.frauHeaderSize)
+
         header.append(contentsOf: [0x46, 0x52, 0x41, 0x55])
-
-        // Codec type
         header.append(codecType)
 
-        // Sequence number (8 bytes LE)
-        var seq = sequence
+        var seq = sequenceNumber
         header.append(contentsOf: withUnsafeBytes(of: &seq) { Array($0) })
 
-        // Sample rate (4 bytes LE)
-        var sr = sampleRate
+        var sr = targetSampleRate
         header.append(contentsOf: withUnsafeBytes(of: &sr) { Array($0) })
 
-        // Channels (2 bytes LE)
-        var ch: UInt16 = 1
+        var ch = targetChannels
         header.append(contentsOf: withUnsafeBytes(of: &ch) { Array($0) })
 
-        // Bits per sample (2 bytes LE)
-        var bps: UInt16 = 16
+        var bps = targetBitsPerSample
         header.append(contentsOf: withUnsafeBytes(of: &bps) { Array($0) })
 
-        // Timestamp ms (8 bytes LE)
         var ts = UInt64(Date().timeIntervalSince1970 * 1000)
         header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
 
         var message = header
         message.append(pcmData)
-        return message
+
+        Task {
+            await relayStage.sendRawData(message)
+        }
     }
 }
