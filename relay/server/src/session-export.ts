@@ -32,10 +32,10 @@ export class ExportError extends Error {
 
 /**
  * Export a recorded session as mp4 via temp files + ffmpeg.
- * Returns { stream, cleanup } — caller MUST call cleanup() when done.
+ * Returns { file, cleanup } — file is a Bun file handle, cleanup removes temp dir.
  */
 export async function exportSessionMp4(opts: ExportOptions): Promise<{
-  stream: ReadableStream<Uint8Array>;
+  file: Bun.BunFile;
   cleanup: () => Promise<void>;
 }> {
   const { sessionId, store, includeAudio, ffmpegPath = "ffmpeg" } = opts;
@@ -80,8 +80,8 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
 
     // Fetch and concatenate audio chunks (if any)
     const hasAudio = audioKeys.length > 0;
+    const audioParts: Buffer[] = [];
     if (hasAudio) {
-      const audioParts: Buffer[] = [];
       for (const key of audioKeys) {
         const buf = await store.get(key);
         if (buf) audioParts.push(buf);
@@ -90,8 +90,8 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
     }
 
     console.log(
-      `[export] Session ${sessionId.slice(0, 8)}: video=${videoParts.reduce((s, b) => s + b.length, 0)} bytes, ` +
-      (hasAudio ? `audio=${audioParts.reduce((s, b) => s + b.length, 0)} bytes` : "no audio")
+      `[export] Session ${sessionId.slice(0, 8)}: video=${videoParts.reduce((s: number, b: Buffer) => s + b.length, 0)} bytes, ` +
+      (hasAudio ? `audio=${audioParts.reduce((s: number, b: Buffer) => s + b.length, 0)} bytes` : "no audio")
     );
 
     // 4. Build ffmpeg command
@@ -155,7 +155,7 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
     }
 
     return {
-      stream: file.stream(),
+      file,
       cleanup: () => rm(tmp, { recursive: true, force: true }),
     };
   } catch (err) {

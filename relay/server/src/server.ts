@@ -170,30 +170,14 @@ const server = Bun.serve<WsData>({
       const sessionId = mp4Match[1];
       const includeAudio = url.searchParams.has("audio");
       try {
-        const { stream, cleanup } = await exportSessionMp4({
+        const result = await exportSessionMp4({
           sessionId,
           store,
           includeAudio,
         });
-        // Cleanup temp files once the stream is fully consumed or aborted
-        const reader = stream.getReader();
-        const passThrough = new ReadableStream({
-          async pull(controller) {
-            try {
-              const { done, value } = await reader.read();
-              if (done) { controller.close(); await cleanup(); return; }
-              controller.enqueue(value);
-            } catch (err) {
-              await cleanup();
-              controller.error(err);
-            }
-          },
-          async cancel() {
-            reader.cancel();
-            await cleanup();
-          },
-        });
-        return new Response(passThrough, {
+        // Schedule cleanup after a delay (file is fully written, just serve it)
+        setTimeout(() => result.cleanup().catch(() => {}), 30_000);
+        return new Response(result.file, {
           headers: {
             "Content-Type": "video/mp4",
             "Content-Disposition": `inline; filename="session-${sessionId.slice(0, 8)}.mp4"`,
