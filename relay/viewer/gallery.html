@@ -45,19 +45,23 @@
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,255,255,0.08);
       border-radius: 8px; overflow: hidden;
-      cursor: pointer; transition: all 0.15s ease;
+      cursor: pointer; transition: all 0.2s ease;
       text-decoration: none; color: inherit; display: block;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3);
     }
     .card:hover {
       background: rgba(255,255,255,0.08);
       border-color: rgba(255,255,255,0.15);
-      transform: translateY(-1px);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4);
     }
     .card-thumb {
       width: 100%; aspect-ratio: 16/9;
       background: #111; object-fit: cover;
       display: block;
+      opacity: 0; transition: opacity 0.3s ease;
     }
+    .card-thumb.loaded { opacity: 1; }
     .card-thumb-placeholder {
       width: 100%; aspect-ratio: 16/9;
       background: #111; display: flex;
@@ -129,7 +133,6 @@
     }
     #status-bar a:hover { color: #fff; }
 
-    /* Inline video player overlay */
     .video-overlay {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.9); z-index: 100;
@@ -138,12 +141,40 @@
     .video-overlay.active { display: flex; }
     .video-overlay video {
       max-width: 90vw; max-height: 85vh; border-radius: 8px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
     }
     .video-overlay .close-btn {
       position: fixed; top: 16px; right: 16px;
       font-size: 20px; color: #fff; background: rgba(255,255,255,0.1);
       border: none; border-radius: 50%; width: 36px; height: 36px;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Skeleton shimmer */
+    .skeleton {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4), 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .skeleton .skel-thumb {
+      width: 100%; aspect-ratio: 16/9;
+      background: linear-gradient(90deg, #111 25%, #1a1a1a 50%, #111 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    .skeleton .skel-body { padding: 12px 14px; }
+    .skeleton .skel-line {
+      height: 10px; border-radius: 4px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      margin-bottom: 8px;
+    }
+    .skeleton .skel-line.w60 { width: 60%; }
+    .skeleton .skel-line.w40 { width: 40%; }
+    .skeleton .skel-line.w80 { width: 80%; }
+    .skeleton .skel-line.w50 { width: 50%; }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
   </style>
 </head>
@@ -182,13 +213,17 @@
 
     let allSessions = [];
     let activeFilter = "all";
+    let loaded = false;
+
+    // Show skeletons immediately
+    showSkeletons(12);
 
     document.querySelectorAll(".filter-btn").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
         btn.classList.add("active");
         activeFilter = btn.dataset.filter;
-        render(filtered());
+        if (loaded) render(filtered());
       });
     });
 
@@ -200,6 +235,22 @@
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) closeBtn.click();
     });
+
+    function showSkeletons(n) {
+      let html = "";
+      for (let i = 0; i < n; i++) {
+        html += `<div class="card skeleton">
+          <div class="skel-thumb"></div>
+          <div class="skel-body">
+            <div class="skel-line w60"></div>
+            <div class="skel-line w80"></div>
+            <div class="skel-line w40"></div>
+            <div class="skel-line w50"></div>
+          </div>
+        </div>`;
+      }
+      grid.innerHTML = html;
+    }
 
     function filtered() {
       if (activeFilter === "live") return allSessions.filter(s => s.live);
@@ -229,6 +280,10 @@
       overlay.classList.add("active");
     }
 
+    function onThumbLoad(img) {
+      img.classList.add("loaded");
+    }
+
     function render(sessions) {
       const liveCount = allSessions.filter(s => s.live).length;
       const totalCount = allSessions.length;
@@ -248,6 +303,7 @@
 
         const thumb = s.segments > 0
           ? `<img class="card-thumb" src="${s.thumbnailUrl}" alt=""
+                  onload="onThumbLoad(this)"
                   onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>No preview</div>'" loading="lazy">`
           : `<div class="card-thumb-placeholder">No video</div>`;
 
@@ -280,6 +336,7 @@
       try {
         const res = await fetch("/gallery/api");
         allSessions = await res.json();
+        loaded = true;
         render(filtered());
         lastRefresh.textContent = "Last refresh: " + new Date().toLocaleTimeString();
       } catch (err) {
