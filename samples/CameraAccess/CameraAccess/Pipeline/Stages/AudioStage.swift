@@ -16,9 +16,10 @@
  *   thread was killing tap callbacks after ~1 second. Verified via SO and Apple
  *   Developer Forums: actor/MainActor isolation breaks AVAudioEngine taps.
  * - Tap installed at hardware's native format, no AVAudioConverter.
- * - Observes AVAudioEngine.configurationChangeNotification for silent engine resets.
- *   When HFP negotiates, the engine resets while isRunning stays true.
  * - Watchdog auto-rebuilds engine if tap stops firing for 2 seconds.
+ *   This catches silent engine resets (HFP negotiation, route changes) without
+ *   the crash risk of observing AVAudioEngineConfigurationChange (which fires
+ *   during engine teardown while the audio thread still holds buffer pointers).
  * - Thread-safe counters via NSLock (audio thread writes, health task reads).
  * - All state mutations on main thread (start/stop/rebuild from MainActor + main queue).
  */
@@ -48,10 +49,9 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
     private var rebuildWorkItem: DispatchWorkItem?
     private var healthTask: Task<Void, Never>?
 
-    // Notification observers
+    // Notification observers (session-level only — NOT engine config)
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
-    private var engineConfigObserver: NSObjectProtocol?
 
     // FRAU header: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
     static let frauHeaderSize = 29
@@ -107,18 +107,6 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
         let hwSampleRate = hardwareFormat.sampleRate
 
         NSLog("[AudioStage] Hardware input format: \(hardwareFormat)")
-
-        // Observe engine config changes for THIS engine instance.
-        // When I/O hardware format changes (HFP negotiation, route change),
-        // the engine silently resets while isRunning stays true.
-        let nc = NotificationCenter.default
-        engineConfigObserver = nc.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            self?.scheduleRebuild(reason: "engine config change")
-        }
 
         // Install tap at HARDWARE format. No format conversion.
         inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
@@ -188,12 +176,11 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
     }
 
     private func removeObservers() {
-        for obs in [interruptionObserver, routeChangeObserver, engineConfigObserver].compactMap({ $0 }) {
+        for obs in [interruptionObserver, routeChangeObserver].compactMap({ $0 }) {
             NotificationCenter.default.removeObserver(obs)
         }
         interruptionObserver = nil
         routeChangeObserver = nil
-        engineConfigObserver = nil
     }
 
     // MARK: - Audio Notifications
@@ -267,12 +254,6 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
 
         NSLog("[AudioStage] Rebuilding engine")
 
-        // Remove old engine config observer
-        if let obs = engineConfigObserver {
-            NotificationCenter.default.removeObserver(obs)
-            engineConfigObserver = nil
-        }
-
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -288,15 +269,6 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
         let hwSampleRate = hardwareFormat.sampleRate
 
         NSLog("[AudioStage] Rebuild hw format: \(hardwareFormat)")
-
-        // Observe config changes on the new engine
-        engineConfigObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: newEngine,
-            queue: .main
-        ) { [weak self] _ in
-            self?.scheduleRebuild(reason: "engine config change (rebuilt)")
-        }
 
         // Same pattern as startEngine — tap at hardware format, extract raw PCM
         inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
@@ -344,7 +316,8 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
 
     /// Monitors tap health every second. If tap count stalls for 2 consecutive
     /// checks (2 seconds), forces an engine rebuild. This catches silent engine
-    /// deaths that don't trigger any notification.
+    /// deaths from HFP renegotiation, route changes, and configuration changes
+    /// that don't trigger AVAudioSession notifications.
     private func startWatchdog() {
         healthTask?.cancel()
         healthTask = Task { [weak self] in
