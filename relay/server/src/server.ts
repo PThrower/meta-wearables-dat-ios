@@ -30,7 +30,8 @@ import type { WsData, QualityPreset } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
-import { exportSessionMp4, getSessionExportMeta, ExportError } from "./session-export.js";
+import { exportSessionMp4, getSessionExportMeta } from "./session-export.js";
+import { ExportError } from "./session-export.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -170,19 +171,12 @@ const server = Bun.serve<WsData>({
       const sessionId = mp4Match[1];
       const includeAudio = url.searchParams.has("audio");
       try {
-        const result = await exportSessionMp4({
+        const { response } = await exportSessionMp4({
           sessionId,
           store,
           includeAudio,
         });
-        // Schedule cleanup after a delay (file is fully written, just serve it)
-        setTimeout(() => result.cleanup().catch(() => {}), 30_000);
-        return new Response(result.file, {
-          headers: {
-            "Content-Type": "video/mp4",
-            "Content-Disposition": `inline; filename="session-${sessionId.slice(0, 8)}.mp4"`,
-          },
-        });
+        return response;
       } catch (err) {
         if (err instanceof ExportError) {
           return Response.json({ error: err.message }, { status: err.status });
