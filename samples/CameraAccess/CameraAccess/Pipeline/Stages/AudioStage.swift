@@ -11,18 +11,52 @@
  *
  * codecType: 0 = mic PCM 16-bit LE
  *
- * Runs on its own actor executor -- never blocks the main thread.
- * Audio session must be pre-configured as .playAndRecord by the app delegate;
- * this stage never changes the category (which would crash the BT video stream).
+ * DESIGN:
+ * - Tap callback does ZERO actor hops and creates ZERO Tasks.
+ *   It only calls floatToPCM16 + appends to a lock-free ring buffer.
+ *   This prevents the audio render thread from ever being blocked by
+ *   the Swift cooperative thread pool or actor executor contention.
  *
- * NOTE: Previous version tapped outputNode to capture system audio (TTS), but
- * this prevented the TTS from actually playing through speakers/glasses.
- * System audio capture must be done differently — e.g. via AudioPlaybackStage
- * sending its own FRAU chunks when it speaks, not by tapping the output bus.
+ * - A drain loop on the actor empties the ring buffer every 100ms
+ *   and sends all buffered PCM chunks as FRAU packets. This reduces
+ *   actor hops from ~50/sec (one per 20ms callback) to ~10/sec.
+ *
+ * - The ring buffer uses os_unfair_lock (priority donation, audio-safe).
  */
 
 import AVFoundation
 import Foundation
+
+// MARK: - PCM Ring Buffer (os_unfair_lock, audio render thread safe)
+
+private final class PCMRingBuffer: @unchecked Sendable {
+    private var chunks: [Data] = []
+    private let lock: os_unfair_lock_t
+
+    init() {
+        lock = .allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock())
+        chunks.reserveCapacity(64)
+    }
+
+    deinit { lock.deallocate() }
+
+    func append(_ data: Data) {
+        os_unfair_lock_lock(lock)
+        chunks.append(data)
+        os_unfair_lock_unlock(lock)
+    }
+
+    func drainAll() -> [Data] {
+        os_unfair_lock_lock(lock)
+        let result = chunks
+        chunks.removeAll(keepingCapacity: true)
+        os_unfair_lock_unlock(lock)
+        return result
+    }
+}
+
+// MARK: - AudioStage
 
 actor AudioStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "audio"
@@ -34,21 +68,19 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var isRunning = false
     private var isPaused = false
 
-    // Notification observers
+    private let pcmBuffer = PCMRingBuffer()
+    private var drainTask: Task<Void, Never>?
+
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
-    // FRAU header size: magic(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) = 29
     static let frauHeaderSize = 29
 
-    // Audio parameters
     private let targetSampleRate: UInt32 = 48000
     private let targetChannels: UInt16 = 1
     private let targetBitsPerSample: UInt16 = 16
     private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
-
-    // Codec type for FRAU wire protocol
-    private let codecMic: UInt8 = 0      // Microphone input
+    private let codecMic: UInt8 = 0
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -64,21 +96,11 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         // Audio stage does not process video frames
     }
 
-    // THREADING REVIEW [FIXED]:
-    // AVAudioSession permission check moved to StreamSessionViewModel.checkMicPermission()
-    // which runs on @MainActor — the correct isolation context for iOS 17+.
-    // This method no longer calls any @MainActor-isolated APIs.
+    // MARK: - Start / Stop
+
     func start() async {
         guard !isRunning else { return }
 
-        // Audio session is pre-configured as .playAndRecord by CameraAccessApp.
-        // Mic permission is checked by the caller (StreamSessionViewModel) before
-        // crossing to this actor — no AVAudioSession calls needed here.
-
-        // Observe audio interruptions (phone calls, Siri, alarms)
-        // and route changes (glasses disconnect, BT switching).
-        // These run on the main thread via NotificationCenter; we dispatch
-        // to this actor for safe state mutation.
         let nc = NotificationCenter.default
         interruptionObserver = nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             Task { await self?.handleInterruption(notification) }
@@ -90,8 +112,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
 
-        // Request 48kHz mono float32 — engine handles hardware conversion
-        // even if the actual hardware (e.g. HFP at 8kHz) provides a different rate.
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: Double(targetSampleRate),
@@ -102,25 +122,24 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        // Install mic tap at 48kHz mono, 20ms buffer.
-        // The engine will upsample/downsample from the hardware format as needed.
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { [weak self] buffer, _ in
+        // Capture the ring buffer — NO self, NO Task, NO actor hop in the callback.
+        let ringBuffer = self.pcmBuffer
+
+        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { buffer, _ in
             guard let floatData = buffer.floatChannelData?[0] else { return }
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            let pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
-
-            Task { [weak self] in
-                await self?.sendFRAU(pcmData, codecType: await self?.codecMic ?? 0)
-            }
+            let pcmData = AudioStage.floatToPCM16(floatData, frameCount: frameCount)
+            ringBuffer.append(pcmData)
         }
 
         do {
             try engine.start()
             self.engine = engine
             self.isRunning = true
-            NSLog("[AudioStage] Started")
+            startDrainLoop()
+            NSLog("[AudioStage] Started — hw: \(inputNode.outputFormat(forBus: 0).sampleRate)Hz")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
             inputNode.removeTap(onBus: 0)
@@ -131,6 +150,9 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isRunning else { return }
 
+        drainTask?.cancel()
+        drainTask = nil
+
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -140,11 +162,31 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         isPaused = false
 
         removeObservers()
-
         NSLog("[AudioStage] Stopped")
     }
 
-    // MARK: - Audio Notifications
+    // MARK: - Drain Loop
+
+    private func startDrainLoop() {
+        drainTask?.cancel()
+        drainTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                guard let self else { return }
+                await self.drainAndSend()
+            }
+        }
+    }
+
+    private func drainAndSend() {
+        guard isRunning else { return }
+        let chunks = pcmBuffer.drainAll()
+        for chunk in chunks {
+            sendFRAU(chunk, codecType: codecMic)
+        }
+    }
+
+    // MARK: - Notification Observers
 
     private func removeObservers() {
         if let obs = interruptionObserver {
@@ -242,7 +284,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         sequenceNumber += 1
 
         var header = Data(capacity: Self.frauHeaderSize)
-
         header.append(contentsOf: [0x46, 0x52, 0x41, 0x55])
         header.append(codecType)
 
