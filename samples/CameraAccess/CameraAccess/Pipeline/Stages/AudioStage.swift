@@ -34,6 +34,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var isRunning = false
     private var isPaused = false
     private var isRebuilding = false
+    private var startupGracePeriod = false
     private var rebuildTask: Task<Void, Never>?
 
     // Notification observers
@@ -122,6 +123,15 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             try engine.start()
             self.engine = engine
             self.isRunning = true
+            // Grace period: suppress route-change rebuilds for 500ms after start.
+            // routeAudioInput() and tryRouteToGlasses() both fire route changes
+            // during startup; rebuilding a freshly-created engine is wasteful and
+            // engine.reset() can crash if the tap callback is still active.
+            self.startupGracePeriod = true
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await self?.clearStartupGrace()
+            }
             NSLog("[AudioStage] Started")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
@@ -146,6 +156,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         isRunning = false
         isPaused = false
         isRebuilding = false
+        startupGracePeriod = false
 
         removeObservers()
 
@@ -166,6 +177,12 @@ actor AudioStage: @preconcurrency FramePipelineStage {
             NotificationCenter.default.removeObserver(obs)
             routeChangeObserver = nil
         }
+    }
+
+    /// Handle phone calls, Siri, alarms — pause/resume the engine.
+
+    private func clearStartupGrace() {
+        startupGracePeriod = false
     }
 
     /// Handle phone calls, Siri, alarms — pause/resume the engine.
@@ -238,8 +255,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         NSLog("[AudioStage] Route change: \(reasonName)")
 
         // Skip category changes — we never change the category.
-        // Skip if not running or already rebuilding.
-        guard isRunning && !isRebuilding && reason != .categoryChange else { return }
+        // Skip if not running, already rebuilding, or in startup grace period.
+        guard isRunning && !isRebuilding && !startupGracePeriod && reason != .categoryChange else { return }
 
         NSLog("[AudioStage] Scheduling engine rebuild (debounce 300ms)")
         rebuildTask?.cancel()
@@ -259,11 +276,12 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         NSLog("[AudioStage] Rebuilding engine for new audio route")
 
-        // Tear down existing engine completely
+        // Tear down existing engine — remove tap first to stop callbacks,
+        // then stop. Do NOT call engine.reset() as it can invalidate buffer
+        // memory while the tap callback is still executing on the audio thread.
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
-            engine.reset()
         }
         engine = nil
 
