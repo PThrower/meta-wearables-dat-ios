@@ -346,12 +346,14 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
-    // Route mic input based on user preference before starting AudioStage.
-    routeAudioInput()
-
-    // Auto-start audio after relay connects — permission and routing already handled above
+    // Start audio engine first, THEN route input.
+    // Routing before engine start triggers a session reconfiguration that
+    // disrupts DAT SDK audio and can pause the glasses' audio path.
     await audioStage.start()
     NSLog("[StreamSession] Audio relay started")
+
+    // Route mic input after engine is running — less disruptive to existing audio.
+    routeAudioInput()
   }
 
   func stopRelay() async {
