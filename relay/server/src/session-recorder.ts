@@ -61,6 +61,7 @@ export class SessionRecorder {
   }
 
   appendAudio(frame: Uint8Array) {
+    this.ensureActive();
     const pcm = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
     this.audioParts.push(Buffer.from(pcm));
   }
