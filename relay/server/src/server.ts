@@ -210,7 +210,12 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/gallery") {
       if (!galleryHtml) return Response.json({ error: "Gallery not available" }, { status: 404 });
-      return new Response(galleryHtml, { headers: { "Content-Type": "text/html" } });
+      const data = await galleryCached();
+      const injected = galleryHtml.replace(
+        "<!--__GALLERY_DATA__-->",
+        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
+      );
+      return new Response(injected, { headers: { "Content-Type": "text/html" } });
     }
 
     if (url.pathname === "/gallery/api") {
