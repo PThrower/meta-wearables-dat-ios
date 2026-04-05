@@ -20,8 +20,11 @@
  *   This catches silent engine resets (HFP negotiation, route changes) without
  *   the crash risk of observing AVAudioEngineConfigurationChange (which fires
  *   during engine teardown while the audio thread still holds buffer pointers).
- * - Thread-safe counters via NSLock (audio thread writes, health task reads).
- * - All state mutations on main thread (start/stop/rebuild from MainActor + main queue).
+ * - Thread-safe counters via NSLock, called ONLY from the cooperative thread pool
+ *   (inside Task closures) and the main thread — NEVER from the audio render thread.
+ *   NSLock on the render thread causes priority inversion → audio watchdog kill.
+ * - Tap callback does PCM extraction only. All other work (locks, FRAU header alloc,
+ *   actor hops) dispatched via Task to the cooperative pool.
  */
 
 import AVFoundation
@@ -109,11 +112,14 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
         NSLog("[AudioStage] Hardware input format: \(hardwareFormat)")
 
         // Install tap at HARDWARE format. No format conversion.
+        // CRITICAL: The tap callback runs on the real-time audio render thread.
+        // Only PCM extraction is permitted here — buffer pointers are invalid after return.
+        // NSLock, malloc (Data alloc for FRAU), and actor hops MUST NOT run on this thread.
+        // Priority inversion on the render thread triggers the iOS audio watchdog → crash.
         inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            // Extract raw PCM-16 data from whatever the hardware provides.
             let pcmData: Data
             if let floatPtr = buffer.floatChannelData?[0] {
                 pcmData = Self.floatToPCM16(floatPtr, frameCount: frameCount)
@@ -125,21 +131,13 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
                 return
             }
 
-            // Thread-safe counter increment
-            self?.incrementTapCount()
-
-            // Build FRAU packet on the audio thread (fast, no actor hop needed)
-            let seq = self?.nextSequence() ?? 0
-            let message = Self.buildFRAU(
-                pcmData,
-                codecType: 0,
-                sequence: seq,
-                sampleRate: UInt32(hwSampleRate)
-            )
-
-            // Send to relay actor asynchronously (only actor hop needed)
+            let rate = UInt32(hwSampleRate)
             Task { [weak self] in
-                guard let relay = self?.relayStage else { return }
+                guard let self else { return }
+                self.incrementTapCount()
+                let seq = self.nextSequence()
+                let message = Self.buildFRAU(pcmData, codecType: 0, sequence: seq, sampleRate: rate)
+                guard let relay = self.relayStage else { return }
                 await relay.sendRawData(message)
             }
         }
@@ -270,7 +268,6 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
 
         NSLog("[AudioStage] Rebuild hw format: \(hardwareFormat)")
 
-        // Same pattern as startEngine — tap at hardware format, extract raw PCM
         inputNode.installTap(onBus: 0, bufferSize: 0, format: hardwareFormat) { [weak self] buffer, _ in
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
@@ -286,18 +283,13 @@ final class AudioStage: FramePipelineStage, @unchecked Sendable {
                 return
             }
 
-            self?.incrementTapCount()
-
-            let seq = self?.nextSequence() ?? 0
-            let message = Self.buildFRAU(
-                pcmData,
-                codecType: 0,
-                sequence: seq,
-                sampleRate: UInt32(hwSampleRate)
-            )
-
+            let rate = UInt32(hwSampleRate)
             Task { [weak self] in
-                guard let relay = self?.relayStage else { return }
+                guard let self else { return }
+                self.incrementTapCount()
+                let seq = self.nextSequence()
+                let message = Self.buildFRAU(pcmData, codecType: 0, sequence: seq, sampleRate: rate)
+                guard let relay = self.relayStage else { return }
                 await relay.sendRawData(message)
             }
         }
