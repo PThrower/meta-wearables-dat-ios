@@ -43,6 +43,7 @@ import {
   exportAndCacheMp4,
   getGalleryData,
   ExportError,
+  type GallerySession,
 } from "./session-export.js";
 
 // --- Auto-detect WiFi IP ---
@@ -113,6 +114,27 @@ const galleryHtml = await Bun.file(join(import.meta.dir, "../../viewer/gallery.h
 // --- Stale cleanup ---
 
 setInterval(() => registry.cleanupStale(), 5_000);
+
+// --- Gallery cache (30s TTL, avoids N+1 R2 fetches per refresh) ---
+
+let galleryCache: { data: GallerySession[]; expiry: number } | null = null;
+const GALLERY_TTL_MS = 30_000;
+
+async function galleryCached(): Promise<GallerySession[]> {
+  const now = Date.now();
+  if (galleryCache && now < galleryCache.expiry) {
+    // Patch live status from current registry state
+    const liveIds = new Set(registry.listActive().map(s => s.id));
+    for (const s of galleryCache.data) s.live = liveIds.has(s.sessionId);
+    return galleryCache.data;
+  }
+
+  const active = registry.listActive();
+  const liveIds = new Set(active.map(s => s.id));
+  const data = await getGalleryData(store, liveIds);
+  galleryCache = { data, expiry: now + GALLERY_TTL_MS };
+  return data;
+}
 
 // --- Server ---
 
@@ -192,14 +214,10 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/gallery/api") {
-      const active = registry.listActive();
-      const livePublisherIds = new Set<string>();
-      for (const s of active) {
-        const session = registry.get(s.id);
-        if (session?.publisher) livePublisherIds.add(session.publisher.id);
-      }
-      const data = await getGalleryData(store, livePublisherIds);
-      return Response.json(data);
+      const data = await galleryCached();
+      return Response.json(data, {
+        headers: { "Cache-Control": "public, max-age=15" },
+      });
     }
 
     // --- Live Sessions (active relay sessions) ---
