@@ -52,11 +52,64 @@ private final class RelayWebSocketDelegate: NSObject, URLSessionWebSocketDelegat
     }
 }
 
+// MARK: - Send Queue (nonisolated, bypasses actor for WebSocket writes)
+
+final class RelaySendQueue: @unchecked Sendable {
+    private var wsTask: URLSessionWebSocketTask?
+    private var _active = false
+    private let lock: os_unfair_lock_t
+
+    init() {
+        lock = .allocate(capacity: 1)
+        lock.initialize(to: os_unfair_lock())
+    }
+
+    deinit { lock.deallocate() }
+
+    var active: Bool {
+        os_unfair_lock_lock(lock)
+        defer { os_unfair_lock_unlock(lock) }
+        return _active
+    }
+
+    func activate(_ task: URLSessionWebSocketTask) {
+        os_unfair_lock_lock(lock)
+        wsTask = task
+        _active = true
+        os_unfair_lock_unlock(lock)
+    }
+
+    func deactivate() {
+        os_unfair_lock_lock(lock)
+        wsTask = nil
+        _active = false
+        os_unfair_lock_unlock(lock)
+    }
+
+    func send(_ data: Data) {
+        os_unfair_lock_lock(lock)
+        guard _active, let ws = wsTask else {
+            os_unfair_lock_unlock(lock)
+            return
+        }
+        os_unfair_lock_unlock(lock)
+        ws.send(.data(data)) { error in
+            if let error {
+                NSLog("[RelaySendQueue] Error: \(error)")
+            }
+        }
+    }
+}
+
 // MARK: - RelayStage
 
 actor RelayStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "relay"
     var config: FrameStageConfig
+
+    // Nonisolated send queue — audio and video send through this
+    // without hopping to the actor executor.
+    nonisolated let sendQueue = RelaySendQueue()
 
     // Connection state
     private var webSocketTask: URLSessionWebSocketTask?
@@ -135,6 +188,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         if connected {
             isConnected = true
+            if let ws = webSocketTask { sendQueue.activate(ws) }
             sendHello()
             startReceiveLoop()
             startKeepAlive()
@@ -146,6 +200,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     }
 
     func disconnect() {
+        sendQueue.deactivate()
         receiveLoopTask?.cancel()
         keepAliveTask?.cancel()
         receiveLoopTask = nil
@@ -315,18 +370,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             var message = header
             message.append(jpegData)
 
-            wsTask.send(.data(message)) { error in
-                if let error {
-                    NSLog("[RelayStage] Send error: \(error)")
-                    Task { [weak self] in
-                        await self?.onSendError(error)
-                    }
-                } else {
-                    Task { [weak self] in
-                        await self?.onSendSuccess()
-                    }
-                }
-            }
+            self?.sendQueue.send(message)
+            Task { [weak self] in await self?.onSendSuccess() }
         }
     }
 
