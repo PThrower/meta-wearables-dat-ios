@@ -4,24 +4,23 @@
  * Pipeline stage that plays audio during an active stream session.
  *
  * Current: uses AVSpeechSynthesizer to say "hello world" on loop.
- * Iterate from here to play TTS prompts, audio files, or route to glasses.
+ *          Attempts to route output to connected glasses via HFP.
+ *
+ * Audio routing to glasses:
+ *   The glasses expose two BT audio profiles (per Meta docs):
+ *     - A2DP: high-quality output-only media
+ *     - HFP:  8kHz mono two-way voice
+ *
+ *   When the audio session includes .allowBluetoothHFP and we set
+ *   preferredInput to the glasses' HFP port, iOS routes
+ *   AVSpeechSynthesizer output through the glasses' open-ear speakers.
+ *
+ *   Ref: https://wearables.developer.meta.com/docs/microphones-and-speakers/
  *
  * Key constraints:
  *   - Audio session is pre-configured as .playAndRecord by CameraAccessApp.
  *     Do NOT change the category here — it crashes the DAT SDK BT video stream.
- *   - .mixWithOthers is set, so background audio from other apps keeps playing.
  *   - Runs on its own actor executor — never blocks the main thread.
- *
- * Iteration notes (where to go next):
- *   1. Change `phrase` to any TTS string, or make it dynamic per session event
- *   2. Swap AVSpeechSynthesizer for AVAudioPlayer + a .wav/.mp3 file:
- *        let player = try AVAudioPlayer(contentsOf: url)
- *        player.numberOfLoops = -1  // infinite loop
- *        player.play()
- *   3. Route output to Bluetooth (glasses) by picking a specific
- *      AVAudioSessionPortDescription from availableInputs
- *   4. Replace fixed delay with AVSpeechSynthesizerDelegate.didFinish
- *      to trigger next utterance only after the current one completes
  */
 
 import AVFoundation
@@ -35,21 +34,10 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     private var loopTask: Task<Void, Never>?
 
     // MARK: - Tuneable constants
-    // Swap these to change behavior without touching the logic below.
 
-    /// The phrase spoken on each loop iteration.
-    /// TODO: Make this configurable from the UI or per-session.
     private let phrase: String = "hello world"
-
-    /// Seconds to wait between utterances.
-    /// The speech itself takes ~1-2s; this adds a gap on top of that.
     private let loopDelaySeconds: UInt64 = 1
-
-    /// Speech rate: 0.0 (slowest) to 1.0 (fastest). 0.5 is normal.
     private let speechRate: Float = 0.5
-
-    /// Voice language. "en-US" for American English.
-    /// TODO: Let user pick, or detect from device locale.
     private let language: String = "en-US"
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
@@ -58,44 +46,35 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
     // MARK: - FramePipelineStage
 
-    nonisolated func processFrame(_ packet: FramePacket) async {
-        // Playback stage does not process video frames.
-        // Future: use packet.timestamp for A/V sync if needed.
-    }
+    nonisolated func processFrame(_ packet: FramePacket) async {}
 
     func start() async {
         guard !isPlaying else { return }
         isPlaying = true
 
-        loopTask = Task { [weak self] in
-            // Create synthesizer inside the loop task so it's owned by this actor.
+        // AVAudioSession APIs are @MainActor-isolated in iOS 17+.
+        // Dispatch to MainActor for route probing, TTS, and audio routing.
+        loopTask = Task { @MainActor in
+            // Log every available audio port so we can see what's connected.
+            Self.logAudioRoutes()
+
+            // Try to route output to glasses via HFP.
+            Self.tryRouteToGlasses()
+
             let synthesizer = AVSpeechSynthesizer()
+            let voice = AVSpeechSynthesisVoice(language: await self.language)
 
-            // Pick a voice for the configured language.
-            // TODO: Let user select from AVSpeechSynthesisVoice.speechVoices()
-            let voice = AVSpeechSynthesisVoice(language: self?.language ?? "en-US")
-
-            while !(self?.isPlaying == false) && !Task.isCancelled {
-                guard let self, self.isPlaying else { break }
-
-                let utterance = AVSpeechUtterance(string: self.phrase)
-                utterance.rate = self.speechRate
+            while await self.isPlaying && !Task.isCancelled {
+                let utterance = AVSpeechUtterance(string: await self.phrase)
+                utterance.rate = await self.speechRate
                 utterance.voice = voice
 
-                // Stop any in-progress speech before starting a new utterance.
-                // This prevents overlap if the loop is faster than speech.
                 if synthesizer.isSpeaking {
                     synthesizer.stopSpeaking(at: .immediate)
                 }
                 synthesizer.speak(utterance)
 
-                // Wait before looping again.
-                // The utterance itself takes ~1-2s to speak; this delay adds
-                // a gap on top of that so it doesn't feel machine-gun.
-                // TODO: Replace fixed delay with listening to
-                //   AVSpeechSynthesizerDelegate.didFinish to trigger
-                //   the next utterance only after the current one completes.
-                let delay = (self?.loopDelaySeconds ?? 1) * 1_000_000_000
+                let delay = await self.loopDelaySeconds * 1_000_000_000
                 try? await Task.sleep(nanoseconds: delay)
             }
 
@@ -111,9 +90,72 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         loopTask?.cancel()
         loopTask = nil
 
-        // Note: do NOT deactivate the audio session here.
-        // AudioStage and the DAT SDK still need it active.
+        // Reset audio route back to default (phone speaker).
+        // AVAudioSession is @MainActor-isolated in iOS 17+.
+        await Task { @MainActor in
+            let session = AVAudioSession.sharedInstance()
+            try? session.setPreferredInput(nil)
+        }.value
 
-        NSLog("[AudioPlayback] Stopped")
+        NSLog("[AudioPlayback] Stopped, route reset to default")
+    }
+
+    // MARK: - Audio Route Probing
+
+    // THREADING REVIEW:
+    // This method is `nonisolated static` — does NOT run on @MainActor.
+    // It calls AVAudioSession.sharedInstance() and reads route properties.
+    // SAFE ONLY because callers dispatch to @MainActor before calling:
+    //   - start() calls it inside `Task { @MainActor in }` block.
+    // DANGER: If called from any other context (e.g. directly from actor), it will crash.
+    // Consider adding `@MainActor` annotation to this method itself for compile-time safety.
+    nonisolated static func logAudioRoutes() {
+        let session = AVAudioSession.sharedInstance()
+        let route = session.currentRoute
+
+        NSLog("[AudioPlayback] === AUDIO ROUTE PROBE ===")
+        NSLog("[AudioPlayback] Current outputs: \(route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
+        NSLog("[AudioPlayback] Current inputs:  \(route.inputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
+
+        for input in session.availableInputs ?? [] {
+            NSLog("[AudioPlayback] Available input: \(input.portName) | type=\(input.portType.rawValue) | uid=\(input.uid)")
+        }
+
+        NSLog("[AudioPlayback] Category options: \(session.categoryOptions)")
+    }
+
+    // THREADING REVIEW: Same as logAudioRoutes() — nonisolated static calling @MainActor APIs.
+    // SAFE only because start() dispatches to @MainActor before calling.
+    // Would crash if called from actor executor directly.
+    /// Find the glasses' HFP port and set it as preferred input.
+    /// Per Meta Wearables docs, HFP gives us two-way audio through the glasses.
+    /// When setPreferredInput points to a BT HFP device, iOS routes output
+    /// (AVSpeechSynthesizer, AVAudioPlayer, etc.) through its speakers.
+    nonisolated static func tryRouteToGlasses() {
+        let session = AVAudioSession.sharedInstance()
+
+        // HFP is the two-way voice profile the glasses expose.
+        // A2DP is output-only — also valid for playback.
+        let allInputs = session.availableInputs ?? []
+        let btInputs = allInputs.filter { input in
+            input.portType == .bluetoothHFP || input.portType == .bluetoothA2DP
+                || input.portType == .bluetoothLE
+        }
+
+        if let btInput = btInputs.first {
+            NSLog("[AudioPlayback] Found BT audio device: \(btInput.portName) (\(btInput.portType.rawValue))")
+            do {
+                try session.setPreferredInput(btInput)
+                let newRoute = session.currentRoute
+                NSLog("[AudioPlayback] Routed to glasses — outputs: \(newRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
+            } catch {
+                NSLog("[AudioPlayback] Failed to set preferredInput: \(error)")
+            }
+        } else {
+            NSLog("[AudioPlayback] No BT audio device found in availableInputs")
+            for input in allInputs {
+                NSLog("[AudioPlayback]   available: \(input.portName) (\(input.portType.rawValue))")
+            }
+        }
     }
 }

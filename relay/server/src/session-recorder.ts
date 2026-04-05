@@ -23,6 +23,7 @@ export class SessionRecorder {
   private bytesToBucket = 0;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private _deviceInfo: Record<string, string | null> = {};
+  private _active = false;
 
   constructor(sessionId: string, store: ObjectStore) {
     this.sessionId = sessionId;
@@ -38,15 +39,23 @@ export class SessionRecorder {
   }
 
   start(params: Record<string, string | null>) {
+    this._deviceInfo = { ...params };
+    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} created (recording starts on first frame)`);
+  }
+
+  /** Activate recording on first video frame — avoids recording pre-button frames */
+  private ensureActive() {
+    if (this._active) return;
+    this._active = true;
     this.startedAt = Date.now();
     this.lastFlush = this.startedAt;
-    this._deviceInfo = { ...params };
-    this.writeMeta(false);
     this.flushTimer = setInterval(() => this.tick(), SEGMENT_FLUSH_MS);
-    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} started`);
+    this.writeMeta(false);
+    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} recording activated`);
   }
 
   appendVideo(frame: Uint8Array) {
+    this.ensureActive();
     const jpeg = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
     this.videoParts.push(Buffer.from(jpeg));
   }
@@ -91,10 +100,14 @@ export class SessionRecorder {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
-    this.flushVideo();
-    this.flushAudio();
-    this.writeMeta(true);
-    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} finished: ${this.flushedSegments} video segs, ${this.chunkIndex} audio chunks, ${(this.bytesToBucket / 1048576).toFixed(2)} MB`);
+    if (this._active) {
+      this.flushVideo();
+      this.flushAudio();
+      this.writeMeta(true);
+      console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} finished: ${this.flushedSegments} video segs, ${this.chunkIndex} audio chunks, ${(this.bytesToBucket / 1048576).toFixed(2)} MB`);
+    } else {
+      console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} finished (never activated — no frames received)`);
+    }
   }
 
   private writeMeta(final: boolean) {
@@ -116,7 +129,7 @@ export class SessionRecorder {
 
   getStats() {
     return {
-      active: true,
+      active: this._active,
       sessionId: this.sessionId,
       segmentsWritten: this.flushedSegments,
       audioChunks: this.chunkIndex,

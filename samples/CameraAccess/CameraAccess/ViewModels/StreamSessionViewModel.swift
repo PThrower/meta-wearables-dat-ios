@@ -26,6 +26,24 @@ enum StreamingStatus {
   case stopped
 }
 
+/// Audio input source for the relay stream.
+/// Controls which microphone feeds get sent to the cloud relay.
+enum AudioInputMode: String, CaseIterable, Identifiable {
+  case builtInMic = "Phone Mic"
+  case glassesMic = "Glasses Mic"
+  case all = "All"
+
+  var id: String { rawValue }
+
+  var systemImage: String {
+    switch self {
+    case .builtInMic: return "iphone.radiowaves.left.and.right"
+    case .glassesMic: return "headphones"
+    case .all: return "waveform.badge.plus"
+    }
+  }
+}
+
 @MainActor
 class StreamSessionViewModel: ObservableObject {
   @Published var currentVideoFrame: UIImage?
@@ -55,6 +73,14 @@ class StreamSessionViewModel: ObservableObject {
   // Relay state
   @Published var isRelaying: Bool = false
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
+  @Published var audioInputMode: AudioInputMode = .builtInMic {
+    didSet {
+      // Re-route audio immediately when user changes mode while relay is active.
+      // "All" restores HFP so glasses mic picks up TTS hello world from the speaker.
+      guard isRelaying else { return }
+      routeAudioInput()
+    }
+  }
 
   var isStreaming: Bool {
     streamingStatus != .stopped
@@ -85,6 +111,7 @@ class StreamSessionViewModel: ObservableObject {
   private let recordingStage = RecordingStage()
   private let relayStage = RelayStage()
   private let audioStage = AudioStage()
+  private let audioPlaybackStage = AudioPlaybackStage()
   private var displayStage: DisplayStage!
 
   private var streamConfig: StreamSessionConfig {
@@ -281,6 +308,9 @@ class StreamSessionViewModel: ObservableObject {
 
   // MARK: - Relay (video + audio)
 
+  // THREADING REVIEW [FIXED]:
+  // Permission check runs on @MainActor here (safe for AVAudioSession APIs).
+  // audioStage.start() no longer touches AVAudioSession — permission handled above.
   func startRelay() async {
     let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !url.isEmpty else {
@@ -288,6 +318,15 @@ class StreamSessionViewModel: ObservableObject {
       showError = true
       return
     }
+
+    // Check mic permission on @MainActor BEFORE crossing to AudioStage actor.
+    // AVAudioSession is @MainActor-isolated in iOS 17+ — must not be called from actors.
+    guard await checkMicPermission() else {
+      errorMessage = "Microphone permission required for audio relay"
+      showError = true
+      return
+    }
+
     do {
       // Use manually selected device, or fall back to auto-selected active device
       let wearableId = selectedDeviceId ?? activeWearableId
@@ -307,7 +346,10 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
-    // Auto-start audio after relay connects
+    // Route mic input based on user preference before starting AudioStage.
+    routeAudioInput()
+
+    // Auto-start audio after relay connects — permission and routing already handled above
     await audioStage.start()
     NSLog("[StreamSession] Audio relay started")
   }
@@ -320,6 +362,75 @@ class StreamSessionViewModel: ObservableObject {
     await relayStage.disconnect()
     isRelaying = false
     NSLog("[StreamSession] Relay disconnected")
+  }
+
+  // MARK: - Microphone Permission
+
+  /// Check/request mic permission on @MainActor and route input to built-in mic.
+  /// AVAudioSession is @MainActor-isolated in iOS 17+ — must be called from here,
+  /// never from an actor executor.
+  ///
+  /// When glasses are connected via HFP, iOS defaults to their mic.
+  /// Using the glasses' HFP mic conflicts with the DAT SDK's BT video stream.
+  /// Force input to the built-in phone mic to avoid the conflict.
+  private func checkMicPermission() async -> Bool {
+    let session = AVAudioSession.sharedInstance()
+    if session.recordPermission == .granted { return true }
+
+    NSLog("[StreamSession] Requesting microphone permission")
+    return await withCheckedContinuation { cont in
+      session.requestRecordPermission { granted in
+        cont.resume(returning: granted)
+      }
+    }
+  }
+
+  /// Route audio input based on user-selected `audioInputMode`.
+  /// Must be called on @MainActor (AVAudioSession isolation in iOS 17+).
+  private func routeAudioInput() {
+    let session = AVAudioSession.sharedInstance()
+    let inputs = session.availableInputs ?? []
+
+    switch audioInputMode {
+    case .builtInMic:
+      // Use phone's built-in mic. Avoids HFP conflict with DAT SDK BT video stream.
+      if let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
+        do {
+          try session.setPreferredInput(builtIn)
+          NSLog("[StreamSession] Routed input to built-in mic")
+        } catch {
+          NSLog("[StreamSession] Failed to route to built-in mic: \(error)")
+        }
+      }
+
+    case .glassesMic:
+      // Use glasses' HFP mic. Warning: may conflict with active BT video stream.
+      if let hfp = inputs.first(where: { $0.portType == .bluetoothHFP }) {
+        do {
+          try session.setPreferredInput(hfp)
+          NSLog("[StreamSession] Routed input to glasses HFP mic: \(hfp.portName)")
+        } catch {
+          NSLog("[StreamSession] Failed to route to glasses mic: \(error)")
+        }
+      } else {
+        NSLog("[StreamSession] No glasses HFP input found — falling back to default")
+      }
+
+    case .all:
+      // Reset to auto-route. When glasses are connected via HFP:
+      //   - Glasses speaker plays TTS hello world (output)
+      //   - Glasses mic picks up TTS + ambient audio (input)
+      //   - Both get captured by AudioStage and sent to relay.
+      // WARNING: may conflict with DAT SDK's active BT video stream.
+      do {
+        try session.setPreferredInput(nil)
+        NSLog("[StreamSession] All mode — auto-route (HFP if connected, includes TTS)")
+      } catch {
+        NSLog("[StreamSession] Failed to reset input: \(error)")
+      }
+    }
+
+    NSLog("[StreamSession] Audio input route: \(session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
   }
 
   // MARK: - Auto-Retry
@@ -404,6 +515,10 @@ class StreamSessionViewModel: ObservableObject {
   func startSession() async {
     cancelRetry()
     await streamSession.start()
+    // Auto-start TTS playback when stream begins.
+    // [SAFE] audioPlaybackStage.start() wraps its AVAudioSession calls in Task { @MainActor in }.
+    // TODO: Make this togglable from the UI, or gate behind a debug flag.
+    await audioPlaybackStage.start()
   }
 
   private func showError(_ message: String) {
@@ -421,6 +536,11 @@ class StreamSessionViewModel: ObservableObject {
     cancelRetry()
     await streamSession.stop()
 
+    // Stop TTS playback stage.
+    await audioPlaybackStage.stop()
+
+    // [SAFE] AVAudioSession.sharedInstance() called from @MainActor (this ViewModel).
+    // This is the correct isolation context — not inside an actor.
     // Notify OS to restore background music that was ducked during streaming
     let audioSession = AVAudioSession.sharedInstance()
     try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)

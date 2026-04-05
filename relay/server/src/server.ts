@@ -13,6 +13,8 @@
  *   /session/<id>          - Serve viewer HTML scoped to a session
  *   /session/<id>/video.mp4 - Export recorded session as mp4 (?audio to include audio)
  *   /session/<id>/export   - JSON metadata about recorded session (segment counts)
+ *   /latest/video.mp4      - Redirect to most recent session's mp4 export (?audio)
+ *   /latest/export         - JSON metadata for most recent session
  *   /stats                 - JSON stats (platform-wide + per-session)
  *   /                      - Directory page if sessions active, else viewer
  *
@@ -105,6 +107,60 @@ const server = Bun.serve<WsData>({
   port: PORT,
   async fetch(req, server) {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
+
+    // --- Latest session (timestamp-ordered, most recent) ---
+
+    if (url.pathname === "/latest/video.mp4") {
+      const keys = await store.list("sessions/") as string[];
+      const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
+      if (metaKeys.length === 0) {
+        return Response.json({ error: "No recorded sessions" }, { status: 404 });
+      }
+      // Fetch all meta.json, parse startedAt, pick most recent
+      let latestId: string | null = null;
+      let latestTime = 0;
+      for (const mk of metaKeys) {
+        const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
+        const buf = await store.get(mk);
+        if (!buf) continue;
+        try {
+          const meta = JSON.parse(new TextDecoder().decode(buf));
+          const t = new Date(meta.startedAt).getTime();
+          if (t > latestTime) { latestTime = t; latestId = id; }
+        } catch {}
+      }
+      if (!latestId) {
+        return Response.json({ error: "No valid session metadata" }, { status: 404 });
+      }
+      // Redirect to the actual mp4 export URL
+      const includeAudio = url.searchParams.has("audio");
+      return Response.redirect(`${url.origin}/session/${latestId}/video.mp4${includeAudio ? "?audio" : ""}`);
+    }
+
+    if (url.pathname === "/latest/export") {
+      const keys = await store.list("sessions/") as string[];
+      const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
+      if (metaKeys.length === 0) {
+        return Response.json({ error: "No recorded sessions" }, { status: 404 });
+      }
+      let latestId: string | null = null;
+      let latestTime = 0;
+      for (const mk of metaKeys) {
+        const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
+        const buf = await store.get(mk);
+        if (!buf) continue;
+        try {
+          const meta = JSON.parse(new TextDecoder().decode(buf));
+          const t = new Date(meta.startedAt).getTime();
+          if (t > latestTime) { latestTime = t; latestId = id; }
+        } catch {}
+      }
+      if (!latestId) {
+        return Response.json({ error: "No valid session metadata" }, { status: 404 });
+      }
+      const meta = await getSessionExportMeta(latestId, store);
+      return Response.json({ ...meta, sessionId: latestId });
+    }
 
     // --- Stats ---
 

@@ -376,34 +376,48 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Device Identity
 
+    // MARK: - Device Identity
+
     /// Send device identity to relay server as JSON after WebSocket opens.
     /// The server stores this on the Publisher object and exposes it via /stats.
+    // THREADING REVIEW: [SAFE] UIDevice.current calls are inside Task { @MainActor in }.
+    // hardwareModelIdentifier() reads utsname — no UIKit dependency, safe from any context.
     private func sendHello() {
         guard let wsTask = webSocketTask else { return }
 
-        let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
-        let deviceName = UIDevice.current.name
-        let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
-        let systemVersion = UIDevice.current.systemVersion
+        // UIDevice.current is @MainActor-isolated in iOS 17+.
+        // Dispatch to main to read device info, then send from here.
+        Task { @MainActor in
+            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+            let deviceName = UIDevice.current.name
+            let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
+            let systemVersion = UIDevice.current.systemVersion
 
-        let hello: [String: String] = [
-            "type": "hello",
-            "deviceId": deviceId,
-            "deviceName": deviceName,
-            "deviceModel": hardwareModel,
-            "systemVersion": systemVersion,
-            "wearableId": wearableId ?? "",
-            "wearableType": wearableType ?? "",
-        ]
+            let hello: [String: String] = [
+                "type": "hello",
+                "deviceId": deviceId,
+                "deviceName": deviceName,
+                "deviceModel": hardwareModel,
+                "systemVersion": systemVersion,
+                "wearableId": await self.wearableId ?? "",
+                "wearableType": await self.wearableType ?? "",
+            ]
 
-        guard let data = try? JSONSerialization.data(withJSONObject: hello),
-              let str = String(data: data, encoding: .utf8) else { return }
+            guard let data = try? JSONSerialization.data(withJSONObject: hello),
+                  let str = String(data: data, encoding: .utf8) else { return }
 
+            await self.sendHelloString(str, deviceName: deviceName, hardwareModel: hardwareModel)
+        }
+    }
+
+    private func sendHelloString(_ str: String, deviceName: String, hardwareModel: String) {
+        guard let wsTask = webSocketTask else { return }
+        let wt = wearableType ?? "none"
         wsTask.send(.string(str)) { error in
             if let error {
                 NSLog("[RelayStage] Hello send error: \(error)")
             } else {
-                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(hardwareModel) wearable=\(self.wearableType ?? "none")")
+                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(hardwareModel) wearable=\(wt)")
             }
         }
     }

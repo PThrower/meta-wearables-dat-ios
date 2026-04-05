@@ -197,55 +197,102 @@ struct ErrorLogSheet: View {
 struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   var body: some View {
-    // Controls row
-    HStack(spacing: 8) {
-      CustomButton(
-        title: "Stop streaming",
-        style: .destructive,
-        isDisabled: false
-      ) {
-        Task {
-          await viewModel.stopSession()
-        }
-      }
-
-      // Record button
-      CircleButton(
-        icon: viewModel.isRecording ? "stop.circle.fill" : "record.circle",
-        text: nil
-      ) {
-        Task {
-          if viewModel.isRecording {
-            await viewModel.stopRecording()
-          } else {
-            await viewModel.startRecording()
+    VStack(spacing: 8) {
+      // Controls row
+      HStack(spacing: 8) {
+        CustomButton(
+          title: "Stop streaming",
+          style: .destructive,
+          isDisabled: false
+        ) {
+          Task {
+            await viewModel.stopSession()
           }
         }
-      }
-      .foregroundColor(viewModel.isRecording ? .red : .white)
-      .accessibilityIdentifier("record_button")
 
-      // Relay button (starts/stops both video + audio relay)
-      CircleButton(
-        icon: viewModel.isRelaying ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
-        text: nil
-      ) {
-        Task {
-          if viewModel.isRelaying {
-            await viewModel.stopRelay()
-          } else {
-            await viewModel.startRelay()
+        // Record button
+        CircleButton(
+          icon: viewModel.isRecording ? "stop.circle.fill" : "record.circle",
+          text: nil
+        ) {
+          Task {
+            if viewModel.isRecording {
+              await viewModel.stopRecording()
+            } else {
+              await viewModel.startRecording()
+            }
           }
         }
-      }
-      .foregroundColor(viewModel.isRelaying ? .green : .white)
-      .accessibilityIdentifier("relay_button")
+        .foregroundColor(viewModel.isRecording ? .red : .white)
+        .accessibilityIdentifier("record_button")
 
-      // Photo button
-      CircleButton(icon: "camera.fill", text: nil) {
-        viewModel.capturePhoto()
+        // Relay button (starts/stops both video + audio relay)
+        CircleButton(
+          icon: viewModel.isRelaying ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
+          text: nil
+        ) {
+          Task {
+            if viewModel.isRelaying {
+              await viewModel.stopRelay()
+            } else {
+              await viewModel.startRelay()
+            }
+          }
+        }
+        .foregroundColor(viewModel.isRelaying ? .green : .white)
+        .accessibilityIdentifier("relay_button")
+
+        // Photo button
+        CircleButton(icon: "camera.fill", text: nil) {
+          viewModel.capturePhoto()
+        }
+        .accessibilityIdentifier("capture_photo_button")
       }
-      .accessibilityIdentifier("capture_photo_button")
+
+      // Audio source picker — shown when relay is active
+      if viewModel.isRelaying {
+        AudioSourcePicker(viewModel: viewModel)
+      }
     }
+  }
+}
+
+// MARK: - Audio Source Picker
+
+struct AudioSourcePicker: View {
+  @ObservedObject var viewModel: StreamSessionViewModel
+
+  var body: some View {
+    HStack(spacing: 6) {
+      Image(systemName: "mic.fill")
+        .font(.system(size: 10))
+        .foregroundColor(.white.opacity(0.6))
+
+      ForEach(AudioInputMode.allCases) { mode in
+        Button {
+          viewModel.audioInputMode = mode
+        } label: {
+          HStack(spacing: 3) {
+            Image(systemName: mode.systemImage)
+              .font(.system(size: 9))
+            Text(mode.rawValue)
+              .font(.system(size: 9, weight: .medium, design: .monospaced))
+          }
+          .padding(.horizontal, 6)
+          .padding(.vertical, 4)
+          .background(
+            viewModel.audioInputMode == mode
+              ? Color.white.opacity(0.25)
+              : Color.clear
+          )
+          .foregroundColor(viewModel.audioInputMode == mode ? .white : .white.opacity(0.5))
+          .cornerRadius(4)
+        }
+      }
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(Color.black.opacity(0.6))
+    .cornerRadius(6)
   }
 }

@@ -40,14 +40,24 @@ struct CameraAccessApp: App {
 
     // Configure audio session as .playAndRecord from launch so AudioStage
     // never needs to change the category mid-stream (which crashes the DAT SDK
-    // Bluetooth video connection). .defaultToSpeaker avoids routing audio to the
-    // earpiece; .mixWithOthers lets background audio keep playing.
+    // Bluetooth video connection).
+    //
+    // Options:
+    //   .allowBluetooth — lets iOS route audio to/from BT devices including
+    //     glasses via HFP/A2DP. When glasses are connected, iOS prefers the
+    //     BT audio route. When no glasses, audio falls through to phone speaker.
+    //   .defaultToSpeaker — fallback for when no BT device is connected;
+    //     avoids routing to the phone earpiece.
+    //   .mixWithOthers — background audio from other apps keeps playing.
+    //
+    // Note: .allowBluetooth alone is insufficient — the glasses need HFP
+    // explicitly. See Meta docs: https://wearables.developer.meta.com/docs/microphones-and-speakers/
     do {
       let audioSession = AVAudioSession.sharedInstance()
       try audioSession.setCategory(
         .playAndRecord,
         mode: .default,
-        options: [.defaultToSpeaker, .mixWithOthers]
+        options: [.allowBluetooth, .defaultToSpeaker, .mixWithOthers]
       )
       try audioSession.setActive(true)
       NSLog("[CameraAccess] Audio session configured as playAndRecord")

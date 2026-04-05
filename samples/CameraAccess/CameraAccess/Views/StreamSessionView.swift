@@ -161,17 +161,18 @@ struct DebugPanel: View {
 
 // MARK: - Orientation Lock
 
-final class OrientationLock: ObservableObject {
+// THREADING REVIEW: [SAFE] Marked @MainActor.
+// Uses UIApplication.shared and UIDevice.current — both @MainActor-isolated in iOS 17+.
+// All callers (SwiftUI .onAppear, .onChange) run on @MainActor.
+@MainActor final class OrientationLock: ObservableObject {
   static let shared = OrientationLock()
   private var isLocked = true
 
   func lock(to orientation: UIInterfaceOrientationMask) {
     isLocked = true
     if #available(iOS 16.0, *) {
-      DispatchQueue.main.async {
-        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
-      }
+      let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+      windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
     } else {
       UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
     }
@@ -180,10 +181,8 @@ final class OrientationLock: ObservableObject {
   func unlock() {
     isLocked = false
     if #available(iOS 16.0, *) {
-      DispatchQueue.main.async {
-        let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-        windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .all)) { _ in }
-      }
+      let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene
+      windowScene?.requestGeometryUpdate(.iOS(interfaceOrientations: .all)) { _ in }
     }
   }
 }

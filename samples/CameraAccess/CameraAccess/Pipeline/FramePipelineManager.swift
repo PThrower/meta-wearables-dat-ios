@@ -11,6 +11,10 @@ import Foundation
 import MWDATCamera
 import MWDATCore
 
+// THREADING REVIEW: [SAFE]
+// Marked @MainActor. videoFramePublisher listener dispatches to @MainActor.
+// Stage dispatch uses Task.detached which correctly hops to each actor's executor.
+// No @MainActor-isolated APIs called from wrong contexts.
 @MainActor
 final class FramePipelineManager {
     private var stages: [any FramePipelineStage] = []

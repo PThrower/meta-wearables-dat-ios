@@ -46,6 +46,7 @@
 		PIPE00902E91PIPE01 /* RecordingStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00A02E91PIPE01 /* RecordingStage.swift */; };
 		PIPE00B02E91PIPE02 /* RelayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00C02E91PIPE02 /* RelayStage.swift */; };
 		PIPE00D02E91PIPE03 /* AudioStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00E02E91PIPE03 /* AudioStage.swift */; };
+		PIPEAOBUILDF01 /* AudioPlaybackStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEAOFILREF01 /* AudioPlaybackStage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -120,6 +121,7 @@
 		PIPE00A02E91PIPE01 /* RecordingStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStage.swift; sourceTree = "<group>"; };
 		PIPE00C02E91PIPE02 /* RelayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayStage.swift; sourceTree = "<group>"; };
 		PIPE00E02E91PIPE03 /* AudioStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStage.swift; sourceTree = "<group>"; };
+		PIPEAOFILREF01 /* AudioPlaybackStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -279,6 +281,7 @@
 				PIPE00A02E91PIPE01 /* RecordingStage.swift */,
 				PIPE00C02E91PIPE02 /* RelayStage.swift */,
 				PIPE00E02E91PIPE03 /* AudioStage.swift */,
+				PIPEAOFILREF01 /* AudioPlaybackStage.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -469,6 +472,7 @@
 				PIPE00902E91PIPE01 /* RecordingStage.swift in Sources */,
 				PIPE00B02E91PIPE02 /* RelayStage.swift in Sources */,
 				PIPE00D02E91PIPE03 /* AudioStage.swift in Sources */,
+				PIPEAOBUILDF01 /* AudioPlaybackStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
