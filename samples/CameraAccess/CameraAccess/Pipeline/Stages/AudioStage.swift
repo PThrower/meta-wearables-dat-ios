@@ -252,11 +252,14 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         default: reasonName = "other(\(reasonValue))"
         }
 
-        NSLog("[AudioStage] Route change: \(reasonName)")
+        NSLog("[AudioStage] Route change: \(reasonName) [running=\(isRunning) rebuilding=\(isRebuilding) grace=\(startupGracePeriod)]")
 
         // Skip category changes — we never change the category.
         // Skip if not running, already rebuilding, or in startup grace period.
-        guard isRunning && !isRebuilding && !startupGracePeriod && reason != .categoryChange else { return }
+        guard isRunning && !isRebuilding && !startupGracePeriod && reason != .categoryChange else {
+            NSLog("[AudioStage] Route change skipped (guard failed)")
+            return
+        }
 
         NSLog("[AudioStage] Scheduling engine rebuild (debounce 300ms)")
         rebuildTask?.cancel()
