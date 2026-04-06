@@ -28,3 +28,4 @@ lmdb.db-lock
 
 # Relay server local
 relay/server/node_modules/
+relay/server/doppler.env
