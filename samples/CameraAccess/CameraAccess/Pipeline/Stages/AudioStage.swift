@@ -65,7 +65,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private var engine: AVAudioEngine?
     private var sequenceNumber: UInt64 = 0
     private var relayStage: RelayStage?
-    private var sendQueue: RelaySendQueue?
     private var isRunning = false
     private var isPaused = false
 
@@ -89,7 +88,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
     func setRelayStage(_ stage: RelayStage) {
         self.relayStage = stage
-        self.sendQueue = stage.sendQueue
     }
 
     // MARK: - FramePipelineStage
@@ -280,7 +278,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     // MARK: - FRAU Wire Protocol
 
     private func sendFRAU(_ pcmData: Data, codecType: UInt8) {
-        guard let sendQueue else { return }
+        guard let relayStage else { return }
         guard pcmData.count > 0 else { return }
 
         sequenceNumber += 1
@@ -307,7 +305,8 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         var message = header
         message.append(pcmData)
 
-        // Direct send via nonisolated queue — no actor hop to RelayStage
-        sendQueue.send(message)
+        Task {
+            await relayStage.sendRawData(message)
+        }
     }
 }
