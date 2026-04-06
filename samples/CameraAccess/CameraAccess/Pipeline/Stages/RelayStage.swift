@@ -370,8 +370,18 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             var message = header
             message.append(jpegData)
 
-            self?.sendQueue.send(message)
-            Task { [weak self] in await self?.onSendSuccess() }
+            wsTask.send(.data(message)) { error in
+                if let error {
+                    NSLog("[RelayStage] Send error: \(error)")
+                    Task { [weak self] in
+                        await self?.onSendError(error)
+                    }
+                } else {
+                    Task { [weak self] in
+                        await self?.onSendSuccess()
+                    }
+                }
+            }
         }
     }
 
