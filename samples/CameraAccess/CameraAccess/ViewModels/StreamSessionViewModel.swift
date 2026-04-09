@@ -75,10 +75,10 @@ class StreamSessionViewModel: ObservableObject {
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
-      // Re-route audio immediately when user changes mode while relay is active.
-      // "All" restores HFP so glasses mic picks up TTS hello world from the speaker.
-      guard isRelaying else { return }
-      routeAudioInput()
+      // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
+      // active tears down the BT HFP link and kills video. Audio routing changes
+      // must only happen before streaming starts. The mode is stored so it can
+      // be applied on the next relay session if needed in the future.
     }
   }
 
@@ -111,6 +111,8 @@ class StreamSessionViewModel: ObservableObject {
   private let recordingStage = RecordingStage()
   private let relayStage = RelayStage()
   private let audioStage = AudioStage()
+  private let audioRelayStage = AudioRelayStage()
+  private let audioEventBus = AudioEventBus()
   private let audioPlaybackStage = AudioPlaybackStage()
   private var displayStage: DisplayStage!
 
@@ -151,8 +153,12 @@ class StreamSessionViewModel: ObservableObject {
     pipeline.register(recordingStage)
     pipeline.register(relayStage)
 
-    // Wire audio stage to relay stage for FRAU binary sending
-    Task { await audioStage.setRelayStage(relayStage) }
+    // Wire decoupled audio pipeline:
+    //   AudioStage -> AudioEventBus -> AudioRelayStage -> RelayStage -> WebSocket
+    Task {
+      await audioStage.setEventBus(audioEventBus)
+      await audioRelayStage.setRelayStage(relayStage)
+    }
 
     setupSessionListeners()
     attachPipeline()
@@ -346,19 +352,27 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
-    // Start audio engine first, THEN route input.
-    // Routing before engine start triggers a session reconfiguration that
-    // disrupts DAT SDK audio and can pause the glasses' audio path.
+    // NOTE: Do NOT call routeAudioInput() here. Changing setPreferredInput()
+    // while the DAT SDK BT video stream is active tears down the HFP link and
+    // kills the video stream. Audio routing must happen BEFORE streaming starts.
+    // The audio session is pre-configured as .playAndRecord with .allowBluetooth
+    // in CameraAccessApp — the hardware default input is used as-is.
+    //
+    // Do NOT call setActive(true) here either — it triggers a route
+    // renegotiation that disrupts the BT video stream.
+
+    // Auto-start audio after relay connects — permission already checked above
+    // Attach relay stage to event bus before starting capture so packets flow immediately
+    await audioRelayStage.attachToEventBus(audioEventBus)
     await audioStage.start()
     NSLog("[StreamSession] Audio relay started")
-
-    // Route mic input after engine is running — less disruptive to existing audio.
-    routeAudioInput()
   }
 
   func stopRelay() async {
-    // Stop audio first (removes mic tap, does NOT deactivate audio session)
+    // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
+    // Detach relay stage from event bus — stops FRAU wire protocol forwarding
+    await audioRelayStage.detachFromEventBus(audioEventBus)
     NSLog("[StreamSession] Audio relay stopped")
 
     await relayStage.disconnect()

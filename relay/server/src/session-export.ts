@@ -96,9 +96,25 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
     (hasAudio ? `audio=${audioParts.reduce((s: number, b: Buffer) => s + b.length, 0)} bytes` : "no audio")
   );
 
-  // 4. Build ffmpeg command — output to stdout for streaming
+  // 4. Read manifest for actual framerate and audio sample rate
+  let actualFps = 15;  // fallback
+  let audioSampleRate = 48000;  // fallback
+  try {
+    const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);
+    if (manifestBuf) {
+      const manifest = JSON.parse(new TextDecoder().decode(manifestBuf));
+      if (manifest.actualFps && manifest.actualFps > 0) actualFps = manifest.actualFps;
+      if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
+      console.log(`[export] Manifest: fps=${actualFps}, audioRate=${audioSampleRate}`);
+    } else {
+      console.log(`[export] No manifest.json — using defaults (fps=${actualFps}, ar=${audioSampleRate})`);
+    }
+  } catch (err) {
+    console.log(`[export] Manifest read failed, using defaults:`, (err as Error).message);
+  }
+
   const args: string[] = [
-    "-framerate", "15",
+    "-framerate", String(actualFps),
     "-f", "image2pipe",
     "-vcodec", "mjpeg",
     "-i", videoPath,
@@ -107,7 +123,7 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
   if (hasAudio) {
     args.push(
       "-f", "s16le",
-      "-ar", "48000",
+      "-ar", String(audioSampleRate),
       "-ac", "1",
       "-i", audioPath,
     );
@@ -306,13 +322,25 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
     await writeFile(audioPath, Buffer.concat(audioParts));
   }
 
+  // Read manifest for actual framerate and audio sample rate
+  let actualFps = 15;
+  let audioSampleRate = 48000;
+  try {
+    const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);
+    if (manifestBuf) {
+      const manifest = JSON.parse(new TextDecoder().decode(manifestBuf));
+      if (manifest.actualFps && manifest.actualFps > 0) actualFps = manifest.actualFps;
+      if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
+    }
+  } catch {}
+
   const args: string[] = [
-    "-framerate", "15",
+    "-framerate", String(actualFps),
     "-f", "image2pipe", "-vcodec", "mjpeg",
     "-i", videoPath,
   ];
   if (hasAudio) {
-    args.push("-f", "s16le", "-ar", "48000", "-ac", "1", "-i", audioPath);
+    args.push("-f", "s16le", "-ar", String(audioSampleRate), "-ac", "1", "-i", audioPath);
   }
   args.push(
     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23",

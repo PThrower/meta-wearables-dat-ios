@@ -4,15 +4,16 @@
 
 ```
 [Meta Wearables (Ray-Ban)]
-        | Bluetooth LE (DAT SDK)
+        | BLE + L2CAP/QUIC (video: DAT SDK)
+        | HFP (audio: mic in, speaker out)
         v
 [iOS App] ---wss://---> [Caddy:443] ---ws://---> [localhost:8080]
   CameraAccess        relay.simulationapi.com      Bun Relay Server
   RelayStage              (auto TLS)             (caringmind-relay)
-  AudioStage                                        |
-                                                     v
-                                              [Browser Viewer]
-                                              index.html (FRLY/FRAU decode)
+  AudioRelayStage                                    |
+  AudioEventBus                                       v
+  AudioStage                                   [Browser Viewer]
+  (via AudioEventBus)                          index.html (FRLY/FRAU decode)
 ```
 
 ## VPS
@@ -125,10 +126,13 @@ Server binds `0.0.0.0:8080`. Port configurable via `RELAY_PORT` env var.
 
 ```
 FramePipelineManager
-  |-- DisplayStage    -> UIImage for SwiftUI
-  |-- RecordingStage  -> .mov file via AVAssetWriter
-  |-- RelayStage      -> FRLY over WebSocket to /publish
-  `-- AudioStage      -> Mic capture -> FRAU -> RelayStage
+  |-- DisplayStage      -> UIImage for SwiftUI
+  |-- RecordingStage    -> .mov file via AVAssetWriter
+  |-- RelayStage        -> FRLY over WebSocket to /publish
+  `-- AudioRelayStage   -> AudioEventBus subscriber -> FRAU -> RelayStage
+
+AudioStage (decoupled from pipeline)
+  `-- Mic capture -> AudioPacket -> AudioEventBus -> AudioRelayStage
 ```
 
 ### Relay Configuration
@@ -184,5 +188,9 @@ Viewer uses a video-clock approach:
 | `relay/viewer/index.html` | Browser viewer with A/V sync |
 | `samples/CameraAccess/CameraAccess/ViewModels/StreamSessionViewModel.swift` | iOS view model, pipeline orchestration |
 | `samples/CameraAccess/CameraAccess/Pipeline/Stages/RelayStage.swift` | Video relay over WebSocket |
-| `samples/CameraAccess/CameraAccess/Pipeline/Stages/AudioStage.swift` | Mic capture and FRAU relay |
+| `samples/CameraAccess/CameraAccess/Pipeline/Stages/AudioStage.swift` | Mic capture, publishes to AudioEventBus |
+| `samples/CameraAccess/CameraAccess/Pipeline/Stages/AudioRelayStage.swift` | AudioEventBus subscriber, FRAU wire protocol |
+| `samples/CameraAccess/CameraAccess/Pipeline/AudioEventBus.swift` | AsyncStream pub/sub for audio packets |
+| `samples/CameraAccess/CameraAccess/Pipeline/AudioPacket.swift` | Transport-agnostic PCM data struct |
+| `samples/CameraAccess/CameraAccess/Pipeline/AudioTransport.swift` | Protocol for audio consumers |
 | `samples/CameraAccess/CameraAccess/Pipeline/FramePipelineManager.swift` | Frame dispatcher to stages |

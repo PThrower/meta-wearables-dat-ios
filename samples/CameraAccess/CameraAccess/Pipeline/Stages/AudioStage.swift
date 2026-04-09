@@ -2,61 +2,23 @@
  * AudioStage.swift
  *
  * Pipeline stage that captures microphone audio via AVAudioEngine,
- * encodes as PCM 16-bit 48kHz mono, wraps in the FRAU wire protocol,
- * and sends over the relay WebSocket.
+ * converts to PCM 16-bit mono, wraps in AudioPacket,
+ * and publishes to AudioEventBus for any subscriber to consume.
  *
- * Wire protocol per audio chunk:
- *   [4 bytes "FRAU"][1 byte codecType][8 bytes sequence][4 bytes sampleRate]
- *   [2 bytes channels][2 bytes bitsPerSample][8 bytes timestamp_ms][PCM payload]
+ * Decoupled from transport concerns (FRAU wire protocol, WebSocket relay).
+ * Subscribers (AudioRelayStage, future recording stages) handle encoding
+ * and transport independently.
  *
- * codecType: 0 = mic PCM 16-bit LE
+ * AudioPacket carries raw PCM + metadata (sample rate, codec type, sequence).
+ * FRAU wire protocol encoding lives in AudioRelayStage.
  *
- * DESIGN:
- * - Tap callback does ZERO actor hops and creates ZERO Tasks.
- *   It only calls floatToPCM16 + appends to a lock-free ring buffer.
- *   This prevents the audio render thread from ever being blocked by
- *   the Swift cooperative thread pool or actor executor contention.
- *
- * - A drain loop on the actor empties the ring buffer every 100ms
- *   and sends all buffered PCM chunks as FRAU packets. This reduces
- *   actor hops from ~50/sec (one per 20ms callback) to ~10/sec.
- *
- * - The ring buffer uses os_unfair_lock (priority donation, audio-safe).
+ * Runs on its own actor executor -- never blocks the main thread.
+ * Audio session must be pre-configured as .playAndRecord by the app delegate;
+ * this stage never changes the category (which would crash the BT video stream).
  */
 
 import AVFoundation
 import Foundation
-
-// MARK: - PCM Ring Buffer (os_unfair_lock, audio render thread safe)
-
-private final class PCMRingBuffer: @unchecked Sendable {
-    private var chunks: [Data] = []
-    private let lock: os_unfair_lock_t
-
-    init() {
-        lock = .allocate(capacity: 1)
-        lock.initialize(to: os_unfair_lock())
-        chunks.reserveCapacity(64)
-    }
-
-    deinit { lock.deallocate() }
-
-    func append(_ data: Data) {
-        os_unfair_lock_lock(lock)
-        chunks.append(data)
-        os_unfair_lock_unlock(lock)
-    }
-
-    func drainAll() -> [Data] {
-        os_unfair_lock_lock(lock)
-        let result = chunks
-        chunks.removeAll(keepingCapacity: true)
-        os_unfair_lock_unlock(lock)
-        return result
-    }
-}
-
-// MARK: - AudioStage
 
 actor AudioStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "audio"
@@ -64,30 +26,27 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
     private var engine: AVAudioEngine?
     private var sequenceNumber: UInt64 = 0
-    private var relayStage: RelayStage?
+    private var eventBus: AudioEventBus?
     private var isRunning = false
     private var isPaused = false
 
-    private let pcmBuffer = PCMRingBuffer()
-    private var drainTask: Task<Void, Never>?
-
+    // Notification observers
     private var interruptionObserver: NSObjectProtocol?
     private var routeChangeObserver: NSObjectProtocol?
 
-    static let frauHeaderSize = 29
-
-    private let targetSampleRate: UInt32 = 48000
+    // Audio parameters
     private let targetChannels: UInt16 = 1
     private let targetBitsPerSample: UInt16 = 16
-    private let bufferSize: AVAudioFrameCount = 960 // 20ms at 48kHz
+
+    // Codec type: 0 = mic PCM 16-bit LE
     private let codecMic: UInt8 = 0
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
     }
 
-    func setRelayStage(_ stage: RelayStage) {
-        self.relayStage = stage
+    func setEventBus(_ bus: AudioEventBus) {
+        self.eventBus = bus
     }
 
     // MARK: - FramePipelineStage
@@ -96,11 +55,15 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         // Audio stage does not process video frames
     }
 
-    // MARK: - Start / Stop
-
     func start() async {
         guard !isRunning else { return }
 
+        // Audio session is pre-configured as .playAndRecord by CameraAccessApp.
+        // Mic permission is checked by the caller (StreamSessionViewModel) before
+        // crossing to this actor — no AVAudioSession calls needed here.
+
+        // Observe audio interruptions (phone calls, Siri, alarms)
+        // and route changes (glasses disconnect, BT switching).
         let nc = NotificationCenter.default
         interruptionObserver = nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             Task { await self?.handleInterruption(notification) }
@@ -112,34 +75,43 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
 
-        guard let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(targetSampleRate),
-            channels: 1,
-            interleaved: false
-        ) else {
-            NSLog("[AudioStage] Failed to create target audio format")
-            return
-        }
+        // Use the input node's native hardware format for the tap.
+        // Requesting a different format (e.g. 48kHz when hardware is 8kHz HFP)
+        // causes AVAudioIONodeImpl::SetOutputFormat to throw an ObjC NSException
+        // on iOS 18, which crashes as SIGABRT. We convert to our target format
+        // in the tap callback instead.
+        let hwFormat = inputNode.outputFormat(forBus: 0)
+        let isFloat = hwFormat.commonFormat == .pcmFormatFloat32 || hwFormat.commonFormat == .pcmFormatFloat64
 
-        // Capture the ring buffer — NO self, NO Task, NO actor hop in the callback.
-        let ringBuffer = self.pcmBuffer
+        NSLog("[AudioStage] Hardware format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch, \(hwFormat.commonFormat)")
 
-        inputNode.installTap(onBus: 0, bufferSize: bufferSize, format: targetFormat) { buffer, _ in
-            guard let floatData = buffer.floatChannelData?[0] else { return }
+        // Install mic tap using hardware format — no format conversion at tap level.
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
             let frameCount = Int(buffer.frameLength)
             if frameCount == 0 { return }
 
-            let pcmData = AudioStage.floatToPCM16(floatData, frameCount: frameCount)
-            ringBuffer.append(pcmData)
+            let pcmData: Data
+            if isFloat, let floatData = buffer.floatChannelData?[0] {
+                pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+            } else if let int16Data = buffer.int16ChannelData?[0] {
+                pcmData = Data(bytes: int16Data, count: frameCount * 2)
+            } else {
+                return
+            }
+
+            guard pcmData.count > 0 else { return }
+
+            let sampleRate = UInt32(hwFormat.sampleRate)
+            Task { [weak self] in
+                await self?.publishPCMAudio(pcmData, sampleRate: sampleRate)
+            }
         }
 
         do {
             try engine.start()
             self.engine = engine
             self.isRunning = true
-            startDrainLoop()
-            NSLog("[AudioStage] Started — hw: \(inputNode.outputFormat(forBus: 0).sampleRate)Hz")
+            NSLog("[AudioStage] Started")
         } catch {
             NSLog("[AudioStage] Engine start failed: \(error)")
             inputNode.removeTap(onBus: 0)
@@ -150,9 +122,6 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isRunning else { return }
 
-        drainTask?.cancel()
-        drainTask = nil
-
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -162,31 +131,14 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         isPaused = false
 
         removeObservers()
+
+        // Note: do NOT deactivate audio session here.
+        // The caller (stopSession) handles session lifecycle.
+
         NSLog("[AudioStage] Stopped")
     }
 
-    // MARK: - Drain Loop
-
-    private func startDrainLoop() {
-        drainTask?.cancel()
-        drainTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-                guard let self else { return }
-                await self.drainAndSend()
-            }
-        }
-    }
-
-    private func drainAndSend() {
-        guard isRunning else { return }
-        let chunks = pcmBuffer.drainAll()
-        for chunk in chunks {
-            sendFRAU(chunk, codecType: codecMic)
-        }
-    }
-
-    // MARK: - Notification Observers
+    // MARK: - Audio Notifications
 
     private func removeObservers() {
         if let obs = interruptionObserver {
@@ -275,38 +227,26 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         return pcmData
     }
 
-    // MARK: - FRAU Wire Protocol
+    // MARK: - AudioPacket Publishing
 
-    private func sendFRAU(_ pcmData: Data, codecType: UInt8) {
-        guard let relayStage else { return }
+    /// Convert raw PCM data to AudioPacket and publish to AudioEventBus.
+    /// Runs on the actor executor — safe to mutate sequenceNumber.
+    private func publishPCMAudio(_ pcmData: Data, sampleRate: UInt32) {
+        guard let eventBus else { return }
         guard pcmData.count > 0 else { return }
 
         sequenceNumber += 1
 
-        var header = Data(capacity: Self.frauHeaderSize)
-        header.append(contentsOf: [0x46, 0x52, 0x41, 0x55])
-        header.append(codecType)
+        let packet = AudioPacket(
+            pcmData: pcmData,
+            codecType: codecMic,
+            sampleRate: sampleRate,
+            channels: targetChannels,
+            bitsPerSample: targetBitsPerSample,
+            sequenceNumber: sequenceNumber,
+            timestampMs: UInt64(Date().timeIntervalSince1970 * 1000)
+        )
 
-        var seq = sequenceNumber
-        header.append(contentsOf: withUnsafeBytes(of: &seq) { Array($0) })
-
-        var sr = targetSampleRate
-        header.append(contentsOf: withUnsafeBytes(of: &sr) { Array($0) })
-
-        var ch = targetChannels
-        header.append(contentsOf: withUnsafeBytes(of: &ch) { Array($0) })
-
-        var bps = targetBitsPerSample
-        header.append(contentsOf: withUnsafeBytes(of: &bps) { Array($0) })
-
-        var ts = UInt64(Date().timeIntervalSince1970 * 1000)
-        header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
-
-        var message = header
-        message.append(pcmData)
-
-        Task {
-            await relayStage.sendRawData(message)
-        }
+        Task { await eventBus.publish(packet) }
     }
 }

@@ -304,20 +304,23 @@ const server = Bun.serve<WsData>({
       const sessionId = mp4Match[1];
       const includeAudio = url.searchParams.has("audio");
       try {
-        // Serve from R2 cache — proxy through server to avoid cross-origin block
+        // Serve from R2 cache if available — proxy through server to avoid
+        // cross-origin redirect issues (R2 signed URLs are different origin).
         const cachedUrl = await getCachedMp4Url(sessionId, store);
         if (cachedUrl) {
-          console.log(`[export] Serving cached MP4 for ${sessionId.slice(0, 8)}`);
-          const r2Resp = await fetch(cachedUrl);
-          if (r2Resp.ok && r2Resp.body) {
-            return new Response(r2Resp.body, {
+          console.log(`[export] Proxying cached MP4 for ${sessionId.slice(0, 8)}`);
+          const mp4Resp = await fetch(cachedUrl);
+          if (mp4Resp.ok) {
+            return new Response(mp4Resp.body, {
               headers: {
                 "Content-Type": "video/mp4",
-                "Content-Length": r2Resp.headers.get("Content-Length") || "",
-                "Cache-Control": "public, max-age=86400",
+                "Content-Length": mp4Resp.headers.get("content-length") || "",
+                "Cache-Control": "public, max-age=3600",
               },
             });
           }
+          // R2 fetch failed — fall through to rebuild
+          console.warn(`[export] R2 cache fetch failed (${mp4Resp.status}), rebuilding`);
         }
         // Build, stream to client, and persist to R2
         return await exportAndCacheMp4({ sessionId, store, includeAudio });
