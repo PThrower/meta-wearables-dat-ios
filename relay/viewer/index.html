@@ -61,6 +61,18 @@
     #connect-form button:hover { background: #409cff; }
     .disconnected #connect-form { display: flex; }
     .connected #connect-form { display: none; }
+    #unmute-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6); display: none; z-index: 20;
+      align-items: center; justify-content: center; cursor: pointer;
+    }
+    #unmute-overlay.show { display: flex; }
+    #unmute-overlay div {
+      background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 12px; padding: 24px 40px; text-align: center;
+    }
+    #unmute-overlay .icon { font-size: 48px; margin-bottom: 8px; }
+    #unmute-overlay .text { font-size: 14px; color: rgba(255,255,255,0.7); }
   </style>
 </head>
 <body class="disconnected">
@@ -89,6 +101,13 @@
   </div>
 
   <div id="status">Disconnected</div>
+
+  <div id="unmute-overlay" onclick="unmuteAudio()">
+    <div>
+      <div class="icon">&#x1f50a;</div>
+      <div class="text">Tap anywhere to enable audio</div>
+    </div>
+  </div>
 
   <div id="connect-form">
     <input id="relay-url" type="text" placeholder="wss://relay-host:8080/view" />
@@ -162,10 +181,62 @@
       ringStarted = false;
       audioResumed = false;
       meterFill.style.width = "0%";
-      if (audioCtx) { audioCtx.close(); audioCtx = null; }
+      document.getElementById("unmute-overlay").classList.remove("show");
+      if (workletNode) { workletNode.port.postMessage({ type: 'reset' }); }
+      pendingSamples = [];
+      if (audioCtx) { audioCtx.close(); audioCtx = null; workletNode = null; }
     }
 
     // --- Audio playback ---
+
+    // Inline AudioWorklet processor (avoids separate file)
+    const WORKLET_CODE = `
+      const RING = new Float32Array(96000);
+      let writePos = 0, readPos = 0, fill = 0, started = false;
+      const PREBUFFER = 48000 * 0.06;
+
+      self.onmessage = (e) => {
+        if (e.data.type === 'push') {
+          const samples = e.data.samples;
+          for (let i = 0; i < samples.length; i++) {
+            if (fill < RING.length) {
+              RING[writePos] = samples[i];
+              writePos = (writePos + 1) % RING.length;
+              fill++;
+            }
+          }
+        } else if (e.data.type === 'reset') {
+          writePos = 0; readPos = 0; fill = 0; started = false;
+        }
+      };
+
+      class RingDrainProcessor extends AudioWorkletProcessor {
+        process(inputs, outputs) {
+          const output = outputs[0][0];
+          const len = output.length;
+          if (!started) {
+            output.fill(0);
+            if (fill >= PREBUFFER) started = true;
+            return true;
+          }
+          const toRead = Math.min(len, fill);
+          for (let i = 0; i < toRead; i++) {
+            output[i] = RING[readPos];
+            readPos = (readPos + 1) % RING.length;
+          }
+          fill -= toRead;
+          if (toRead < len) {
+            for (let i = toRead; i < len; i++) output[i] = 0;
+            started = false;
+          }
+          return true;
+        }
+      }
+      registerProcessor('ring-drain', RingDrainProcessor);
+    `;
+
+    let workletNode = null;
+    let pendingSamples = []; // buffer samples until worklet is ready
 
     function initAudio() {
       if (audioCtx) return;
@@ -176,48 +247,60 @@
       ringReadPos = 0;
       ringFill = 0;
 
-      // ScriptProcessorNode: called by the browser to fill its output buffer.
-      // bufferSize=4096 gives ~85ms at 48kHz — low latency but stable.
-      const processor = audioCtx.createScriptProcessor(4096, 0, 1);
-      processor.onaudioprocess = (e) => {
-        const output = e.outputBuffer.getChannelData(0);
-        const len = output.length;
-
-        if (!ringStarted) {
-          // Not enough data yet — output silence
-          output.fill(0);
-          if (ringFill >= PREBUFFER_SAMPLES) {
-            ringStarted = true;
+      const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      audioCtx.audioWorklet.addModule(url).then(() => {
+        workletNode = new AudioWorkletNode(audioCtx, 'ring-drain');
+        workletNode.connect(audioCtx.destination);
+        // Flush any samples that arrived before worklet was ready
+        for (const batch of pendingSamples) {
+          workletNode.port.postMessage({ type: 'push', samples: batch });
+        }
+        pendingSamples = [];
+      }).catch(() => {
+        // Fallback to ScriptProcessorNode if AudioWorklet fails
+        const processor = audioCtx.createScriptProcessor(4096, 0, 1);
+        processor.onaudioprocess = (e) => {
+          const output = e.outputBuffer.getChannelData(0);
+          const len = output.length;
+          if (!ringStarted) {
+            output.fill(0);
+            if (ringFill >= PREBUFFER_SAMPLES) ringStarted = true;
+            return;
           }
-          return;
-        }
-
-        // Drain from ring buffer
-        const toRead = Math.min(len, ringFill);
-        for (let i = 0; i < toRead; i++) {
-          output[i] = RING_BUFFER[ringReadPos];
-          ringReadPos = (ringReadPos + 1) % RING_SIZE;
-        }
-        ringFill -= toRead;
-
-        // Fill remainder with silence if buffer underran
-        if (toRead < len) {
-          for (let i = toRead; i < len; i++) {
-            output[i] = 0;
+          const toRead = Math.min(len, ringFill);
+          for (let i = 0; i < toRead; i++) {
+            output[i] = RING_BUFFER[ringReadPos];
+            ringReadPos = (ringReadPos + 1) % RING_SIZE;
           }
-          // Underrun — reset prebuffer so we wait for data again
-          ringStarted = false;
-        }
-      };
-      processor.connect(audioCtx.destination);
+          ringFill -= toRead;
+          if (toRead < len) {
+            for (let i = toRead; i < len; i++) output[i] = 0;
+            ringStarted = false;
+          }
+        };
+        processor.connect(audioCtx.destination);
+      });
+      URL.revokeObjectURL(url);
     }
 
     function ensureAudioResumed() {
       if (!audioCtx || audioResumed) return;
       if (audioCtx.state === "suspended") {
-        audioCtx.resume();
+        // Show unmute overlay instead of trying to resume silently
+        document.getElementById("unmute-overlay").classList.add("show");
+        return;
       }
       audioResumed = true;
+    }
+
+    function unmuteAudio() {
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume().then(() => {
+          audioResumed = true;
+          document.getElementById("unmute-overlay").classList.remove("show");
+        });
+      }
     }
 
     function pushAudioToRing(pcmInt16, sampleRate, channels) {
@@ -230,26 +313,37 @@
       const targetRate = audioCtx.sampleRate;
       const ratio = targetRate / sampleRate;
       const outSamples = Math.round(inSamples * ratio);
+      const floatSamples = new Float32Array(outSamples);
 
       for (let i = 0; i < outSamples; i++) {
-        // Linear interpolation resampling
         const srcPos = i / ratio;
         const idx0 = Math.floor(srcPos);
         const idx1 = Math.min(idx0 + 1, inSamples - 1);
         const frac = srcPos - idx0;
         const s0 = pcmInt16[idx0] / 32768.0;
         const s1 = pcmInt16[idx1] / 32768.0;
-        const sample = s0 + (s1 - s0) * frac;
+        floatSamples[i] = s0 + (s1 - s0) * frac;
+      }
 
-        if (ringFill < RING_SIZE) {
-          RING_BUFFER[ringWritePos] = sample;
-          ringWritePos = (ringWritePos + 1) % RING_SIZE;
-          ringFill++;
-        }
-
-        // Track peak for meter
-        const abs = Math.abs(sample);
+      // Track peak for meter
+      for (let i = 0; i < floatSamples.length; i++) {
+        const abs = Math.abs(floatSamples[i]);
         if (abs > audioLevel) audioLevel = abs;
+      }
+
+      // Send to AudioWorklet if ready, else fallback ring buffer
+      if (workletNode) {
+        workletNode.port.postMessage({ type: 'push', samples: floatSamples });
+      } else {
+        pendingSamples.push(floatSamples);
+        // Also push to fallback ring buffer in case ScriptProcessor is used
+        for (let i = 0; i < floatSamples.length; i++) {
+          if (ringFill < RING_SIZE) {
+            RING_BUFFER[ringWritePos] = floatSamples[i];
+            ringWritePos = (ringWritePos + 1) % RING_SIZE;
+            ringFill++;
+          }
+        }
       }
     }
 
