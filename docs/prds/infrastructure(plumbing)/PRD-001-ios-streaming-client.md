@@ -83,6 +83,7 @@ The `CameraAccess` sample app extends Meta's reference sample with:
 | P1-5 | Device battery level display | Show glasses battery in pre-stream and stream views |
 | P1-6 | Production app target (separate from sample) | Xcode target `CaringMind` with own bundle ID, entitlements, and App Store config; CameraAccess remains as dev reference |
 | P1-7 | AudioPlaybackStage via AVAudioEngine (active development) | write() produces PCM, player node routes to glasses speaker, same PCM published to AudioEventBus; codecType 2 enabled; see plan `streamed-dreaming-panda.md` |
+| P1-8 | Bidirectional audio: receive FRAU from relay (AudioSinkStage) | New `AudioSinkStage` receives FRAU frames (codecType 3) from relay WebSocket, decodes PCM, plays via AVAudioEngine; published to AudioEventBus alongside local audio sources; same content stream as outbound FRAU |
 
 ### P2 -- Could Have (Backlog)
 

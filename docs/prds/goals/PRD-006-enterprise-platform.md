@@ -2,7 +2,7 @@
 
 **Product:** com.mwdat-ios / Enterprise Platform
 **Owner:** @ebowwa
-**Status:** Draft
+**Status:** Phase 7 -- Not Active (all foundation PRDs must reach P1 Complete first)
 **Last Updated:** 2026-04-10
 **Depends On:** PRD-001 (iOS Client), PRD-002 (Relay Platform), PRD-003 (On-Device AI), PRD-004 (Session Persistence)
 
@@ -131,10 +131,14 @@ The success of the platform launch will be evaluated through a multi-dimensional
 
 #### 4.2.4 Compatibility
 
+**Phase 7 (initial launch):**
 - HeyCyan W610 (8 MP Camera) and Lensmoo W600
 - W600, M01 and HeyCyan products
-- Meta Smart Glasses (via Android, iOS clients)
-- Apple Vision Pro
+- Meta Smart Glasses (via iOS client)
+
+**Future phases (no plan yet):**
+- Apple Vision Pro (requires visionOS SDK investigation)
+- Meta Smart Glasses via Android client
 
 ---
 
@@ -195,7 +199,16 @@ The final product will be available via enterprise deployment with mobile apps o
 
 ---
 
-## 9. Next Steps
+## 9. Scaling Risks
+
+| Risk | Severity | Note |
+|------|----------|------|
+| Single-person team (PM, Engineering, all roles) | High | @ebowwa covers all responsibilities; hiring or contracting needed before pilot launch |
+| Hardware vendor SDKs may not exist or have restrictive licenses | High | FR-003 blocked until Lensmoo and HeyCyan SDKs are evaluated |
+| AI safety protocols undefined | High | Legal review required before any enterprise deployment |
+| All foundation PRDs must reach P1 Complete before this PRD activates | Medium | Current focus: PRDs 001-005 P1 items and PRD-007 auth |
+
+## 10. Next Steps
 
 1. **Stakeholder Review:** Review this document with key stakeholders and secure sign-off.
 2. **Resolve Open Issues (Phase 1):** Prioritize and finalize decisions on the four critical open issues (AI Safety Protocols, Core PRD Content, Hardware Latency Feasibility, and Hardware Variant Management).

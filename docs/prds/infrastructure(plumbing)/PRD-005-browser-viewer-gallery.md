@@ -57,7 +57,7 @@ The viewer needs to evolve from a debug tool into a usable product surface where
 5. ~~**No viewer count**~~ -- RESOLVED: viewer count in session directory + stats endpoint
 6. ~~**Gallery is static**~~ -- RESOLVED: live bucket queries with 30s TTL cache
 7. ~~**No recording playback**~~ -- RESOLVED: MP4 export with R2 caching, `/session/{id}/video.mp4`
-8. **No AI overlay** -- detection events not rendered on the video canvas
+8. **No AI overlay** -- detection events not rendered on the video canvas (blocked on PRD-003 P1-2)
 9. **No mobile-responsive layout** -- designed for desktop browsers
 10. **No share functionality** -- no way to generate a sharable session link
 
@@ -81,7 +81,7 @@ The viewer needs to evolve from a debug tool into a usable product surface where
 
 | ID | Requirement | Acceptance Criteria |
 |----|-------------|---------------------|
-| P1-1 | Google OAuth viewer auth | Viewer authenticates before accessing any session; auth token passed on WebSocket upgrade |
+| P1-1 | Google OAuth viewer auth | Viewer authenticates before accessing any session; auth token passed on WebSocket upgrade; see PRD-007 for implementation |
 | P1-2 | Viewer count display (for operator and viewers) | "N viewers watching" shown in both the iOS app and the browser viewer |
 | P1-3 | Sharable session link | Operator can generate `https://relay.simulationapi.com/session/{id}` link; copy to clipboard |
 | P1-4 | Gallery page with stored session browsing | Grid of past sessions from bucket; thumbnail, duration, date, device name; click to play |

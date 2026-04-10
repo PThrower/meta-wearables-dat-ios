@@ -97,13 +97,6 @@ class StreamSessionViewModel: ObservableObject {
 
   // Auth state
   @Published var idToken: String?
-    didSet {
-      // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
-      // active tears down the BT HFP link and kills video. Audio routing changes
-      // must only happen before streaming starts. The mode is stored so it can
-      // be applied on the next relay session if needed in the future.
-    }
-  }
 
   var isStreaming: Bool {
     streamingStatus != .stopped

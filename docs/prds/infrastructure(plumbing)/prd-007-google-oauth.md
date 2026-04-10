@@ -74,11 +74,21 @@ Browser (GIS popup)              iOS (ASWebAuthenticationSession)
 2. Authorization header: `Bearer <jwt>`
 3. Cookie: `relay_token=<jwt>`
 
-## Dev Mode Bypass
+## Token Refresh Strategy
+
+Google ID tokens expire after 1 hour. WebSocket connections may be long-lived.
+
+**Browser:** GIS popup re-authenticates silently (session cookie). On 401 close code, `relay-player.js` re-authenticates and reconnects.
+
+**iOS:** `GoogleAuthService` stores refresh token in Keychain. Before the ID token expires, `StreamSessionViewModel` refreshes and updates the WebSocket connection. On 401 close code, force-refresh the token and reconnect.
+
+**Server:** No server-side token refresh needed -- tokens are validated on each WebSocket upgrade.
 
 `RELAY_NO_AUTH=1` in environment:
 - `verifyToken()` returns `{ sub: "dev", email: "dev@localhost" }`
 - All routes accessible without token
+- **Warning logged on every request** when bypass is active: `"AUTH BYPASS ACTIVE -- RELAY_NO_AUTH=1"`
+- Startup log: `"WARNING: Auth bypass enabled. Do not use in production."`
 
 ## Doppler Secrets
 

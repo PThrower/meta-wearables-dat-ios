@@ -86,6 +86,7 @@ The current relay server handles one publisher at a time. A second publisher is 
 | P1-3 | AI worker fan-out endpoint (`/analyze?session=<id>`) | Same binary frames forwarded to AI worker WebSocket connections; throttled independently of viewers |
 | P1-4 | Per-session stats (`/stats?session=<id>`) | Scoped metrics: publisher FPS, viewer count, bandwidth, jitter, per-viewer quality preset |
 | P1-5 | Systemd service + deploy script | ~~`systemctl restart caringmind-relay`~~ RESOLVED: systemd service `caringmind-relay` running on Hetzner VPS |
+| P1-6 | Bidirectional audio: push FRAU to iOS client | Relay sends FRAU frames (codecType 3) to publisher's WebSocket; enables server-side TTS, remote expert voice, AI guidance audio; uses existing publish WebSocket connection (no new endpoint) |
 
 ### P2 -- Could Have
 
