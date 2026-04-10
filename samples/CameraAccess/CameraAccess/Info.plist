@@ -32,9 +32,12 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>cameraaccess</string>
+				<string>com.googleusercontent.apps.$(GOOGLE_IOS_CLIENT_ID_REVERSED)</string>
 			</array>
 		</dict>
 	</array>
+	<key>GIDClientID</key>
+	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<!-- Begin required section for Device Access Toolkit Apps -->

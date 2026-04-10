@@ -86,9 +86,16 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Connection
 
-    func connect(to urlString: String) async throws {
-        guard let url = URL(string: urlString) else {
-            throw RelayError.invalidURL(urlString)
+    func connect(to urlString: String, idToken: String? = nil) async throws {
+        // Append token to URL if provided
+        var fullUrlString = urlString
+        if let token = idToken, !token.isEmpty {
+            let separator = urlString.contains("?") ? "&" : "?"
+            fullUrlString = "\(urlString)\(separator)token=\(token)"
+        }
+
+        guard let url = URL(string: fullUrlString) else {
+            throw RelayError.invalidURL(fullUrlString)
         }
 
         disconnect()
@@ -138,10 +145,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             sendHello()
             startReceiveLoop()
             startKeepAlive()
-            NSLog("[RelayStage] Connected to \(urlString)")
+            NSLog("[RelayStage] Connected to \(fullUrlString)")
         } else {
             disconnect()
-            throw RelayError.connectionFailed(urlString)
+            throw RelayError.connectionFailed(fullUrlString)
         }
     }
 
@@ -454,12 +461,16 @@ enum RelayError: LocalizedError {
     case invalidURL(String)
     case notConnected
     case connectionFailed(String)
+    case authRequired
+    case accessDenied
 
     var errorDescription: String? {
         switch self {
         case .invalidURL(let url): return "Invalid relay URL: \(url)"
         case .notConnected: return "Relay not connected"
         case .connectionFailed(let url): return "Failed to connect to relay: \(url)"
+        case .authRequired: return "Authentication required"
+        case .accessDenied: return "Access denied"
         }
     }
 }

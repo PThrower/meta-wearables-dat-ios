@@ -61,7 +61,11 @@ export class SessionRegistry {
           systemVersion: null,
           wearableType: null,
           resolution: null,
+          ownerEmail: null,
         },
+        ownerId: undefined,
+        ownerEmail: undefined,
+        isPublic: true,
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);
@@ -82,8 +86,13 @@ export class SessionRegistry {
   // --- Publisher management ---
 
   /** Claim the publisher slot for a session. Returns error string or null on success. */
-  claimPublisher(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string): string | null {
+  claimPublisher(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string): string | null {
     const session = this.getOrCreate(sessionId);
+
+    // Ownership enforcement: if session already has an owner, verify identity
+    if (session.ownerId && userId && session.ownerId !== userId) {
+      return "session owned by another user";
+    }
 
     if (session.publisher && session.publisher.ws.readyState === WebSocket.OPEN) {
       return "publisher already connected";
@@ -119,6 +128,13 @@ export class SessionRegistry {
     session.publisher = publisher;
     session.lastActivityAt = Date.now();
 
+    // Set session ownership on first publisher claim
+    if (userId && !session.ownerId) {
+      session.ownerId = userId;
+      session.ownerEmail = email || undefined;
+      session.metadata.ownerEmail = email || null;
+    }
+
     // Start recorder
     session.recorder = new SessionRecorder(id, this.store);
     session.recorder.start({});
@@ -148,9 +164,15 @@ export class SessionRegistry {
 
   // --- Viewer management ---
 
-  /** Add a viewer to a session */
-  addViewer(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string): string {
+  /** Add a viewer to a session. Returns viewer ID or error string (prefixed with "error:"). */
+  addViewer(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string): string {
     const session = this.getOrCreate(sessionId);
+
+    // Access control: private sessions require owner identity
+    if (!session.isPublic && session.ownerId && userId !== session.ownerId) {
+      return "error:access denied";
+    }
+
     const id = crypto.randomUUID();
     ws.data.viewerId = id;
 

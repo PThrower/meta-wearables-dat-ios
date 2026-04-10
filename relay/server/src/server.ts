@@ -36,6 +36,7 @@ import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
+import { verifyToken, extractToken } from "./auth.js";
 import {
   getSessionExportMeta,
   getSessionThumbnail,
@@ -161,6 +162,19 @@ async function findLatestSessionId(): Promise<string | null> {
   return latestId;
 }
 
+// --- Auth config injection into viewer HTML ---
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
+
+function injectAuthConfig(html: string): string {
+  let result = html;
+  const authScript = `<script>window.__GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}";${NO_AUTH_FLAG ? 'document.documentElement.dataset.noAuth="1";' : ''}</script>`;
+  // Inject right before the closing </head> if not already present
+  result = result.replace("</head>", `${authScript}</head>`);
+  return result;
+}
+
 // --- Server ---
 
 const server = Bun.serve<WsData>({
@@ -194,6 +208,11 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
+      const token = extractToken(req, url);
+      const user = token ? await verifyToken(token) : null;
+      if (!user) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
       const s = await registry.stats(wifiIp, PORT, serverStartTime, store);
       return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
@@ -263,9 +282,9 @@ const server = Bun.serve<WsData>({
         if (!data) return Response.json({ error: "Session not found" }, { status: 404 });
       }
       const gallery = await galleryCached();
-      const html = viewerHtml
+      const html = injectAuthConfig(viewerHtml
         .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
-        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`);
+        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`));
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -364,21 +383,26 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
       const data = await galleryCached();
-      const html = viewerHtml.replace(
+      const html = injectAuthConfig(viewerHtml.replace(
         "<!--__GALLERY_DATA__-->",
         `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
-      );
+      ));
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
+      const token = extractToken(req, url);
+      const user = token ? await verifyToken(token) : null;
+      if (!user) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
       const sessionId = url.searchParams.get("session") || "default";
       const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
         || req.headers.get("x-real-ip")
         || "unknown";
-      server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId } });
+      server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId, userId: user.sub, email: user.email } });
       return new Response(null, { status: 204 });
     }
 
@@ -395,9 +419,9 @@ const server = Bun.serve<WsData>({
     if (isView && !wsUpgrade) {
       const sessionId = registry.resolveSessionId(url);
       const gallery = await galleryCached();
-      const html = viewerHtml
+      const html = injectAuthConfig(viewerHtml
         .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
-        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`);
+        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`));
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -407,7 +431,14 @@ const server = Bun.serve<WsData>({
       || req.headers.get("x-real-ip")
       || "unknown";
 
-    server.upgrade(req, { data: { role, clientIp, sessionId } });
+    // Auth check for WebSocket upgrade
+    const token = extractToken(req, url);
+    const user = token ? await verifyToken(token) : null;
+    if (!user) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user.sub, email: user.email } });
     return new Response(null, { status: 204 });
   },
   websocket: {
@@ -434,13 +465,17 @@ const server = Bun.serve<WsData>({
       }
 
       if (role === "publish") {
-        const err = registry.claimPublisher(sessionId, ws, clientIp);
+        const err = registry.claimPublisher(sessionId, ws, clientIp, ws.data.userId, ws.data.email);
         if (err) {
-          ws.close(4001, err);
+          ws.close(err === "session owned by another user" ? 4003 : 4001, err);
           return;
         }
       } else {
-        registry.addViewer(sessionId, ws, clientIp);
+        const result = registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email);
+        if (result.startsWith("error:")) {
+          ws.close(4003, result.slice(6));
+          return;
+        }
       }
     },
     async message(ws, message) {

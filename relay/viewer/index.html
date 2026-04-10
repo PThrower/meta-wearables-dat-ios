@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!--__GALLERY_DATA__-->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -203,9 +204,33 @@
     }
     #unmute .icon { font-size: 48px; margin-bottom: 8px; }
     #unmute .text { font-size: 14px; color: rgba(255,255,255,0.7); }
+
+    /* === LOGIN OVERLAY === */
+    #loginOverlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.9);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 16px;
+    }
+    #loginOverlay.hidden { display: none; }
+    #loginOverlay h2 { color: #fff; font-size: 18px; font-weight: 600; }
+    #loginOverlay p { color: rgba(255,255,255,0.5); font-size: 12px; max-width: 300px; text-align: center; }
+    #loginOverlay .g_id_signin { margin-top: 8px; }
   </style>
 </head>
 <body>
+  <!-- LOGIN OVERLAY -->
+  <div id="loginOverlay" class="hidden">
+    <h2>Sign in to CaringMind</h2>
+    <p>Authentication required to view live streams and access stats.</p>
+    <div id="g_id_onload"
+         data-client_id=""
+         data-callback="handleGoogleLogin"
+         data-auto_prompt="false">
+    </div>
+    <div class="g_id_signin" data-type="standard" data-size="large" data-theme="filled_black" data-text="sign_in_with" data-shape="rectangular" data-logo_alignment="left"></div>
+  </div>
+
   <!-- GALLERY -->
   <div id="gallery">
     <header>
@@ -265,6 +290,46 @@
 
   <script src="/relay-player.js"></script>
   <script>
+    // === AUTH ===
+    const loginOverlay = document.getElementById("loginOverlay");
+    const NO_AUTH = document.documentElement.dataset.noAuth === "1";
+
+    function requireAuth() {
+      if (NO_AUTH) return false;
+      const token = localStorage.getItem("relay_token");
+      if (!token) {
+        loginOverlay.classList.remove("hidden");
+        return true;
+      }
+      return false;
+    }
+
+    function handleGoogleLogin(response) {
+      const token = response.credential;
+      localStorage.setItem("relay_token", token);
+      loginOverlay.classList.add("hidden");
+      // If a session was queued, open it now
+      if (window.__pendingSession) {
+        watchLive(window.__pendingSession);
+        window.__pendingSession = null;
+      } else if (!window.__GALLERY_DATA) {
+        fetchGallery();
+      }
+    }
+    // Expose globally for GIS callback
+    window.handleGoogleLogin = handleGoogleLogin;
+
+    // Set GIS client_id from server-injected config
+    (function() {
+      const clientId = window.__GOOGLE_CLIENT_ID || "";
+      if (clientId) {
+        const onload = document.getElementById("g_id_onload");
+        if (onload) onload.setAttribute("data-client_id", clientId);
+        // Also set it on any gsi divs
+        document.querySelectorAll("[data-client_id]").forEach(el => el.setAttribute("data-client_id", clientId));
+      }
+    })();
+
     const grid = document.getElementById("grid");
     const subtitle = document.getElementById("subtitle");
     const lastRefresh = document.getElementById("last-refresh");
@@ -374,8 +439,15 @@
 
     // === LIVE PLAYER ===
     function watchLive(sessionId) {
+      // Require auth before connecting
+      if (requireAuth()) {
+        window.__pendingSession = sessionId;
+        return;
+      }
+
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}`;
+      const token = localStorage.getItem("relay_token") || "";
+      const wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
 
       if (player) { player.destroy(); player = null; }
       document.getElementById("p-fps").textContent = "--";
@@ -450,7 +522,7 @@
 
     // Auto-open if session ID provided via URL, otherwise show gallery
     if (!autoOpenSession()) {
-      // Fetch gallery data if not injected
+      // Fetch gallery data if not injected (gallery is public, no auth needed)
       if (!window.__GALLERY_DATA) fetchGallery();
     }
 

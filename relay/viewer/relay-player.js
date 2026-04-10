@@ -154,7 +154,22 @@ class RelayPlayer {
 
     this.ws.onmessage = (event) => this._handleMessage(event);
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      // 401 = auth required, 403 = access denied -- do not reconnect
+      if (event.code === 401 || event.code === 4001) {
+        this.intentionalClose = true;
+        this.callbacks.onConnectionState('error');
+        this.callbacks.onStatus('AUTH REQUIRED');
+        // Clear stale token
+        try { localStorage.removeItem('relay_token'); } catch {}
+        return;
+      }
+      if (event.code === 4003) {
+        this.intentionalClose = true;
+        this.callbacks.onConnectionState('error');
+        this.callbacks.onStatus('ACCESS DENIED');
+        return;
+      }
       this._resetStreamState();
       this.callbacks.onConnectionState('disconnected');
       this.callbacks.onStatus('CLOSED');

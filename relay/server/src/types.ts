@@ -13,6 +13,9 @@ export interface WsData {
   clientIp: string;
   sessionId: string;    // session this connection belongs to
   viewerId?: string;
+  userId?: string;      // Google sub (user ID) from verified token
+  email?: string;       // Google email from verified token
+  unsub?: () => void;   // Audio tap unsubscribe callback
 }
 
 // --- Quality Presets ---
@@ -86,6 +89,7 @@ export interface SessionMetadata {
   systemVersion: string | null;
   wearableType: string | null;
   resolution: { width: number; height: number } | null;
+  ownerEmail: string | null;
 }
 
 export interface Session {
@@ -97,4 +101,7 @@ export interface Session {
   createdAt: number;
   lastActivityAt: number;
   metadata: SessionMetadata;
+  ownerId?: string;             // Google sub (user ID) of session creator
+  ownerEmail?: string;          // Google email of session creator
+  isPublic: boolean;            // if false, only owner can view
 }
