@@ -336,7 +336,7 @@
           <div class="card-actions">
             ${s.segments > 0 ? `<button class="action-btn primary" onclick="playVideo('${s.videoUrl}')">Play</button>
             <a class="action-btn" href="${s.videoUrl}" target="_blank">Download</a>` : ""}
-            ${s.live ? `<button class="action-btn primary" onclick="watchLive('${s.sessionId}')">Watch Live</button>` : ""}
+            ${s.live ? `<a class="action-btn primary" href="/view?session=${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
           </div>
         </div>
       </div>`;
