@@ -1,9 +1,9 @@
 # PRD-004: Session Persistence & Playback
 
-**Product:** com.mwdat-ios / Relay Server + Object Storage  
-**Owner:** @ebowwa  
-**Status:** Draft  
-**Last Updated:** 2026-04-06  
+**Product:** com.mwdat-ios / Relay Server + Object Storage
+**Owner:** @ebowwa
+**Status:** P0 Complete
+**Last Updated:** 2026-04-10
 **Depends On:** PRD-002 (Multi-session relay), PRD-003 (AI detections to persist)
 
 ---
@@ -45,13 +45,13 @@ The server already sees every FRLY/FRAU frame in real-time. Writing to an S3-com
 
 ### Gaps
 
-1. **Server-side recorder is not wired into the live fan-out loop** -- frames aren't being buffered or flushed
-2. **No bucket is provisioned** -- S3 credentials and endpoint not configured
-3. **No segment flush logic** -- buffering JPEG frames into timed segments not implemented
-4. **No audio recording** -- FRAU chunks not captured server-side
-5. **No session metadata persistence** -- device info, timestamps, config lost on disconnect
-6. **No retrieval endpoints** -- no way to list or stream stored sessions via HTTP
-7. **Gallery data injection is static** -- `<!--__GALLERY_DATA__-->` placeholder, not live bucket queries
+1. ~~**Server-side recorder not wired into fan-out**~~ -- RESOLVED: `session.recorder?.appendVideo(buf)` / `appendAudio(buf)` in server.ts message handler
+2. ~~**No bucket provisioned**~~ -- RESOLVED: Hetzner Storage Box with S3 API, credentials via Doppler
+3. ~~**No segment flush logic**~~ -- RESOLVED: `SessionRecorder` buffers and flushes on timed interval
+4. ~~**No audio recording**~~ -- RESOLVED: FRAU PCM chunks captured alongside video
+5. ~~**No session metadata persistence**~~ -- RESOLVED: `meta.json` with device info, timestamps, duration, frame count
+6. ~~**No retrieval endpoints**~~ -- RESOLVED: signed URLs for video/audio segments, MP4 export, thumbnail endpoint
+7. ~~**Gallery data injection is static**~~ -- RESOLVED: `galleryCached()` with 30s TTL, live from bucket
 
 ---
 
@@ -79,13 +79,14 @@ The server already sees every FRLY/FRAU frame in real-time. Writing to an S3-com
 | P1-4 | AI detection persistence | `AIDetection` events written to `sessions/{sessionId}/ai/detections.jsonl` |
 | P1-5 | Thumbnail generation per session | First frame of session saved as JPEG thumbnail to `sessions/{sessionId}/thumb.jpg` |
 | P1-6 | Presigned URL generation for direct download | `GET /recording/{id}/download` returns S3 presigned URL (time-limited) |
+| P1-7 | Opus audio transcoding | Stored PCM segments transcoded to Opus on flush; reduces audio storage from ~2.8 GB/hr to ~280 MB/hr; Opus files stored alongside PCM originals |
 
 ### P2 -- Could Have
 
 | ID | Requirement | Acceptance Criteria |
 |----|-------------|---------------------|
-| P2-1 | HLS transcoding via ffmpeg | Convert stored MJPEG + PCM to HLS `.m3u8` + `.ts` segments for standard video playback |
-| P2-2 | MP4 export | Combine video + audio into MP4 container; serve via presigned URL |
+| P2-1 | HLS transcoding via ffmpeg | Convert stored MJPEG + Opus (P1-7) to HLS `.m3u8` + `.ts` segments for standard video playback |
+| P2-2 | ~~MP4 export~~ -- RESOLVED: `exportAndCacheMp4()` builds MP4 via ffmpeg, caches to R2, serves from `/session/{id}/video.mp4` |
 | P2-3 | AI keyframe extraction | AI-flagged frames (person detected, text visible) saved as individual JPEGs with metadata |
 | P2-4 | Whisper transcription of stored audio | Batch-process stored PCM segments through Whisper; write `transcriptions.jsonl` |
 | P2-5 | Bucket lifecycle rules | Auto-expire video segments after 90 days; archive AI results to cold storage after 30 days |
@@ -241,6 +242,6 @@ At Hetzner Storage Box pricing (~EUR 3.81/month for 100GB): ~25 hours of recordi
 | S3 flush failure loses segment | High | Retry with exponential backoff; hold buffer until confirmed; log gaps |
 | Memory pressure from large video/audio buffers | High | Cap buffer size; flush early if approaching limit; drop oldest frames |
 | Storage cost accumulates unbounded | Medium | Lifecycle rules (P2-5); configurable per-session recording (P0-7) |
-| PCM audio is uncompressed (~2.8 GB/hour) | Medium | Opus transcoding (P2-1) reduces 10x; defer to optimization phase |
+| PCM audio is uncompressed (~2.8 GB/hour) | Medium | Opus transcoding (P1-7) reduces 10x to ~280 MB/hr; PCM kept as source until Opus is validated |
 | MJPEG is not a standard playback format | Low | HLS transcoding (P2-1) for browser playback; MJPEG is fine for storage/retrieval |
 | Bucket credentials exposure | Medium | Credentials via Doppler; server proxies all access; bucket not public |

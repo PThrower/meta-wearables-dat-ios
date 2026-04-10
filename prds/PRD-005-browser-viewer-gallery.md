@@ -1,10 +1,10 @@
 # PRD-005: Browser Viewer & Creator Gallery
 
-**Product:** com.mwdat-ios / Relay Viewer  
-**Owner:** @ebowwa  
-**Status:** Draft  
-**Last Updated:** 2026-04-06  
-**Depends On:** PRD-002 (Multi-session relay), PRD-004 (Stored sessions for gallery)
+**Product:** com.mwdat-ios / Relay Viewer
+**Owner:** @ebowwa
+**Status:** P0 Complete
+**Last Updated:** 2026-04-10
+**Depends On:** PRD-002 (Multi-session relay), PRD-004 (Stored sessions for gallery), PRD-007 (Viewer auth)
 
 ---
 
@@ -50,13 +50,13 @@ The viewer needs to evolve from a debug tool into a usable product surface where
 
 ### Gaps
 
-1. **Manual URL entry** -- viewer must know the WebSocket URL and type it
-2. **No session discovery** -- can't browse active sessions from the viewer
-3. **No auth** -- anyone with the URL watches; no viewer identity
-4. **No quality controls** -- quality preset is server-default; viewer can't choose
-5. **No viewer count** -- operator doesn't know who's watching
-6. **Gallery is static** -- server-injected data, not live bucket queries
-7. **No recording playback** -- gallery shows thumbnails but can't play back
+1. ~~**Manual URL entry**~~ -- RESOLVED: session directory at `/` with clickable session cards
+2. ~~**No session discovery**~~ -- RESOLVED: `/sessions` JSON endpoint + directory landing page
+3. **No auth** -- anyone with the URL watches; no viewer identity (see PRD-007 for Google OAuth implementation)
+4. ~~**No quality controls**~~ -- RESOLVED: viewer quality preset selector (High/Medium/Low/Mini)
+5. ~~**No viewer count**~~ -- RESOLVED: viewer count in session directory + stats endpoint
+6. ~~**Gallery is static**~~ -- RESOLVED: live bucket queries with 30s TTL cache
+7. ~~**No recording playback**~~ -- RESOLVED: MP4 export with R2 caching, `/session/{id}/video.mp4`
 8. **No AI overlay** -- detection events not rendered on the video canvas
 9. **No mobile-responsive layout** -- designed for desktop browsers
 10. **No share functionality** -- no way to generate a sharable session link

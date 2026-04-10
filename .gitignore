@@ -30,3 +30,7 @@ lmdb.db-lock
 relay/server/node_modules/
 relay/server/dist/
 relay/server/doppler.env
+relay/viewer/dist/
+relay/viewer/node_modules/
+relay/packages/relay-protocol/dist/
+relay/packages/relay-protocol/node_modules/

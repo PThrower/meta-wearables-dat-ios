@@ -15,6 +15,7 @@
     "@aws-sdk/client-s3": "^3.1024.0",
     "@aws-sdk/s3-request-presigner": "^3.1024.0",
     "@ebowwa/object-store": "^0.1.0",
+    "@ebowwa/relay-protocol": "file:../packages/relay-protocol",
     "google-auth-library": "^9.0.0"
   },
   "devDependencies": {

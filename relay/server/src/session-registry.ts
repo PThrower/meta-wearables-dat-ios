@@ -532,6 +532,8 @@ export class SessionRegistry {
         port,
         memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
         activeConnections: activePublisherCount + this.totalViewers(),
+        gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
+        buildVersion: process.env.BUILD_VERSION ?? "dev",
       },
       aggregate: {
         totalViewers: this.totalViewers(),

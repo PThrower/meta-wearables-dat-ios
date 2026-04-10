@@ -105,14 +105,11 @@ async function loadWasm() {
 
 await loadWasm();
 
-// --- Load HTML template ---
+// --- Load HTML template from Vite build output ---
 
-const viewerHtml = await Bun.file(join(import.meta.dir, "../../viewer/index.html")).text().catch(() =>
-  "<html><body><h1>Viewer HTML not found</h1></body></html>"
-);
-
-const relayPlayerJs = await Bun.file(join(import.meta.dir, "../../viewer/relay-player.js")).text().catch(() =>
-  ""
+const VIEWER_DIR = join(import.meta.dir, "../../viewer/dist");
+const viewerHtml = await Bun.file(join(VIEWER_DIR, "index.html")).text().catch(() =>
+  "<html><body><h1>Viewer HTML not found. Run: cd ../viewer && bun run build</h1></body></html>"
 );
 
 // --- Stale cleanup ---
@@ -230,13 +227,14 @@ const server = Bun.serve<WsData>({
       });
     }
 
-    // --- Relay Player JS (shared module) ---
+    // --- Static viewer assets (Vite build output) ---
 
-    if (url.pathname === "/relay-player.js") {
-      if (!relayPlayerJs) return Response.json({ error: "Not found" }, { status: 404 });
-      return new Response(relayPlayerJs, {
-        headers: { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=60" },
-      });
+    if (url.pathname.startsWith("/assets/")) {
+      const filePath = join(VIEWER_DIR, url.pathname);
+      const file = Bun.file(filePath);
+      if (await file.exists()) {
+        return new Response(file);
+      }
     }
 
     // --- Live Sessions (active relay sessions) ---

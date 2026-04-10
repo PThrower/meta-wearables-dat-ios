@@ -1,10 +1,18 @@
 /**
  * Shared types for caringmind-frame-relay
  *
- * Extracted from server.ts for multi-session support.
+ * Server-specific types stay here. Protocol types imported from @ebowwa/relay-protocol.
  */
 
 import type { ServerWebSocket } from "bun";
+import type { FrameTiming as FrameTimingType, QualityPreset as QualityPresetType } from "@ebowwa/relay-protocol";
+import { QUALITY_PRESETS, DEFAULT_QUALITY } from "@ebowwa/relay-protocol";
+
+// --- Protocol types from shared package ---
+
+export type FrameTiming = FrameTimingType;
+export type QualityPreset = QualityPresetType;
+export { QUALITY_PRESETS, DEFAULT_QUALITY };
 
 // --- WebSocket Data Type (Bun.serve generic) ---
 
@@ -16,32 +24,6 @@ export interface WsData {
   userId?: string;      // Google sub (user ID) from verified token
   email?: string;       // Google email from verified token
   unsub?: () => void;   // Audio tap unsubscribe callback
-}
-
-// --- Quality Presets ---
-
-export type QualityPreset = "high" | "medium" | "low" | "mini";
-
-export const QUALITY_PRESETS: Record<QualityPreset, { maxFps: number; minIntervalMs: number; label: string }> = {
-  high:   { maxFps: 30, minIntervalMs: 33,  label: "High (30 FPS)" },
-  medium: { maxFps: 15, minIntervalMs: 67,  label: "Medium (15 FPS)" },
-  low:    { maxFps: 8,  minIntervalMs: 125, label: "Low (8 FPS)" },
-  mini:   { maxFps: 4,  minIntervalMs: 250, label: "Mini (4 FPS)" },
-};
-
-export const DEFAULT_QUALITY: QualityPreset = "high";
-
-// --- Frame Timing ---
-
-export interface FrameTiming {
-  lastSequence: number;
-  lastTimestampMs: number;
-  lastReceivedAt: number;
-  jitterMs: number;
-  fps: number;
-  minIntervalMs: number;
-  maxIntervalMs: number;
-  droppedFrames: number;
 }
 
 // --- Publisher ---

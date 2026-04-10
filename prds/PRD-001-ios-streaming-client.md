@@ -1,9 +1,9 @@
 # PRD-001: iOS Streaming Client
 
-**Product:** com.mwdat-ios / CameraAccess  
-**Owner:** @ebowwa  
-**Status:** Draft  
-**Last Updated:** 2026-04-06  
+**Product:** com.mwdat-ios / CameraAccess
+**Owner:** @ebowwa
+**Status:** P0 Complete
+**Last Updated:** 2026-04-10
 **Depends On:** Meta DAT SDK 0.5.x, PRD-002 (Relay Platform)
 
 ---
@@ -48,13 +48,13 @@ The `CameraAccess` sample app extends Meta's reference sample with:
 
 ### Gaps
 
-1. **No production app target** -- everything lives in the sample app target
-2. **AudioPlaybackStage conflicts** with relay audio path; disabled
-3. **No on-device AI stage** -- pipeline supports it but none registered
-4. **Single relay URL** -- hardcoded default, user-editable but no session routing
-5. **No background streaming** -- app must be foregrounded
-6. **No adaptive quality** -- JPEG quality and resolution are static per session
-7. **Recording is local-only** -- no upload to cloud/bucket
+1. **No production app target** -- everything lives in the sample app target (P1-6)
+2. ~~**AudioPlaybackStage conflicts** with relay audio path~~ -- ACTIVE: AVAudioEngine solution designed, write() async fix shipped, testing in progress (see P1-4 below)
+3. **No on-device AI stage** -- pipeline supports it but none registered (see PRD-003)
+4. ~~**Single relay URL**~~ -- RESOLVED: `?session=<id>` param added
+5. **No background streaming** -- app must be foregrounded (P1-3)
+6. **No adaptive quality** -- JPEG quality and resolution are static per session (P1-2)
+7. **Recording is local-only** -- server-side recording covers this via PRD-004
 
 ---
 
@@ -81,16 +81,17 @@ The `CameraAccess` sample app extends Meta's reference sample with:
 | P1-3 | Background streaming (audio continues, video pauses) | App enters background: audio relay continues, video relay suspends, recording pauses |
 | P1-4 | Photo capture with relay forwarding | Captured photo sent over WebSocket as a tagged FRLY frame (quality 0.95) |
 | P1-5 | Device battery level display | Show glasses battery in pre-stream and stream views |
+| P1-6 | Production app target (separate from sample) | Xcode target `CaringMind` with own bundle ID, entitlements, and App Store config; CameraAccess remains as dev reference |
+| P1-7 | AudioPlaybackStage via AVAudioEngine (active development) | write() produces PCM, player node routes to glasses speaker, same PCM published to AudioEventBus; codecType 2 enabled; see plan `streamed-dreaming-panda.md` |
 
 ### P2 -- Could Have (Backlog)
 
 | ID | Requirement | Acceptance Criteria |
 |----|-------------|---------------------|
 | P2-1 | On-device AI stage (Vision framework) | Register `AIStage` at 4fps; person/face detection, text recognition (see PRD-003) |
-| P2-2 | Recording upload to S3-compatible bucket | Post-session upload of `.mov` to bucket via presigned URL (see PRD-004) |
+| P2-2 | Recording upload to S3-compatible bucket | Post-session upload of `.mov` to bucket via presigned URL (see PRD-004 P2-6) |
 | P2-3 | Multi-device simultaneous streaming | Two glasses connected, two sessions published concurrently |
-| P2-4 | AudioPlaybackStage reconciliation with relay audio | TTS/audio feedback to glasses without disrupting FRAU relay path |
-| P2-5 | Adaptive resolution downscaling | Switch from `.high` to `.medium` when Bluetooth bandwidth is constrained |
+| P2-4 | Adaptive resolution downscaling | Switch from `.high` to `.medium` when Bluetooth bandwidth is constrained |
 
 ---
 
@@ -189,8 +190,8 @@ iOS App (CameraAccess)
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| DAT SDK is pre-1.0; breaking changes in 0.6.x | High | Pin exact version; vendored xcframeworks as fallback |
+| DAT SDK is pre-1.0; breaking changes in 0.6.x | High | Pin exact version 0.5.0; vendored xcframeworks as fallback |
 | Bluetooth bandwidth limits JPEG quality at high FPS | Medium | Adaptive quality (P1-2); recommend medium resolution |
-| AudioPlaybackStage conflicts with relay audio | Medium | Keep disabled until reconciled (P2-4) |
+| AudioPlaybackStage + relay audio coexistence | Medium | AVAudioEngine routing solution in progress (P1-7); codecType 2 reserved until resolved |
 | Single-publisher relay rejects reconnect during stale timeout | Low | Server stale timeout is 15s; client retries with backoff |
 | Meta AI companion app required for registration | Low | MockDeviceKit for dev; document onboarding flow |
