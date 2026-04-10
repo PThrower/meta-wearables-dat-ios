@@ -121,6 +121,7 @@ export class SessionRecorder {
   private tick() {
     this.flushVideo();
     this.flushAudio();
+    this.writeManifest();  // persist manifest on every flush so it survives crashes
   }
 
   private flushVideo() {

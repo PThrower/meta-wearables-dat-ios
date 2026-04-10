@@ -98,7 +98,7 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
 
   // 4. Read manifest for actual framerate and audio sample rate
   let actualFps = 15;  // fallback
-  let audioSampleRate = 48000;  // fallback
+  let audioSampleRate = 16000;  // fallback (matches iOS hardware)
   let totalFrames = 0;
   try {
     const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);

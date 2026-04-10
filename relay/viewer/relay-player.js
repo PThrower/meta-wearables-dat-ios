@@ -220,6 +220,8 @@ class RelayPlayer {
     this.ringFill = 0;
     this.ringStarted = false;
     this.audioResumed = false;
+    this._firstFrameLocalTime = 0;
+    this._firstFrameSenderTime = 0;
     this.callbacks.onAudioLevel(0);
     if (this.workletNode) {
       try { this.workletNode.port.postMessage({ type: 'reset' }); } catch {}
@@ -324,11 +326,17 @@ class RelayPlayer {
       this.lastFpsTime = now;
     }
 
-    const latency = Date.now() - timestampMs;
+    // Use relative latency: measure transport delay from first frame baseline
+    if (!this._firstFrameLocalTime) this._firstFrameLocalTime = Date.now();
+    if (!this._firstFrameSenderTime) this._firstFrameSenderTime = timestampMs;
+    const clockOffset = this._firstFrameLocalTime - this._firstFrameSenderTime;
+    const latency = (Date.now() - this._firstFrameLocalTime) - (timestampMs - this._firstFrameSenderTime);
+    const absLatency = Math.abs(latency);
+
     this.callbacks.onFps(this.currentFps);
     this.callbacks.onSize(width, height);
     this.callbacks.onSequence(sequence);
-    this.callbacks.onLatency(latency);
+    this.callbacks.onLatency(absLatency);
     this.callbacks.onDropped(this.droppedFrames);
   }
 
