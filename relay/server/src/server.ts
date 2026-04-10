@@ -395,12 +395,23 @@ const server = Bun.serve<WsData>({
       return new Response(null, { status: 204 });
     }
 
-    // --- WebSocket upgrade: /publish and /view ---
+    // --- /view as HTML page (browser GET) or WebSocket upgrade ---
 
     const isPublish = url.pathname === "/publish";
     const isView = url.pathname === "/view";
     if (!isPublish && !isView) {
       return Response.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Browser navigated to /view?session=<id> — serve the viewer page
+    const wsUpgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
+    if (isView && !wsUpgrade) {
+      const sessionId = registry.resolveSessionId(url);
+      const gallery = await galleryCached();
+      const html = viewerHtml
+        .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
+        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`);
+      return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
     const role = isPublish ? "publish" : "view";
