@@ -133,7 +133,8 @@ class StreamSessionViewModel: ObservableObject {
   private let audioPlaybackStage = AudioPlaybackStage()
   private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage!
-  private var activePlayer: AVAudioPlayer?  // retained to prevent deallocation during playback
+  private var inboundAudioEngine: AVAudioEngine?
+  private var inboundPlayerNode: AVAudioPlayerNode?
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -369,11 +370,12 @@ class StreamSessionViewModel: ObservableObject {
       }
 
       // Wire server-to-publisher FRAU audio to direct playback.
+      // Uses AVAudioEngine (not AVAudioPlayer) — works reliably with .playAndRecord.
       // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
       await relayStage.setOnReceivedAudio { [weak self] data in
         guard data.count >= 29 else { return }
 
-        // Safe little-endian parsing (no withUnsafeBytes — avoids alignment crashes)
+        // Safe little-endian parsing
         let sampleRate = UInt32(data[13])
           | UInt32(data[14]) << 8
           | UInt32(data[15]) << 16
@@ -384,24 +386,9 @@ class StreamSessionViewModel: ObservableObject {
 
         NSLog("[StreamSession] Server audio: \(pcmData.count) bytes, \(sampleRate)Hz, \(channels)ch, \(bitsPerSample)bit")
 
-        // Wrap PCM in WAV header and play via AVAudioPlayer
-        let wav = Self.pcmToWav(pcm: pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
         Task { @MainActor [weak self] in
           guard let self else { return }
-          do {
-            // Route to phone speaker (not HFP glasses) — avoids BT video stream conflict
-            try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
-            let player = try AVAudioPlayer(data: wav)
-            player.volume = 1.0
-            if player.prepareToPlay() {
-              player.play()
-              self.activePlayer = player  // retain so it isn't deallocated mid-playback
-            } else {
-              NSLog("[StreamSession] AVAudioPlayer prepareToPlay failed")
-            }
-          } catch {
-            NSLog("[StreamSession] WAV playback error: \(error)")
-          }
+          self.playInboundPCM(pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
         }
       }
       try await relayStage.connect(to: url, idToken: idToken)
@@ -459,6 +446,7 @@ class StreamSessionViewModel: ObservableObject {
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
     await glassesAudioStage.stop()
+    stopInboundAudioEngine()
     // Detach relay stage from event bus — stops FRAU wire protocol forwarding
     await audioRelayStage.detachFromEventBus(audioEventBus)
     NSLog("[StreamSession] Audio relay stopped")
@@ -679,34 +667,67 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  // MARK: - WAV Helper
+  // MARK: - Inbound Audio Playback (AVAudioEngine)
 
-  /// Wrap raw PCM data in a WAV header for AVAudioPlayer playback.
-  nonisolated private static func pcmToWav(pcm: Data, sampleRate: UInt32, channels: UInt16, bitsPerSample: UInt16) -> Data {
-    let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample) / 8
-    let blockAlign = UInt32(channels) * UInt32(bitsPerSample) / 8
-    let dataSize = UInt32(pcm.count)
-    let fileSize = 36 + dataSize
+  /// Play raw Int16 PCM via AVAudioEngine. Works reliably with .playAndRecord sessions.
+  private func playInboundPCM(_ pcm: Data, sampleRate: UInt32, channels: UInt16, bitsPerSample: UInt16) {
+    let sr = Double(sampleRate)
+    let ch = UInt32(channels)
 
-    var wav = Data(capacity: 44 + pcm.count)
-    // RIFF header
-    wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
-    wav.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
-    wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
-    // fmt chunk
-    wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
-    wav.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) }) // chunk size
-    wav.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })  // PCM format
-    wav.append(contentsOf: withUnsafeBytes(of: channels.littleEndian) { Array($0) })
-    wav.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian) { Array($0) })
-    wav.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian) { Array($0) })
-    wav.append(contentsOf: withUnsafeBytes(of: UInt16(blockAlign).littleEndian) { Array($0) })
-    wav.append(contentsOf: withUnsafeBytes(of: bitsPerSample.littleEndian) { Array($0) })
-    // data chunk
-    wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
-    wav.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian) { Array($0) })
-    wav.append(pcm)
-    return wav
+    // Lazy-init engine + player node on first call
+    if inboundAudioEngine == nil {
+      let engine = AVAudioEngine()
+      let player = AVAudioPlayerNode()
+      engine.attach(player)
+
+      guard let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: ch) else {
+        NSLog("[StreamSession] Failed to create audio format for \(sr)Hz/\(ch)ch")
+        return
+      }
+      engine.connect(player, to: engine.mainMixerNode, format: format)
+
+      do {
+        try engine.start()
+        NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz")
+      } catch {
+        NSLog("[StreamSession] Audio engine start failed: \(error)")
+        return
+      }
+
+      inboundAudioEngine = engine
+      inboundPlayerNode = player
+    }
+
+    guard let player = inboundPlayerNode, let engine = inboundAudioEngine else { return }
+
+    // Convert Int16 PCM → Float32 for AVAudioPlayerNode
+    let frameCount = UInt32(pcm.count) / 2  // 2 bytes per Int16 sample
+    guard frameCount > 0,
+          let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: ch),
+          let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
+    else { return }
+
+    buffer.frameLength = frameCount
+    pcm.withUnsafeBytes { rawPtr in
+      guard let base = rawPtr.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+      guard let floatChannel = buffer.floatChannelData?[0] else { return }
+      for i in 0..<Int(frameCount) {
+        floatChannel[i] = Float(base[i]) / 32768.0
+      }
+    }
+
+    player.scheduleBuffer(buffer) {
+      NSLog("[StreamSession] Inbound buffer playback complete")
+    }
+    if !player.isPlaying { player.play() }
+  }
+
+  /// Stop and tear down the inbound audio engine.
+  private func stopInboundAudioEngine() {
+    inboundPlayerNode?.stop()
+    inboundAudioEngine?.stop()
+    inboundPlayerNode = nil
+    inboundAudioEngine = nil
   }
 
   private static func formatStreamingError(_ error: StreamSessionError) -> String {
