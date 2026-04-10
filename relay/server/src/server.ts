@@ -35,6 +35,7 @@ import type { WsData, QualityPreset } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
+import { AudioTapBus } from "./audio-tap.js";
 import {
   exportSessionMp4,
   getSessionExportMeta,
@@ -73,6 +74,13 @@ const store: ObjectStore = createObjectStore();
 // --- Session Registry ---
 
 const registry = new SessionRegistry(store);
+
+// --- Audio Tap Bus ---
+// Pluggable audio dispatch: custom taps subscribe to receive parsed audio frames.
+// Built-in taps (fanout, recording) continue via their existing paths.
+// Add custom taps via: audioTapBus.subscribe()
+
+const audioTapBus = new AudioTapBus();
 
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)
@@ -199,7 +207,8 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      return Response.json(await registry.stats(wifiIp, PORT, serverStartTime, store));
+      const s = await registry.stats(wifiIp, PORT, serverStartTime, store);
+      return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
 
     // --- Gallery (redirect to root — unified page) ---
@@ -375,6 +384,17 @@ const server = Bun.serve<WsData>({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    // --- Audio tap WebSocket: /tap/audio?session=<id> ---
+
+    if (url.pathname === "/tap/audio") {
+      const sessionId = url.searchParams.get("session") || "default";
+      const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+        || req.headers.get("x-real-ip")
+        || "unknown";
+      server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId } });
+      return new Response(null, { status: 204 });
+    }
+
     // --- WebSocket upgrade: /publish and /view ---
 
     const isPublish = url.pathname === "/publish";
@@ -395,6 +415,25 @@ const server = Bun.serve<WsData>({
   websocket: {
     open(ws) {
       const { role, clientIp, sessionId } = ws.data;
+
+      if (role === "audio-tap") {
+        const unsub = audioTapBus.onFrame((frame) => {
+          if (ws.readyState !== WebSocket.OPEN) { unsub(); return; }
+          ws.send(JSON.stringify({
+            type: "audio",
+            codecType: frame.codecType,
+            sequence: frame.sequence,
+            sampleRate: frame.sampleRate,
+            channels: frame.channels,
+            bitsPerSample: frame.bitsPerSample,
+            timestampMs: frame.timestampMs,
+            pcmBase64: Buffer.from(frame.pcm).toString("base64"),
+          }));
+        });
+        ws.data = { ...ws.data, unsub };
+        console.log(`[relay] Audio tap connected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
+        return;
+      }
 
       if (role === "publish") {
         const err = registry.claimPublisher(sessionId, ws, clientIp);
@@ -456,6 +495,7 @@ const server = Bun.serve<WsData>({
             session.publisher.audioBytes += buf.length;
             registry.fanoutAudio(sessionId, buf);
             session.recorder?.appendAudio(buf);
+            audioTapBus.publish(buf);
           } else if (isVideoFrame(buf)) {
             // Video frame (FRLY)
             session.publisher.frameCount++;
@@ -494,6 +534,12 @@ const server = Bun.serve<WsData>({
     },
     async close(ws) {
       const { role, sessionId } = ws.data;
+
+      if (role === "audio-tap") {
+        if (ws.data.unsub) ws.data.unsub();
+        console.log(`[relay] Audio tap disconnected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
+        return;
+      }
 
       if (role === "publish") {
         await registry.releasePublisher(sessionId);

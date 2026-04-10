@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "bun run --watch src/server.ts",
     "build:wasm": "cd ../crate && CARGO_TARGET_DIR=/tmp/frame-relay-target cargo build --target wasm32-unknown-unknown --release && wasm-bindgen --target bundler --out-dir ../server/pkg /tmp/frame-relay-target/wasm32-unknown-unknown/release/frame_relay_wasm.wasm",
-    "start": "bun run src/server.ts"
+    "start": "bun run src/server.ts",
+    "test": "bun test"
   },
   "keywords": ["relay", "wasm", "streaming", "caringmind"],
   "license": "MIT",

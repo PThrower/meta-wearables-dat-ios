@@ -72,6 +72,7 @@ class StreamSessionViewModel: ObservableObject {
 
   // Relay state
   @Published var isRelaying: Bool = false
+  @Published var isTapConnected: Bool = false
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
@@ -114,6 +115,7 @@ class StreamSessionViewModel: ObservableObject {
   private let audioRelayStage = AudioRelayStage()
   private let audioEventBus = AudioEventBus()
   private let audioPlaybackStage = AudioPlaybackStage()
+  private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage!
 
   private var streamConfig: StreamSessionConfig {
@@ -155,6 +157,8 @@ class StreamSessionViewModel: ObservableObject {
 
     // Wire decoupled audio pipeline:
     //   AudioStage -> AudioEventBus -> AudioRelayStage -> RelayStage -> WebSocket
+    //   AudioTapClient -> AudioEventBus (receives remote audio frames from /tap/audio)
+    self.audioTapClient = AudioTapClient(eventBus: audioEventBus)
     Task {
       await audioStage.setEventBus(audioEventBus)
       await audioRelayStage.setRelayStage(relayStage)
@@ -366,6 +370,16 @@ class StreamSessionViewModel: ObservableObject {
     await audioRelayStage.attachToEventBus(audioEventBus)
     await audioStage.start()
     NSLog("[StreamSession] Audio relay started")
+
+    // Start audio tap client to receive remote audio frames from the server
+    Task {
+      do {
+        try await audioTapClient.connect(to: url, session: nil, autoReconnect: true)
+        isTapConnected = true
+      } catch {
+        NSLog("[StreamSession] Audio tap connect failed (non-fatal): \(error)")
+      }
+    }
   }
 
   func stopRelay() async {
@@ -374,6 +388,10 @@ class StreamSessionViewModel: ObservableObject {
     // Detach relay stage from event bus — stops FRAU wire protocol forwarding
     await audioRelayStage.detachFromEventBus(audioEventBus)
     NSLog("[StreamSession] Audio relay stopped")
+
+    // Stop audio tap client
+    await audioTapClient.disconnect()
+    isTapConnected = false
 
     await relayStage.disconnect()
     isRelaying = false
