@@ -165,6 +165,7 @@ class StreamSessionViewModel: ObservableObject {
     Task {
       await audioStage.setEventBus(audioEventBus)
       await glassesAudioStage.setEventBus(audioEventBus)
+      await audioPlaybackStage.setEventBus(audioEventBus)
       await audioRelayStage.setRelayStage(relayStage)
     }
 
