@@ -51,6 +51,9 @@
 		PIPEDECO03 /* AudioTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO04 /* AudioTransport.swift */; };
 		PIPEDECO05 /* AudioEventBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO06 /* AudioEventBus.swift */; };
 		PIPEDECO07 /* AudioRelayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO08 /* AudioRelayStage.swift */; };
+		PIPEMSRC01 /* AudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEMSRC02 /* AudioSource.swift */; };
+		PIPETAPC01 /* AudioTapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPETAPC02 /* AudioTapClient.swift */; };
+		PIPEREMF01 /* RemoteAudioFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEREMF02 /* RemoteAudioFrame.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -130,6 +133,9 @@
 		PIPEDECO04 /* AudioTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTransport.swift; sourceTree = "<group>"; };
 		PIPEDECO06 /* AudioEventBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEventBus.swift; sourceTree = "<group>"; };
 		PIPEDECO08 /* AudioRelayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRelayStage.swift; sourceTree = "<group>"; };
+		PIPEMSRC02 /* AudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSource.swift; sourceTree = "<group>"; };
+		PIPETAPC02 /* AudioTapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTapClient.swift; sourceTree = "<group>"; };
+		PIPEREMF02 /* RemoteAudioFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAudioFrame.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -281,6 +287,8 @@
 				PIPEDECO02 /* AudioPacket.swift */,
 				PIPEDECO04 /* AudioTransport.swift */,
 				PIPEDECO06 /* AudioEventBus.swift */,
+				PIPEMSRC02 /* AudioSource.swift */,
+				PIPEREMF02 /* RemoteAudioFrame.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -294,6 +302,7 @@
 				PIPE00E02E91PIPE03 /* AudioStage.swift */,
 				PIPEAOFILREF01 /* AudioPlaybackStage.swift */,
 				PIPEDECO08 /* AudioRelayStage.swift */,
+				PIPETAPC02 /* AudioTapClient.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -489,6 +498,9 @@
 				PIPEDECO03 /* AudioTransport.swift in Sources */,
 				PIPEDECO05 /* AudioEventBus.swift in Sources */,
 				PIPEDECO07 /* AudioRelayStage.swift in Sources */,
+				PIPEMSRC01 /* AudioSource.swift in Sources */,
+				PIPETAPC01 /* AudioTapClient.swift in Sources */,
+				PIPEREMF01 /* RemoteAudioFrame.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

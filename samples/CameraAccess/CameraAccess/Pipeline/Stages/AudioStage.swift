@@ -38,10 +38,11 @@ actor AudioStage: @preconcurrency FramePipelineStage {
     private let targetChannels: UInt16 = 1
     private let targetBitsPerSample: UInt16 = 16
 
-    // Codec type: 0 = mic PCM 16-bit LE
-    private let codecMic: UInt8 = 0
+    // Audio source — determines codecType tagged on every AudioPacket
+    private let source: AudioSource
 
-    init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
+    init(source: AudioSource = .builtInMic, config: FrameStageConfig = FrameStageConfig.maxFPS) {
+        self.source = source
         self.config = config
     }
 
@@ -83,7 +84,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         let hwFormat = inputNode.outputFormat(forBus: 0)
         let isFloat = hwFormat.commonFormat == .pcmFormatFloat32 || hwFormat.commonFormat == .pcmFormatFloat64
 
-        NSLog("[AudioStage] Hardware format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch, \(hwFormat.commonFormat)")
+        NSLog("[AudioStage] Hardware format: \(hwFormat.sampleRate)Hz, \(hwFormat.channelCount)ch, \(hwFormat.commonFormat) source=\(source.displayName)")
 
         // Install mic tap using hardware format — no format conversion at tap level.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
@@ -239,7 +240,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         let packet = AudioPacket(
             pcmData: pcmData,
-            codecType: codecMic,
+            codecType: source.codecType,
             sampleRate: sampleRate,
             channels: targetChannels,
             bitsPerSample: targetBitsPerSample,

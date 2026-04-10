@@ -1,25 +1,22 @@
 /*
  * AudioPlaybackStage.swift
  *
- * Pipeline stage that plays audio during an active stream session.
+ * Pipeline stage that plays TTS audio through the glasses speaker during
+ * an active stream session.
  *
- * Current: uses AVSpeechSynthesizer to say "hello world" on loop.
- *          Attempts to route output to connected glasses via HFP.
+ * Audio routing:
+ *   CameraAccessApp configures the audio session as .playAndRecord with
+ *   .allowBluetooth. When glasses are connected via HFP, iOS automatically
+ *   routes output (AVSpeechSynthesizer, AVAudioPlayer, etc.) through the
+ *   glasses' open-ear speakers.
  *
- * Audio routing to glasses:
- *   The glasses expose two BT audio profiles (per Meta docs):
- *     - A2DP: high-quality output-only media
- *     - HFP:  8kHz mono two-way voice
- *
- *   When the audio session includes .allowBluetoothHFP and we set
- *   preferredInput to the glasses' HFP port, iOS routes
- *   AVSpeechSynthesizer output through the glasses' open-ear speakers.
- *
- *   Ref: https://wearables.developer.meta.com/docs/microphones-and-speakers/
+ *   We do NOT call setPreferredInput() here — that changes BOTH input and
+ *   output routes, which tears down the DAT SDK's BT video stream.
+ *   The default output route (glasses HFP speaker) is sufficient.
  *
  * Key constraints:
  *   - Audio session is pre-configured as .playAndRecord by CameraAccessApp.
- *     Do NOT change the category here — it crashes the DAT SDK BT video stream.
+ *     Do NOT change the category or call setPreferredInput().
  *   - Runs on its own actor executor — never blocks the main thread.
  */
 
@@ -53,13 +50,15 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         isPlaying = true
 
         // AVAudioSession APIs are @MainActor-isolated in iOS 17+.
-        // Dispatch to MainActor for route probing, TTS, and audio routing.
+        // Dispatch to MainActor for route probing and TTS.
         loopTask = Task { @MainActor in
-            // Log every available audio port so we can see what's connected.
+            // Log current audio routes for diagnostics.
             Self.logAudioRoutes()
 
-            // Try to route output to glasses via HFP.
-            Self.tryRouteToGlasses()
+            // Do NOT call tryRouteToGlasses() or setPreferredInput().
+            // With .allowBluetooth in the session config, the glasses HFP
+            // output is already the default route. Changing it disrupts the
+            // DAT SDK's BT video stream.
 
             let synthesizer = AVSpeechSynthesizer()
             let voice = AVSpeechSynthesisVoice(language: await self.language)
@@ -90,25 +89,14 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         loopTask?.cancel()
         loopTask = nil
 
-        // Reset audio route back to default (phone speaker).
-        // AVAudioSession is @MainActor-isolated in iOS 17+.
-        await Task { @MainActor in
-            let session = AVAudioSession.sharedInstance()
-            try? session.setPreferredInput(nil)
-        }.value
+        // Do NOT call setPreferredInput(nil) — route changes disrupt
+        // the DAT SDK's BT video stream.
 
-        NSLog("[AudioPlayback] Stopped, route reset to default")
+        NSLog("[AudioPlayback] Stopped")
     }
 
     // MARK: - Audio Route Probing
 
-    // THREADING REVIEW:
-    // This method is `nonisolated static` — does NOT run on @MainActor.
-    // It calls AVAudioSession.sharedInstance() and reads route properties.
-    // SAFE ONLY because callers dispatch to @MainActor before calling:
-    //   - start() calls it inside `Task { @MainActor in }` block.
-    // DANGER: If called from any other context (e.g. directly from actor), it will crash.
-    // Consider adding `@MainActor` annotation to this method itself for compile-time safety.
     nonisolated static func logAudioRoutes() {
         let session = AVAudioSession.sharedInstance()
         let route = session.currentRoute
@@ -122,40 +110,5 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         }
 
         NSLog("[AudioPlayback] Category options: \(session.categoryOptions)")
-    }
-
-    // THREADING REVIEW: Same as logAudioRoutes() — nonisolated static calling @MainActor APIs.
-    // SAFE only because start() dispatches to @MainActor before calling.
-    // Would crash if called from actor executor directly.
-    /// Find the glasses' HFP port and set it as preferred input.
-    /// Per Meta Wearables docs, HFP gives us two-way audio through the glasses.
-    /// When setPreferredInput points to a BT HFP device, iOS routes output
-    /// (AVSpeechSynthesizer, AVAudioPlayer, etc.) through its speakers.
-    nonisolated static func tryRouteToGlasses() {
-        let session = AVAudioSession.sharedInstance()
-
-        // HFP is the two-way voice profile the glasses expose.
-        // A2DP is output-only — also valid for playback.
-        let allInputs = session.availableInputs ?? []
-        let btInputs = allInputs.filter { input in
-            input.portType == .bluetoothHFP || input.portType == .bluetoothA2DP
-                || input.portType == .bluetoothLE
-        }
-
-        if let btInput = btInputs.first {
-            NSLog("[AudioPlayback] Found BT audio device: \(btInput.portName) (\(btInput.portType.rawValue))")
-            do {
-                try session.setPreferredInput(btInput)
-                let newRoute = session.currentRoute
-                NSLog("[AudioPlayback] Routed to glasses — outputs: \(newRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
-            } catch {
-                NSLog("[AudioPlayback] Failed to set preferredInput: \(error)")
-            }
-        } else {
-            NSLog("[AudioPlayback] No BT audio device found in availableInputs")
-            for input in allInputs {
-                NSLog("[AudioPlayback]   available: \(input.portName) (\(input.portType.rawValue))")
-            }
-        }
     }
 }

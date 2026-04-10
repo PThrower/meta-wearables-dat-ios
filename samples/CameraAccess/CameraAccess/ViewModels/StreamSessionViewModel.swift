@@ -111,7 +111,8 @@ class StreamSessionViewModel: ObservableObject {
   private let pipeline = FramePipelineManager()
   private let recordingStage = RecordingStage()
   private let relayStage = RelayStage()
-  private let audioStage = AudioStage()
+  private let audioStage = AudioStage(source: .builtInMic)
+  private let glassesAudioStage = AudioStage(source: .bluetoothHFP)
   private let audioRelayStage = AudioRelayStage()
   private let audioEventBus = AudioEventBus()
   private let audioPlaybackStage = AudioPlaybackStage()
@@ -142,6 +143,12 @@ class StreamSessionViewModel: ObservableObject {
       deviceSelector: currentSelector
     )
 
+    // Wire decoupled audio pipeline before display stage closure captures self:
+    //   AudioStage(builtIn) -> AudioEventBus -> AudioRelayStage -> RelayStage -> WebSocket
+    //   AudioStage(glasses) -> AudioEventBus (same bus, codecType distinguishes sources)
+    //   AudioTapClient -> AudioEventBus (receives remote audio frames from /tap/audio)
+    self.audioTapClient = AudioTapClient(eventBus: audioEventBus)
+
     // Create display stage with MainActor callback (safe to capture self after all stored props initialized)
     self.displayStage = DisplayStage { [weak self] image in
       self?.currentVideoFrame = image
@@ -155,12 +162,9 @@ class StreamSessionViewModel: ObservableObject {
     pipeline.register(recordingStage)
     pipeline.register(relayStage)
 
-    // Wire decoupled audio pipeline:
-    //   AudioStage -> AudioEventBus -> AudioRelayStage -> RelayStage -> WebSocket
-    //   AudioTapClient -> AudioEventBus (receives remote audio frames from /tap/audio)
-    self.audioTapClient = AudioTapClient(eventBus: audioEventBus)
     Task {
       await audioStage.setEventBus(audioEventBus)
+      await glassesAudioStage.setEventBus(audioEventBus)
       await audioRelayStage.setRelayStage(relayStage)
     }
 
@@ -368,8 +372,23 @@ class StreamSessionViewModel: ObservableObject {
     // Auto-start audio after relay connects — permission already checked above
     // Attach relay stage to event bus before starting capture so packets flow immediately
     await audioRelayStage.attachToEventBus(audioEventBus)
-    await audioStage.start()
-    NSLog("[StreamSession] Audio relay started")
+
+    // Start audio capture based on user-selected input mode.
+    // Audio routing must NOT change during active streaming (DAT SDK constraint).
+    switch audioInputMode {
+    case .builtInMic:
+      await audioStage.start()
+      NSLog("[StreamSession] Audio relay started (built-in mic only)")
+    case .glassesMic:
+      await glassesAudioStage.start()
+      NSLog("[StreamSession] Audio relay started (glasses HFP mic only)")
+    case .all:
+      // Start both stages — codecType 0 (built-in) + codecType 1 (glasses HFP)
+      // on the same AudioEventBus, relay sends both to server.
+      await audioStage.start()
+      await glassesAudioStage.start()
+      NSLog("[StreamSession] Audio relay started (built-in + glasses HFP mic)")
+    }
 
     // Start audio tap client to receive remote audio frames from the server
     Task {
@@ -385,6 +404,7 @@ class StreamSessionViewModel: ObservableObject {
   func stopRelay() async {
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
+    await glassesAudioStage.stop()
     // Detach relay stage from event bus — stops FRAU wire protocol forwarding
     await audioRelayStage.detachFromEventBus(audioEventBus)
     NSLog("[StreamSession] Audio relay stopped")
@@ -549,10 +569,10 @@ class StreamSessionViewModel: ObservableObject {
   func startSession() async {
     cancelRetry()
     await streamSession.start()
-    // DISABLED: AudioPlaybackStage.tryRouteToGlasses() conflicts with relay audio.
-    // It calls setPreferredInput(hfp) which triggers route changes that kill mic capture.
-    // Re-enable only when relay audio route conflicts are resolved.
-    // await audioPlaybackStage.start()
+    // Start TTS playback through glasses speaker.
+    // AudioPlaybackStage no longer calls setPreferredInput() —
+    // with .allowBluetooth, the glasses HFP output is already the default route.
+    await audioPlaybackStage.start()
   }
 
   private func showError(_ message: String) {

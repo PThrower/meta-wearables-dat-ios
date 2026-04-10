@@ -99,13 +99,15 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
   // 4. Read manifest for actual framerate and audio sample rate
   let actualFps = 15;  // fallback
   let audioSampleRate = 48000;  // fallback
+  let totalFrames = 0;
   try {
     const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);
     if (manifestBuf) {
       const manifest = JSON.parse(new TextDecoder().decode(manifestBuf));
       if (manifest.actualFps && manifest.actualFps > 0) actualFps = manifest.actualFps;
       if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
-      console.log(`[export] Manifest: fps=${actualFps}, audioRate=${audioSampleRate}`);
+      if (manifest.totalFrames && manifest.totalFrames > 0) totalFrames = manifest.totalFrames;
+      console.log(`[export] Manifest: fps=${actualFps}, audioRate=${audioSampleRate}, totalFrames=${totalFrames}`);
     } else {
       console.log(`[export] No manifest.json — using defaults (fps=${actualFps}, ar=${audioSampleRate})`);
     }
@@ -114,6 +116,10 @@ export async function exportSessionMp4(opts: ExportOptions): Promise<{
   }
 
   const args: string[] = [
+    // Force ffmpeg to probe the full file — without this, image2pipe
+    // may stop after the first JPEG frame in a concatenated MJPEG stream.
+    "-probesize", "100M",
+    "-analyzeduration", "100M",
     "-framerate", String(actualFps),
     "-f", "image2pipe",
     "-vcodec", "mjpeg",
@@ -335,6 +341,10 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   } catch {}
 
   const args: string[] = [
+    // Force ffmpeg to probe the full file — without this, image2pipe
+    // may stop after the first JPEG frame in a concatenated MJPEG stream.
+    "-probesize", "100M",
+    "-analyzeduration", "100M",
     "-framerate", String(actualFps),
     "-f", "image2pipe", "-vcodec", "mjpeg",
     "-i", videoPath,

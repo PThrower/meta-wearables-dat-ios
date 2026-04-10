@@ -18,7 +18,7 @@ struct AudioPacket: Sendable {
     /// Raw PCM audio data (16-bit LE mono)
     let pcmData: Data
 
-    /// FRAU codec type: 0 = mic PCM 16-bit LE
+    /// FRAU codec type: 0 = built-in mic, 1 = glasses HFP mic, 2 = playback
     let codecType: UInt8
 
     /// Actual hardware sample rate (varies: 48000 built-in, 8000 HFP, etc.)

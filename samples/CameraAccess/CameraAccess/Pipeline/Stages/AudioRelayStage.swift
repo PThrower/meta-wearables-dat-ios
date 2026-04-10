@@ -88,7 +88,7 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
         // Magic "FRAU"
         header.append(contentsOf: [0x46, 0x52, 0x41, 0x55])
 
-        // Codec type (1 byte): 0 = mic PCM, 1 = system/output audio PCM
+        // Codec type (1 byte): 0 = built-in mic, 1 = glasses HFP mic, 2 = playback
         header.append(packet.codecType)
 
         // Sequence number (8 bytes LE)
