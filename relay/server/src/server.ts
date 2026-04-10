@@ -111,6 +111,10 @@ const galleryHtml = await Bun.file(join(import.meta.dir, "../../viewer/gallery.h
   ""
 );
 
+const relayPlayerJs = await Bun.file(join(import.meta.dir, "../../viewer/relay-player.js")).text().catch(() =>
+  ""
+);
+
 // --- Stale cleanup ---
 
 setInterval(() => registry.cleanupStale(), 5_000);
@@ -222,6 +226,15 @@ const server = Bun.serve<WsData>({
       const data = await galleryCached();
       return Response.json(data, {
         headers: { "Cache-Control": "public, max-age=15" },
+      });
+    }
+
+    // --- Relay Player JS (shared module) ---
+
+    if (url.pathname === "/relay-player.js") {
+      if (!relayPlayerJs) return Response.json({ error: "Not found" }, { status: 404 });
+      return new Response(relayPlayerJs, {
+        headers: { "Content-Type": "application/javascript", "Cache-Control": "public, max-age=60" },
       });
     }
 

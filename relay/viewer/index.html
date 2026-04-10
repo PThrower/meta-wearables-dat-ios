@@ -114,413 +114,58 @@
     <button onclick="connect()">Connect</button>
   </div>
 
+  <script src="/relay-player.js"></script>
   <script>
-    // --- Wire protocol constants ---
-    const FRLY_HEADER_SIZE = 29;
-    const FRAU_HEADER_SIZE = 29;
-    const FRAU_MAGIC = [0x46, 0x52, 0x41, 0x55]; // "FRAU"
-    const FRLY_MAGIC = [0x46, 0x52, 0x4C, 0x59]; // "FRLY"
-
-    // --- DOM ---
     const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
     const meterFill = document.getElementById("audio-meter-fill");
-
-    // --- Video state ---
-    let ws = null;
-    let frameCount = 0;
-    let lastFpsTime = performance.now();
-    let fpsFrameCount = 0;
-    let currentFps = 0;
-    let droppedFrames = 0;
-    let lastSequence = 0;
-
-    // --- Reconnect state ---
-    let reconnectTimer = null;
-    let reconnectDelay = 1000;    // start at 1s, doubles each attempt
-    const RECONNECT_MAX = 15000;  // cap at 15s
-    let intentionalClose = false;
-
-    // --- Audio state ---
-    let audioCtx = null;
-    let audioChunkCount = 0;
-    let audioLevel = 0;
-    let audioResumed = false;
-
-    // --- A/V sync state ---
-    let videoClockBase = null; // { senderMs, audioCtxTime }
-
-    // --- Ring buffer for continuous gapless audio playback ---
-    // Instead of scheduling individual BufferSourceNodes per chunk (which causes
-    // clicks/gaps at boundaries), we use a single ScriptProcessorNode that
-    // continuously drains a ring buffer. Incoming PCM chunks just push into the
-    // buffer. No chunk boundaries in the output = no clicks/ringing.
-    const RING_SIZE = 48000 * 2; // 2 seconds at 48kHz — generous
-    const RING_BUFFER = new Float32Array(RING_SIZE);
-    let ringWritePos = 0;
-    let ringReadPos = 0;
-    let ringFill = 0;       // samples available
-    let ringStarted = false;
-    const PREBUFFER_SAMPLES = 48000 * 0.06; // 60ms pre-buffer before starting output
+    let player = null;
 
     function updateHud(id, value) {
       document.getElementById(id).textContent = value;
     }
 
-    function resetStreamState() {
-      frameCount = 0;
-      fpsFrameCount = 0;
-      currentFps = 0;
-      droppedFrames = 0;
-      lastSequence = 0;
-      audioChunkCount = 0;
-      videoClockBase = null;
-      ringWritePos = 0;
-      ringReadPos = 0;
-      ringFill = 0;
-      ringStarted = false;
-      audioResumed = false;
-      meterFill.style.width = "0%";
-      document.getElementById("unmute-overlay").classList.remove("show");
-      if (workletNode) { workletNode.port.postMessage({ type: 'reset' }); }
-      pendingSamples = [];
-      if (audioCtx) { audioCtx.close(); audioCtx = null; workletNode = null; }
-    }
-
-    // --- Audio playback ---
-
-    // Inline AudioWorklet processor (avoids separate file)
-    const WORKLET_CODE = `
-      const RING = new Float32Array(96000);
-      let writePos = 0, readPos = 0, fill = 0, started = false;
-      const PREBUFFER = 48000 * 0.06;
-
-      self.onmessage = (e) => {
-        if (e.data.type === 'push') {
-          const samples = e.data.samples;
-          for (let i = 0; i < samples.length; i++) {
-            if (fill < RING.length) {
-              RING[writePos] = samples[i];
-              writePos = (writePos + 1) % RING.length;
-              fill++;
-            }
-          }
-        } else if (e.data.type === 'reset') {
-          writePos = 0; readPos = 0; fill = 0; started = false;
-        }
-      };
-
-      class RingDrainProcessor extends AudioWorkletProcessor {
-        process(inputs, outputs) {
-          const output = outputs[0][0];
-          const len = output.length;
-          if (!started) {
-            output.fill(0);
-            if (fill >= PREBUFFER) started = true;
-            return true;
-          }
-          const toRead = Math.min(len, fill);
-          for (let i = 0; i < toRead; i++) {
-            output[i] = RING[readPos];
-            readPos = (readPos + 1) % RING.length;
-          }
-          fill -= toRead;
-          if (toRead < len) {
-            for (let i = toRead; i < len; i++) output[i] = 0;
-            started = false;
-          }
-          return true;
-        }
-      }
-      registerProcessor('ring-drain', RingDrainProcessor);
-    `;
-
-    let workletNode = null;
-    let pendingSamples = []; // buffer samples until worklet is ready
-
-    function initAudio() {
-      if (audioCtx) return;
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-      audioResumed = false;
-      ringStarted = false;
-      ringWritePos = 0;
-      ringReadPos = 0;
-      ringFill = 0;
-
-      const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      audioCtx.audioWorklet.addModule(url).then(() => {
-        workletNode = new AudioWorkletNode(audioCtx, 'ring-drain');
-        workletNode.connect(audioCtx.destination);
-        // Flush any samples that arrived before worklet was ready
-        for (const batch of pendingSamples) {
-          workletNode.port.postMessage({ type: 'push', samples: batch });
-        }
-        pendingSamples = [];
-      }).catch(() => {
-        // Fallback to ScriptProcessorNode if AudioWorklet fails
-        const processor = audioCtx.createScriptProcessor(4096, 0, 1);
-        processor.onaudioprocess = (e) => {
-          const output = e.outputBuffer.getChannelData(0);
-          const len = output.length;
-          if (!ringStarted) {
-            output.fill(0);
-            if (ringFill >= PREBUFFER_SAMPLES) ringStarted = true;
-            return;
-          }
-          const toRead = Math.min(len, ringFill);
-          for (let i = 0; i < toRead; i++) {
-            output[i] = RING_BUFFER[ringReadPos];
-            ringReadPos = (ringReadPos + 1) % RING_SIZE;
-          }
-          ringFill -= toRead;
-          if (toRead < len) {
-            for (let i = toRead; i < len; i++) output[i] = 0;
-            ringStarted = false;
-          }
-        };
-        processor.connect(audioCtx.destination);
-      });
-      URL.revokeObjectURL(url);
-    }
-
-    function ensureAudioResumed() {
-      if (!audioCtx || audioResumed) return;
-      if (audioCtx.state === "suspended") {
-        // Show unmute overlay instead of trying to resume silently
-        document.getElementById("unmute-overlay").classList.add("show");
-        return;
-      }
-      audioResumed = true;
-    }
-
-    function unmuteAudio() {
-      if (audioCtx && audioCtx.state === "suspended") {
-        audioCtx.resume().then(() => {
-          audioResumed = true;
-          document.getElementById("unmute-overlay").classList.remove("show");
-        });
-      }
-    }
-
-    function pushAudioToRing(pcmInt16, sampleRate, channels) {
-      // Convert Int16 to Float32 and push into ring buffer.
-      // If incoming sample rate differs from AudioContext rate (48kHz),
-      // do linear interpolation resampling inline.
-      const inSamples = pcmInt16.length;
-      if (inSamples === 0) return;
-
-      const targetRate = audioCtx.sampleRate;
-      const ratio = targetRate / sampleRate;
-      const outSamples = Math.round(inSamples * ratio);
-      const floatSamples = new Float32Array(outSamples);
-
-      for (let i = 0; i < outSamples; i++) {
-        const srcPos = i / ratio;
-        const idx0 = Math.floor(srcPos);
-        const idx1 = Math.min(idx0 + 1, inSamples - 1);
-        const frac = srcPos - idx0;
-        const s0 = pcmInt16[idx0] / 32768.0;
-        const s1 = pcmInt16[idx1] / 32768.0;
-        floatSamples[i] = s0 + (s1 - s0) * frac;
-      }
-
-      // Track peak for meter
-      for (let i = 0; i < floatSamples.length; i++) {
-        const abs = Math.abs(floatSamples[i]);
-        if (abs > audioLevel) audioLevel = abs;
-      }
-
-      // Send to AudioWorklet if ready, else fallback ring buffer
-      if (workletNode) {
-        workletNode.port.postMessage({ type: 'push', samples: floatSamples });
-      } else {
-        pendingSamples.push(floatSamples);
-        // Also push to fallback ring buffer in case ScriptProcessor is used
-        for (let i = 0; i < floatSamples.length; i++) {
-          if (ringFill < RING_SIZE) {
-            RING_BUFFER[ringWritePos] = floatSamples[i];
-            ringWritePos = (ringWritePos + 1) % RING_SIZE;
-            ringFill++;
-          }
-        }
-      }
-    }
-
-    function playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs) {
-      if (!audioCtx) initAudio();
-      ensureAudioResumed();
-
-      if (pcmInt16.length === 0) return;
-
-      // Push into ring buffer — handles resampling if needed
-      audioLevel = 0;
-      pushAudioToRing(pcmInt16, sampleRate, channels);
-
-      // Update video clock for A/V sync reference
-      if (audioCtx && senderTimestampMs > 0) {
-        videoClockBase = {
-          senderMs: senderTimestampMs,
-          audioCtxTime: audioCtx.currentTime
-        };
-      }
-    }
-
-    function updateAudioMeter() {
-      const pct = Math.min(100, Math.round(audioLevel * 300));
-      meterFill.style.width = pct + "%";
-    }
-
-    // --- Quality control ---
-
-    function setQuality(preset) {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "config", quality: preset }));
-      }
-    }
-
-    // --- Connection ---
-
     function connect() {
       const url = document.getElementById("relay-url").value.trim();
       if (!url) return;
 
-      intentionalClose = false;
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      if (ws) ws.close();
-      ws = new WebSocket(url);
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => {
-        reconnectDelay = 1000; // reset backoff on successful connect
-        resetStreamState();
-        document.body.className = "connected";
-        document.getElementById("status").textContent = "Connected";
-        updateHud("h-status", "CONNECTED");
-      };
-
-      ws.onmessage = (event) => {
-        if (typeof event.data === "string") {
-          try {
-            const msg = JSON.parse(event.data);
-            if (msg.type === "quality") {
-              document.getElementById("quality-select").value = msg.preset;
-            }
-          } catch {}
-          return;
-        }
-        const buf = new Uint8Array(event.data);
-        if (buf.length < 4) return;
-
-        // Detect message type by magic bytes
-        const m0 = buf[0], m1 = buf[1], m2 = buf[2], m3 = buf[3];
-
-        if (m0 === FRAU_MAGIC[0] && m1 === FRAU_MAGIC[1] && m2 === FRAU_MAGIC[2] && m3 === FRAU_MAGIC[3]) {
-          // --- Audio frame (FRAU) ---
-          if (buf.length < FRAU_HEADER_SIZE) return;
-
-          const view = new DataView(buf.buffer, buf.byteOffset);
-          const codecType = buf[4];
-          const sampleRate = view.getUint32(13, true);
-          const channels = view.getUint16(17, true);
-          const bitsPerSample = view.getUint16(19, true);
-          const senderTimestampMs = Number(view.getBigUint64(21, true));
-
-          if (codecType !== 0 || bitsPerSample !== 16) return; // Only PCM 16-bit
-
-          const pcmBytes = buf.slice(FRAU_HEADER_SIZE);
-          const pcmInt16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.length / 2);
-
-          playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs);
-          audioChunkCount++;
-
-          updateHud("h-audio", "ON");
-          updateAudioMeter();
-          return;
-        }
-
-        if (m0 === FRLY_MAGIC[0] && m1 === FRLY_MAGIC[1] && m2 === FRLY_MAGIC[2] && m3 === FRLY_MAGIC[3]) {
-          // --- Video frame (FRLY) ---
-          if (buf.length < FRLY_HEADER_SIZE) return;
-
-          const sequence = Number(new DataView(buf.buffer, buf.byteOffset + 4, 8).getBigUint64(0, true));
-          const width = new DataView(buf.buffer, buf.byteOffset + 12, 4).getUint32(0, true);
-          const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
-          const quality = buf[20];
-          const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
-
-          // Update video clock — map sender timestamp to AudioContext time
-          // This is the anchor audio uses to sync its playback.
-          if (audioCtx && timestampMs > 0) {
-            videoClockBase = {
-              senderMs: timestampMs,
-              audioCtxTime: audioCtx.currentTime
-            };
+      if (player) player.destroy();
+      player = new RelayPlayer({
+        canvas: canvas,
+        onStatus: (s) => updateHud("h-status", s),
+        onFps: (fps) => updateHud("h-fps", fps.toString()),
+        onSize: (w, h) => updateHud("h-size", `${w}x${h}`),
+        onSequence: (seq) => updateHud("h-seq", seq.toString()),
+        onLatency: (ms) => updateHud("h-latency", `${ms}ms`),
+        onDropped: (count) => updateHud("h-drop", count.toString()),
+        onAudioState: (state) => updateHud("h-audio", state),
+        onAudioLevel: (pct) => meterFill.style.width = pct + "%",
+        onConnectionState: (state) => {
+          if (state === "connected") {
+            document.body.className = "connected";
+            document.getElementById("status").textContent = "Connected";
+          } else if (state === "disconnected") {
+            document.body.className = "disconnected";
+            document.getElementById("status").textContent = "Disconnected";
+          } else if (state === "reconnecting") {
+            document.body.className = "disconnected";
           }
+        },
+        onNeedUnmute: () => {
+          document.getElementById("unmute-overlay").classList.add("show");
+        },
+      });
+      player.connect(url);
+    }
 
-          // Detect dropped frames
-          if (lastSequence > 0 && sequence > lastSequence + 1) {
-            droppedFrames += sequence - lastSequence - 1;
-          }
-          lastSequence = sequence;
+    function unmuteAudio() {
+      if (player) {
+        player.resumeAudio();
+        document.getElementById("unmute-overlay").classList.remove("show");
+      }
+    }
 
-          // JPEG payload
-          const jpeg = buf.slice(FRLY_HEADER_SIZE);
-          const blob = new Blob([jpeg], { type: "image/jpeg" });
-          const url = URL.createObjectURL(blob);
-          const img = new Image();
-          img.onload = () => {
-            if (canvas.width !== width || canvas.height !== height) {
-              canvas.width = width;
-              canvas.height = height;
-            }
-            ctx.drawImage(img, 0, 0);
-            URL.revokeObjectURL(url);
-          };
-          img.src = url;
-
-          // FPS counter
-          frameCount++;
-          fpsFrameCount++;
-          const now = performance.now();
-          if (now - lastFpsTime >= 1000) {
-            currentFps = Math.round(fpsFrameCount * 1000 / (now - lastFpsTime));
-            fpsFrameCount = 0;
-            lastFpsTime = now;
-          }
-
-          const latency = Date.now() - timestampMs;
-          updateHud("h-fps", currentFps.toString());
-          updateHud("h-size", `${width}x${height}`);
-          updateHud("h-seq", sequence.toString());
-          updateHud("h-latency", `${latency}ms`);
-          updateHud("h-drop", droppedFrames.toString());
-        }
-      };
-
-      ws.onclose = () => {
-        resetStreamState();
-        document.body.className = "disconnected";
-        document.getElementById("status").textContent = "Disconnected";
-        updateHud("h-status", "CLOSED");
-        updateHud("h-audio", "OFF");
-
-        // Auto-reconnect with exponential backoff (unless user clicked Connect manually)
-        if (!intentionalClose) {
-          updateHud("h-status", `RECONN ${Math.round(reconnectDelay/1000)}s`);
-          document.getElementById("status").textContent = `Reconnecting in ${Math.round(reconnectDelay/1000)}s...`;
-          reconnectTimer = setTimeout(() => {
-            const url = document.getElementById("relay-url").value.trim();
-            if (url) connect();
-          }, reconnectDelay);
-          reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
-        }
-      };
-
-      ws.onerror = () => {
-        document.getElementById("status").textContent = "Connection error";
-        updateHud("h-status", "ERROR");
-      };
+    function setQuality(preset) {
+      if (player) player.setQuality(preset);
     }
 
     // Auto-detect relay URL from page hostname if served from the relay server
@@ -531,15 +176,10 @@
         connect();
         return;
       }
-      // If served from the relay server itself (not file:// or localhost dev), auto-connect
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-
-      // Check for session scoping: server injects window.__SESSION_ID for /session/<id> routes
-      // or client can pass ?session=<id> in the page URL
       const sessionId = window.__SESSION_ID
         || new URLSearchParams(location.search).get("session")
         || "";
-
       const sessionParam = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
       const autoUrl = `${proto}//${location.host}/view${sessionParam}`;
       input.value = autoUrl;

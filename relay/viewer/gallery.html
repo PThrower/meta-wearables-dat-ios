@@ -131,22 +131,60 @@
     #status-bar a { color: rgba(255,255,255,0.5); text-decoration: none; }
     #status-bar a:hover { color: #fff; }
 
-    .video-overlay {
+    /* --- Shared overlay base --- */
+    .overlay {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.9); z-index: 100;
       align-items: center; justify-content: center;
+      flex-direction: column;
     }
-    .video-overlay.active { display: flex; }
-    .video-overlay video {
-      max-width: 90vw; max-height: 85vh; border-radius: 8px;
-      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
-    }
-    .video-overlay .close-btn {
+    .overlay.active { display: flex; }
+    .overlay .close-btn {
       position: fixed; top: 16px; right: 16px;
       font-size: 20px; color: #fff; background: rgba(255,255,255,0.1);
       border: none; border-radius: 50%; width: 36px; height: 36px;
       cursor: pointer; display: flex; align-items: center; justify-content: center;
+      z-index: 101;
     }
+
+    /* --- Recorded video overlay --- */
+    #videoOverlay video {
+      max-width: 90vw; max-height: 85vh; border-radius: 8px;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.8);
+    }
+
+    /* --- Live stream overlay --- */
+    #liveOverlay {
+      background: #000;
+    }
+    #liveOverlay .live-container {
+      display: flex; flex-direction: column; align-items: center;
+      width: 100%; height: 100%;
+    }
+    #liveOverlay canvas {
+      max-width: 100%; max-height: calc(100vh - 48px); object-fit: contain;
+    }
+    #liveOverlay .live-hud {
+      display: flex; gap: 16px; padding: 8px 16px;
+      font-size: 11px; color: rgba(255,255,255,0.6);
+      background: rgba(0,0,0,0.8); width: 100%;
+      justify-content: center; flex-shrink: 0;
+    }
+    #liveOverlay .live-hud .val { color: #0f0; font-weight: 600; }
+    #liveOverlay .live-hud .audio-val { color: #0ff; }
+    .live-unmute {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 102;
+      display: none; align-items: center; justify-content: center;
+      cursor: pointer;
+    }
+    .live-unmute.show { display: flex; }
+    .live-unmute div {
+      background: rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 12px; padding: 24px 40px; text-align: center;
+    }
+    .live-unmute .icon { font-size: 48px; margin-bottom: 8px; }
+    .live-unmute .text { font-size: 14px; color: rgba(255,255,255,0.7); }
   </style>
 </head>
 <body>
@@ -169,21 +207,50 @@
     <span><a href="/">Directory</a> &middot; <a href="/stats">Stats</a> &middot; Auto-refresh 30s</span>
   </div>
 
-  <div class="video-overlay" id="videoOverlay">
+  <!-- Recorded video overlay -->
+  <div class="overlay" id="videoOverlay">
     <button class="close-btn" id="closeVideo">&times;</button>
     <video id="videoPlayer" controls autoplay></video>
   </div>
 
+  <!-- Live stream overlay (uses RelayPlayer) -->
+  <div class="overlay" id="liveOverlay">
+    <button class="close-btn" id="closeLive">&times;</button>
+    <div class="live-container">
+      <canvas id="liveCanvas"></canvas>
+      <div class="live-hud">
+        <span>FPS <span class="val" id="lh-fps">--</span></span>
+        <span>SIZE <span class="val" id="lh-size">--</span></span>
+        <span>LATENCY <span class="val" id="lh-latency">--</span></span>
+        <span>AUDIO <span class="audio-val" id="lh-audio">OFF</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unmute overlay for live audio -->
+  <div class="live-unmute" id="liveUnmute" onclick="resumeLiveAudio()">
+    <div>
+      <div class="icon">&#x1f50a;</div>
+      <div class="text">Tap anywhere to enable audio</div>
+    </div>
+  </div>
+
+  <script src="/relay-player.js"></script>
   <script>
     const grid = document.getElementById("grid");
     const subtitle = document.getElementById("subtitle");
     const lastRefresh = document.getElementById("last-refresh");
-    const overlay = document.getElementById("videoOverlay");
-    const player = document.getElementById("videoPlayer");
-    const closeBtn = document.getElementById("closeVideo");
+    const videoOverlay = document.getElementById("videoOverlay");
+    const videoPlayer = document.getElementById("videoPlayer");
+    const closeVideoBtn = document.getElementById("closeVideo");
+    const liveOverlay = document.getElementById("liveOverlay");
+    const liveCanvas = document.getElementById("liveCanvas");
+    const closeLiveBtn = document.getElementById("closeLive");
+    const liveUnmute = document.getElementById("liveUnmute");
 
     let allSessions = [];
     let activeFilter = "all";
+    let livePlayer = null;
 
     document.querySelectorAll(".filter-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -194,13 +261,22 @@
       });
     });
 
-    closeBtn.addEventListener("click", () => {
-      overlay.classList.remove("active");
-      player.pause();
-      player.src = "";
+    closeVideoBtn.addEventListener("click", () => {
+      videoOverlay.classList.remove("active");
+      videoPlayer.pause();
+      videoPlayer.src = "";
     });
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) closeBtn.click();
+    videoOverlay.addEventListener("click", (e) => {
+      if (e.target === videoOverlay) closeVideoBtn.click();
+    });
+
+    closeLiveBtn.addEventListener("click", () => {
+      liveOverlay.classList.remove("active");
+      liveUnmute.classList.remove("show");
+      if (livePlayer) { livePlayer.disconnect(); livePlayer = null; }
+    });
+    liveOverlay.addEventListener("click", (e) => {
+      if (e.target === liveOverlay) closeLiveBtn.click();
     });
 
     function filtered() {
@@ -226,8 +302,44 @@
     }
 
     function playVideo(url) {
-      player.src = url;
-      overlay.classList.add("active");
+      videoPlayer.src = url;
+      videoOverlay.classList.add("active");
+    }
+
+    function watchLive(sessionId) {
+      // Build WebSocket URL from current page origin
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}`;
+
+      // Destroy previous player if any
+      if (livePlayer) { livePlayer.destroy(); livePlayer = null; }
+
+      // Reset HUD
+      document.getElementById("lh-fps").textContent = "--";
+      document.getElementById("lh-size").textContent = "--";
+      document.getElementById("lh-latency").textContent = "--";
+      document.getElementById("lh-audio").textContent = "OFF";
+      liveUnmute.classList.remove("show");
+
+      // Create new RelayPlayer instance
+      livePlayer = new RelayPlayer({
+        canvas: liveCanvas,
+        onFps: (fps) => document.getElementById("lh-fps").textContent = fps,
+        onSize: (w, h) => document.getElementById("lh-size").textContent = `${w}x${h}`,
+        onLatency: (ms) => document.getElementById("lh-latency").textContent = `${ms}ms`,
+        onAudioState: (state) => document.getElementById("lh-audio").textContent = state,
+        onNeedUnmute: () => liveUnmute.classList.add("show"),
+      });
+
+      liveOverlay.classList.add("active");
+      livePlayer.connect(wsUrl);
+    }
+
+    function resumeLiveAudio() {
+      if (livePlayer) {
+        livePlayer.resumeAudio();
+        liveUnmute.classList.remove("show");
+      }
     }
 
     function onThumbLoad(img) { img.classList.add("loaded"); }
@@ -263,7 +375,7 @@
           <div class="card-actions">
             ${s.segments > 0 ? `<button class="action-btn primary" onclick="event.stopPropagation(); playVideo('${s.videoUrl}')">Play</button>
             <a class="action-btn" href="${s.videoUrl}" target="_blank" onclick="event.stopPropagation()">Download</a>` : ""}
-            ${s.live ? `<a class="action-btn" href="/session/${s.sessionId}" onclick="event.stopPropagation()">Watch Live</a>` : ""}
+            ${s.live ? `<button class="action-btn primary" onclick="event.stopPropagation(); watchLive('${s.sessionId}')">Watch Live</button>` : ""}
           </div>
         </div>
       </div>`;
