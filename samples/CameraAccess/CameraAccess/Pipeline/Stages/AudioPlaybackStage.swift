@@ -144,15 +144,22 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
             var collectedBuffers: [(buffer: AVAudioPCMBuffer, format: AVAudioFormat)] = []
 
-            synth.write(utterance) { buffer in
-                if let pcmBuffer = buffer as? AVAudioPCMBuffer, pcmBuffer.frameLength > 0 {
-                    let format = pcmBuffer.format
-                    guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: pcmBuffer.frameLength) else { return }
-                    copy.frameLength = pcmBuffer.frameLength
-                    if let src = pcmBuffer.floatChannelData?[0], let dst = copy.floatChannelData?[0] {
-                        dst.initialize(from: src, count: Int(pcmBuffer.frameLength) * Int(format.channelCount))
+            // write() calls the handler asynchronously — final call has frameLength == 0.
+            // Use a continuation to wait for all buffers before proceeding.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                synth.write(utterance) { buffer in
+                    if let pcmBuffer = buffer as? AVAudioPCMBuffer, pcmBuffer.frameLength > 0 {
+                        let format = pcmBuffer.format
+                        guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: pcmBuffer.frameLength) else { return }
+                        copy.frameLength = pcmBuffer.frameLength
+                        if let src = pcmBuffer.floatChannelData?[0], let dst = copy.floatChannelData?[0] {
+                            dst.initialize(from: src, count: Int(pcmBuffer.frameLength) * Int(format.channelCount))
+                        }
+                        collectedBuffers.append((copy, format))
+                    } else {
+                        // End-of-stream signal (frameLength == 0)
+                        continuation.resume()
                     }
-                    collectedBuffers.append((copy, format))
                 }
             }
 
