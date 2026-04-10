@@ -97,18 +97,10 @@ async function loadWasm() {
 
 await loadWasm();
 
-// --- Load HTML templates ---
+// --- Load HTML template ---
 
 const viewerHtml = await Bun.file(join(import.meta.dir, "../../viewer/index.html")).text().catch(() =>
   "<html><body><h1>Viewer HTML not found</h1></body></html>"
-);
-
-const directoryHtml = await Bun.file(join(import.meta.dir, "../../viewer/directory.html")).text().catch(() =>
-  ""
-);
-
-const galleryHtml = await Bun.file(join(import.meta.dir, "../../viewer/gallery.html")).text().catch(() =>
-  ""
 );
 
 const relayPlayerJs = await Bun.file(join(import.meta.dir, "../../viewer/relay-player.js")).text().catch(() =>
@@ -210,16 +202,10 @@ const server = Bun.serve<WsData>({
       return Response.json(await registry.stats(wifiIp, PORT, serverStartTime, store));
     }
 
-    // --- Gallery ---
+    // --- Gallery (redirect to root — unified page) ---
 
     if (url.pathname === "/gallery") {
-      if (!galleryHtml) return Response.json({ error: "Gallery not available" }, { status: 404 });
-      const data = await galleryCached();
-      const injected = galleryHtml.replace(
-        "<!--__GALLERY_DATA__-->",
-        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
-      );
-      return new Response(injected, { headers: { "Content-Type": "text/html" } });
+      return Response.redirect(`${req.headers.get("x-forwarded-proto") || "https"}://${req.headers.get("host") || url.host}/`);
     }
 
     if (url.pathname === "/gallery/api") {
@@ -270,23 +256,20 @@ const server = Bun.serve<WsData>({
       return Response.json(result);
     }
 
-    // --- Serve viewer scoped to a session: /session/<id> ---
+    // --- Serve unified page scoped to a session: /session/<id> ---
 
     const liveSessionMatch = url.pathname.match(/^\/session\/([^/]+)$/);
     if (liveSessionMatch) {
       const sessionId = liveSessionMatch[1];
-      // Check if session exists (live or historical)
       const liveSession = registry.get(sessionId);
       if (!liveSession) {
-        // Check S3 for historical session
         const data = await store.get(`sessions/${sessionId}/meta.json`);
         if (!data) return Response.json({ error: "Session not found" }, { status: 404 });
       }
-      // Inject session id into the HTML so the viewer auto-connects to the right session
-      const html = viewerHtml.replace(
-        "</head>",
-        `<script>window.__SESSION_ID = "${sessionId}";</script></head>`
-      );
+      const gallery = await galleryCached();
+      const html = viewerHtml
+        .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
+        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`);
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -381,19 +364,15 @@ const server = Bun.serve<WsData>({
       }
     }
 
-    // --- Root: directory if sessions active, else viewer ---
+    // --- Root: unified page (gallery + directory + live player) ---
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const active = registry.listActive();
-      if (directoryHtml && active.length > 0) {
-        // Inject live session data into directory page
-        const html = directoryHtml.replace(
-          "</head>",
-          `<script>window.__SESSIONS = ${JSON.stringify(active)};</script></head>`
-        );
-        return new Response(html, { headers: { "Content-Type": "text/html" } });
-      }
-      return new Response(viewerHtml, { headers: { "Content-Type": "text/html" } });
+      const data = await galleryCached();
+      const html = viewerHtml.replace(
+        "<!--__GALLERY_DATA__-->",
+        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
+      );
+      return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
     // --- WebSocket upgrade: /publish and /view ---
