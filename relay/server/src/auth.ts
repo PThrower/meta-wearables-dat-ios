@@ -24,7 +24,7 @@ export interface AuthUser {
  * Returns null if the token is invalid, expired, or missing required fields.
  * In dev mode (RELAY_NO_AUTH=1), returns a synthetic dev user.
  */
-export async function verifyToken(token: string): Promise<AuthUser | null> {
+export async function verifyToken(token: string | null | undefined): Promise<AuthUser | null> {
   if (NO_AUTH) return { sub: "dev", email: "dev@localhost" };
   if (!token) return null;
   try {

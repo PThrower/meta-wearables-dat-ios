@@ -209,7 +209,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/stats") {
       const token = extractToken(req, url);
-      const user = token ? await verifyToken(token) : null;
+      const user = await verifyToken(token);
       if (!user) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
@@ -394,7 +394,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/tap/audio") {
       const token = extractToken(req, url);
-      const user = token ? await verifyToken(token) : null;
+      const user = await verifyToken(token);
       if (!user) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
