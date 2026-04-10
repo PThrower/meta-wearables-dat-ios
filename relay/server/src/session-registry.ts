@@ -105,6 +105,7 @@ export class SessionRegistry {
       totalBytes: 0,
       audioCount: 0,
       audioBytes: 0,
+      audioTaps: new Map(),
       timing: freshTiming(),
       lastHeader: null,
       clientIp,
@@ -255,9 +256,29 @@ export class SessionRegistry {
   }
 
   /** Fan out an audio frame to all viewers in a session */
-  fanoutAudio(sessionId: string, data: Uint8Array) {
+  fanoutAudio(sessionId: string, data: Uint8Array, codecType: number, sampleRate: number) {
     const session = this.sessions.get(sessionId);
-    if (!session || session.viewers.size === 0) return;
+    if (!session) return;
+
+    // Track per-codecType audio stats on the publisher
+    if (session.publisher) {
+      const tap = session.publisher.audioTaps.get(codecType);
+      if (tap) {
+        tap.count++;
+        tap.bytes += data.length;
+        tap.lastAt = Date.now();
+        if (sampleRate > 0) tap.sampleRate = sampleRate;
+      } else {
+        session.publisher.audioTaps.set(codecType, {
+          count: 1,
+          bytes: data.length,
+          sampleRate,
+          lastAt: Date.now(),
+        });
+      }
+    }
+
+    if (session.viewers.size === 0) return;
 
     for (const [id, viewer] of session.viewers) {
       try {
@@ -397,6 +418,16 @@ export class SessionRegistry {
           audioCount: session.publisher.audioCount,
           audioBytes: session.publisher.audioBytes,
           audioMB: Math.round(session.publisher.audioBytes / 1048576 * 100) / 100,
+          audioTaps: Object.fromEntries(
+            [...session.publisher.audioTaps.entries()].map(([ct, tap]) => [ct, {
+              codecType: ct,
+              label: ct === 0 ? "built-in mic" : ct === 1 ? "glasses HFP mic" : ct === 2 ? "TTS playback" : `unknown(${ct})`,
+              frameCount: tap.count,
+              bytes: tap.bytes,
+              sampleRate: tap.sampleRate,
+              lastAtMs: tap.lastAt,
+            }])
+          ),
           uptimeMs: pubUptimeMs,
           latencyMs: session.publisher.timing.lastReceivedAt > 0
             ? Math.round(now - session.publisher.timing.lastReceivedAt)

@@ -10,7 +10,7 @@
  */
 
 import type { ObjectStore } from "@ebowwa/object-store";
-import { HEADER_SIZE, AUDIO_HEADER_SIZE } from "./protocol.js";
+import { HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 
@@ -95,24 +95,23 @@ export class SessionRecorder {
 
     // Extract FRLY timestamp for timing metadata
     this.segFrameCount++;
-    if (frame.length >= HEADER_SIZE) {
-      const view = new DataView(frame.buffer, frame.byteOffset);
-      const ts = Number(view.getBigUint64(21, true));
-      if (this.segFrameCount === 1) this.segFirstTimestampMs = ts;
-      this.segLastTimestampMs = ts;
+    const header = parseHeader(frame);
+    if (header) {
+      if (this.segFrameCount === 1) this.segFirstTimestampMs = header.timestampMs;
+      this.segLastTimestampMs = header.timestampMs;
     }
   }
 
   appendAudio(frame: Uint8Array) {
     this.ensureActive();
-    const pcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
+    const pcm = frame.length > 29 ? frame.subarray(29) : frame;
     this.audioParts.push(Buffer.from(pcm));
 
     // Extract FRAU header metadata for sample rate / channels
-    if (frame.length >= AUDIO_HEADER_SIZE) {
-      const view = new DataView(frame.buffer, frame.byteOffset);
-      this.chunkSampleRate = view.getUint32(13, true);  // offset 13 in FRAU header
-      this.chunkChannels = view.getUint16(17, true);     // offset 17 in FRAU header
+    const header = parseAudioHeader(frame);
+    if (header) {
+      this.chunkSampleRate = header.sampleRate;
+      this.chunkChannels = header.channels;
       // PCM 16-bit LE: 2 bytes per sample per channel
       this.chunkSampleCount += Math.floor(pcm.length / (this.chunkChannels * 2));
     }

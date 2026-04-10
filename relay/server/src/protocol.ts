@@ -64,6 +64,21 @@ export function updateTiming(t: FrameTiming, sequence: number, timestampMs: numb
 
 // --- Frame parsing ---
 
+export function parseAudioHeader(buf: Uint8Array) {
+  if (buf.length < AUDIO_HEADER_SIZE) return null;
+  if (buf[0] !== 0x46 || buf[1] !== 0x52 || buf[2] !== 0x41 || buf[3] !== 0x55) return null;
+  const view = new DataView(buf.buffer, buf.byteOffset);
+  return {
+    codecType: buf[4],
+    sequence: Number(view.getBigUint64(5, true)),
+    sampleRate: view.getUint32(13, true),
+    channels: view.getUint16(17, true),
+    bitsPerSample: view.getUint16(19, true),
+    timestampMs: Number(view.getBigUint64(21, true)),
+    pcm: buf.subarray(AUDIO_HEADER_SIZE),
+  };
+}
+
 export function parseHeader(buf: Uint8Array) {
   if (buf.length < HEADER_SIZE) return null;
   if (buf[0] !== 0x46 || buf[1] !== 0x52 || buf[2] !== 0x4c || buf[3] !== 0x59) return null;

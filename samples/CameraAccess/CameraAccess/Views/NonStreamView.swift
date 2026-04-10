@@ -81,6 +81,39 @@ struct NonStreamView: View {
           .padding(.horizontal, 24)
           .padding(.bottom, 8)
 
+        // TTS playback toggle
+        HStack {
+          Image(systemName: "speaker.wave.2")
+            .foregroundColor(.white.opacity(0.7))
+            .frame(width: 20)
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text("TTS Playback")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundColor(.white)
+            Text("Play \"hello world\" through glasses speaker")
+              .font(.system(size: 11))
+              .foregroundColor(.white.opacity(0.5))
+          }
+
+          Spacer()
+
+          Toggle("", isOn: $viewModel.isTTSPlaybackEnabled)
+            .labelsHidden()
+            .tint(.blue)
+            .onChange(of: viewModel.isTTSPlaybackEnabled) { enabled in
+              Task {
+                if enabled {
+                  await viewModel.startTTSPlayback()
+                } else {
+                  await viewModel.stopTTSPlayback()
+                }
+              }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 8)
+
         HStack(spacing: 8) {
           Image(systemName: "hourglass")
             .resizable()

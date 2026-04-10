@@ -33,11 +33,10 @@ import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
 import type { WsData, QualityPreset } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
-import { isAudioFrame, isVideoFrame } from "./protocol.js";
+import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import {
-  exportSessionMp4,
   getSessionExportMeta,
   getSessionThumbnail,
   getCachedMp4Url,
@@ -140,6 +139,28 @@ async function galleryCached(): Promise<GallerySession[]> {
   return data;
 }
 
+// --- Helpers ---
+
+async function findLatestSessionId(): Promise<string | null> {
+  const keys = await store.list("sessions/") as string[];
+  const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
+  if (metaKeys.length === 0) return null;
+
+  let latestId: string | null = null;
+  let latestTime = 0;
+  for (const mk of metaKeys) {
+    const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
+    const buf = await store.get(mk);
+    if (!buf) continue;
+    try {
+      const meta = JSON.parse(new TextDecoder().decode(buf));
+      const t = new Date(meta.startedAt).getTime();
+      if (t > latestTime) { latestTime = t; latestId = id; }
+    } catch {}
+  }
+  return latestId;
+}
+
 // --- Server ---
 
 const server = Bun.serve<WsData>({
@@ -152,53 +173,19 @@ const server = Bun.serve<WsData>({
     // --- Latest session (timestamp-ordered, most recent) ---
 
     if (url.pathname === "/latest/video.mp4") {
-      const keys = await store.list("sessions/") as string[];
-      const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-      if (metaKeys.length === 0) {
+      const latestId = await findLatestSessionId();
+      if (!latestId) {
         return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
-      // Fetch all meta.json, parse startedAt, pick most recent
-      let latestId: string | null = null;
-      let latestTime = 0;
-      for (const mk of metaKeys) {
-        const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
-        const buf = await store.get(mk);
-        if (!buf) continue;
-        try {
-          const meta = JSON.parse(new TextDecoder().decode(buf));
-          const t = new Date(meta.startedAt).getTime();
-          if (t > latestTime) { latestTime = t; latestId = id; }
-        } catch {}
-      }
-      if (!latestId) {
-        return Response.json({ error: "No valid session metadata" }, { status: 404 });
-      }
-      // Redirect to the actual mp4 export URL
       const proto = req.headers.get("x-forwarded-proto") || "https";
       const host = req.headers.get("host") || url.host;
       return Response.redirect(`${proto}://${host}/session/${latestId}/video.mp4?audio`);
     }
 
     if (url.pathname === "/latest/export") {
-      const keys = await store.list("sessions/") as string[];
-      const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-      if (metaKeys.length === 0) {
-        return Response.json({ error: "No recorded sessions" }, { status: 404 });
-      }
-      let latestId: string | null = null;
-      let latestTime = 0;
-      for (const mk of metaKeys) {
-        const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
-        const buf = await store.get(mk);
-        if (!buf) continue;
-        try {
-          const meta = JSON.parse(new TextDecoder().decode(buf));
-          const t = new Date(meta.startedAt).getTime();
-          if (t > latestTime) { latestTime = t; latestId = id; }
-        } catch {}
-      }
+      const latestId = await findLatestSessionId();
       if (!latestId) {
-        return Response.json({ error: "No valid session metadata" }, { status: 404 });
+        return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
       const meta = await getSessionExportMeta(latestId, store);
       return Response.json({ ...meta, sessionId: latestId });
@@ -504,7 +491,8 @@ const server = Bun.serve<WsData>({
             // Audio frame (FRAU)
             session.publisher.audioCount++;
             session.publisher.audioBytes += buf.length;
-            registry.fanoutAudio(sessionId, buf);
+            const audioHdr = parseAudioHeader(buf);
+            registry.fanoutAudio(sessionId, buf, audioHdr?.codecType ?? 0, audioHdr?.sampleRate ?? 0);
             session.recorder?.appendAudio(buf);
             audioTapBus.publish(buf);
           } else if (isVideoFrame(buf)) {

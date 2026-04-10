@@ -67,6 +67,18 @@ class StreamSessionViewModel: ObservableObject {
     didSet { rebuildSessionWithNewConfig() }
   }
 
+  // TTS playback state
+  @Published var isTTSPlaybackEnabled: Bool = false
+
+  // TTS playback methods — toggled independently from streaming
+  func startTTSPlayback() async {
+    await audioPlaybackStage.start()
+  }
+
+  func stopTTSPlayback() async {
+    await audioPlaybackStage.stop()
+  }
+
   // Recording state
   @Published var isRecording: Bool = false
 
@@ -570,10 +582,6 @@ class StreamSessionViewModel: ObservableObject {
   func startSession() async {
     cancelRetry()
     await streamSession.start()
-    // Start TTS playback through glasses speaker.
-    // AudioPlaybackStage no longer calls setPreferredInput() —
-    // with .allowBluetooth, the glasses HFP output is already the default route.
-    await audioPlaybackStage.start()
   }
 
   private func showError(_ message: String) {
@@ -590,9 +598,6 @@ class StreamSessionViewModel: ObservableObject {
     }
     cancelRetry()
     await streamSession.stop()
-
-    // Stop TTS playback stage.
-    await audioPlaybackStage.stop()
 
     // [SAFE] AVAudioSession.sharedInstance() called from @MainActor (this ViewModel).
     // This is the correct isolation context — not inside an actor.

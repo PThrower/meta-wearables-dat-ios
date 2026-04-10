@@ -51,6 +51,7 @@ export interface Publisher {
   totalBytes: number;
   audioCount: number;
   audioBytes: number;
+  audioTaps: Map<number, { count: number; bytes: number; sampleRate: number; lastAt: number }>;
   timing: FrameTiming;
   lastHeader: { width: number; height: number; quality: number } | null;
   clientIp: string;

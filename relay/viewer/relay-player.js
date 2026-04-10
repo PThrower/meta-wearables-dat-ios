@@ -266,7 +266,9 @@ class RelayPlayer {
     const bitsPerSample = view.getUint16(19, true);
     const senderTimestampMs = Number(view.getBigUint64(21, true));
 
-    if (codecType !== 0 || bitsPerSample !== 16) return;
+    // Accept all 16-bit PCM sources:
+    //   codecType 0 = built-in mic, 1 = glasses HFP mic, 2 = TTS playback
+    if (bitsPerSample !== 16) return;
 
     const pcmBytes = buf.slice(RelayPlayer.FRAU_HEADER_SIZE);
     const pcmInt16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.length / 2);
