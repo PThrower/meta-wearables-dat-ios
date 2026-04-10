@@ -288,6 +288,27 @@ const server = Bun.serve<WsData>({
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
+    // --- Push audio to publisher: POST /session/<id>/audio-in ---
+
+    const audioInMatch = url.pathname.match(/^\/session\/([^/]+)\/audio-in$/);
+    if (audioInMatch && req.method === "POST") {
+      const sessionId = audioInMatch[1];
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const buf = await req.arrayBuffer();
+      if (buf.byteLength < 29) return Response.json({ error: "Payload too small" }, { status: 400 });
+
+      const data = new Uint8Array(buf);
+      if (!isAudioFrame(data)) return Response.json({ error: "Not a FRAU frame" }, { status: 400 });
+
+      const sent = registry.sendToPublisher(sessionId, data);
+      if (!sent) return Response.json({ error: "No connected publisher" }, { status: 404 });
+
+      return Response.json({ ok: true, bytes: data.length });
+    }
+
     // --- Session Thumbnail ---
 
     const thumbMatch = url.pathname.match(/^\/session\/([^/]+)\/thumbnail$/);

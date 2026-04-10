@@ -319,6 +319,17 @@ export class SessionRegistry {
     }
   }
 
+  // --- Server-to-publisher audio push ---
+
+  /** Send binary data (FRAU frame) to a session's publisher. Returns true if sent. */
+  sendToPublisher(sessionId: string, data: Uint8Array): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.publisher) return false;
+    if (session.publisher.ws.readyState !== WebSocket.OPEN) return false;
+    session.publisher.ws.send(data);
+    return true;
+  }
+
   // --- Stale connection cleanup ---
 
   /** Evict stale publishers (15s timeout) and viewers (30s timeout) */

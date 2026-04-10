@@ -73,6 +73,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private let jpegQuality: CGFloat
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
+    /// Callback to dispatch received FRAU audio to the AudioEventBus.
+    /// Set by StreamSessionViewModel before connecting.
+    private var onReceivedAudio: (@Sendable (Data) -> Void)?
+
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
@@ -201,6 +205,17 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                     case .string(let text):
                         NSLog("[RelayStage] Received: \(text.prefix(100))")
                     case .data(let data):
+                        // Check if this is a FRAU audio frame (server → publisher)
+                        if data.count >= 29 {
+                            let magic: [UInt8] = [0x46, 0x52, 0x41, 0x55] // "FRAU"
+                            let prefix = [UInt8](data.prefix(4))
+                            if prefix == magic {
+                                if let handler = await self.onReceivedAudio {
+                                    handler(data)
+                                }
+                                return
+                            }
+                        }
                         NSLog("[RelayStage] Received binary: \(data.count) bytes")
                     @unknown default:
                         break
@@ -454,6 +469,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     func setDeviceIdentity(wearableId: String?, wearableType: String?) {
         self.wearableId = wearableId
         self.wearableType = wearableType
+    }
+
+    /// Set the callback for server-to-publisher FRAU audio frames.
+    /// Called by StreamSessionViewModel before connecting.
+    func setOnReceivedAudio(_ handler: @Sendable @escaping (Data) -> Void) {
+        self.onReceivedAudio = handler
     }
 }
 

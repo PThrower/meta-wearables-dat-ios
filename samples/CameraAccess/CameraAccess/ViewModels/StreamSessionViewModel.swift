@@ -366,6 +366,34 @@ class StreamSessionViewModel: ObservableObject {
           : activeWearableType
         await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
       }
+
+      // Wire server-to-publisher FRAU audio to AudioEventBus for playback
+      await relayStage.setOnReceivedAudio { [weak self] data in
+        guard let self else { return }
+        guard data.count >= 29 else { return }
+
+        // Parse FRAU header fields (little-endian)
+        // Layout: [0:4] magic [4] codecType [5:13] seq [13:17] sampleRate
+        //         [17:19] channels [19:21] bitsPerSample [21:29] timestampMs [29:] pcm
+        let codecType = data[4]
+        let seq = data[5...12].withUnsafeBytes { $0.load(as: UInt64.self) }
+        let sampleRate = data[13...16].withUnsafeBytes { $0.load(as: UInt32.self) }
+        let channels = data[17...18].withUnsafeBytes { $0.load(as: UInt16.self) }
+        let bitsPerSample = data[19...20].withUnsafeBytes { $0.load(as: UInt16.self) }
+        let timestampMs = data[21...28].withUnsafeBytes { $0.load(as: UInt64.self) }
+        let pcmData = data.subdata(in: 29..<data.count)
+
+        let packet = AudioPacket(
+          pcmData: pcmData,
+          codecType: codecType,
+          sampleRate: sampleRate,
+          channels: channels,
+          bitsPerSample: bitsPerSample,
+          sequenceNumber: seq,
+          timestampMs: timestampMs
+        )
+        Task { await self.audioEventBus.publish(packet) }
+      }
       try await relayStage.connect(to: url, idToken: idToken)
       isRelaying = true
       NSLog("[StreamSession] Relay connected to \(url)")
