@@ -433,7 +433,7 @@ const server = Bun.serve<WsData>({
 
     // Auth check for WebSocket upgrade
     const token = extractToken(req, url);
-    const user = token ? await verifyToken(token) : null;
+    const user = await verifyToken(token);
     if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
