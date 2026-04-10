@@ -133,6 +133,7 @@ class StreamSessionViewModel: ObservableObject {
   private let audioPlaybackStage = AudioPlaybackStage()
   private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage!
+  private var activePlayer: AVAudioPlayer?  // retained to prevent deallocation during playback
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -369,7 +370,7 @@ class StreamSessionViewModel: ObservableObject {
 
       // Wire server-to-publisher FRAU audio to direct playback.
       // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
-      await relayStage.setOnReceivedAudio { data in
+      await relayStage.setOnReceivedAudio { [weak self] data in
         guard data.count >= 29 else { return }
 
         // Safe little-endian parsing (no withUnsafeBytes — avoids alignment crashes)
@@ -385,11 +386,19 @@ class StreamSessionViewModel: ObservableObject {
 
         // Wrap PCM in WAV header and play via AVAudioPlayer
         let wav = Self.pcmToWav(pcm: pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+          guard let self else { return }
           do {
+            // Route to phone speaker (not HFP glasses) — avoids BT video stream conflict
+            try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
             let player = try AVAudioPlayer(data: wav)
             player.volume = 1.0
-            player.play()
+            if player.prepareToPlay() {
+              player.play()
+              self.activePlayer = player  // retain so it isn't deallocated mid-playback
+            } else {
+              NSLog("[StreamSession] AVAudioPlayer prepareToPlay failed")
+            }
           } catch {
             NSLog("[StreamSession] WAV playback error: \(error)")
           }
