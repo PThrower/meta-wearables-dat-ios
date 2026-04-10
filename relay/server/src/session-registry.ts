@@ -124,6 +124,8 @@ export class SessionRegistry {
       wearableType: null,
       deviceModel: null,
       systemVersion: null,
+      appVersion: null,
+      buildNumber: null,
     };
     session.publisher = publisher;
     session.lastActivityAt = Date.now();
@@ -186,6 +188,8 @@ export class SessionRegistry {
       lastSentAt: 0,
       throttledCount: 0,
       clientIp,
+      gitCommit: null,
+      buildVersion: null,
     });
     session.lastActivityAt = Date.now();
 
@@ -434,6 +438,8 @@ export class SessionRegistry {
           systemVersion: session.publisher.systemVersion,
           wearableId: session.publisher.wearableId,
           wearableType: session.publisher.wearableType,
+          appVersion: session.publisher.appVersion,
+          buildNumber: session.publisher.buildNumber,
           frameCount: session.publisher.frameCount,
           totalBytes: session.publisher.totalBytes,
           totalMB: Math.round(session.publisher.totalBytes / 1048576 * 100) / 100,
@@ -476,6 +482,8 @@ export class SessionRegistry {
             totalMB: Math.round(v.totalBytes / 1048576 * 100) / 100,
             uptimeMs: now - v.connected,
             timing: formatTiming(v.timing),
+            gitCommit: v.gitCommit,
+            buildVersion: v.buildVersion,
           }])
         ),
       };

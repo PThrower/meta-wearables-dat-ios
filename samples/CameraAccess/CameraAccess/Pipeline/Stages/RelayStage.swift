@@ -408,6 +408,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 "systemVersion": systemVersion,
                 "wearableId": await self.wearableId ?? "",
                 "wearableType": await self.wearableType ?? "",
+                "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             ]
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),

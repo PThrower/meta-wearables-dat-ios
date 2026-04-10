@@ -163,10 +163,12 @@ async function findLatestSessionId(): Promise<string | null> {
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
+const VIEWER_GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
+const VIEWER_BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
 
 function injectAuthConfig(html: string): string {
   let result = html;
-  const authScript = `<script>window.__GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}";${NO_AUTH_FLAG ? 'document.documentElement.dataset.noAuth="1";' : ''}</script>`;
+  const authScript = `<script>window.__GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}";${NO_AUTH_FLAG ? 'document.documentElement.dataset.noAuth="1";' : ''}window.__VIEWER_VERSION={gitCommit:"${VIEWER_GIT_COMMIT}",buildVersion:"${VIEWER_BUILD_VERSION}"};</script>`;
   // Inject right before the closing </head> if not already present
   result = result.replace("</head>", `${authScript}</head>`);
   return result;
@@ -493,6 +495,8 @@ const server = Bun.serve<WsData>({
               session.publisher.wearableType = cmd.wearableType || null;
               session.publisher.deviceModel = cmd.deviceModel || null;
               session.publisher.systemVersion = cmd.systemVersion || null;
+              session.publisher.appVersion = cmd.appVersion || null;
+              session.publisher.buildNumber = cmd.buildNumber || null;
 
               // Update session metadata
               session.metadata.deviceName = cmd.deviceName || null;
@@ -544,6 +548,16 @@ const server = Bun.serve<WsData>({
             if (cmd.type === "stats") {
               const s = await registry.stats(wifiIp, PORT, serverStartTime);
               ws.send(JSON.stringify({ type: "stats", ...s }));
+            } else if (cmd.type === "hello") {
+              // Viewer identity — store version info
+              const viewerId = ws.data.viewerId;
+              if (viewerId) {
+                const found = registry.findViewerSession(viewerId);
+                if (found) {
+                  found.viewer.gitCommit = cmd.gitCommit || null;
+                  found.viewer.buildVersion = cmd.buildVersion || null;
+                }
+              }
             } else if (cmd.type === "config" && cmd.quality && cmd.quality in QUALITY_PRESETS) {
               const viewerId = ws.data.viewerId;
               if (!viewerId) return;

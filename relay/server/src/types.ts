@@ -46,6 +46,8 @@ export interface Publisher {
   wearableType: string | null;
   deviceModel: string | null;
   systemVersion: string | null;
+  appVersion: string | null;
+  buildNumber: string | null;
 }
 
 // --- Viewer ---
@@ -60,6 +62,8 @@ export interface Viewer {
   lastSentAt: number;
   throttledCount: number;
   clientIp: string;
+  gitCommit: string | null;
+  buildVersion: string | null;
 }
 
 // --- Session (multi-session support) ---

@@ -100,6 +100,13 @@ export class RelayPlayer {
       this._resetStreamState();
       this.cb.onConnectionState("connected");
       this.cb.onStatus("CONNECTED");
+      // Send viewer identity with version info
+      const v = (window as any).__VIEWER_VERSION;
+      this.ws!.send(JSON.stringify({
+        type: "hello",
+        gitCommit: v?.gitCommit ?? "unknown",
+        buildVersion: v?.buildVersion ?? "unknown",
+      }));
     };
 
     this.ws.onmessage = (event) => this._handleMessage(event);
