@@ -213,10 +213,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                                 if let handler = await self.onReceivedAudio {
                                     handler(data)
                                 }
-                                return
+                            } else {
+                                NSLog("[RelayStage] Received binary: \(data.count) bytes")
                             }
+                        } else {
+                            NSLog("[RelayStage] Received binary: \(data.count) bytes")
                         }
-                        NSLog("[RelayStage] Received binary: \(data.count) bytes")
                     @unknown default:
                         break
                     }
