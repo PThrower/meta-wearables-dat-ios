@@ -367,32 +367,33 @@ class StreamSessionViewModel: ObservableObject {
         await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
       }
 
-      // Wire server-to-publisher FRAU audio to AudioEventBus for playback
-      await relayStage.setOnReceivedAudio { [weak self] data in
-        guard let self else { return }
+      // Wire server-to-publisher FRAU audio to direct playback.
+      // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
+      await relayStage.setOnReceivedAudio { data in
         guard data.count >= 29 else { return }
 
-        // Parse FRAU header fields (little-endian)
-        // Layout: [0:4] magic [4] codecType [5:13] seq [13:17] sampleRate
-        //         [17:19] channels [19:21] bitsPerSample [21:29] timestampMs [29:] pcm
-        let codecType = data[4]
-        let seq = data[5...12].withUnsafeBytes { $0.load(as: UInt64.self) }
-        let sampleRate = data[13...16].withUnsafeBytes { $0.load(as: UInt32.self) }
-        let channels = data[17...18].withUnsafeBytes { $0.load(as: UInt16.self) }
-        let bitsPerSample = data[19...20].withUnsafeBytes { $0.load(as: UInt16.self) }
-        let timestampMs = data[21...28].withUnsafeBytes { $0.load(as: UInt64.self) }
+        // Safe little-endian parsing (no withUnsafeBytes — avoids alignment crashes)
+        let sampleRate = UInt32(data[13])
+          | UInt32(data[14]) << 8
+          | UInt32(data[15]) << 16
+          | UInt32(data[16]) << 24
+        let channels = UInt16(data[17]) | UInt16(data[18]) << 8
+        let bitsPerSample = UInt16(data[19]) | UInt16(data[20]) << 8
         let pcmData = data.subdata(in: 29..<data.count)
 
-        let packet = AudioPacket(
-          pcmData: pcmData,
-          codecType: codecType,
-          sampleRate: sampleRate,
-          channels: channels,
-          bitsPerSample: bitsPerSample,
-          sequenceNumber: seq,
-          timestampMs: timestampMs
-        )
-        Task { await self.audioEventBus.publish(packet) }
+        NSLog("[StreamSession] Server audio: \(pcmData.count) bytes, \(sampleRate)Hz, \(channels)ch, \(bitsPerSample)bit")
+
+        // Wrap PCM in WAV header and play via AVAudioPlayer
+        let wav = Self.pcmToWav(pcm: pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
+        Task { @MainActor in
+          do {
+            let player = try AVAudioPlayer(data: wav)
+            player.volume = 1.0
+            player.play()
+          } catch {
+            NSLog("[StreamSession] WAV playback error: \(error)")
+          }
+        }
       }
       try await relayStage.connect(to: url, idToken: idToken)
       isRelaying = true
@@ -667,6 +668,36 @@ class StreamSessionViewModel: ObservableObject {
       streamingStatus = .streaming
       cancelRetry()
     }
+  }
+
+  // MARK: - WAV Helper
+
+  /// Wrap raw PCM data in a WAV header for AVAudioPlayer playback.
+  nonisolated private static func pcmToWav(pcm: Data, sampleRate: UInt32, channels: UInt16, bitsPerSample: UInt16) -> Data {
+    let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample) / 8
+    let blockAlign = UInt32(channels) * UInt32(bitsPerSample) / 8
+    let dataSize = UInt32(pcm.count)
+    let fileSize = 36 + dataSize
+
+    var wav = Data(capacity: 44 + pcm.count)
+    // RIFF header
+    wav.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+    wav.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian) { Array($0) })
+    wav.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+    // fmt chunk
+    wav.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+    wav.append(contentsOf: withUnsafeBytes(of: UInt32(16).littleEndian) { Array($0) }) // chunk size
+    wav.append(contentsOf: withUnsafeBytes(of: UInt16(1).littleEndian) { Array($0) })  // PCM format
+    wav.append(contentsOf: withUnsafeBytes(of: channels.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: UInt16(blockAlign).littleEndian) { Array($0) })
+    wav.append(contentsOf: withUnsafeBytes(of: bitsPerSample.littleEndian) { Array($0) })
+    // data chunk
+    wav.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+    wav.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian) { Array($0) })
+    wav.append(pcm)
+    return wav
   }
 
   private static func formatStreamingError(_ error: StreamSessionError) -> String {
