@@ -2,8 +2,31 @@ relay.simulationapi.com {
     root * /root/relay-server/hosted/viewer/dist
 
     # API and WebSocket proxy to Bun — highest priority
-    @api path /api/* /publish /view /tap/* /sessions /stats /gallery/api /gallery /latest/* /session/*
-    handle @api {
+    handle /api/* {
+        reverse_proxy localhost:8080
+    }
+    handle /publish {
+        reverse_proxy localhost:8080
+    }
+    handle /view {
+        reverse_proxy localhost:8080
+    }
+    handle /tap/* {
+        reverse_proxy localhost:8080
+    }
+    handle /sessions {
+        reverse_proxy localhost:8080
+    }
+    handle /stats {
+        reverse_proxy localhost:8080
+    }
+    handle /gallery/api {
+        reverse_proxy localhost:8080
+    }
+    handle /latest/* {
+        reverse_proxy localhost:8080
+    }
+    handle /session/* {
         reverse_proxy localhost:8080
     }
 
