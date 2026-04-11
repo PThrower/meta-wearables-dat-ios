@@ -54,9 +54,9 @@ export function buildFrauFrame(
   // Timestamp ms (u64 LE)
   view.setBigUint64(21, BigInt(Date.now()), true);
 
-  // PCM payload
-  const pcmDest = new Int16Array(buf, FRAU_HEADER_SIZE, pcmInt16.length);
-  pcmDest.set(pcmInt16);
+  // PCM payload — use Uint8Array since FRAU_HEADER_SIZE (29) is not 2-byte aligned
+  const pcmBytes = new Uint8Array(pcmInt16.buffer, pcmInt16.byteOffset, pcmInt16.byteLength);
+  new Uint8Array(buf, FRAU_HEADER_SIZE).set(pcmBytes);
 
   return buf;
 }
