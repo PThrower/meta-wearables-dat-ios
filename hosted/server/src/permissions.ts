@@ -234,14 +234,17 @@ export function canSeeInGallery(
     accessLevel?: AccessLevel;
     acl?: AclEntry[];
     ownerId?: string;
+    ownerEmail?: string;
   },
   userId?: string,
+  userEmail?: string,
 ): boolean {
   // Public sessions visible to all
   if (meta.accessLevel === "public") return true;
 
-  // Owner always sees their sessions
+  // Owner always sees their sessions (by sub ID or email fallback)
   if (userId && meta.ownerId === userId) return true;
+  if (userEmail && meta.ownerEmail === userEmail) return true;
 
   // ACL match
   if (userId && meta.acl) {

@@ -147,7 +147,7 @@ function invalidateSessionListCache(): void {
   sessionListCache = null;
 }
 
-async function galleryCached(userId?: string): Promise<GallerySession[]> {
+async function galleryCached(userId?: string, userEmail?: string): Promise<GallerySession[]> {
   const cacheKey = userId || "__anon";
   const now = Date.now();
 
@@ -164,7 +164,7 @@ async function galleryCached(userId?: string): Promise<GallerySession[]> {
 
   const active = registry.listActive();
   const liveIds = new Set(active.map(s => s.id));
-  const data = await getGalleryData(store, liveIds, userId);
+  const data = await getGalleryData(store, liveIds, userId, userEmail);
   galleryCacheMap.set(cacheKey, { data, expiry: now + GALLERY_TTL_MS });
   return data;
 }
@@ -326,7 +326,7 @@ const server = Bun.serve<WsData>({
       const user = await verifyToken(token);
       // Allow anonymous access — will only see public sessions
       const userId = user?.sub;
-      const data = await galleryCached(userId);
+      const data = await galleryCached(userId, user?.email);
       return Response.json(data, {
         headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
       });
