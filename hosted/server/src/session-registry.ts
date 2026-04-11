@@ -150,6 +150,12 @@ export class SessionRegistry {
       session.metadata.accessLevel = session.accessLevel;
     }
 
+    // Unauthenticated publisher → public session so viewers can connect
+    if (!userId && !session.ownerId) {
+      session.accessLevel = "public";
+      session.metadata.accessLevel = "public";
+    }
+
     // Start recorder
     session.recorder = new SessionRecorder(id, this.store);
     session.recorder.start({});

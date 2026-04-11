@@ -725,12 +725,15 @@ const server = Bun.serve<WsData>({
             const token = cmd.token || "";
             const shareTok = cmd.shareToken || ws.data.shareToken;
             const user = await verifyToken(token);
-            if (!user) {
+
+            // Allow publishers without auth (iOS client doesn't send tokens yet)
+            if (!user && role !== "publish") {
               ws.close(4001, "auth failed");
               return;
             }
-            ws.data.userId = user.sub;
-            ws.data.email = user.email;
+
+            ws.data.userId = user?.sub;
+            ws.data.email = user?.email;
             ws.data.shareToken = shareTok || undefined;
             ws.data.authPending = false;
 
