@@ -88,6 +88,8 @@ The viewer needs to evolve from a debug tool into a usable product surface where
 | P1-5 | Recording playback in browser | Play stored MJPEG + PCM from bucket via retrieval endpoints; scrub/seek within segments |
 | P1-6 | Fullscreen mode | Double-click or button to enter fullscreen; ESC to exit |
 | P1-7 | Frame stats overlay (toggle) | FPS, latency, resolution, bitrate visible as overlay; default off |
+| P1-8 | Viewer microphone capture → glasses speakers | "Push to Talk" button captures browser mic audio via `getUserMedia()`, encodes as PCM 16-bit 16kHz mono, wraps in FRAU binary (codecType 4), sends over existing viewer WebSocket; relay forwards to publisher; iOS plays through glasses speakers via HFP |
+| P1-9 | Push-to-talk UI control | Button in viewer bottom bar: hold to talk (default) or toggle mode; visual indicator when mic is active; mute/release on disconnect |
 
 ### P2 -- Could Have
 
@@ -177,6 +179,37 @@ Server updates viewer's FrameRelay FPS target
        v
 Server throttles frame delivery to that viewer
 ```
+
+### Viewer Microphone → Glasses Speakers (P1-8)
+
+```
+[Browser Viewer]
+       |
+       +-- getUserMedia({ audio: true })
+       +-- MediaStreamSource -> ScriptProcessorNode (or AudioWorklet)
+       +-- PCM Int16 16kHz mono, 20ms chunks (320 samples)
+       +-- Wrap in FRAU binary: [FRAU][codecType=4][seq][16000][1][16][ts_ms][PCM]
+       +-- WebSocket.send(binary FRAU)
+       |
+       v
+[Relay Server]
+       |
+       +-- Receive binary from viewer WebSocket (new: currently viewers only send JSON)
+       +-- Parse FRAU header, verify codecType=4
+       +-- If multiple viewers talking: mix PCM streams (sum + clip)
+       +-- Forward FRAU frame to session.publisher WebSocket
+       |
+       v
+[iOS Client]
+       |
+       +-- RelayStage receive loop detects FRAU magic (line 209-215 of RelayStage.swift)
+       +-- onReceivedAudio callback -> AudioSinkStage
+       +-- Decode PCM, create AVAudioPCMBuffer
+       +-- AVAudioEngine playerNode.scheduleBuffer(buffer)
+       +-- AVAudioSession .playAndRecord + .allowBluetooth -> HFP -> glasses speakers
+```
+
+**Push-to-talk UI:** Hold button to capture (default), or toggle mode for hands-free. Visual indicator (red mic icon) when active. Auto-release on WebSocket disconnect.
 
 ### Key Files
 
