@@ -112,12 +112,13 @@ async function loadWasm() {
 
 await loadWasm();
 
-// --- Load HTML template from Vite build output ---
+// --- Load HTML templates ---
 
 const VIEWER_DIR = join(import.meta.dir, "../../viewer/dist");
 const viewerHtml = await Bun.file(join(VIEWER_DIR, "index.html")).text().catch(() =>
   "<html><body><h1>Viewer HTML not found. Run: cd ../viewer && bun run build</h1></body></html>"
 );
+const landingHtml = await Bun.file(join(import.meta.dir, "../../viewer/landing.html")).text();
 
 // --- Stale cleanup ---
 
@@ -305,10 +306,17 @@ const server = Bun.serve<WsData>({
       return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
 
-    // --- Gallery (redirect to root — unified page) ---
+    // --- Gallery (viewer page with session cards) ---
 
-    if (url.pathname === "/gallery") {
-      return Response.redirect(`${req.headers.get("x-forwarded-proto") || "https"}://${req.headers.get("host") || url.host}/`);
+    if (url.pathname === "/gallery" || url.pathname === "/gallery/") {
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      const data = await galleryCached(user?.sub);
+      const html = injectAuthConfig(viewerHtml.replace(
+        "<!--__GALLERY_DATA__-->",
+        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
+      ));
+      return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
     if (url.pathname === "/gallery/api") {
@@ -636,18 +644,10 @@ const server = Bun.serve<WsData>({
       }
     }
 
-    // --- Root: unified page (gallery + directory + live player) ---
+    // --- Root: landing page ---
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      // Resolve auth for user-scoped gallery
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      const data = await galleryCached(user?.sub);
-      const html = injectAuthConfig(viewerHtml.replace(
-        "<!--__GALLERY_DATA__-->",
-        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
-      ));
-      return new Response(html, { headers: { "Content-Type": "text/html" } });
+      return new Response(landingHtml, { headers: { "Content-Type": "text/html" } });
     }
 
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---

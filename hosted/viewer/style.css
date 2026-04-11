@@ -15,9 +15,10 @@ header {
   border-bottom: 1px solid rgba(255,255,255,0.08);
   display: flex; justify-content: space-between; align-items: flex-end;
 }
-.header-left h1 {
+.header-left h1, .header-home {
   font-size: 16px; font-weight: 600; color: #fff;
   display: flex; align-items: center; gap: 8px;
+  text-decoration: none;
 }
 .header-left p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px; }
 .filters { display: flex; gap: 6px; }

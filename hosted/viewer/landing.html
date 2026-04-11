@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaringMind</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧠</text></svg>">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a; color: #e0e0e0;
+      font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      min-height: 100vh; display: flex; flex-direction: column;
+    }
+    nav {
+      padding: 20px 32px;
+      display: flex; justify-content: space-between; align-items: center;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    nav .logo {
+      font-size: 15px; font-weight: 700; color: #fff;
+      letter-spacing: -0.3px;
+    }
+    nav a {
+      font-size: 12px; color: rgba(255,255,255,0.4);
+      text-decoration: none; transition: color 0.15s;
+    }
+    nav a:hover { color: #fff; }
+    main {
+      flex: 1; display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      padding: 60px 24px; text-align: center;
+    }
+    h1 {
+      font-size: 48px; font-weight: 700; color: #fff;
+      letter-spacing: -1.5px; line-height: 1.1;
+      margin-bottom: 16px;
+    }
+    h1 span { color: #0f0; }
+    .tagline {
+      font-size: 16px; color: rgba(255,255,255,0.4);
+      max-width: 480px; line-height: 1.6;
+      margin-bottom: 40px;
+    }
+    .cta {
+      display: inline-block; padding: 12px 32px;
+      background: rgba(0,255,0,0.1); color: #0f0;
+      border: 1px solid rgba(0,255,0,0.25); border-radius: 8px;
+      font-size: 14px; font-weight: 600; text-decoration: none;
+      transition: all 0.15s;
+    }
+    .cta:hover {
+      background: rgba(0,255,0,0.18);
+      border-color: rgba(0,255,0,0.4);
+    }
+    .stats {
+      display: flex; gap: 48px; margin-top: 64px;
+    }
+    .stat {
+      text-align: center;
+    }
+    .stat .val {
+      font-size: 28px; font-weight: 700; color: #fff;
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    .stat .label {
+      font-size: 11px; color: rgba(255,255,255,0.3);
+      text-transform: uppercase; letter-spacing: 1px;
+      margin-top: 4px;
+    }
+    footer {
+      padding: 20px 32px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 11px; color: rgba(255,255,255,0.2);
+      display: flex; justify-content: space-between;
+    }
+    footer a { color: rgba(255,255,255,0.3); text-decoration: none; }
+    footer a:hover { color: rgba(255,255,255,0.6); }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="logo">CaringMind</div>
+    <a href="/gallery">Gallery</a>
+  </nav>
+  <main>
+    <h1>Live, <span>encrypted</span><br>wearable streams</h1>
+    <p class="tagline">
+      Real-time video relay from smart glasses to any browser.
+      Zero-trust auth, FRLY/FRAU binary streaming, session recording with MP4 export.
+    </p>
+    <a class="cta" href="/gallery">Open Gallery</a>
+    <div class="stats">
+      <div class="stat">
+        <div class="val">16kHz</div>
+        <div class="label">Audio</div>
+      </div>
+      <div class="stat">
+        <div class="val">30fps</div>
+        <div class="label">Video</div>
+      </div>
+      <div class="stat">
+        <div class="val">&lt;200ms</div>
+        <div class="label">Latency</div>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <span>CaringMind Relay Platform</span>
+    <span><a href="/stats">Stats</a></span>
+  </footer>
+</body>
+</html>
