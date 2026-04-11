@@ -15,6 +15,11 @@ export interface GallerySession {
   thumbnailUrl?: string;
   videoUrl?: string;
   device?: { deviceName?: string; deviceModel?: string; wearableType?: string };
+  ownerId?: string;
+  ownerEmail?: string;
+  accessLevel?: "public" | "link" | "private";
+  acl?: Array<{ userId: string; email: string; role: string }>;
+  viewerRole?: "owner" | "editor" | "viewer" | "public" | "none";
 }
 
 const BATCH = 6;
@@ -30,6 +35,7 @@ export function getAllSessions(): GallerySession[] { return allSessions; }
 export function filtered(): GallerySession[] {
   if (activeFilter === "live") return allSessions.filter(s => s.live);
   if (activeFilter === "recorded") return allSessions.filter(s => !s.live);
+  if (activeFilter === "mine") return allSessions.filter(s => s.viewerRole === "owner" || s.viewerRole === "editor");
   return allSessions;
 }
 
@@ -45,6 +51,12 @@ function cardHtml(s: GallerySession, delay: number): string {
   const badgeClass = s.live ? "badge-live" : "badge-recorded";
   const badgeText = s.live ? "LIVE" : "RECORDED";
   const cached = s.exportCached ? "cached" : "on-demand";
+  const isPrivate = s.accessLevel === "private";
+  const isOwner = s.viewerRole === "owner";
+  const canEdit = s.viewerRole === "owner" || s.viewerRole === "editor";
+  const lockIcon = isPrivate ? `<span class="lock-icon" title="Private">&#x1F512;</span>` : "";
+  const ownerBadge = isOwner ? `<span class="owner-badge">Owner</span>` : "";
+  const shareBtn = canEdit ? `<button class="action-btn share-btn" onclick="openShareDialog('${s.sessionId}')">Share</button>` : "";
   const thumb = (s.segments ?? 0) > 0
     ? `<img class="card-thumb" src="${s.thumbnailUrl}" alt=""
             onload="onThumbLoad(this)"
@@ -54,7 +66,7 @@ function cardHtml(s: GallerySession, delay: number): string {
     ${thumb}
     <div class="card-body">
       <div class="card-top">
-        <span class="card-title">${device}</span>
+        <span class="card-title">${lockIcon}${device}${ownerBadge}</span>
         <span class="badge ${badgeClass}">${badgeText}</span>
       </div>
       <div class="card-meta">
@@ -69,6 +81,7 @@ function cardHtml(s: GallerySession, delay: number): string {
         ${(s.segments ?? 0) > 0 ? `<button class="action-btn primary" onclick="playVideo('${s.videoUrl}')">Play</button>
         <a class="action-btn" href="${s.videoUrl}" target="_blank">Download</a>` : ""}
         ${s.live ? `<a class="action-btn primary" href="/view?session=${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
+        ${shareBtn}
       </div>
     </div>
   </div>`;

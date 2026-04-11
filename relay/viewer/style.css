@@ -207,3 +207,79 @@ header {
 #loginOverlay h2 { color: #fff; font-size: 18px; font-weight: 600; }
 #loginOverlay p { color: rgba(255,255,255,0.5); font-size: 12px; max-width: 300px; text-align: center; }
 #loginOverlay .g_id_signin { margin-top: 8px; }
+
+/* === PERMISSION INDICATORS === */
+.lock-icon {
+  font-size: 12px; margin-right: 4px;
+  opacity: 0.6; vertical-align: middle;
+}
+.owner-badge {
+  font-size: 8px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(100,150,255,0.15); color: #6af;
+  border: 1px solid rgba(100,150,255,0.3);
+  margin-left: 6px; vertical-align: middle; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.share-btn { border-color: rgba(100,150,255,0.3) !important; color: #6af !important; }
+
+/* === SHARE DIALOG === */
+#shareDialog {
+  position: fixed; inset: 0; z-index: 300;
+  background: rgba(0,0,0,0.8);
+  display: flex; align-items: center; justify-content: center;
+}
+#shareDialog.hidden { display: none; }
+.share-dialog-content {
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px; width: 480px; max-width: 90vw;
+  max-height: 80vh; overflow-y: auto;
+}
+.share-dialog-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.share-dialog-header h3 { color: #fff; font-size: 14px; font-weight: 600; }
+.share-dialog-body { padding: 16px 20px; }
+.share-create-row {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.share-create-row select {
+  background: rgba(255,255,255,0.08); color: #e0e0e0;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+  padding: 6px 10px; font-size: 11px; font-family: inherit; flex: 1;
+}
+.share-create-row select option { background: #222; }
+.share-link-row {
+  display: flex; gap: 8px; margin-bottom: 16px;
+}
+.share-link-row input {
+  flex: 1; background: rgba(255,255,255,0.06); color: #e0e0e0;
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 6px;
+  padding: 8px 12px; font-size: 11px; font-family: inherit;
+}
+.share-link-row input::placeholder { color: rgba(255,255,255,0.3); }
+.share-token-empty {
+  text-align: center; padding: 16px;
+  color: rgba(255,255,255,0.3); font-size: 11px;
+}
+.share-token-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 11px;
+}
+.share-token-item:last-child { border-bottom: none; }
+.share-token-value {
+  color: rgba(255,255,255,0.5); font-family: monospace; flex: 1;
+}
+.share-token-expiry {
+  color: rgba(255,255,255,0.3); font-size: 10px;
+}
+.share-token-item.token-expiring .share-token-expiry { color: #fb0; }
+.share-token-revoke {
+  font-family: inherit; font-size: 9px;
+  padding: 2px 8px; border-radius: 4px;
+  background: rgba(255,80,80,0.1); color: #f55;
+  border: 1px solid rgba(255,80,80,0.2);
+  cursor: pointer; transition: all 0.15s ease;
+}
+.share-token-revoke:hover { background: rgba(255,80,80,0.2); }

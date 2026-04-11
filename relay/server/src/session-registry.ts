@@ -13,7 +13,6 @@ import { SessionRecorder } from "./session-recorder.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
 import { resolvePermission } from "./permissions.js";
-import type { ObjectStore } from "@ebowwa/object-store";
 
 const DEFAULT_SESSION_ID = "default";
 const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no viewers for 60s

@@ -7,6 +7,7 @@ import { ingest, initFilters } from "./gallery/render.js";
 import { onThumbLoad } from "./gallery/format.js";
 import { watchLive, closeLive, setQuality, resumeAudio } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
+import "./share.js";
 
 // Expose functions needed by inline HTML handlers (card onclick/onload attributes)
 (window as any).onThumbLoad = onThumbLoad;
@@ -58,10 +59,19 @@ function autoOpenSession(): boolean {
 // Ingest server-injected gallery data
 if ((window as any).__GALLERY_DATA) ingest((window as any).__GALLERY_DATA);
 
-// Gallery fetch (used when data not injected)
+/** Auth-aware gallery fetch with Bearer token */
 export async function fetchGallery(): Promise<void> {
   try {
-    const res = await fetch("/gallery/api");
+    const token = localStorage.getItem("relay_token");
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch("/gallery/api", { headers });
+    if (res.status === 401) {
+      // Token expired or missing — trigger re-auth
+      const { requireAuth } = await import("./auth.js");
+      requireAuth();
+      return;
+    }
     ingest(await res.json());
   } catch {}
 }
@@ -69,6 +79,13 @@ export async function fetchGallery(): Promise<void> {
 // Auto-open or show gallery
 if (!autoOpenSession()) {
   if (!(window as any).__GALLERY_DATA) fetchGallery();
+}
+
+// Handle share token from URL
+const shareToken = (window as any).__SHARE_TOKEN || new URLSearchParams(location.search).get("share");
+if (shareToken) {
+  // Store for WebSocket connection
+  (window as any).__SHARE_TOKEN = shareToken;
 }
 
 // Background refresh every 30s

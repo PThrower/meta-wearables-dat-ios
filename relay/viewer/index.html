@@ -30,6 +30,7 @@
       </div>
       <div class="filters">
         <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="mine">My Sessions</button>
         <button class="filter-btn" data-filter="live">Live</button>
         <button class="filter-btn" data-filter="recorded">Recorded</button>
       </div>
@@ -38,6 +39,32 @@
     <div id="status-bar">
       <span id="last-refresh">--</span>
       <span><a href="/stats">Stats</a> &middot; Auto-refresh 30s</span>
+    </div>
+  </div>
+
+  <!-- SHARE DIALOG -->
+  <div id="shareDialog" class="hidden">
+    <div class="share-dialog-content">
+      <div class="share-dialog-header">
+        <h3>Share Session</h3>
+        <button id="closeShareDialog" class="close-btn">&times;</button>
+      </div>
+      <div class="share-dialog-body">
+        <div class="share-create-row">
+          <select id="shareExpiry">
+            <option value="1">1 hour</option>
+            <option value="24">1 day</option>
+            <option value="168" selected>7 days</option>
+            <option value="720">30 days</option>
+          </select>
+          <button id="shareCreateBtn" class="action-btn primary">Create Link</button>
+        </div>
+        <div class="share-link-row">
+          <input type="text" id="shareLink" readonly placeholder="Share link will appear here">
+          <button id="shareCopyBtn" class="action-btn">Copy</button>
+        </div>
+        <div id="shareTokenList"></div>
+      </div>
     </div>
   </div>
 

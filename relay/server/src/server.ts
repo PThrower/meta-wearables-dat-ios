@@ -211,7 +211,7 @@ async function getSessionMetaFromR2(sessionId: string): Promise<SessionMetaFromR
   }
 }
 
-type AuthResult = { user: { sub: string; email: string }; role: SessionRole | "public" } | Response;
+type AuthResult = { user: { sub: string; email: string }; role: SessionRole | "public" | "none" } | Response;
 
 /**
  * Require session access at a minimum role level.
@@ -226,7 +226,7 @@ async function requireSessionAccess(
 ): Promise<AuthResult> {
   const token = extractToken(req, url);
   const user = await verifyToken(token);
-  const shareTok = extractShareToken(url);
+  const shareTok = extractShareToken(url) ?? undefined;
 
   // Check live session first
   const liveSession = registry.get(sessionId);
@@ -238,7 +238,7 @@ async function requireSessionAccess(
       store,
       sessionId,
     );
-    if (!perm.allowed || !hasRole(perm.role, minimumRole)) {
+    if (!perm.allowed || !hasRole(perm.role, minimumRole as SessionRole)) {
       return Response.json({ error: "Forbidden" }, { status: 403 });
     }
     return { user: user || { sub: "", email: "" }, role: perm.role };
@@ -257,7 +257,7 @@ async function requireSessionAccess(
     store,
     sessionId,
   );
-  if (!perm.allowed || !hasRole(perm.role, minimumRole)) {
+  if (!perm.allowed || !hasRole(perm.role, minimumRole as SessionRole)) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
   return { user: user || { sub: "", email: "" }, role: perm.role };
