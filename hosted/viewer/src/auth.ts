@@ -161,7 +161,7 @@ export async function initAuth(): Promise<void> {
       });
       // Re-render the sign-in button inside the overlay
       google.accounts.id.renderButton(
-        document.querySelector("#loginOverlay .g_id_signin"),
+        document.getElementById("g_id_signin"),
         { type: "standard", size: "large", theme: "filled_black", text: "sign_in_with", shape: "rectangular", logo_alignment: "left" },
       );
     }
