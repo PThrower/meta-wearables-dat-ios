@@ -705,7 +705,7 @@ const server = Bun.serve<WsData>({
     return new Response(null, { status: 204 });
   },
   websocket: {
-    open(ws) {
+    async open(ws) {
       const { role, clientIp, sessionId } = ws.data;
 
       if (role === "audio-tap") {
