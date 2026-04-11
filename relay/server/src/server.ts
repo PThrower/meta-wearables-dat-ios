@@ -31,12 +31,12 @@ import { join } from "node:path";
 import os from "node:os";
 import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
-import type { WsData, QualityPreset } from "./types.js";
+import type { WsData, QualityPreset, SessionRole, AccessLevel, AclEntry } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
-import { verifyToken, extractToken } from "./auth.js";
+import { verifyToken, extractToken, extractShareToken } from "./auth.js";
 import {
   getSessionExportMeta,
   getSessionThumbnail,
@@ -46,6 +46,13 @@ import {
   ExportError,
   type GallerySession,
 } from "./session-export.js";
+import {
+  resolvePermission,
+  hasRole,
+  createShareToken,
+  revokeShareToken,
+  listShareTokens,
+} from "./permissions.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -116,25 +123,36 @@ const viewerHtml = await Bun.file(join(VIEWER_DIR, "index.html")).text().catch((
 
 setInterval(() => registry.cleanupStale(), 5_000);
 
-// --- Gallery cache (30s TTL, avoids N+1 R2 fetches per refresh) ---
+// --- Gallery cache (per-user, 30s TTL) ---
 
-let galleryCache: { data: GallerySession[]; expiry: number } | null = null;
+const galleryCacheMap = new Map<string, { data: GallerySession[]; expiry: number }>();
 const GALLERY_TTL_MS = 30_000;
 
-async function galleryCached(): Promise<GallerySession[]> {
+async function galleryCached(userId?: string): Promise<GallerySession[]> {
+  const cacheKey = userId || "__anon";
   const now = Date.now();
-  if (galleryCache && now < galleryCache.expiry) {
-    // Patch live status from current registry state
+  const cached = galleryCacheMap.get(cacheKey);
+  if (cached && now < cached.expiry) {
     const liveIds = new Set(registry.listActive().map(s => s.id));
-    for (const s of galleryCache.data) s.live = liveIds.has(s.sessionId);
-    return galleryCache.data;
+    for (const s of cached.data) s.live = liveIds.has(s.sessionId);
+    return cached.data;
   }
 
   const active = registry.listActive();
   const liveIds = new Set(active.map(s => s.id));
-  const data = await getGalleryData(store, liveIds);
-  galleryCache = { data, expiry: now + GALLERY_TTL_MS };
+  const data = await getGalleryData(store, liveIds, userId);
+  galleryCacheMap.set(cacheKey, { data, expiry: now + GALLERY_TTL_MS });
   return data;
+}
+
+/** Invalidate gallery cache for a specific user (or all) */
+function invalidateGalleryCache(userId?: string): void {
+  if (userId) {
+    galleryCacheMap.delete(userId);
+    galleryCacheMap.delete("__anon"); // anon cache may change too
+  } else {
+    galleryCacheMap.clear();
+  }
 }
 
 // --- Helpers ---
@@ -172,6 +190,77 @@ function injectAuthConfig(html: string): string {
   // Inject right before the closing </head> if not already present
   result = result.replace("</head>", `${authScript}</head>`);
   return result;
+}
+
+// --- Auth helper for session access ---
+
+interface SessionMetaFromR2 {
+  accessLevel?: AccessLevel;
+  acl?: AclEntry[];
+  ownerId?: string;
+  ownerEmail?: string;
+}
+
+async function getSessionMetaFromR2(sessionId: string): Promise<SessionMetaFromR2 | null> {
+  const buf = await store.get(`sessions/${sessionId}/meta.json`);
+  if (!buf) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(buf));
+  } catch {
+    return null;
+  }
+}
+
+type AuthResult = { user: { sub: string; email: string }; role: SessionRole | "public" } | Response;
+
+/**
+ * Require session access at a minimum role level.
+ * Checks live session first, then falls back to R2 meta.json.
+ * Returns user+role on success, or a Response (401/403) on failure.
+ */
+async function requireSessionAccess(
+  sessionId: string,
+  req: Request,
+  url: URL,
+  minimumRole: SessionRole | "public",
+): Promise<AuthResult> {
+  const token = extractToken(req, url);
+  const user = await verifyToken(token);
+  const shareTok = extractShareToken(url);
+
+  // Check live session first
+  const liveSession = registry.get(sessionId);
+  if (liveSession) {
+    const perm = await resolvePermission(
+      { ownerId: liveSession.ownerId, accessLevel: liveSession.accessLevel, acl: liveSession.acl },
+      user?.sub,
+      shareTok,
+      store,
+      sessionId,
+    );
+    if (!perm.allowed || !hasRole(perm.role, minimumRole)) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return { user: user || { sub: "", email: "" }, role: perm.role };
+  }
+
+  // Fall back to R2 meta.json for recorded sessions
+  const meta = await getSessionMetaFromR2(sessionId);
+  if (!meta) {
+    return Response.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  const perm = await resolvePermission(
+    { ownerId: meta.ownerId, accessLevel: meta.accessLevel || "public", acl: meta.acl || [] },
+    user?.sub,
+    shareTok,
+    store,
+    sessionId,
+  );
+  if (!perm.allowed || !hasRole(perm.role, minimumRole)) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+  return { user: user || { sub: "", email: "" }, role: perm.role };
 }
 
 // --- Server ---
@@ -223,9 +312,14 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/gallery/api") {
-      const data = await galleryCached();
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const data = await galleryCached(user.sub);
       return Response.json(data, {
-        headers: { "Cache-Control": "public, max-age=15" },
+        headers: { "Cache-Control": "private, max-age=15" },
       });
     }
 
@@ -242,6 +336,12 @@ const server = Bun.serve<WsData>({
     // --- Live Sessions (active relay sessions) ---
 
     if (url.pathname === "/sessions") {
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+
       const active = registry.listActive();
 
       // Merge with S3-stored historical sessions
@@ -271,20 +371,134 @@ const server = Bun.serve<WsData>({
       return Response.json(result);
     }
 
+    // --- Share token management: POST /session/{id}/share ---
+
+    const shareCreateMatch = url.pathname.match(/^\/session\/([^/]+)\/share$/);
+    if (shareCreateMatch && req.method === "POST") {
+      const sessionId = shareCreateMatch[1];
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
+      if (authResult instanceof Response) return authResult;
+
+      try {
+        const body = await req.json() as { expiresAt?: string };
+        const expiresAt = body.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+        const shareToken = await createShareToken(sessionId, user.sub, expiresAt, store);
+        return Response.json(shareToken, { status: 201 });
+      } catch {
+        return Response.json({ error: "Invalid request body" }, { status: 400 });
+      }
+    }
+
+    // --- Revoke share token: DELETE /session/{id}/share/{token} ---
+
+    const shareRevokeMatch = url.pathname.match(/^\/session\/([^/]+)\/share\/(shr_[^/]+)$/);
+    if (shareRevokeMatch && req.method === "DELETE") {
+      const sessionId = shareRevokeMatch[1];
+      const tokenStr = shareRevokeMatch[2];
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const authResult = await requireSessionAccess(sessionId, req, url, "owner");
+      if (authResult instanceof Response) return authResult;
+
+      const revoked = await revokeShareToken(sessionId, tokenStr, store);
+      if (!revoked) return Response.json({ error: "Token not found" }, { status: 404 });
+      return Response.json({ ok: true });
+    }
+
+    // --- List share tokens: GET /session/{id}/shares ---
+
+    const shareListMatch = url.pathname.match(/^\/session\/([^/]+)\/shares$/);
+    if (shareListMatch && req.method === "GET") {
+      const sessionId = shareListMatch[1];
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
+      if (authResult instanceof Response) return authResult;
+
+      const tokens = await listShareTokens(sessionId, store);
+      return Response.json(tokens);
+    }
+
+    // --- Update access level/ACL: PATCH /session/{id}/access ---
+
+    const accessMatch = url.pathname.match(/^\/session\/([^/]+)\/access$/);
+    if (accessMatch && req.method === "PATCH") {
+      const sessionId = accessMatch[1];
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+      const authResult = await requireSessionAccess(sessionId, req, url, "owner");
+      if (authResult instanceof Response) return authResult;
+
+      try {
+        const body = await req.json() as { accessLevel?: AccessLevel; acl?: AclEntry[] };
+
+        // Update live session if active
+        const liveSession = registry.get(sessionId);
+        if (liveSession) {
+          if (body.accessLevel) {
+            liveSession.accessLevel = body.accessLevel;
+            liveSession.metadata.accessLevel = body.accessLevel;
+          }
+          if (body.acl) {
+            liveSession.acl = body.acl;
+            liveSession.metadata.acl = body.acl;
+          }
+          // Sync to recorder
+          if (liveSession.recorder) {
+            if (body.accessLevel) liveSession.recorder.accessLevel = body.accessLevel;
+            if (body.acl) liveSession.recorder.acl = body.acl;
+          }
+        }
+
+        // Update R2 meta.json
+        const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
+        if (metaBuf) {
+          const meta = JSON.parse(new TextDecoder().decode(metaBuf));
+          if (body.accessLevel) meta.accessLevel = body.accessLevel;
+          if (body.acl) meta.acl = body.acl;
+          await store.put(`sessions/${sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2)));
+        }
+
+        invalidateGalleryCache();
+        return Response.json({ ok: true });
+      } catch {
+        return Response.json({ error: "Invalid request body" }, { status: 400 });
+      }
+    }
+
     // --- Serve unified page scoped to a session: /session/<id> ---
 
     const liveSessionMatch = url.pathname.match(/^\/session\/([^/]+)$/);
     if (liveSessionMatch) {
       const sessionId = liveSessionMatch[1];
+      const shareTok = extractShareToken(url);
+
+      // For private sessions, verify access (share token or auth)
       const liveSession = registry.get(sessionId);
       if (!liveSession) {
         const data = await store.get(`sessions/${sessionId}/meta.json`);
         if (!data) return Response.json({ error: "Session not found" }, { status: 404 });
       }
-      const gallery = await galleryCached();
+
+      // Resolve auth for user-scoped gallery
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      const gallery = await galleryCached(user?.sub);
+
+      const shareScript = shareTok ? `<script>window.__SHARE_TOKEN = "${shareTok}";</script>` : "";
       const html = injectAuthConfig(viewerHtml
         .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
-        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`));
+        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script>${shareScript}</head>`));
       return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
@@ -303,6 +517,16 @@ const server = Bun.serve<WsData>({
       const data = new Uint8Array(buf);
       if (!isAudioFrame(data)) return Response.json({ error: "Not a FRAU frame" }, { status: 400 });
 
+      const audioHdr = parseAudioHeader(data);
+
+      // Record inbound audio to session
+      const session = registry.get(sessionId);
+      session?.recorder?.appendAudio(data);
+
+      // Fan out to viewers so they hear it too
+      registry.fanoutAudio(sessionId, data, audioHdr?.codecType ?? 3, audioHdr?.sampleRate ?? 22050);
+
+      // Push to publisher for local playback
       const sent = registry.sendToPublisher(sessionId, data);
       if (!sent) return Response.json({ error: "No connected publisher" }, { status: 404 });
 
@@ -314,6 +538,10 @@ const server = Bun.serve<WsData>({
     const thumbMatch = url.pathname.match(/^\/session\/([^/]+)\/thumbnail$/);
     if (thumbMatch) {
       const sessionId = thumbMatch[1];
+      // Auth gate: require at least viewer role (public sessions allowed without auth)
+      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
+      if (authResult instanceof Response) return authResult;
+
       try {
         const jpeg = await getSessionThumbnail(sessionId, store);
         if (!jpeg) return Response.json({ error: "No video data" }, { status: 404 });
@@ -334,6 +562,10 @@ const server = Bun.serve<WsData>({
     const mp4Match = url.pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
     if (mp4Match) {
       const sessionId = mp4Match[1];
+      // Auth gate: require at least viewer role
+      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
+      if (authResult instanceof Response) return authResult;
+
       const includeAudio = url.searchParams.has("audio");
       try {
         // Serve from R2 cache if available — proxy through server to avoid
@@ -370,6 +602,10 @@ const server = Bun.serve<WsData>({
     const exportMetaMatch = url.pathname.match(/^\/session\/([^/]+)\/export$/);
     if (exportMetaMatch) {
       const sessionId = exportMetaMatch[1];
+      // Auth gate: require at least viewer role
+      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
+      if (authResult instanceof Response) return authResult;
+
       const meta = await getSessionExportMeta(sessionId, store);
       return Response.json(meta);
     }
@@ -403,7 +639,10 @@ const server = Bun.serve<WsData>({
     // --- Root: unified page (gallery + directory + live player) ---
 
     if (url.pathname === "/" || url.pathname === "/index.html") {
-      const data = await galleryCached();
+      // Resolve auth for user-scoped gallery
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      const data = await galleryCached(user?.sub);
       const html = injectAuthConfig(viewerHtml.replace(
         "<!--__GALLERY_DATA__-->",
         `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
@@ -439,7 +678,9 @@ const server = Bun.serve<WsData>({
     const wsUpgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
     if (isView && !wsUpgrade) {
       const sessionId = registry.resolveSessionId(url);
-      const gallery = await galleryCached();
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      const gallery = await galleryCached(user?.sub);
       const html = injectAuthConfig(viewerHtml
         .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
         .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`));
@@ -451,6 +692,7 @@ const server = Bun.serve<WsData>({
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("x-real-ip")
       || "unknown";
+    const shareTok = extractShareToken(url);
 
     // Auth check for WebSocket upgrade
     const token = extractToken(req, url);
@@ -459,7 +701,7 @@ const server = Bun.serve<WsData>({
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user.sub, email: user.email } });
+    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user.sub, email: user.email, shareToken: shareTok || undefined } });
     return new Response(null, { status: 204 });
   },
   websocket: {
@@ -492,7 +734,7 @@ const server = Bun.serve<WsData>({
           return;
         }
       } else {
-        const result = registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email);
+        const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, ws.data.shareToken);
         if (result.startsWith("error:")) {
           ws.close(4003, result.slice(6));
           return;
@@ -538,6 +780,11 @@ const server = Bun.serve<WsData>({
                   deviceModel: cmd.deviceModel || null,
                   systemVersion: cmd.systemVersion || null,
                 };
+                // Sync access control to recorder
+                session.recorder.accessLevel = session.accessLevel;
+                session.recorder.acl = session.acl;
+                session.recorder.ownerId = session.ownerId;
+                session.recorder.ownerEmail = session.ownerEmail;
               }
             }
           } catch {}
