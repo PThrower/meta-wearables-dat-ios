@@ -58,15 +58,23 @@ jobs:
             systemctl restart caringmind-relay.service
 
             echo ">>> Waiting for startup"
-            sleep 3
+            sleep 2
 
             echo ">>> Health check"
-            STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
-            if [ "$STATUS" != "200" ]; then
-              echo "FAIL: health check returned $STATUS"
-              systemctl status caringmind-relay.service --no-pager
-              exit 1
-            fi
+            for i in 1 2 3 4 5; do
+              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
+              if [ "$STATUS" = "200" ]; then
+                echo "OK after attempt $i"
+                break
+              fi
+              if [ "$i" = "5" ]; then
+                echo "FAIL: health check returned $STATUS after 5 attempts"
+                systemctl status caringmind-relay.service --no-pager
+                exit 1
+              fi
+              echo "attempt $i: got $STATUS, retrying in 2s..."
+              sleep 2
+            done
 
             echo ">>> Deploy complete"
             systemctl status caringmind-relay.service --no-pager
