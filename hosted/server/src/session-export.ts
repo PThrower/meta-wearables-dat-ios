@@ -290,8 +290,8 @@ export async function getGalleryData(
     try {
       const meta = JSON.parse(new TextDecoder().decode(buf));
 
-      // Lazy migration: missing accessLevel = "public" (backward compat)
-      const accessLevel: AccessLevel = meta.accessLevel || "public";
+      // Lazy migration: missing accessLevel = "link" (owner-only, matches new session default)
+      const accessLevel: AccessLevel = meta.accessLevel || "link";
       const acl: AclEntry[] = meta.acl || [];
       const ownerId: string | undefined = meta.ownerId;
       const ownerEmail: string | undefined = meta.ownerEmail;
