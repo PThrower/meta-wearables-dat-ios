@@ -43,11 +43,12 @@ struct CameraAccessApp: App {
     // Bluetooth video connection).
     //
     // Options:
-    //   .allowBluetoothHFP — required for Meta glasses mic input via HFP protocol.
+    //   .allowBluetooth — required for Meta glasses mic input + speaker output via HFP.
     //     Without this, iOS only enables A2DP (output-only) for BT devices.
     //     HFP provides bidirectional audio (mic input + speaker output) at 8/16kHz.
-    //   .defaultToSpeaker — fallback for when no BT device is connected;
-    //     avoids routing to the phone earpiece.
+    //     No .defaultToSpeaker — when HFP glasses are connected, output (inbound
+    //     viewer audio, TTS) routes through glasses speakers. Without glasses,
+    //     output falls back to phone speaker automatically.
     //   .mixWithOthers — background audio from other apps keeps playing.
     //
     // See Meta docs: https://wearables.developer.meta.com/docs/microphones-and-speakers/
@@ -56,7 +57,7 @@ struct CameraAccessApp: App {
       try audioSession.setCategory(
         .playAndRecord,
         mode: .default,
-        options: [.allowBluetooth, .defaultToSpeaker, .mixWithOthers]
+        options: [.allowBluetooth, .mixWithOthers]
       )
       try audioSession.setActive(true)
       NSLog("[CameraAccess] Audio session configured as playAndRecord")
