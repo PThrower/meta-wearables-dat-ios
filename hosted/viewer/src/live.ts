@@ -3,23 +3,36 @@
  */
 
 import { RelayPlayer } from "./player/relay-player.js";
-import { requireAuth } from "./auth.js";
+import { requireAuth, getToken } from "./auth.js";
 
 let player: RelayPlayer | null = null;
 const meterFill = document.getElementById("audio-meter-fill")!;
 
 export function getPlayer(): RelayPlayer | null { return player; }
 
-export function watchLive(sessionId: string): void {
-  if (requireAuth()) {
-    // Store for replay after login (caller reads this via auth:login event)
-    (window as any).__pendingSession = sessionId;
-    return;
-  }
+// Re-auth state: when WS closes with 401, store session for post-login replay
+let pendingReauth: { sessionId: string; shareToken?: string } | null = null;
+
+export function getPendingLiveSession(): { sessionId: string; shareToken?: string } | null {
+  return pendingReauth;
+}
+
+export function clearPendingLiveSession(): void {
+  pendingReauth = null;
+}
+
+/**
+ * Open a live stream viewer for the given session.
+ * @returns true if auth was required (caller should store sessionId for post-login replay)
+ */
+export function watchLive(sessionId: string, shareToken?: string): boolean {
+  if (requireAuth()) return true;
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const token = localStorage.getItem("relay_token") || "";
-  const wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(token)}`;
+  const authToken = getToken() || "";
+  // Server reads token from URL during WebSocket upgrade via extractToken()
+  let wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken)}`;
+  if (shareToken) wsUrl += `&share=${encodeURIComponent(shareToken)}`;
 
   if (player) { player.destroy(); player = null; }
 
@@ -40,11 +53,17 @@ export function watchLive(sessionId: string): void {
     onAudioState: (s) => document.getElementById("p-audio")!.textContent = s,
     onAudioLevel: (pct) => meterFill.style.width = pct + "%",
     onNeedUnmute: () => document.getElementById("unmute")!.classList.add("show"),
+    onAuthRequired: () => {
+      pendingReauth = { sessionId, shareToken };
+      closeLive();
+      requireAuth();
+    },
   });
 
   document.getElementById("gallery")!.classList.add("hidden");
   document.getElementById("livePlayer")!.classList.add("active");
-  player.connect(wsUrl);
+  player.connect(wsUrl, shareToken);
+  return false;
 }
 
 export function closeLive(): void {

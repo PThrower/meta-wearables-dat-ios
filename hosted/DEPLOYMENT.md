@@ -52,7 +52,19 @@ systemd: caringmind-relay.service
   Logs: /var/log/caringmind-relay.log
 ```
 
-Caddy proxies `:443`/`:80` → `:8080`.
+The Bun server is **pure API** — it serves JSON endpoints and WebSocket upgrades only.
+The viewer SPA is served directly by Caddy from `hosted/viewer/dist/`.
+On startup the viewer fetches runtime config (auth, version) from `/api/config`.
+
+**Architecture:**
+```
+Browser → Caddy (:443)
+             ├─ /api/*        → Bun (:8080)  [JSON API + WebSocket]
+             ├─ /publish      → Bun (:8080)  [WebSocket]
+             ├─ /view         → Bun (:8080)  [WebSocket]
+             ├─ /session/*    → Bun (:8080)  [JSON API]
+             └─ /*            → hosted/viewer/dist/index.html  [SPA]
+```
 
 ## Infrastructure Configs
 
@@ -81,6 +93,9 @@ git pull origin feat/stream-registry
 
 # If relay-protocol changed (rare), rebuild:
 cd hosted/packages/relay-protocol && /root/.bun/bin/bun install && /root/.bun/bin/bun x tsc
+
+# Build viewer SPA (Caddy serves from dist/):
+cd /root/relay-server/hosted/viewer && /root/.bun/bin/bun install && /root/.bun/bin/bun x vite build
 
 # If server deps changed:
 cd /root/relay-server/hosted/server && /root/.bun/bin/bun install

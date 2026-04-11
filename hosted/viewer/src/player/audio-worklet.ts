@@ -7,6 +7,10 @@
 
 declare function registerProcessor(name: string, processor: any): void;
 
+declare class AudioWorkletProcessor {
+  process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>): boolean;
+}
+
 const RING = new Float32Array(96000);
 let writePos = 0, readPos = 0, fill = 0, started = false;
 const PREBUFFER = 48000 * 0.06;

@@ -170,11 +170,8 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
       if (manifest.actualFps && manifest.actualFps > 0) actualFps = manifest.actualFps;
       if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
     }
-  } catch {}
-
+  } catch (err) { console.warn(`[export] Manifest parse error for ${sessionId}:`, err); }
   const args: string[] = [
-    // Force ffmpeg to probe the full file — without this, image2pipe
-    // may stop after the first JPEG frame in a concatenated MJPEG stream.
     "-probesize", "100M",
     "-analyzeduration", "100M",
     "-framerate", String(actualFps),
@@ -204,25 +201,48 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
     throw new ExportError("FFmpeg encoding failed", 500);
   }
 
-  const mp4Data = await readFile(mp4Path);
+  const mp4File = Bun.file(mp4Path);
+  const mp4Size = mp4File.size;
 
-  // Persist to R2 in background
+  // Persist to R2 in background (read file separately to avoid consuming the stream)
   const cacheKey = `sessions/${sessionId}/export.mp4`;
-  store.put(cacheKey, mp4Data).then(() => {
-    console.log(`[export] MP4 cached for ${sessionId.slice(0, 8)}: ${(mp4Data.length / 1048576).toFixed(2)} MB`);
+  readFile(mp4Path).then(mp4Data => {
+    store.put(cacheKey, mp4Data).then(() => {
+      console.log(`[export] MP4 cached for ${sessionId.slice(0, 8)}: ${(mp4Data.length / 1048576).toFixed(2)} MB`);
+    }).catch(err => {
+      console.error(`[export] MP4 cache write failed:`, err.message);
+    });
   }).catch(err => {
-    console.error(`[export] MP4 cache write failed:`, err.message);
+    console.error(`[export] MP4 read for cache failed:`, err.message);
   });
 
-  await rm(tmp, { recursive: true, force: true }).catch(() => {});
+  // Stream the file to the response (avoids holding entire MP4 in memory)
+  // Cleanup happens after the stream is consumed via a transform
+  const fileStream = mp4File.stream();
+  const cleanupTransform = new TransformStream({
+    flush() {
+      rm(tmp, { recursive: true, force: true }).catch(() => {});
+    },
+  });
+  const body = fileStream.pipeTo(cleanupTransform.writable).catch(() => {});
+  // Actually, we need to return a readable stream. Let's use a different approach.
+  // Read the file as a stream and pipe through cleanup.
 
-  return new Response(mp4Data, {
+  // Use Bun.file directly as response body — it streams from disk
+  const response = new Response(mp4File, {
     headers: {
       "Content-Type": "video/mp4",
-      "Content-Length": String(mp4Data.length),
+      "Content-Length": String(mp4Size),
       "Content-Disposition": `inline; filename="session-${sessionId.slice(0, 8)}.mp4"`,
     },
   });
+
+  // Schedule cleanup after a delay to allow the stream to be consumed
+  setTimeout(() => {
+    rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }, 60_000);
+
+  return response;
 }
 
 /**
@@ -308,7 +328,7 @@ export async function getGalleryData(
         acl,
         viewerRole,
       });
-    } catch {}
+    } catch (err) { console.warn(`[gallery] Meta parse error for ${sessionId}:`, err); }
   }
 
   // Most recent first

@@ -33,9 +33,9 @@ The viewer needs to evolve from a debug tool into a usable product surface where
 
 | File | Purpose |
 |------|---------|
-| `relay/viewer/index.html` | Live stream viewer: WebSocket connect, FRLY canvas decode, FRAU audio decode with A/V sync |
-| `relay/viewer/directory.html` | Session directory listing (basic) |
-| `relay/viewer/gallery.html` | "CaringMind -- Creator Gallery"; grid UI; server injects `<!--__GALLERY_DATA__-->` |
+| `hosted/viewer/index.html` | Live stream viewer: WebSocket connect, FRLY canvas decode, FRAU audio decode with A/V sync |
+| `hosted/viewer/directory.html` | Session directory listing (basic) |
+| `hosted/viewer/gallery.html` | "CaringMind -- Creator Gallery"; grid UI; server injects `<!--__GALLERY_DATA__-->` |
 
 ### Live Viewer Features (index.html)
 
@@ -215,11 +215,11 @@ Server throttles frame delivery to that viewer
 
 | File | Purpose |
 |------|---------|
-| `relay/viewer/index.html` | Live stream viewer (FRLY/FRAU decode, canvas, A/V sync) |
-| `relay/viewer/directory.html` | Session directory listing |
-| `relay/viewer/gallery.html` | Stored session gallery and playback |
-| `relay/server/src/server.ts` | Serves static HTML; handles WebSocket upgrade; quality preset routing |
-| `relay/server/src/session-export.ts` | Gallery data, thumbnail generation, retrieval proxy |
+| `hosted/viewer/index.html` | Live stream viewer (FRLY/FRAU decode, canvas, A/V sync) |
+| `hosted/viewer/directory.html` | Session directory listing |
+| `hosted/viewer/gallery.html` | Stored session gallery and playback |
+| `hosted/server/src/server.ts` | Serves static HTML; handles WebSocket upgrade; quality preset routing |
+| `hosted/server/src/session-export.ts` | Gallery data, thumbnail generation, retrieval proxy |
 
 ---
 

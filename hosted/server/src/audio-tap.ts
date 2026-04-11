@@ -34,6 +34,8 @@ interface TapSubscriber {
   closed: boolean;
 }
 
+const MAX_TAP_QUEUE_SIZE = 1000; // Drop oldest frames when queue exceeds this
+
 export class AudioTapBus {
   private taps = new Map<string, TapSubscriber>();
   private callbacks = new Map<string, (frame: AudioFrame) => void>();
@@ -109,6 +111,10 @@ export class AudioTapBus {
         tap.waiting = null;
         resolve(audioFrame);
       } else {
+        if (tap.queue.length >= MAX_TAP_QUEUE_SIZE) {
+          // Drop oldest frame to prevent unbounded growth
+          tap.queue.shift();
+        }
         tap.queue.push(audioFrame);
       }
     }

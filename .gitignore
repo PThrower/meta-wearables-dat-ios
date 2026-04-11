@@ -26,11 +26,11 @@ bun.lock
 lmdb.db
 lmdb.db-lock
 
-# Relay server local
-relay/server/node_modules/
-relay/server/dist/
-relay/server/doppler.env
-relay/viewer/dist/
-relay/viewer/node_modules/
-relay/packages/relay-protocol/dist/
-relay/packages/relay-protocol/node_modules/
+# Hosted server local
+hosted/server/node_modules/
+hosted/server/dist/
+hosted/server/doppler.env
+hosted/viewer/dist/
+hosted/viewer/node_modules/
+hosted/packages/relay-protocol/dist/
+hosted/packages/relay-protocol/node_modules/

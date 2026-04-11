@@ -2,13 +2,14 @@
  * Viewer entry point — gallery init, auth, auto-open session
  */
 
-import { initAuth, requireAuth } from "./auth.js";
+import { loadConfig } from "./config.js";
+import { initAuth, requireAuth, authFetch } from "./auth.js";
 import { ingest, initFilters, onCardAction } from "./gallery/render.js";
-import { watchLive, closeLive, setQuality, resumeAudio, getPlayer } from "./live.js";
+import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
 import "./share.js";
 
-// Wire card action delegation (replaces all inline onclick in rendered HTML)
+// Wire card action delegation
 onCardAction((action, data) => {
   switch (action) {
     case "share":
@@ -20,16 +21,12 @@ onCardAction((action, data) => {
   }
 });
 
-// Init auth (GIS client ID setup)
-initAuth();
+// Module-level state
+let pendingSession: string | null = null;
+let pendingShareToken: string | null = null;
+let hasGalleryData = false;
 
-// Init filter buttons
-initFilters();
-
-// Init video player overlay click-to-close
-initVideoPlayerEvents();
-
-// Wire up button handlers
+// Wire button handlers
 document.getElementById("backBtn")!.addEventListener("click", closeLive);
 document.getElementById("closeVideoBtn")!.addEventListener("click", closeVideo);
 document.getElementById("unmute")!.addEventListener("click", resumeAudio);
@@ -63,44 +60,42 @@ pttBtn.addEventListener("mouseleave", pttStop);
 pttBtn.addEventListener("touchend", pttStop);
 pttBtn.addEventListener("touchcancel", pttStop);
 
-// Auth login handler — dispatch from auth.ts
+// Auth login handler
 window.addEventListener("auth:login", () => {
   if (pendingSession) {
-    watchLive(pendingSession);
+    watchLive(pendingSession, pendingShareToken ?? undefined);
     pendingSession = null;
-  } else if (!hasGalleryData) {
-    fetchGallery();
+    pendingShareToken = null;
+  } else {
+    const pending = getPendingLiveSession();
+    if (pending) {
+      clearPendingLiveSession();
+      watchLive(pending.sessionId, pending.shareToken);
+    } else if (!hasGalleryData) {
+      fetchGallery();
+    }
   }
 });
 
-// Module-level state (replaces window globals where possible)
-let pendingSession: string | null = null;
-let hasGalleryData = false;
+// Auth logout handler
+window.addEventListener("auth:logout", () => {
+  hasGalleryData = false;
+  const grid = document.getElementById("grid");
+  if (grid) grid.innerHTML = "";
+  const subtitle = document.getElementById("subtitle");
+  if (subtitle) subtitle.textContent = "";
+});
 
-// Auto-open session if provided
-function autoOpenSession(): boolean {
-  const sessionId = (window as any).__SESSION_ID
-    || new URLSearchParams(location.search).get("session");
-  if (sessionId) {
-    watchLive(sessionId);
-    return true;
-  }
-  return false;
-}
+// Init filter buttons
+initFilters();
 
-// Ingest server-injected gallery data
-if ((window as any).__GALLERY_DATA) {
-  ingest((window as any).__GALLERY_DATA);
-  hasGalleryData = true;
-}
+// Init video player overlay click-to-close
+initVideoPlayerEvents();
 
-/** Auth-aware gallery fetch with Bearer token */
+/** Auth-aware gallery fetch */
 export async function fetchGallery(): Promise<void> {
   try {
-    const token = localStorage.getItem("relay_token");
-    const headers: Record<string, string> = {};
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch("/gallery/api", { headers });
+    const res = await authFetch("/gallery/api");
     if (res.status === 401) {
       requireAuth();
       return;
@@ -136,16 +131,37 @@ function clearNetworkError(): void {
   if (el) el.classList.remove("show");
 }
 
-// Auto-open or show gallery
-if (!autoOpenSession()) {
-  if (!hasGalleryData) fetchGallery();
+// Derive session ID and share token from URL
+function sessionIdFromUrl(): string | null {
+  // /session/<id> path format
+  const m = location.pathname.match(/^\/session\/([^/]+)$/);
+  if (m) return m[1];
+  // ?session=<id> query param
+  return new URLSearchParams(location.search).get("session");
 }
 
-// Handle share token from URL
-const shareToken = (window as any).__SHARE_TOKEN || new URLSearchParams(location.search).get("share");
-if (shareToken) {
-  (window as any).__SHARE_TOKEN = shareToken;
+function shareTokenFromUrl(): string | null {
+  return new URLSearchParams(location.search).get("share");
 }
+
+// Boot sequence
+(async () => {
+  await loadConfig();
+  await initAuth();
+
+  const sessionId = sessionIdFromUrl();
+  const shareToken = shareTokenFromUrl();
+
+  if (sessionId) {
+    const authNeeded = watchLive(sessionId, shareToken ?? undefined);
+    if (authNeeded) {
+      pendingSession = sessionId;
+      pendingShareToken = shareToken;
+    }
+  } else {
+    fetchGallery();
+  }
+})();
 
 // Background refresh every 30s
 setInterval(fetchGallery, 30000);

@@ -49,7 +49,7 @@ Browser (GIS popup)              iOS (ASWebAuthenticationSession)
 
 ## Implementation
 
-### Server (`relay/server/src/`)
+### Server (`hosted/server/src/`)
 
 - **`auth.ts`** (new): `verifyToken()` and `extractToken()` using `google-auth-library`
 - **`types.ts`**: Added `userId`, `email` to `WsData`; `ownerId`, `ownerEmail`, `isPublic` to `Session`
@@ -57,7 +57,7 @@ Browser (GIS popup)              iOS (ASWebAuthenticationSession)
 - **`server.ts`**: Auth middleware on `/stats`, WebSocket upgrades (publish, view, audio-tap)
 - **`package.json`**: Added `google-auth-library` dependency
 
-### Viewer (`relay/viewer/`)
+### Viewer (`hosted/viewer/`)
 
 - **`index.html`**: GIS popup login overlay, token stored in localStorage, passed as query param
 - **`relay-player.js`**: 401/403 close code handling, stops reconnect on auth failure

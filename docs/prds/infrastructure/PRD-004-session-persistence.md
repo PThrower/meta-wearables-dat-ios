@@ -39,7 +39,7 @@ The server already sees every FRLY/FRAU frame in real-time. Writing to an S3-com
 - `RecordingStage` on iOS writes `.mov` files locally (operator's phone)
 - `session-recorder.ts` module exists in the relay server
 - `session-export.ts` handles gallery data, MP4 export, thumbnails
-- `@aws-sdk/client-s3` and `@ebowwa/object-store` are dependencies in `relay/server/package.json`
+- `@aws-sdk/client-s3` and `@ebowwa/object-store` are dependencies in `hosted/server/package.json`
 - `persistence-architecture.md` documents the full design (bucket layout, segment format, cost estimates)
 - Gallery HTML (`gallery.html`) renders stored sessions with thumbnails
 

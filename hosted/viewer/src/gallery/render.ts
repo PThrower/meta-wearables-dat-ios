@@ -3,6 +3,7 @@
  */
 
 import { fmtDur, fmtTime } from "./format.js";
+import { authUrl } from "../auth.js";
 
 /** Escape a string for safe insertion into an HTML attribute value (inside double quotes) */
 function escAttr(s: string): string {
@@ -100,9 +101,9 @@ function cardHtml(s: GallerySession, delay: number): string {
   const ownerBadge = isOwner ? `<span class="owner-badge">Owner</span>` : "";
   const shareBtn = canEdit ? `<button class="action-btn share-btn" data-action="share" data-session-id="${escAttr(s.sessionId)}">Share</button>` : "";
   const thumb = (s.segments ?? 0) > 0
-    ? `<img class="card-thumb" src="${escAttr(s.thumbnailUrl ?? "")}" alt="" loading="lazy">`
+    ? `<img class="card-thumb" src="${escAttr(authUrl(s.thumbnailUrl ?? ""))}" alt="" loading="lazy">`
     : `<div class="card-thumb-placeholder">No video</div>`;
-  const safeVideoUrl = escAttr(s.videoUrl ?? "");
+  const safeVideoUrl = escAttr(authUrl(s.videoUrl ?? ""));
   return `<div class="card" style="animation-delay:${delay}ms">
     ${thumb}
     <div class="card-body">
@@ -121,7 +122,7 @@ function cardHtml(s: GallerySession, delay: number): string {
       <div class="card-actions">
         ${(s.segments ?? 0) > 0 ? `<button class="action-btn primary" data-action="play" data-url="${safeVideoUrl}">Play</button>
         <a class="action-btn" href="${safeVideoUrl}" target="_blank" rel="noopener">Download</a>` : ""}
-        ${s.live ? `<a class="action-btn primary" href="/view?session=${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
+        ${s.live ? `<a class="action-btn primary" href="/session/${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
         ${shareBtn}
       </div>
     </div>

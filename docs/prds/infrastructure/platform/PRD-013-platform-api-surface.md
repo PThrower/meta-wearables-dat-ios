@@ -405,20 +405,20 @@ All old endpoints deleted. New surface ships in a single commit.
 
 | File | Change |
 |------|--------|
-| `relay/server/src/server.ts` | Replace monolithic fetch with router dispatch; `message()` delegates to pipeline |
-| `relay/server/src/pipeline.ts` | NEW: `FramePipeline`, `FramePipelineStage`, `FrameContext` types and dispatch loop |
-| `relay/server/src/stages/stats.ts` | NEW: publisher counters, timing, resolution metadata |
-| `relay/server/src/stages/recording.ts` | NEW: append to session recorder |
-| `relay/server/src/stages/throttle.ts` | NEW: WASM per-session throttle state |
-| `relay/server/src/stages/viewer-fanout.ts` | NEW: send to viewers with quality presets (only stage gated on viewer count) |
-| `relay/server/src/stages/ai-fanout.ts` | NEW: forward to `/analyze` connections |
-| `relay/server/src/stages/audio-tap.ts` | NEW: publish to AudioTapBus |
-| `relay/server/src/routes/api.ts` | NEW: `/api/v1/*` route handlers |
-| `relay/server/src/routes/media.ts` | NEW: `/media/*` binary handlers |
-| `relay/server/src/routes/html.ts` | NEW: HTML page serving (viewer, directory) |
-| `relay/server/src/session-registry.ts` | Remove `fanout()` and `fanoutAudio()`; split `stats()` into `platformStats()` and `sessionStats(id)` |
-| `relay/server/src/session-export.ts` | Media paths updated; no signed URL redirects |
-| `relay/viewer/` | Update to call `/api/v1/` endpoints |
+| `hosted/server/src/server.ts` | Replace monolithic fetch with router dispatch; `message()` delegates to pipeline |
+| `hosted/server/src/pipeline.ts` | NEW: `FramePipeline`, `FramePipelineStage`, `FrameContext` types and dispatch loop |
+| `hosted/server/src/stages/stats.ts` | NEW: publisher counters, timing, resolution metadata |
+| `hosted/server/src/stages/recording.ts` | NEW: append to session recorder |
+| `hosted/server/src/stages/throttle.ts` | NEW: WASM per-session throttle state |
+| `hosted/server/src/stages/viewer-fanout.ts` | NEW: send to viewers with quality presets (only stage gated on viewer count) |
+| `hosted/server/src/stages/ai-fanout.ts` | NEW: forward to `/analyze` connections |
+| `hosted/server/src/stages/audio-tap.ts` | NEW: publish to AudioTapBus |
+| `hosted/server/src/routes/api.ts` | NEW: `/api/v1/*` route handlers |
+| `hosted/server/src/routes/media.ts` | NEW: `/media/*` binary handlers |
+| `hosted/server/src/routes/html.ts` | NEW: HTML page serving (viewer, directory) |
+| `hosted/server/src/session-registry.ts` | Remove `fanout()` and `fanoutAudio()`; split `stats()` into `platformStats()` and `sessionStats(id)` |
+| `hosted/server/src/session-export.ts` | Media paths updated; no signed URL redirects |
+| `hosted/viewer/` | Update to call `/api/v1/` endpoints |
 
 ---
 

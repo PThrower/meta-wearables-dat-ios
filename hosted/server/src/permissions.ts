@@ -79,6 +79,7 @@ export async function resolvePermission(
 // --- Share token management ---
 
 const SHARE_PREFIX = "shr_";
+const MAX_SHARE_TOKENS_PER_SESSION = 20;
 
 function shareKey(sessionId: string, token: string): string {
   return `sessions/${sessionId}/shares/${token}.json`;
@@ -116,13 +117,18 @@ export async function validateShareToken(
   }
 }
 
-/** Create a new share token and persist to R2 */
+/** Create a new share token and persist to R2. Throws if limit reached. */
 export async function createShareToken(
   sessionId: string,
   createdBy: string,
   expiresAt: string,
   store: ObjectStore,
 ): Promise<ShareToken> {
+  // Enforce max active tokens per session
+  const activeTokens = await listShareTokens(sessionId, store);
+  if (activeTokens.length >= MAX_SHARE_TOKENS_PER_SESSION) {
+    throw new Error(`Session already has ${MAX_SHARE_TOKENS_PER_SESSION} active share tokens`);
+  }
   const token = generateToken();
   const shareToken: ShareToken = {
     token,
@@ -186,7 +192,7 @@ export async function listShareTokens(
   }
 }
 
-/** Update the denormalized share token index */
+/** Update the denormalized share token index, pruning expired/revoked entries */
 async function updateShareIndex(
   sessionId: string,
   newToken: ShareToken,
@@ -194,9 +200,12 @@ async function updateShareIndex(
 ): Promise<void> {
   const existing = await listShareTokensRaw(sessionId, store);
   existing.push(newToken);
+  // Prune expired and revoked tokens to prevent unbounded growth
+  const now = Date.now();
+  const pruned = existing.filter(t => !t.revoked && new Date(t.expiresAt).getTime() > now);
   await store.put(
     shareIndexKey(sessionId),
-    Buffer.from(JSON.stringify(existing, null, 2)),
+    Buffer.from(JSON.stringify(pruned, null, 2)),
   );
 }
 

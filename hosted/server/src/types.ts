@@ -53,6 +53,7 @@ export interface WsData {
   email?: string;       // Google email from verified token
   unsub?: () => void;   // Audio tap unsubscribe callback
   shareToken?: string;  // share token for link-access sessions
+  authPending?: boolean; // true if auth deferred to hello message
 }
 
 // --- Publisher ---
@@ -122,4 +123,5 @@ export interface Session {
   ownerEmail?: string;          // Google email of session creator
   accessLevel: AccessLevel;
   acl: AclEntry[];
+  publisherClaiming: boolean;   // Mutex for atomic publisher claim
 }

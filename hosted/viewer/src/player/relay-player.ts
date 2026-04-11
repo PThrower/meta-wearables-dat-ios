@@ -6,6 +6,7 @@
 
 import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE } from "@ebowwa/relay-protocol";
 import { buildFrauFrame } from "./frau-builder.js";
+import { getConfig } from "../config.js";
 
 export interface RelayPlayerOptions {
   canvas: HTMLCanvasElement;
@@ -19,6 +20,7 @@ export interface RelayPlayerOptions {
   onAudioLevel?: (pct: number) => void;
   onConnectionState?: (state: string) => void;
   onNeedUnmute?: () => void;
+  onAuthRequired?: () => void;
 }
 
 type Callbacks = Required<RelayPlayerOptions>;
@@ -89,14 +91,18 @@ export class RelayPlayer {
       onAudioLevel: options.onAudioLevel ?? (() => {}),
       onConnectionState: options.onConnectionState ?? (() => {}),
       onNeedUnmute: options.onNeedUnmute ?? (() => {}),
+      onAuthRequired: options.onAuthRequired ?? (() => {}),
     };
     this.lastFpsTime = performance.now();
   }
 
   // --- Connection ---
 
-  connect(url: string): void {
+  private _pendingShareToken: string | null = null;
+
+  connect(url: string, shareToken?: string): void {
     this.lastUrl = url;
+    this._pendingShareToken = shareToken ?? null;
     this.intentionalClose = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.ws) this.ws.close();
@@ -110,12 +116,9 @@ export class RelayPlayer {
       this.cb.onConnectionState("connected");
       this.cb.onStatus("CONNECTED");
       // Send viewer identity with version info
-      const v = (window as any).__VIEWER_VERSION;
-      this.ws!.send(JSON.stringify({
-        type: "hello",
-        gitCommit: v?.gitCommit ?? "unknown",
-        buildVersion: v?.buildVersion ?? "unknown",
-      }));
+      let v = { gitCommit: "unknown", buildVersion: "unknown" };
+      try { v = getConfig().version; } catch {}
+      this.ws!.send(JSON.stringify({ type: "hello", ...v }));
     };
 
     this.ws.onmessage = (event) => this._handleMessage(event);
@@ -126,6 +129,7 @@ export class RelayPlayer {
         this.cb.onConnectionState("error");
         this.cb.onStatus("AUTH REQUIRED");
         try { localStorage.removeItem("relay_token"); } catch {}
+        this.cb.onAuthRequired();
         return;
       }
       if (event.code === 4003) {
@@ -473,22 +477,39 @@ export class RelayPlayer {
     this.audioResumed = true;
   }
 
-  private _pushAudioToRing(pcmInt16: Int16Array, sampleRate: number): void {
+  private _pushAudioToRing(pcmInt16: Int16Array, sampleRate: number, channels: number): void {
     const inSamples = pcmInt16.length;
     if (inSamples === 0) return;
 
+    // Downmix multi-channel to mono if needed
+    let monoSamples: Int16Array;
+    if (channels > 1) {
+      const frames = Math.floor(inSamples / channels);
+      monoSamples = new Int16Array(frames);
+      for (let i = 0; i < frames; i++) {
+        let sum = 0;
+        for (let ch = 0; ch < channels; ch++) {
+          sum += pcmInt16[i * channels + ch];
+        }
+        monoSamples[i] = Math.round(sum / channels);
+      }
+    } else {
+      monoSamples = pcmInt16;
+    }
+
+    const monoLen = monoSamples.length;
     const targetRate = this.audioCtx!.sampleRate;
     const ratio = targetRate / sampleRate;
-    const outSamples = Math.round(inSamples * ratio);
+    const outSamples = Math.round(monoLen * ratio);
     const floatSamples = new Float32Array(outSamples);
 
     for (let i = 0; i < outSamples; i++) {
       const srcPos = i / ratio;
       const idx0 = Math.floor(srcPos);
-      const idx1 = Math.min(idx0 + 1, inSamples - 1);
+      const idx1 = Math.min(idx0 + 1, monoLen - 1);
       const frac = srcPos - idx0;
-      const s0 = pcmInt16[idx0] / 32768.0;
-      const s1 = pcmInt16[idx1] / 32768.0;
+      const s0 = monoSamples[idx0] / 32768.0;
+      const s1 = monoSamples[idx1] / 32768.0;
       floatSamples[i] = s0 + (s1 - s0) * frac;
     }
 
@@ -516,14 +537,14 @@ export class RelayPlayer {
     }
   }
 
-  private _playAudioChunk(pcmInt16: Int16Array, sampleRate: number, _channels: number, senderTimestampMs: number): void {
+  private _playAudioChunk(pcmInt16: Int16Array, sampleRate: number, channels: number, senderTimestampMs: number): void {
     if (!this.audioCtx) this._initAudio();
     this._ensureAudioResumed();
 
     if (pcmInt16.length === 0) return;
 
     this.audioLevel = 0;
-    this._pushAudioToRing(pcmInt16, sampleRate);
+    this._pushAudioToRing(pcmInt16, sampleRate, channels);
 
     if (this.audioCtx && senderTimestampMs > 0) {
       this.videoClockBase = {

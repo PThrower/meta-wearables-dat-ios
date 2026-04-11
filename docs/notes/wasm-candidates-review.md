@@ -1,6 +1,6 @@
 # Universal Wasm Candidates -- Codebase Review
 
-> Review of all logic across the three distributions (`com.mwdat-ios`, `relay/`, `samples/CameraAccess/`) to identify what should become Wasm, what stays native, and what the performance tradeoffs are.
+> Review of all logic across the three distributions (`com.mwdat-ios`, `hosted/`, `publishers/CameraAccess/`) to identify what should become Wasm, what stays native, and what the performance tradeoffs are.
 
 ---
 
@@ -27,10 +27,10 @@
 
 | Location | Language | Lines | What it does |
 |----------|----------|-------|-------------|
-| `relay/crate/src/lib.rs:88-124` | Rust/Wasm | ~37 | `encode_frame_prefix()` + `decode_frame_prefix()` with `FrameHeader` struct |
-| `relay/server/src/server.ts:316-327` | TypeScript | ~12 | `parseHeader()` with DataView |
+| `hosted/crate/src/lib.rs:88-124` | Rust/Wasm | ~37 | `encode_frame_prefix()` + `decode_frame_prefix()` with `FrameHeader` struct |
+| `hosted/server/src/server.ts:316-327` | TypeScript | ~12 | `parseHeader()` with DataView |
 | `samples/.../RelayStage.swift` | Swift | ~30 | Manual byte-by-byte construction with `Data` |
-| `relay/viewer/index.html:348-356` | JavaScript | ~9 | DataView parsing inline |
+| `hosted/viewer/index.html:348-356` | JavaScript | ~9 | DataView parsing inline |
 
 **Status:** Implemented in Rust/Wasm. Not yet called from Swift (Swift builds headers manually). No protocol version field. No CRC/checksum.
 
@@ -42,8 +42,8 @@
 
 | Location | Language | Lines | What it does |
 |----------|----------|-------|-------------|
-| `relay/server/src/server.ts:619` | TypeScript | ~5 | Magic byte detection only |
-| `relay/viewer/index.html:324-344` | JavaScript | ~20 | Full decode: codec, sampleRate, channels, bitsPerSample, timestamp |
+| `hosted/server/src/server.ts:619` | TypeScript | ~5 | Magic byte detection only |
+| `hosted/viewer/index.html:324-344` | JavaScript | ~20 | Full decode: codec, sampleRate, channels, bitsPerSample, timestamp |
 | `samples/.../AudioStage.swift:139-180` | Swift | ~42 | Full encode: builds 29-byte header + PCM payload |
 
 **Status:** NOT in Rust/Wasm. Three separate implementations. Bytes 5-12 (between codecType and sampleRate) appear to be a sequence field in Swift but are never parsed by TypeScript/JavaScript. This inconsistency needs resolution.
@@ -52,7 +52,7 @@
 
 Three independent implementations with different semantics:
 
-**Rust (Wasm) -- `relay/crate/src/lib.rs:57-66`:**
+**Rust (Wasm) -- `hosted/crate/src/lib.rs:57-66`:**
 ```rust
 pub fn should_relay(&mut self, now_ms: u64) -> bool {
     self.frames_received += 1;
@@ -67,7 +67,7 @@ pub fn should_relay(&mut self, now_ms: u64) -> bool {
 ```
 Single global gate. One `min_interval_ms`. Returns bool.
 
-**TypeScript -- `relay/server/src/server.ts:345-365`:**
+**TypeScript -- `hosted/server/src/server.ts:345-365`:**
 ```typescript
 const preset = QUALITY_PRESETS[viewer.quality];
 const elapsed = viewer.lastSentAt > 0 ? now - viewer.lastSentAt : preset.minIntervalMs;
@@ -93,7 +93,7 @@ Uses `ContinuousClock.Instant` and `Duration` (Swift 5.9+). Per-stage throttle.
 
 ### Timing / Telemetry
 
-**TypeScript only -- `relay/server/src/server.ts:47-56, 286-314`:**
+**TypeScript only -- `hosted/server/src/server.ts:47-56, 286-314`:**
 
 ```typescript
 interface FrameTiming {
@@ -118,7 +118,7 @@ interface FrameTiming {
 
 ### Quality Presets
 
-**TypeScript only -- `relay/server/src/server.ts:34-41`:**
+**TypeScript only -- `hosted/server/src/server.ts:34-41`:**
 
 ```typescript
 const QUALITY_PRESETS = {
@@ -133,7 +133,7 @@ const QUALITY_PRESETS = {
 
 ### Audio Processing (Viewer Side)
 
-**JavaScript only -- `relay/viewer/index.html:134-254`:**
+**JavaScript only -- `hosted/viewer/index.html:134-254`:**
 
 | Component | Implementation |
 |-----------|---------------|
@@ -393,7 +393,7 @@ Audio DSP: 1 implementation (Rust/Wasm)
 
 ### Phase 1: Extend the Rust Crate (Highest Impact, Lowest Risk)
 
-The existing `relay/crate/src/lib.rs` becomes the universal protocol+telemetry module.
+The existing `hosted/crate/src/lib.rs` becomes the universal protocol+telemetry module.
 
 **1a. Add FRAU protocol:**
 ```
@@ -462,10 +462,10 @@ Each uses the FlatBuffer schema from Phase 2 for zero-copy data exchange.
 
 | File | Role |
 |------|------|
-| `relay/crate/src/lib.rs` | Current Rust/Wasm crate (FRLY + throttle) |
-| `relay/crate/Cargo.toml` | Crate config (cdylib, wasm-bindgen, opt-level "s", LTO) |
-| `relay/server/src/server.ts` | Bun server: FRLY/FRAU parsing, fanout, timing, recording |
-| `relay/viewer/index.html` | Browser viewer: FRLY/FRAU decode, ring buffer, resampling, A/V sync |
+| `hosted/crate/src/lib.rs` | Current Rust/Wasm crate (FRLY + throttle) |
+| `hosted/crate/Cargo.toml` | Crate config (cdylib, wasm-bindgen, opt-level "s", LTO) |
+| `hosted/server/src/server.ts` | Bun server: FRLY/FRAU parsing, fanout, timing, recording |
+| `hosted/viewer/index.html` | Browser viewer: FRLY/FRAU decode, ring buffer, resampling, A/V sync |
 | `samples/.../Pipeline/FramePipelineManager.swift` | Frame dispatch to stages |
 | `samples/.../Pipeline/FramePipelineTypes.swift` | `FramePacket`, `FrameStageConfig`, `FramePipelineStage` protocol |
 | `samples/.../Pipeline/Stages/RelayStage.swift` | JPEG encode, FRLY construction, WebSocket relay |

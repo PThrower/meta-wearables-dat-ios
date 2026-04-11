@@ -35,6 +35,8 @@ export class SessionRecorder {
   private store: ObjectStore;
   private videoParts: Buffer[] = [];
   private audioParts: Buffer[] = [];
+  private failedVideoParts: Buffer[] = []; // retry buffer for failed writes
+  private failedAudioParts: Buffer[] = [];
   private segIndex = 0;
   private chunkIndex = 0;
   private lastFlush = Date.now();
@@ -168,9 +170,20 @@ export class SessionRecorder {
     });
 
     const key = `sessions/${this.sessionId}/video/seg-${this.segIndex.toString().padStart(4, "0")}.mjpeg`;
-    this.store.put(key, data).catch(err =>
-      console.error(`[recorder] video write failed:`, err.message)
-    );
+    this.store.put(key, data).then(() => {
+      // On success, flush any previously failed parts
+      if (this.failedVideoParts.length > 0) {
+        const retry = Buffer.concat(this.failedVideoParts);
+        this.failedVideoParts = [];
+        this.store.put(`${key}.retry`, retry).catch(err => {
+          console.error(`[recorder] retry video write failed:`, err.message);
+          this.failedVideoParts.push(retry);
+        });
+      }
+    }).catch(err => {
+      console.error(`[recorder] video write failed, buffering for retry:`, err.message);
+      this.failedVideoParts.push(data);
+    });
   }
 
   private flushAudio() {
@@ -197,9 +210,10 @@ export class SessionRecorder {
     });
 
     const key = `sessions/${this.sessionId}/audio/chunk-${this.chunkIndex.toString().padStart(4, "0")}.pcm`;
-    this.store.put(key, data).catch(err =>
-      console.error(`[recorder] audio write failed:`, err.message)
-    );
+    this.store.put(key, data).catch(err => {
+      console.error(`[recorder] audio write failed, buffering for retry:`, err.message);
+      this.failedAudioParts.push(data);
+    });
   }
 
   async finish() {
@@ -255,7 +269,7 @@ export class SessionRecorder {
     };
 
     this.store.put(`sessions/${this.sessionId}/manifest.json`, Buffer.from(JSON.stringify(manifest, null, 2))).catch(err =>
-      console.error(`[recorder] manifest write failed:`, err.message)
+      console.error(`[recorder] manifest write failed for ${this.sessionId.slice(0, 8)}:`, err.message)
     );
   }
 
@@ -276,7 +290,7 @@ export class SessionRecorder {
       },
     };
     this.store.put(`sessions/${this.sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2))).catch(err =>
-      console.error(`[recorder] meta write failed:`, err.message)
+      console.error(`[recorder] meta write failed for ${this.sessionId.slice(0, 8)}:`, err.message)
     );
   }
 

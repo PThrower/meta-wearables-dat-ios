@@ -166,16 +166,16 @@ publisher.onmessage(frame)
 
 | File | Purpose |
 |------|---------|
-| `relay/server/src/server.ts` | HTTP/WebSocket handler, routing, fan-out |
-| `relay/server/src/session-registry.ts` | Session CRUD, stale cleanup |
-| `relay/server/src/protocol.ts` | FRLY/FRAU parsing, timing helpers |
-| `relay/server/src/session-export.ts` | Gallery data, MP4 export, thumbnails |
-| `relay/server/src/session-recorder.ts` | Server-side recording |
-| `relay/server/src/types.ts` | Shared TypeScript types |
-| `relay/crate/src/lib.rs` | Rust WASM `FrameRelay.should_relay()` |
-| `relay/viewer/index.html` | Browser viewer (canvas, A/V sync, ring buffer) |
-| `relay/viewer/directory.html` | Session directory listing |
-| `relay/viewer/gallery.html` | Creator gallery (stored sessions) |
+| `hosted/server/src/server.ts` | HTTP/WebSocket handler, routing, fan-out |
+| `hosted/server/src/session-registry.ts` | Session CRUD, stale cleanup |
+| `hosted/server/src/protocol.ts` | FRLY/FRAU parsing, timing helpers |
+| `hosted/server/src/session-export.ts` | Gallery data, MP4 export, thumbnails |
+| `hosted/server/src/session-recorder.ts` | Server-side recording |
+| `hosted/server/src/types.ts` | Shared TypeScript types |
+| `hosted/crate/src/lib.rs` | Rust WASM `FrameRelay.should_relay()` |
+| `hosted/viewer/index.html` | Browser viewer (canvas, A/V sync, ring buffer) |
+| `hosted/viewer/directory.html` | Session directory listing |
+| `hosted/viewer/gallery.html` | Creator gallery (stored sessions) |
 
 ---
 
@@ -220,7 +220,7 @@ The refactor is confined to `server.ts` and `session-registry.ts`:
 6. Update viewer HTML to accept and pass `session` param
 7. Instantiate `FrameRelay` per session instead of globally
 
-**Zero changes** to `relay/crate` (Rust WASM) -- `FrameRelay` is already stateless per instance.  
+**Zero changes** to `hosted/crate` (Rust WASM) -- `FrameRelay` is already stateless per instance.  
 **Additive change** to viewer HTML -- session picker + param passthrough.  
 **iOS client change** -- append `?session=<id>` to the relay URL (P1-1 in PRD-001).
 

@@ -1,25 +1,30 @@
 /**
  * caringmind-frame-relay
  *
- * Bun WebSocket relay server that:
+ * Bun WebSocket relay server (pure API — no HTML serving).
+ * Viewer SPA is served by Caddy from hosted/viewer/dist.
+ *
  * 1. Accepts multiple publishers (iOS apps) on separate sessions
  * 2. Fans out frames to per-session browser viewers in real-time
  * 3. Uses WASM module for frame throttling (falls back to pure JS)
  *
- * Endpoints:
+ * API Endpoints:
+ *   /api/config              - Runtime config for SPA (auth, version)
  *   /publish?session=<id>    - WebSocket, iOS publisher connects here
  *   /view?session=<id>       - WebSocket, browser viewers connect here
- *   /sessions                - JSON list of active sessions (live)
- *   /gallery                 - Content creator gallery (all recorded sessions)
- *   /gallery/api             - JSON feed for gallery with metadata + thumbnails
- *   /session/<id>            - Serve viewer HTML scoped to a session
+ *   /tap/audio?session=<id>  - WebSocket, audio tap for AI pipeline
+ *   /sessions                - JSON list of active + historical sessions
+ *   /gallery/api             - JSON feed with metadata + thumbnails
  *   /session/<id>/thumbnail  - First-frame JPEG (cached to R2)
  *   /session/<id>/video.mp4  - MP4 export (cached to R2 after first build)
  *   /session/<id>/export     - JSON metadata about recorded session
+ *   /session/<id>/share      - Create share token (POST)
+ *   /session/<id>/shares     - List share tokens (GET)
+ *   /session/<id>/access     - Update access level/ACL (PATCH)
+ *   /session/<id>/audio-in   - Push audio to publisher (POST)
  *   /latest/video.mp4        - Redirect to most recent session's mp4 export
  *   /latest/export           - JSON metadata for most recent session
- *   /stats                   - JSON stats (platform-wide + per-session + gallery)
- *   /                        - Directory page if sessions active, else viewer
+ *   /stats                   - JSON stats (platform-wide + per-session)
  *
  * Backward compatible: omitting ?session= routes to "default" session.
  *
@@ -112,14 +117,6 @@ async function loadWasm() {
 
 await loadWasm();
 
-// --- Load HTML templates ---
-
-const VIEWER_DIR = join(import.meta.dir, "../../viewer/dist");
-const viewerHtml = await Bun.file(join(VIEWER_DIR, "index.html")).text().catch(() =>
-  "<html><body><h1>Viewer HTML not found. Run: cd ../viewer && bun run build</h1></body></html>"
-);
-const landingHtml = await Bun.file(join(import.meta.dir, "../../viewer/landing.html")).text();
-
 // --- Stale cleanup ---
 
 setInterval(() => registry.cleanupStale(), 5_000);
@@ -129,14 +126,40 @@ setInterval(() => registry.cleanupStale(), 5_000);
 const galleryCacheMap = new Map<string, { data: GallerySession[]; expiry: number }>();
 const GALLERY_TTL_MS = 30_000;
 
+// --- Session list cache (avoid scanning all R2 keys repeatedly) ---
+
+let sessionListCache: { ids: string[]; expiry: number } | null = null;
+const SESSION_LIST_TTL_MS = 60_000;
+
+async function getCachedSessionIds(): Promise<string[]> {
+  const now = Date.now();
+  if (sessionListCache && now < sessionListCache.expiry) {
+    return sessionListCache.ids;
+  }
+  const keys = await store.list("sessions/") as string[];
+  const metaKeys = keys.filter(k => k.startsWith("sessions/") && k.endsWith("/meta.json"));
+  const ids = metaKeys.map(k => k.slice("sessions/".length, k.length - "/meta.json".length));
+  sessionListCache = { ids, expiry: now + SESSION_LIST_TTL_MS };
+  return ids;
+}
+
+function invalidateSessionListCache(): void {
+  sessionListCache = null;
+}
+
 async function galleryCached(userId?: string): Promise<GallerySession[]> {
   const cacheKey = userId || "__anon";
   const now = Date.now();
+
+  // Evict expired entries to prevent unbounded growth
+  for (const [key, entry] of galleryCacheMap) {
+    if (now >= entry.expiry) galleryCacheMap.delete(key);
+  }
   const cached = galleryCacheMap.get(cacheKey);
   if (cached && now < cached.expiry) {
     const liveIds = new Set(registry.listActive().map(s => s.id));
-    for (const s of cached.data) s.live = liveIds.has(s.sessionId);
-    return cached.data;
+    // Return a shallow clone with updated live status (don't mutate cached array)
+    return cached.data.map(s => ({ ...s, live: liveIds.has(s.sessionId) }));
   }
 
   const active = registry.listActive();
@@ -159,21 +182,19 @@ function invalidateGalleryCache(userId?: string): void {
 // --- Helpers ---
 
 async function findLatestSessionId(): Promise<string | null> {
-  const keys = await store.list("sessions/") as string[];
-  const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-  if (metaKeys.length === 0) return null;
+  const sessionIds = await getCachedSessionIds();
+  if (sessionIds.length === 0) return null;
 
   let latestId: string | null = null;
   let latestTime = 0;
-  for (const mk of metaKeys) {
-    const id = mk.slice("sessions/".length, mk.length - "/meta.json".length);
-    const buf = await store.get(mk);
+  for (const id of sessionIds) {
+    const buf = await store.get(`sessions/${id}/meta.json`);
     if (!buf) continue;
     try {
       const meta = JSON.parse(new TextDecoder().decode(buf));
       const t = new Date(meta.startedAt).getTime();
       if (t > latestTime) { latestTime = t; latestId = id; }
-    } catch {}
+    } catch { console.warn(`[findLatest] Corrupt meta for session ${id}`); }
   }
   return latestId;
 }
@@ -184,14 +205,6 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
 const VIEWER_GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const VIEWER_BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
-
-function injectAuthConfig(html: string): string {
-  let result = html;
-  const authScript = `<script>window.__GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}";${NO_AUTH_FLAG ? 'document.documentElement.dataset.noAuth="1";' : ''}window.__VIEWER_VERSION={gitCommit:"${VIEWER_GIT_COMMIT}",buildVersion:"${VIEWER_BUILD_VERSION}"};</script>`;
-  // Inject right before the closing </head> if not already present
-  result = result.replace("</head>", `${authScript}</head>`);
-  return result;
-}
 
 // --- Auth helper for session access ---
 
@@ -306,39 +319,17 @@ const server = Bun.serve<WsData>({
       return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
 
-    // --- Gallery (viewer page with session cards) ---
-
-    if (url.pathname === "/gallery" || url.pathname === "/gallery/") {
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      const data = await galleryCached(user?.sub);
-      const html = injectAuthConfig(viewerHtml.replace(
-        "<!--__GALLERY_DATA__-->",
-        `<script>window.__GALLERY_DATA=${JSON.stringify(data)};</script>`
-      ));
-      return new Response(html, { headers: { "Content-Type": "text/html" } });
-    }
+    // --- Gallery API ---
 
     if (url.pathname === "/gallery/api") {
       const token = extractToken(req, url);
       const user = await verifyToken(token);
-      if (!user) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const data = await galleryCached(user.sub);
+      // Allow anonymous access — will only see public sessions
+      const userId = user?.sub;
+      const data = await galleryCached(userId);
       return Response.json(data, {
-        headers: { "Cache-Control": "private, max-age=15" },
+        headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
       });
-    }
-
-    // --- Static viewer assets (Vite build output) ---
-
-    if (url.pathname.startsWith("/assets/")) {
-      const filePath = join(VIEWER_DIR, url.pathname);
-      const file = Bun.file(filePath);
-      if (await file.exists()) {
-        return new Response(file);
-      }
     }
 
     // --- Live Sessions (active relay sessions) ---
@@ -352,14 +343,8 @@ const server = Bun.serve<WsData>({
 
       const active = registry.listActive();
 
-      // Merge with S3-stored historical sessions
-      const keys = await store.list("sessions/") as string[];
-      const historicalSessionIds: string[] = [];
-      for (const key of keys) {
-        if (key.startsWith("sessions/") && key.endsWith("/meta.json")) {
-          historicalSessionIds.push(key.slice("sessions/".length, key.length - "/meta.json".length));
-        }
-      }
+      // Use cached session list instead of scanning all R2 keys
+      const historicalSessionIds = await getCachedSessionIds();
 
       // Combine: active sessions (with live metadata) + historical (id only)
       const activeIds = new Set(active.map(s => s.id));
@@ -478,36 +463,11 @@ const server = Bun.serve<WsData>({
         }
 
         invalidateGalleryCache();
+        invalidateSessionListCache();
         return Response.json({ ok: true });
       } catch {
         return Response.json({ error: "Invalid request body" }, { status: 400 });
       }
-    }
-
-    // --- Serve unified page scoped to a session: /session/<id> ---
-
-    const liveSessionMatch = url.pathname.match(/^\/session\/([^/]+)$/);
-    if (liveSessionMatch) {
-      const sessionId = liveSessionMatch[1];
-      const shareTok = extractShareToken(url);
-
-      // For private sessions, verify access (share token or auth)
-      const liveSession = registry.get(sessionId);
-      if (!liveSession) {
-        const data = await store.get(`sessions/${sessionId}/meta.json`);
-        if (!data) return Response.json({ error: "Session not found" }, { status: 404 });
-      }
-
-      // Resolve auth for user-scoped gallery
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      const gallery = await galleryCached(user?.sub);
-
-      const shareScript = shareTok ? `<script>window.__SHARE_TOKEN = "${shareTok}";</script>` : "";
-      const html = injectAuthConfig(viewerHtml
-        .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
-        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script>${shareScript}</head>`));
-      return new Response(html, { headers: { "Content-Type": "text/html" } });
     }
 
     // --- Push audio to publisher: POST /session/<id>/audio-in ---
@@ -644,10 +604,14 @@ const server = Bun.serve<WsData>({
       }
     }
 
-    // --- Root: landing page ---
+    // --- Runtime config for SPA ---
 
-    if (url.pathname === "/" || url.pathname === "/index.html") {
-      return new Response(landingHtml, { headers: { "Content-Type": "text/html" } });
+    if (url.pathname === "/api/config") {
+      return Response.json({
+        googleClientId: GOOGLE_CLIENT_ID,
+        noAuth: NO_AUTH_FLAG,
+        version: { gitCommit: VIEWER_GIT_COMMIT, buildVersion: VIEWER_BUILD_VERSION },
+      });
     }
 
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
@@ -674,17 +638,10 @@ const server = Bun.serve<WsData>({
       return Response.json({ error: "Not found" }, { status: 404 });
     }
 
-    // Browser navigated to /view?session=<id> — serve the viewer page
+    // Viewer page now served by Caddy (SPA) — only handle WebSocket upgrades
     const wsUpgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
     if (isView && !wsUpgrade) {
-      const sessionId = registry.resolveSessionId(url);
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      const gallery = await galleryCached(user?.sub);
-      const html = injectAuthConfig(viewerHtml
-        .replace("<!--__GALLERY_DATA__-->", `<script>window.__GALLERY_DATA=${JSON.stringify(gallery)};</script>`)
-        .replace("</head>", `<script>window.__SESSION_ID = "${sessionId}";</script></head>`));
-      return new Response(html, { headers: { "Content-Type": "text/html" } });
+      return Response.json({ error: "Not found" }, { status: 404 });
     }
 
     const role = isPublish ? "publish" : "view";
@@ -694,33 +651,49 @@ const server = Bun.serve<WsData>({
       || "unknown";
     const shareTok = extractShareToken(url);
 
-    // Auth check for WebSocket upgrade
+    // Auth: accept token from query param (backward compat) or defer to hello message
     const token = extractToken(req, url);
-    const user = await verifyToken(token);
-    if (!user) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const user = token ? await verifyToken(token) : null;
+    // If no token in URL, upgrade will succeed but viewer/publisher auth is deferred
+    // to the hello message handler which sends the token
+    if (!user && !NO_AUTH_FLAG) {
+      // Allow upgrade without token — auth will be verified on hello message
+      server.upgrade(req, { data: { role, clientIp, sessionId, userId: undefined, email: undefined, shareToken: shareTok || undefined, authPending: true } });
+      return new Response(null, { status: 204 });
     }
 
-    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user.sub, email: user.email, shareToken: shareTok || undefined } });
+    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user?.sub, email: user?.email, shareToken: shareTok || undefined, authPending: false } });
     return new Response(null, { status: 204 });
   },
   websocket: {
     async open(ws) {
-      const { role, clientIp, sessionId } = ws.data;
+      const { role, clientIp, sessionId, authPending } = ws.data;
+
+      // If auth is deferred to hello message, don't register yet
+      if (authPending) {
+        console.log(`[relay] ${role} connected (auth pending) session=${sessionId}`);
+        return;
+      }
 
       if (role === "audio-tap") {
         const unsub = audioTapBus.onFrame((frame) => {
           if (ws.readyState !== WebSocket.OPEN) { unsub(); return; }
-          ws.send(JSON.stringify({
-            type: "audio",
-            codecType: frame.codecType,
-            sequence: frame.sequence,
-            sampleRate: frame.sampleRate,
-            channels: frame.channels,
-            bitsPerSample: frame.bitsPerSample,
-            timestampMs: frame.timestampMs,
-            pcmBase64: Buffer.from(frame.pcm).toString("base64"),
-          }));
+          // Send binary FRAU frame (raw PCM) instead of base64 JSON for efficiency
+          // Reconstruct the original binary frame from the parsed AudioFrame
+          const pcmLen = frame.pcm.length;
+          const buf = new ArrayBuffer(29 + pcmLen);
+          const view = new DataView(buf);
+          // Magic "FRAU"
+          view.setUint8(0, 0x46); view.setUint8(1, 0x52);
+          view.setUint8(2, 0x41); view.setUint8(3, 0x55);
+          view.setUint8(4, frame.codecType);
+          view.setBigUint64(5, BigInt(frame.sequence), true);
+          view.setUint32(13, frame.sampleRate, true);
+          view.setUint16(17, frame.channels, true);
+          view.setUint16(19, frame.bitsPerSample, true);
+          view.setBigUint64(21, BigInt(frame.timestampMs), true);
+          new Uint8Array(buf, 29).set(frame.pcm);
+          ws.send(new Uint8Array(buf));
         });
         ws.data = { ...ws.data, unsub };
         console.log(`[relay] Audio tap connected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
@@ -742,7 +715,97 @@ const server = Bun.serve<WsData>({
       }
     },
     async message(ws, message) {
-      const { role, sessionId } = ws.data;
+      const { role, sessionId, authPending } = ws.data;
+
+      // Handle deferred auth: verify token sent in hello message
+      if (authPending && typeof message === "string") {
+        try {
+          const cmd = JSON.parse(message);
+          if (cmd.type === "hello") {
+            const token = cmd.token || "";
+            const shareTok = cmd.shareToken || ws.data.shareToken;
+            const user = await verifyToken(token);
+            if (!user) {
+              ws.close(4001, "auth failed");
+              return;
+            }
+            ws.data.userId = user.sub;
+            ws.data.email = user.email;
+            ws.data.shareToken = shareTok || undefined;
+            ws.data.authPending = false;
+
+            // Now register the connection
+            if (role === "publish") {
+              const err = registry.claimPublisher(sessionId, ws, ws.data.clientIp, user.sub, user.email);
+              if (err) {
+                ws.close(err === "session owned by another user" ? 4003 : 4001, err);
+                return;
+              }
+              // Process hello fields
+              const session = registry.get(sessionId);
+              if (session?.publisher) {
+                const MAX_FIELD_LEN = 256;
+                const strField = (v: unknown): string | null => {
+                  if (typeof v !== "string") return null;
+                  const trimmed = v.slice(0, MAX_FIELD_LEN);
+                  return trimmed || null;
+                };
+                session.publisher.deviceId = strField(cmd.deviceId);
+                session.publisher.deviceName = strField(cmd.deviceName);
+                session.publisher.wearableId = strField(cmd.wearableId);
+                session.publisher.wearableType = strField(cmd.wearableType);
+                session.publisher.deviceModel = strField(cmd.deviceModel);
+                session.publisher.systemVersion = strField(cmd.systemVersion);
+                session.publisher.appVersion = strField(cmd.appVersion);
+                session.publisher.buildNumber = strField(cmd.buildNumber);
+                session.metadata.deviceName = strField(cmd.deviceName);
+                session.metadata.deviceModel = strField(cmd.deviceModel);
+                session.metadata.deviceId = strField(cmd.deviceId);
+                session.metadata.systemVersion = strField(cmd.systemVersion);
+                session.metadata.wearableType = strField(cmd.wearableType);
+                console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${ws.data.clientIp} session=${sessionId}`);
+                if (session.recorder) {
+                  session.recorder.deviceInfo = {
+                    deviceId: cmd.deviceId || null,
+                    deviceName: cmd.deviceName || null,
+                    wearableId: cmd.wearableId || null,
+                    wearableType: cmd.wearableType || null,
+                    deviceModel: cmd.deviceModel || null,
+                    systemVersion: cmd.systemVersion || null,
+                  };
+                  session.recorder.accessLevel = session.accessLevel;
+                  session.recorder.acl = session.acl;
+                  session.recorder.ownerId = session.ownerId;
+                  session.recorder.ownerEmail = session.ownerEmail;
+                }
+              }
+            } else if (role === "view") {
+              const result = await registry.addViewer(sessionId, ws, ws.data.clientIp, user.sub, user.email, shareTok);
+              if (result.startsWith("error:")) {
+                ws.close(4003, result.slice(6));
+                return;
+              }
+              // Store viewer version info
+              const viewerId = ws.data.viewerId;
+              if (viewerId) {
+                const found = registry.findViewerSession(viewerId);
+                if (found) {
+                  found.viewer.gitCommit = cmd.gitCommit || null;
+                  found.viewer.buildVersion = cmd.buildVersion || null;
+                }
+              }
+            }
+            return;
+          }
+        } catch {
+          ws.close(4001, "invalid hello");
+          return;
+        }
+        // Any non-hello message before auth is rejected
+        ws.close(4001, "auth required");
+        return;
+      }
+
       const session = registry.get(sessionId);
       if (!session) return;
 
@@ -752,33 +815,39 @@ const server = Bun.serve<WsData>({
           try {
             const cmd = JSON.parse(message);
             if (cmd.type === "hello" && session.publisher) {
-              session.publisher.deviceId = cmd.deviceId || null;
-              session.publisher.deviceName = cmd.deviceName || null;
-              session.publisher.wearableId = cmd.wearableId || null;
-              session.publisher.wearableType = cmd.wearableType || null;
-              session.publisher.deviceModel = cmd.deviceModel || null;
-              session.publisher.systemVersion = cmd.systemVersion || null;
-              session.publisher.appVersion = cmd.appVersion || null;
-              session.publisher.buildNumber = cmd.buildNumber || null;
+              const MAX_FIELD_LEN = 256;
+              const strField = (v: unknown): string | null => {
+                if (typeof v !== "string") return null;
+                const trimmed = v.slice(0, MAX_FIELD_LEN);
+                return trimmed || null;
+              };
+              session.publisher.deviceId = strField(cmd.deviceId);
+              session.publisher.deviceName = strField(cmd.deviceName);
+              session.publisher.wearableId = strField(cmd.wearableId);
+              session.publisher.wearableType = strField(cmd.wearableType);
+              session.publisher.deviceModel = strField(cmd.deviceModel);
+              session.publisher.systemVersion = strField(cmd.systemVersion);
+              session.publisher.appVersion = strField(cmd.appVersion);
+              session.publisher.buildNumber = strField(cmd.buildNumber);
 
               // Update session metadata
-              session.metadata.deviceName = cmd.deviceName || null;
-              session.metadata.deviceModel = cmd.deviceModel || null;
-              session.metadata.deviceId = cmd.deviceId || null;
-              session.metadata.systemVersion = cmd.systemVersion || null;
-              session.metadata.wearableType = cmd.wearableType || null;
+              session.metadata.deviceName = strField(cmd.deviceName);
+              session.metadata.deviceModel = strField(cmd.deviceModel);
+              session.metadata.deviceId = strField(cmd.deviceId);
+              session.metadata.systemVersion = strField(cmd.systemVersion);
+              session.metadata.wearableType = strField(cmd.wearableType);
 
-              console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
+              console.log(`[relay] Publisher hello: device=${session.publisher.deviceName || "?"} wearable=${session.publisher.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
 
               // Update recorder device info
               if (session.recorder) {
                 session.recorder.deviceInfo = {
-                  deviceId: cmd.deviceId || null,
-                  deviceName: cmd.deviceName || null,
-                  wearableId: cmd.wearableId || null,
-                  wearableType: cmd.wearableType || null,
-                  deviceModel: cmd.deviceModel || null,
-                  systemVersion: cmd.systemVersion || null,
+                  deviceId: strField(cmd.deviceId),
+                  deviceName: strField(cmd.deviceName),
+                  wearableId: strField(cmd.wearableId),
+                  wearableType: strField(cmd.wearableType),
+                  deviceModel: strField(cmd.deviceModel),
+                  systemVersion: strField(cmd.systemVersion),
                 };
                 // Sync access control to recorder
                 session.recorder.accessLevel = session.accessLevel;
@@ -787,7 +856,7 @@ const server = Bun.serve<WsData>({
                 session.recorder.ownerEmail = session.ownerEmail;
               }
             }
-          } catch {}
+          } catch (err) { console.warn("[relay] Publisher hello parse error:", err); }
         } else {
           // Binary frame (Uint8Array in Bun)
           const buf = message as Uint8Array;
@@ -842,7 +911,7 @@ const server = Bun.serve<WsData>({
                 }));
               }
             }
-          } catch {}
+          } catch (err) { console.warn("[relay] Viewer message parse error:", err); }
         } else {
           // Binary frame from viewer — forward FRAU audio to publisher
           const buf = message as Uint8Array;
@@ -881,6 +950,5 @@ const server = Bun.serve<WsData>({
 
 console.log(`[relay] Server on 0.0.0.0:${PORT}`);
 console.log(`[relay] Publisher: ws://${wifiIp}:${PORT}/publish[?session=<id>]`);
-console.log(`[relay] Viewer:   http://${wifiIp}:${PORT}[?session=<id>]`);
-console.log(`[relay] Directory: http://${wifiIp}:${PORT}/`);
-console.log(`[relay] Gallery:  http://${wifiIp}:${PORT}/gallery`);
+console.log(`[relay] Viewer:   http://${wifiIp}:${PORT}/ (served by Caddy)`);
+console.log(`[relay] API:      http://${wifiIp}:${PORT}/api/config`);

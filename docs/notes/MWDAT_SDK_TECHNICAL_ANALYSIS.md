@@ -441,7 +441,7 @@ Properly structured for Swift Package Manager integration via Package.swift
 Universal binaries supporting both device and simulator architectures
 
 ### Documentation and Examples
-- Comprehensive sample app in `samples/CameraAccess/`
+- Comprehensive sample app in `publishers/CameraAccess/`
 - Inline documentation for all public APIs
 - Clear error messages and debugging support
 

@@ -18,7 +18,7 @@ End-to-end workflow for pushing code changes to the relay server and iOS app.
 | Remote | `git@github.com:ebowwa/meta-wearables-dat-ios.git` |
 | Service | `caringmind-relay.service` |
 | Runtime | Bun (`/root/.bun/bin/bun`) |
-| Working dir | `/root/relay-server/relay/server` |
+| Working dir | `/root/relay-server/hosted/server` |
 | Log file | `/var/log/caringmind-relay.log` |
 | Session storage | Cloudflare R2 (`caringmind-sessions`) |
 | Port | `8080` |
@@ -37,7 +37,7 @@ cd packages/src/products/active/com.mwdat-ios
 ### Push to remote
 
 ```bash
-git add relay/server/src/<changed-files>
+git add hosted/server/src/<changed-files>
 git commit -m "feat: description of change"
 git push origin feat/stream-registry
 ```
@@ -61,8 +61,8 @@ cd /root/relay-server
 git pull origin feat/stream-registry
 
 # 2. Update version stamp in .env (optional, for /stats identification)
-echo "GIT_COMMIT=$(git rev-parse --short=7 HEAD)" >> relay/server/.env
-echo "BUILD_VERSION=$(date +%Y%m%d-%H%M)" >> relay/server/.env
+echo "GIT_COMMIT=$(git rev-parse --short=7 HEAD)" >> hosted/server/.env
+echo "BUILD_VERSION=$(date +%Y%m%d-%H%M)" >> hosted/server/.env
 
 # 3. Restart service
 systemctl restart caringmind-relay
@@ -84,7 +84,7 @@ systemctl status caringmind-relay
 tail -50 /var/log/caringmind-relay.log
 
 # Run manually to see errors directly
-cd /root/relay-server/relay/server
+cd /root/relay-server/hosted/server
 /root/.bun/bin/bun run src/server.ts
 
 # Common failures:
@@ -105,8 +105,8 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/relay-server/relay/server
-EnvironmentFile=/root/relay-server/relay/server/.env
+WorkingDirectory=/root/relay-server/hosted/server
+EnvironmentFile=/root/relay-server/hosted/server/.env
 Environment=BUN_INSTALL=/root/.bun
 Environment=PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=RELAY_NO_AUTH=1
@@ -123,7 +123,7 @@ WantedBy=multi-user.target
 
 ### Environment variables
 
-File: `/root/relay-server/relay/server/.env`
+File: `/root/relay-server/hosted/server/.env`
 
 | Variable | Purpose |
 |----------|---------|
@@ -147,7 +147,7 @@ File: `/root/relay-server/relay/server/.env`
 
 ```bash
 # Open Xcode project
-open samples/CameraAccess/CameraAccess.xcodeproj
+open publishers/CameraAccess/CameraAccess.xcodeproj
 
 # Or via command line:
 xcodebuild -scheme CameraAccess \

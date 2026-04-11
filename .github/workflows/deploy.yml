@@ -29,20 +29,18 @@ jobs:
             git pull origin feat/stream-registry
 
             echo ">>> Building relay-protocol if needed"
-            cd hosted/packages/relay-protocol
+            cd /root/relay-server/hosted/packages/relay-protocol
             if [ ! -d dist ] || [ "$(find src -newer dist -type f 2>/dev/null | wc -l)" -gt 0 ]; then
               /root/.bun/bin/bun install
               /root/.bun/bin/bun x tsc
               echo "relay-protocol rebuilt"
             fi
 
-            echo ">>> Building viewer if needed"
+            echo ">>> Building viewer"
             cd /root/relay-server/hosted/viewer
-            if [ ! -d dist ] || [ "$(find src index.html style.css -newer dist -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-              /root/.bun/bin/bun install
-              /root/.bun/bin/bun x vite build
-              echo "viewer rebuilt"
-            fi
+            /root/.bun/bin/bun install
+            /root/.bun/bin/bun x vite build
+            echo "viewer rebuilt"
 
             echo ">>> Installing server deps if needed"
             cd /root/relay-server/hosted/server
@@ -53,14 +51,17 @@ jobs:
             cp /root/relay-server/hosted/infra/Caddyfile /etc/caddy/
             systemctl daemon-reload
 
-            echo ">>> Restarting service"
+            echo ">>> Restarting Caddy"
+            systemctl reload caddy || systemctl restart caddy
+
+            echo ">>> Restarting relay service"
             systemctl restart caringmind-relay.service
 
             echo ">>> Waiting for startup"
             sleep 3
 
             echo ">>> Health check"
-            STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
             if [ "$STATUS" != "200" ]; then
               echo "FAIL: health check returned $STATUS"
               systemctl status caringmind-relay.service --no-pager

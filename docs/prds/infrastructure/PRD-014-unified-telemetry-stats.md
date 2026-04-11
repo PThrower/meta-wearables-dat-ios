@@ -268,13 +268,13 @@ Session {
 
 | File | Change |
 |------|--------|
-| `relay/server/src/types.ts` | Add `sdkVersion` to `Publisher`, `SessionMetadata`; add `TelemetryMessage` types |
-| `relay/server/src/server.ts` | Handle `type: "telemetry"` JSON messages from publishers, viewers, analyzers |
-| `relay/server/src/session-registry.ts` | Remove monolithic `stats()`; split into `platformStats()` and `sessionStats(id)` |
-| `relay/server/src/stages/stats.ts` | Pipeline stats stage (from PRD-013); runs on every frame |
-| `samples/CameraAccess/CameraAccess/Pipeline/Stages/RelayStage.swift` | Add `sdkVersion` to hello; send telemetry JSON every 5s |
-| `samples/CameraAccess/CameraAccess/Services/TelemetryService.swift` | Expose structured `TelemetrySnapshot` for `RelayStage` to report |
-| `relay/viewer/` | Add telemetry reporting (5s interval JSON messages) |
+| `hosted/server/src/types.ts` | Add `sdkVersion` to `Publisher`, `SessionMetadata`; add `TelemetryMessage` types |
+| `hosted/server/src/server.ts` | Handle `type: "telemetry"` JSON messages from publishers, viewers, analyzers |
+| `hosted/server/src/session-registry.ts` | Remove monolithic `stats()`; split into `platformStats()` and `sessionStats(id)` |
+| `hosted/server/src/stages/stats.ts` | Pipeline stats stage (from PRD-013); runs on every frame |
+| `publishers/CameraAccess/CameraAccess/Pipeline/Stages/RelayStage.swift` | Add `sdkVersion` to hello; send telemetry JSON every 5s |
+| `publishers/CameraAccess/CameraAccess/Services/TelemetryService.swift` | Expose structured `TelemetrySnapshot` for `RelayStage` to report |
+| `hosted/viewer/` | Add telemetry reporting (5s interval JSON messages) |
 
 ---
 

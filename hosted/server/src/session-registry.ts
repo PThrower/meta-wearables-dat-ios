@@ -70,6 +70,7 @@ export class SessionRegistry {
         ownerEmail: undefined,
         accessLevel: "link",
         acl: [],
+        publisherClaiming: false,
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);
@@ -102,6 +103,12 @@ export class SessionRegistry {
       return "publisher already connected";
     }
 
+    // Mutex: prevent concurrent publisher claims
+    if (session.publisherClaiming) {
+      return "publisher claim in progress";
+    }
+    session.publisherClaiming = true;
+
     // Track reconnects — session already existed with a disconnected publisher
     if (session.publisher === null && this.sessions.has(sessionId) && session.createdAt < Date.now() - 1000) {
       this.publisherReconnects++;
@@ -132,6 +139,7 @@ export class SessionRegistry {
       buildNumber: null,
     };
     session.publisher = publisher;
+    session.publisherClaiming = false;
     session.lastActivityAt = Date.now();
 
     // Set session ownership on first publisher claim
@@ -434,7 +442,7 @@ export class SessionRegistry {
       if (session.recorder && session.publisher) {
         try {
           bucketUrl = await this.store.signedUrl(`sessions/${session.publisher.id}/meta.json`, 3600);
-        } catch {}
+        } catch { bucketUrl = null; }
       }
 
       if (session.publisher) activePublisherCount++;
@@ -548,7 +556,7 @@ export class SessionRegistry {
           const meta = JSON.parse(new TextDecoder().decode(buf));
           if (meta.durationMs) galleryTotalDurationMs += meta.durationMs;
           if (meta.recording?.bytesToBucket) galleryTotalStorageBytes += meta.recording.bytesToBucket;
-        } catch {}
+        } catch (err) { console.warn(`[stats] Gallery meta parse error:`, err); }
       }
     } catch (err) {
       console.error("[stats] Gallery stats failed:", err);

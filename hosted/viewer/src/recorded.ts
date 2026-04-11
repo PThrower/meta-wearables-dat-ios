@@ -2,9 +2,11 @@
  * Recorded video player overlay
  */
 
+import { authUrl } from "./auth.js";
+
 export function playVideo(url: string): void {
   const v = document.getElementById("recVideo") as HTMLVideoElement;
-  v.src = url;
+  v.src = authUrl(url);
   document.getElementById("videoPlayer")!.classList.add("active");
 }
 
