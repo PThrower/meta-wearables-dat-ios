@@ -2,21 +2,23 @@
  * Viewer entry point — gallery init, auth, auto-open session
  */
 
-import { initAuth } from "./auth.js";
-import { ingest, initFilters } from "./gallery/render.js";
-import { onThumbLoad } from "./gallery/format.js";
+import { initAuth, requireAuth } from "./auth.js";
+import { ingest, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
 import "./share.js";
 
-// Expose functions needed by inline HTML handlers (card onclick/onload attributes)
-(window as any).onThumbLoad = onThumbLoad;
-(window as any).watchLive = watchLive;
-(window as any).closeLive = closeLive;
-(window as any).setQuality = setQuality;
-(window as any).resumeAudio = resumeAudio;
-(window as any).playVideo = playVideo;
-(window as any).closeVideo = closeVideo;
+// Wire card action delegation (replaces all inline onclick in rendered HTML)
+onCardAction((action, data) => {
+  switch (action) {
+    case "share":
+      (window as any).openShareDialog(data.sessionId);
+      break;
+    case "play":
+      playVideo(data.url);
+      break;
+  }
+});
 
 // Init auth (GIS client ID setup)
 initAuth();
@@ -27,7 +29,7 @@ initFilters();
 // Init video player overlay click-to-close
 initVideoPlayerEvents();
 
-// Wire up button handlers (replacing inline onclick in HTML)
+// Wire up button handlers
 document.getElementById("backBtn")!.addEventListener("click", closeLive);
 document.getElementById("closeVideoBtn")!.addEventListener("click", closeVideo);
 document.getElementById("unmute")!.addEventListener("click", resumeAudio);
@@ -63,13 +65,17 @@ pttBtn.addEventListener("touchcancel", pttStop);
 
 // Auth login handler — dispatch from auth.ts
 window.addEventListener("auth:login", () => {
-  if ((window as any).__pendingSession) {
-    watchLive((window as any).__pendingSession);
-    (window as any).__pendingSession = null;
-  } else if (!(window as any).__GALLERY_DATA) {
+  if (pendingSession) {
+    watchLive(pendingSession);
+    pendingSession = null;
+  } else if (!hasGalleryData) {
     fetchGallery();
   }
 });
+
+// Module-level state (replaces window globals where possible)
+let pendingSession: string | null = null;
+let hasGalleryData = false;
 
 // Auto-open session if provided
 function autoOpenSession(): boolean {
@@ -83,7 +89,10 @@ function autoOpenSession(): boolean {
 }
 
 // Ingest server-injected gallery data
-if ((window as any).__GALLERY_DATA) ingest((window as any).__GALLERY_DATA);
+if ((window as any).__GALLERY_DATA) {
+  ingest((window as any).__GALLERY_DATA);
+  hasGalleryData = true;
+}
 
 /** Auth-aware gallery fetch with Bearer token */
 export async function fetchGallery(): Promise<void> {
@@ -93,24 +102,48 @@ export async function fetchGallery(): Promise<void> {
     if (token) headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch("/gallery/api", { headers });
     if (res.status === 401) {
-      // Token expired or missing — trigger re-auth
-      const { requireAuth } = await import("./auth.js");
       requireAuth();
       return;
     }
+    if (!res.ok) {
+      showNetworkError(`Server error ${res.status}`);
+      return;
+    }
+    clearNetworkError();
     ingest(await res.json());
-  } catch {}
+    hasGalleryData = true;
+  } catch (err) {
+    showNetworkError("Network error — relay server unreachable");
+    console.warn("[gallery] fetch failed:", err);
+  }
+}
+
+function showNetworkError(msg: string): void {
+  let el = document.getElementById("network-error");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "network-error";
+    el.className = "network-error";
+    const status = document.getElementById("status-bar");
+    status?.parentNode?.insertBefore(el, status);
+  }
+  el.textContent = msg;
+  el.classList.add("show");
+}
+
+function clearNetworkError(): void {
+  const el = document.getElementById("network-error");
+  if (el) el.classList.remove("show");
 }
 
 // Auto-open or show gallery
 if (!autoOpenSession()) {
-  if (!(window as any).__GALLERY_DATA) fetchGallery();
+  if (!hasGalleryData) fetchGallery();
 }
 
 // Handle share token from URL
 const shareToken = (window as any).__SHARE_TOKEN || new URLSearchParams(location.search).get("share");
 if (shareToken) {
-  // Store for WebSocket connection
   (window as any).__SHARE_TOKEN = shareToken;
 }
 

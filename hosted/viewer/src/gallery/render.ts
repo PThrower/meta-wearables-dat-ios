@@ -4,6 +4,11 @@
 
 import { fmtDur, fmtTime } from "./format.js";
 
+/** Escape a string for safe insertion into an HTML attribute value (inside double quotes) */
+function escAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export interface GallerySession {
   sessionId: string;
   live: boolean;
@@ -29,6 +34,43 @@ const lastRefresh = document.getElementById("last-refresh")!;
 
 let allSessions: GallerySession[] = [];
 let activeFilter = "all";
+
+// Delegated event handlers for card actions (replaces inline onclick)
+let cardActionHandler: ((action: string, data: Record<string, string>) => void) | null = null;
+
+export function onCardAction(handler: (action: string, data: Record<string, string>) => void): void {
+  cardActionHandler = handler;
+}
+
+grid.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
+  if (!target || !cardActionHandler) return;
+  const action = target.dataset.action ?? "";
+  const data: Record<string, string> = {};
+  for (const [k, v] of Object.entries(target.dataset)) {
+    if (k !== "action" && v !== undefined) data[k] = v;
+  }
+  cardActionHandler(action, data);
+});
+
+// Lazy image load handler via MutationObserver (replaces inline onload/onerror)
+const imgObserver = new MutationObserver((mutations) => {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (node instanceof HTMLElement) {
+        node.querySelectorAll<HTMLImageElement>("img.card-thumb").forEach(img => {
+          if (img.dataset.wired) return;
+          img.dataset.wired = "1";
+          img.addEventListener("load", () => img.classList.add("loaded"));
+          img.addEventListener("error", () => {
+            img.outerHTML = '<div class="card-thumb-placeholder">No preview</div>';
+          });
+        });
+      }
+    }
+  }
+});
+imgObserver.observe(grid, { childList: true, subtree: true });
 
 export function getAllSessions(): GallerySession[] { return allSessions; }
 
@@ -56,30 +98,29 @@ function cardHtml(s: GallerySession, delay: number): string {
   const canEdit = s.viewerRole === "owner" || s.viewerRole === "editor";
   const lockIcon = isPrivate ? `<span class="lock-icon" title="Private">&#x1F512;</span>` : "";
   const ownerBadge = isOwner ? `<span class="owner-badge">Owner</span>` : "";
-  const shareBtn = canEdit ? `<button class="action-btn share-btn" onclick="openShareDialog('${s.sessionId}')">Share</button>` : "";
+  const shareBtn = canEdit ? `<button class="action-btn share-btn" data-action="share" data-session-id="${escAttr(s.sessionId)}">Share</button>` : "";
   const thumb = (s.segments ?? 0) > 0
-    ? `<img class="card-thumb" src="${s.thumbnailUrl}" alt=""
-            onload="onThumbLoad(this)"
-            onerror="this.outerHTML='<div class=\\'card-thumb-placeholder\\'>No preview</div>'" loading="lazy">`
+    ? `<img class="card-thumb" src="${escAttr(s.thumbnailUrl ?? "")}" alt="" loading="lazy">`
     : `<div class="card-thumb-placeholder">No video</div>`;
+  const safeVideoUrl = escAttr(s.videoUrl ?? "");
   return `<div class="card" style="animation-delay:${delay}ms">
     ${thumb}
     <div class="card-body">
       <div class="card-top">
-        <span class="card-title">${lockIcon}${device}${ownerBadge}</span>
+        <span class="card-title">${lockIcon}${escAttr(device)}${ownerBadge}</span>
         <span class="badge ${badgeClass}">${badgeText}</span>
       </div>
       <div class="card-meta">
-        ${wearable ? `<div class="row"><span class="label">Wearable</span><span class="value">${wearable}</span></div>` : ""}
+        ${wearable ? `<div class="row"><span class="label">Wearable</span><span class="value">${escAttr(wearable)}</span></div>` : ""}
         <div class="row"><span class="label">Duration</span><span class="value">${fmtDur(s.durationMs ?? 0)}</span></div>
         <div class="row"><span class="label">Started</span><span class="value">${fmtTime(s.startedAt ?? "")}</span></div>
         <div class="row"><span class="label">Segments</span><span class="value">${s.segments ?? 0} vid / ${s.audioChunks ?? 0} aud</span></div>
         <div class="row"><span class="label">MP4</span><span class="value">${cached}</span></div>
-        <div class="row"><span class="label">ID</span><span class="value">${s.sessionId.slice(0, 8)}</span></div>
+        <div class="row"><span class="label">ID</span><span class="value">${escAttr(s.sessionId.slice(0, 8))}</span></div>
       </div>
       <div class="card-actions">
-        ${(s.segments ?? 0) > 0 ? `<button class="action-btn primary" onclick="playVideo('${s.videoUrl}')">Play</button>
-        <a class="action-btn" href="${s.videoUrl}" target="_blank">Download</a>` : ""}
+        ${(s.segments ?? 0) > 0 ? `<button class="action-btn primary" data-action="play" data-url="${safeVideoUrl}">Play</button>
+        <a class="action-btn" href="${safeVideoUrl}" target="_blank" rel="noopener">Download</a>` : ""}
         ${s.live ? `<a class="action-btn primary" href="/view?session=${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
         ${shareBtn}
       </div>

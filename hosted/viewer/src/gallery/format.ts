@@ -17,7 +17,3 @@ export function fmtTime(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
     " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
-
-export function onThumbLoad(img: HTMLImageElement): void {
-  img.classList.add("loaded");
-}

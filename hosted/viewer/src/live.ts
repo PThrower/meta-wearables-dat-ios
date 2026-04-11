@@ -12,6 +12,7 @@ export function getPlayer(): RelayPlayer | null { return player; }
 
 export function watchLive(sessionId: string): void {
   if (requireAuth()) {
+    // Store for replay after login (caller reads this via auth:login event)
     (window as any).__pendingSession = sessionId;
     return;
   }
@@ -62,12 +63,4 @@ export function resumeAudio(): void {
     player.resumeAudio();
     document.getElementById("unmute")!.classList.remove("show");
   }
-}
-
-export function startMic(): void {
-  if (player) player.startMic();
-}
-
-export function stopMic(): void {
-  if (player) player.stopMic();
 }

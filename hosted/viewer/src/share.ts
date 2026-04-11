@@ -99,16 +99,31 @@ async function refreshTokenList(): Promise<void> {
     const isExpiringSoon = expires.getTime() - Date.now() < 24 * 60 * 60 * 1000;
     const expiryClass = isExpiringSoon ? "token-expiring" : "";
     return `<div class="share-token-item ${expiryClass}">
-      <span class="share-token-value">${t.token.slice(0, 16)}...</span>
+      <span class="share-token-value">${escHtml(t.token.slice(0, 16))}...</span>
       <span class="share-token-expiry">Expires: ${expires.toLocaleDateString()}</span>
-      <button class="share-token-revoke" onclick="revokeShareToken('${t.token}')">Revoke</button>
+      <button class="share-token-revoke" data-action="revoke" data-token="${escAttr(t.token)}">Revoke</button>
     </div>`;
   }).join("");
 }
 
-// Expose for inline handlers
+/** Escape for HTML attribute context (inside double quotes) */
+function escAttr(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Escape for HTML text content */
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Event delegation for revoke buttons
+tokenList.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest("[data-action='revoke']") as HTMLElement | null;
+  if (btn) revokeToken(btn.dataset.token ?? "");
+});
+
+// Expose openShareDialog only (revokeToken now via delegation)
 (window as any).openShareDialog = openShareDialog;
-(window as any).revokeShareToken = revokeToken;
 
 // Event listeners
 createBtn.addEventListener("click", createShareLink);

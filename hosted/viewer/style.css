@@ -118,6 +118,14 @@ header {
 }
 #status-bar a { color: rgba(255,255,255,0.5); text-decoration: none; }
 #status-bar a:hover { color: #fff; }
+.network-error {
+  position: fixed; bottom: 36px; left: 0; right: 0;
+  background: rgba(255,80,80,0.15); border-top: 1px solid rgba(255,80,80,0.3);
+  padding: 8px 24px; font-size: 11px; color: #f88;
+  text-align: center; display: none;
+  backdrop-filter: blur(8px);
+}
+.network-error.show { display: block; }
 
 /* === LIVE PLAYER (full page overlay) === */
 #livePlayer {
