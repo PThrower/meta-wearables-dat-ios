@@ -114,6 +114,11 @@ function updateUserInfo(): void {
   if (email) {
     el.innerHTML = `<span class="user-email">${escHtml(email)}</span><button id="logoutBtn" class="logout-btn">Logout</button>`;
     document.getElementById("logoutBtn")?.addEventListener("click", logout);
+  } else if (!isNoAuth()) {
+    el.innerHTML = `<button id="signinBtn" class="signin-btn">Sign in</button>`;
+    document.getElementById("signinBtn")?.addEventListener("click", () => {
+      loginOverlay.classList.remove("hidden");
+    });
   } else {
     el.innerHTML = "";
   }

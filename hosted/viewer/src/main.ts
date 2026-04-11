@@ -13,9 +13,11 @@ import "./share.js";
 onCardAction((action, data) => {
   switch (action) {
     case "share":
+      if (requireAuth()) return;
       (window as any).openShareDialog(data.sessionId);
       break;
     case "play":
+      if (requireAuth()) return;
       playVideo(data.url);
       break;
   }

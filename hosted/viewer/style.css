@@ -32,6 +32,14 @@ header {
   cursor: pointer; transition: all 0.15s ease;
 }
 .logout-btn:hover { background: rgba(255,80,80,0.15); color: #f88; border-color: rgba(255,80,80,0.3); }
+.signin-btn {
+  font-family: inherit; font-size: 10px;
+  padding: 4px 14px; border-radius: 6px;
+  background: rgba(0,255,0,0.1); color: #0f0;
+  border: 1px solid rgba(0,255,0,0.25);
+  cursor: pointer; transition: all 0.15s ease; font-weight: 600;
+}
+.signin-btn:hover { background: rgba(0,255,0,0.18); border-color: rgba(0,255,0,0.4); }
 .filter-btn {
   font-family: inherit; font-size: 10px;
   padding: 4px 10px; border-radius: 10px;
