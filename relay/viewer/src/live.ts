@@ -50,7 +50,7 @@ export function closeLive(): void {
   document.getElementById("livePlayer")!.classList.remove("active");
   document.getElementById("unmute")!.classList.remove("show");
   document.getElementById("gallery")!.classList.remove("hidden");
-  if (player) { player.disconnect(); player = null; }
+  if (player) { player.destroy(); player = null; }
 }
 
 export function setQuality(preset: string): void {
@@ -62,4 +62,12 @@ export function resumeAudio(): void {
     player.resumeAudio();
     document.getElementById("unmute")!.classList.remove("show");
   }
+}
+
+export function startMic(): void {
+  if (player) player.startMic();
+}
+
+export function stopMic(): void {
+  if (player) player.stopMic();
 }

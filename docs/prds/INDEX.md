@@ -67,8 +67,8 @@ MISSING (viewer → iOS):
 | `AudioSinkStage` | Receives FRAU frames from relay WebSocket, publishes to AudioEventBus, plays via AVAudioEngine | iOS (PRD-001) | 3, 4 |
 | Relay audio push | Server sends FRAU frames to publisher's WebSocket (currently only receives from publisher) | Relay (PRD-002) | 3, 4 |
 | FRAU codecType 3 | `relay-inbound` -- server-originated audio (TTS, AI guidance) | Wire protocol | 3 |
-| FRAU codecType 4 | `viewer-mic` -- browser viewer microphone audio | Wire protocol | 4 |
-| Viewer mic capture | `navigator.mediaDevices.getUserMedia()` → PCM 16-bit → FRAU binary → viewer WebSocket | Browser (PRD-005) | 4 |
+| FRAU codecType 3 (viewer mic) | Browser viewer microphone audio sent as `relay-inbound` | Wire protocol | 3 |
+| Viewer mic capture | `navigator.mediaDevices.getUserMedia()` → PCM 16-bit → FRAU binary (codecType 3) → viewer WebSocket | Browser (PRD-005) | 3 |
 | Relay viewer audio forward | Receive binary FRAU from viewer WebSocket, forward to publisher's WebSocket | Relay (PRD-002) | 4 |
 | HFP output routing | AVAudioEngine plays received PCM through glasses speakers via `.allowBluetooth` | iOS (PRD-001) | 3, 4 |
 
@@ -77,7 +77,7 @@ MISSING (viewer → iOS):
 1. Viewer clicks "Push to Talk" (or toggle) in browser
 2. navigator.mediaDevices.getUserMedia({ audio: true })
 3. MediaStream → ScriptProcessorNode / AudioWorklet → PCM Int16 16kHz
-4. Wrap PCM in FRAU binary: [FRAU][codecType=4][seq][16000][1][16][timestamp][PCM]
+4. Wrap PCM in FRAU binary: [FRAU][codecType=3][seq][16000][1][16][timestamp][PCM]
 5. Send binary over existing viewer WebSocket
 6. Relay receives binary from viewer WebSocket (new: currently viewers only send JSON)
 7. Relay forwards FRAU frame to publisher's WebSocket
@@ -220,7 +220,7 @@ PRD-001 (iOS Client)
    |        |                              |
    |        +---> PRD-004 (Persistence)  <--- PRD-005 (Gallery)
    |        +---> PRD-007 (Google OAuth) ---> P1-1/P1-2 auth gates
-   |        +---> PRD-005 P1-8 (viewer mic → FRAU codecType 4 → relay → publisher)
+   |        +---> PRD-005 P1-8 (viewer mic → FRAU codecType 3 → relay → publisher)
    |        +---> PRD-001 P1-8/P1-11 (AudioSinkStage + HFP output routing)
    |
    +---> PRD-003 (On-Device AI)
@@ -317,7 +317,7 @@ Both protocols are stable and shared across all PRDs:
 | 1 | Glasses HFP mic | Ray-Ban Meta via Bluetooth HFP | 16kHz | iOS → Relay | Active |
 | 2 | TTS playback | AVSpeechSynthesizer.write() PCM | 22050Hz | iOS → Relay | Reserved (see PRD-001 P1-7) |
 | 3 | Relay inbound | Server-originated audio (TTS, AI guidance) | TBD | Relay → iOS | Not built |
-| 4 | Viewer mic | Browser viewer microphone | 16kHz | Viewer → Relay → iOS | Not built |
+| 4 | _unused_ | _collapsed into codecType 3_ | — | — | — |
 
 ## Infrastructure
 

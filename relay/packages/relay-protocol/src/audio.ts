@@ -3,7 +3,7 @@
  *
  * Wire layout:
  *   [0:4]   magic "FRAU"
- *   [4]     codecType  (u8) — 0=built-in mic, 1=glasses HFP, 2=TTS
+ *   [4]     codecType  (u8) — 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound (viewer mic / server audio)
  *   [5:13]  sequence   (u64 LE)
  *   [13:17] sampleRate (u32 LE)
  *   [17:19] channels   (u16 LE)

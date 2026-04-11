@@ -162,6 +162,32 @@ header {
 }
 #quality-select option { background: #222; }
 
+/* === PUSH-TO-TALK === */
+.ptt-button {
+  background: rgba(255,255,255,0.15);
+  border: 2px solid rgba(255,255,255,0.3);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ptt-button:hover {
+  background: rgba(255,255,255,0.25);
+}
+.ptt-button.active {
+  background: rgba(255, 60, 60, 0.6);
+  border-color: rgba(255, 60, 60, 0.8);
+  animation: ptt-pulse 1s infinite;
+}
+@keyframes ptt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 60, 60, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 60, 60, 0); }
+}
+
 /* === RECORDED VIDEO OVERLAY === */
 #videoPlayer {
   display: none; position: fixed; inset: 0;

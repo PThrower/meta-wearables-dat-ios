@@ -843,6 +843,18 @@ const server = Bun.serve<WsData>({
               }
             }
           } catch {}
+        } else {
+          // Binary frame from viewer — forward FRAU audio to publisher
+          const buf = message as Uint8Array;
+          if (isAudioFrame(buf)) {
+            const viewerId = ws.data.viewerId;
+            if (viewerId) {
+              const found = registry.findViewerSession(viewerId);
+              if (found && found.session.publisher) {
+                found.session.publisher.ws.send(buf);
+              }
+            }
+          }
         }
       }
     },

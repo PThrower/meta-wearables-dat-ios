@@ -5,7 +5,7 @@
 import { initAuth } from "./auth.js";
 import { ingest, initFilters } from "./gallery/render.js";
 import { onThumbLoad } from "./gallery/format.js";
-import { watchLive, closeLive, setQuality, resumeAudio } from "./live.js";
+import { watchLive, closeLive, setQuality, resumeAudio, getPlayer } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
 import "./share.js";
 
@@ -34,6 +34,32 @@ document.getElementById("unmute")!.addEventListener("click", resumeAudio);
 document.getElementById("quality-select")!.addEventListener("change", (e) => {
   setQuality((e.target as HTMLSelectElement).value);
 });
+
+// Push-to-talk mic capture
+const pttBtn = document.getElementById("ptt-btn")!;
+
+function pttStart(): void {
+  const player = getPlayer();
+  if (!player) return;
+  pttBtn.classList.add("active");
+  player.startMic().catch((err) => {
+    console.warn("[PTT] Mic start failed:", err);
+    pttBtn.classList.remove("active");
+  });
+}
+
+function pttStop(): void {
+  const player = getPlayer();
+  if (player) player.stopMic();
+  pttBtn.classList.remove("active");
+}
+
+pttBtn.addEventListener("mousedown", (e) => { e.preventDefault(); pttStart(); });
+pttBtn.addEventListener("touchstart", (e) => { e.preventDefault(); pttStart(); });
+pttBtn.addEventListener("mouseup", pttStop);
+pttBtn.addEventListener("mouseleave", pttStop);
+pttBtn.addEventListener("touchend", pttStop);
+pttBtn.addEventListener("touchcancel", pttStop);
 
 // Auth login handler — dispatch from auth.ts
 window.addEventListener("auth:login", () => {

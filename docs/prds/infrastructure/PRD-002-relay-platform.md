@@ -87,7 +87,7 @@ The current relay server handles one publisher at a time. A second publisher is 
 | P1-4 | Per-session stats (`/stats?session=<id>`) | Scoped metrics: publisher FPS, viewer count, bandwidth, jitter, per-viewer quality preset |
 | P1-5 | Systemd service + deploy script | ~~`systemctl restart caringmind-relay`~~ RESOLVED: systemd service `caringmind-relay` running on Hetzner VPS |
 | P1-6 | Bidirectional audio: push FRAU to iOS client | Relay sends FRAU frames (codecType 3) to publisher's WebSocket; enables server-side TTS, remote expert voice, AI guidance audio; uses existing publish WebSocket connection (no new endpoint) |
-| P1-7 | Viewer audio forwarding to publisher | Relay receives binary FRAU frames (codecType 4) from viewer WebSocket (new: currently viewers only send JSON control messages); forwards to session publisher's WebSocket unchanged; when multiple viewers talk simultaneously, relay mixes PCM streams (server-side summation with clipping protection) before forwarding single mixed stream |
+| P1-7 | Viewer audio forwarding to publisher | Relay receives binary FRAU frames (codecType 3) from viewer WebSocket (new: currently viewers only send JSON control messages); forwards to session publisher's WebSocket unchanged; when multiple viewers talk simultaneously, relay mixes PCM streams (server-side summation with clipping protection) before forwarding single mixed stream |
 
 ### P2 -- Could Have
 
@@ -198,7 +198,7 @@ publisher.onmessage(frame)
 | Offset | Size | Field |
 |--------|------|-------|
 | 0 | 4 | Magic: `0x46524155` ("FRAU") |
-| 4 | 1 | Codec type: 0=built-in mic, 1=glasses HFP mic, 2=TTS playback, 3=relay inbound, 4=viewer mic |
+| 4 | 1 | Codec type: 0=built-in mic, 1=glasses HFP mic, 2=TTS playback, 3=relay inbound (server audio + viewer mic) |
 | 5 | 8 | Sequence number (u64 LE) |
 | 13 | 4 | Sample rate (u32 LE) |
 | 17 | 2 | Channels (u16 LE) |

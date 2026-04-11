@@ -5,6 +5,7 @@
  */
 
 import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE } from "@ebowwa/relay-protocol";
+import { buildFrauFrame } from "./frau-builder.js";
 
 export interface RelayPlayerOptions {
   canvas: HTMLCanvasElement;
@@ -64,6 +65,14 @@ export class RelayPlayer {
   // Latency tracking
   private _firstFrameLocalTime = 0;
   private _firstFrameSenderTime = 0;
+
+  // Mic capture (push-to-talk)
+  private micStream: MediaStream | null = null;
+  private micContext: AudioContext | null = null;
+  private micProcessor: ScriptProcessorNode | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
+  private micSeqNum = 0;
+  private isMicActive = false;
 
   constructor(options: RelayPlayerOptions) {
     this.canvas = options.canvas;
@@ -156,6 +165,7 @@ export class RelayPlayer {
 
   destroy(): void {
     this.disconnect();
+    this.stopMic();
     this._cleanupAudio();
     this.canvas = null;
     this.ctx = null;
@@ -170,6 +180,110 @@ export class RelayPlayer {
   resumeAudio(): void {
     if (this.audioCtx && this.audioCtx.state === "suspended") {
       this.audioCtx.resume().then(() => { this.audioResumed = true; });
+    }
+  }
+
+  // --- Mic capture (push-to-talk) ---
+
+  async startMic(): Promise<void> {
+    if (this.isMicActive) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    try {
+      this.micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (err) {
+      console.warn("[RelayPlayer] Mic permission denied or unavailable:", err);
+      return;
+    }
+
+    // Create an AudioContext — browsers typically run at 48kHz regardless of
+    // the requested sampleRate in getUserMedia, so we resample below.
+    this.micContext = new AudioContext({ sampleRate: 48000 });
+    const source = this.micContext.createMediaStreamSource(this.micStream);
+    this.micSource = source;
+
+    // bufferSize 2560 = 160ms at 16kHz equivalent (we decimate 3:1 from 48kHz)
+    // At 48kHz, 2560 samples = ~53ms, decimated to ~853 samples at 16kHz
+    const bufferSize = 2560;
+    const processor = this.micContext.createScriptProcessor(bufferSize, 1, 1);
+    this.micProcessor = processor;
+
+    const self = this;
+
+    processor.onaudioprocess = (event: AudioProcessingEvent) => {
+      if (!self.isMicActive || !self.ws || self.ws.readyState !== WebSocket.OPEN) return;
+
+      const input: Float32Array = event.inputBuffer.getChannelData(0);
+      const srcSampleRate = self.micContext!.sampleRate;
+      const targetSampleRate = 16000;
+
+      // Decimation ratio (typically 48kHz / 16kHz = 3)
+      const ratio = srcSampleRate / targetSampleRate;
+
+      // Convert Float32 -> Int16 with clamping, then decimate
+      const outLength = Math.floor(input.length / ratio);
+      const pcmInt16 = new Int16Array(outLength);
+
+      for (let i = 0; i < outLength; i++) {
+        const srcIdx = Math.floor(i * ratio);
+        let sample = input[srcIdx];
+        // Clamp to -1..1
+        if (sample > 1) sample = 1;
+        else if (sample < -1) sample = -1;
+        pcmInt16[i] = sample * 0x7FFF;
+      }
+
+      // Build FRAU frame: codecType=3 (relay inbound), 16kHz, mono, 16-bit
+      const frame = buildFrauFrame(3, self.micSeqNum++, 16000, 1, 16, pcmInt16);
+
+      try {
+        self.ws.send(frame);
+      } catch (err) {
+        console.warn("[RelayPlayer] Failed to send mic frame:", err);
+      }
+    };
+
+    source.connect(processor);
+    // Must connect to destination for the processor to fire onaudioprocess
+    processor.connect(this.micContext.destination);
+
+    this.isMicActive = true;
+  }
+
+  stopMic(): void {
+    if (!this.isMicActive) return;
+
+    this.isMicActive = false;
+
+    if (this.micProcessor) {
+      this.micProcessor.disconnect();
+      this.micProcessor.onaudioprocess = null;
+      this.micProcessor = null;
+    }
+
+    if (this.micSource) {
+      this.micSource.disconnect();
+      this.micSource = null;
+    }
+
+    if (this.micStream) {
+      for (const track of this.micStream.getTracks()) {
+        track.stop();
+      }
+      this.micStream = null;
+    }
+
+    if (this.micContext) {
+      try { this.micContext.close(); } catch {}
+      this.micContext = null;
     }
   }
 
