@@ -24,6 +24,7 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
         landing: resolve(__dirname, "landing.html"),
       },
+      external: ["three"],
     },
   },
 });
