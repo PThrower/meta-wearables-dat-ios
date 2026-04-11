@@ -1,11 +1,10 @@
 relay.simulationapi.com {
     root * /root/relay-server/hosted/viewer/dist
-    file_server
 
-    # SPA fallback — non-file paths serve index.html
-    try_files {path} /index.html
+    # Root serves landing page
+    redir / /landing.html
 
-    # API and WebSocket proxy to Bun
+    # API and WebSocket proxy to Bun (must come before try_files)
     reverse_proxy /api/* localhost:8080
     reverse_proxy /publish localhost:8080
     reverse_proxy /view localhost:8080
@@ -24,4 +23,8 @@ relay.simulationapi.com {
     reverse_proxy /session/*/audio-in localhost:8080
     reverse_proxy /session/*/video/* localhost:8080
     reverse_proxy /session/*/audio/* localhost:8080
+
+    # Static files + SPA fallback (only for paths not matched above)
+    file_server
+    try_files {path} /index.html
 }
