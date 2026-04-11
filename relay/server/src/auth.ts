@@ -63,3 +63,11 @@ export function extractToken(req: Request, url: URL): string | null {
 
   return null;
 }
+
+/**
+ * Extract a share token from the URL query string.
+ * Checks: ?share=<token>
+ */
+export function extractShareToken(url: URL): string | null {
+  return url.searchParams.get("share");
+}

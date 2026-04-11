@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import type { ObjectStore } from "@ebowwa/object-store";
+import { canSeeInGallery } from "./permissions.js";
+import type { AccessLevel, AclEntry } from "./types.js";
 
 export interface ExportOptions {
   sessionId: string;
@@ -242,11 +244,17 @@ export interface GallerySession {
   exportCached: boolean;
   thumbnailUrl: string;
   videoUrl: string;
+  ownerId?: string;
+  ownerEmail?: string;
+  accessLevel: AccessLevel;
+  acl: AclEntry[];
+  viewerRole?: "owner" | "editor" | "viewer" | "public" | "none";
 }
 
 export async function getGalleryData(
   store: ObjectStore,
   liveSessionIds: Set<string>,
+  userId?: string,
 ): Promise<GallerySession[]> {
   const keys = await store.list("sessions/") as string[];
   const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
@@ -261,6 +269,23 @@ export async function getGalleryData(
 
     try {
       const meta = JSON.parse(new TextDecoder().decode(buf));
+
+      // Lazy migration: missing accessLevel = "public" (backward compat)
+      const accessLevel: AccessLevel = meta.accessLevel || "public";
+      const acl: AclEntry[] = meta.acl || [];
+      const ownerId: string | undefined = meta.ownerId;
+      const ownerEmail: string | undefined = meta.ownerEmail;
+
+      // Gallery visibility check
+      if (!canSeeInGallery({ accessLevel, acl, ownerId }, userId)) continue;
+
+      // Determine viewer role
+      let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
+      if (userId && ownerId === userId) viewerRole = "owner";
+      else if (userId && acl.find((e: AclEntry) => e.userId === userId)?.role === "editor") viewerRole = "editor";
+      else if (userId && acl.find((e: AclEntry) => e.userId === userId)) viewerRole = "viewer";
+      else if (accessLevel === "public") viewerRole = "public";
+
       sessions.push({
         sessionId,
         live: liveSessionIds.has(sessionId),
@@ -277,6 +302,11 @@ export async function getGalleryData(
         exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`),
         thumbnailUrl: `/session/${sessionId}/thumbnail`,
         videoUrl: `/session/${sessionId}/video.mp4?audio`,
+        ownerId,
+        ownerEmail,
+        accessLevel,
+        acl,
+        viewerRole,
       });
     } catch {}
   }

@@ -14,6 +14,34 @@ export type FrameTiming = FrameTimingType;
 export type QualityPreset = QualityPresetType;
 export { QUALITY_PRESETS, DEFAULT_QUALITY };
 
+// --- Access Control Types ---
+
+export type AccessLevel = "public" | "link" | "private";
+
+export type SessionRole = "owner" | "editor" | "viewer";
+
+export interface AclEntry {
+  userId: string;
+  email: string;
+  role: "editor" | "viewer";
+}
+
+export interface ShareToken {
+  token: string;
+  sessionId: string;
+  role: "viewer";
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  revoked: boolean;
+}
+
+export interface PermissionResult {
+  allowed: boolean;
+  role: SessionRole | "public" | "none";
+  reason?: string;
+}
+
 // --- WebSocket Data Type (Bun.serve generic) ---
 
 export interface WsData {
@@ -24,6 +52,7 @@ export interface WsData {
   userId?: string;      // Google sub (user ID) from verified token
   email?: string;       // Google email from verified token
   unsub?: () => void;   // Audio tap unsubscribe callback
+  shareToken?: string;  // share token for link-access sessions
 }
 
 // --- Publisher ---
@@ -76,6 +105,8 @@ export interface SessionMetadata {
   wearableType: string | null;
   resolution: { width: number; height: number } | null;
   ownerEmail: string | null;
+  accessLevel: AccessLevel;
+  acl: AclEntry[];
 }
 
 export interface Session {
@@ -89,5 +120,6 @@ export interface Session {
   metadata: SessionMetadata;
   ownerId?: string;             // Google sub (user ID) of session creator
   ownerEmail?: string;          // Google email of session creator
-  isPublic: boolean;            // if false, only owner can view
+  accessLevel: AccessLevel;
+  acl: AclEntry[];
 }

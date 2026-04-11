@@ -12,6 +12,8 @@ import type { WsData, Publisher, Viewer, Session, SessionMetadata } from "./type
 import { SessionRecorder } from "./session-recorder.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
+import { resolvePermission } from "./permissions.js";
+import type { ObjectStore } from "@ebowwa/object-store";
 
 const DEFAULT_SESSION_ID = "default";
 const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no viewers for 60s
@@ -62,10 +64,13 @@ export class SessionRegistry {
           wearableType: null,
           resolution: null,
           ownerEmail: null,
+          accessLevel: "link",
+          acl: [],
         },
         ownerId: undefined,
         ownerEmail: undefined,
-        isPublic: true,
+        accessLevel: "link",
+        acl: [],
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);
@@ -135,6 +140,7 @@ export class SessionRegistry {
       session.ownerId = userId;
       session.ownerEmail = email || undefined;
       session.metadata.ownerEmail = email || null;
+      session.metadata.accessLevel = session.accessLevel;
     }
 
     // Start recorder
@@ -167,12 +173,19 @@ export class SessionRegistry {
   // --- Viewer management ---
 
   /** Add a viewer to a session. Returns viewer ID or error string (prefixed with "error:"). */
-  addViewer(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string): string {
+  async addViewer(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string, shareToken?: string): Promise<string> {
     const session = this.getOrCreate(sessionId);
 
-    // Access control: private sessions require owner identity
-    if (!session.isPublic && session.ownerId && userId !== session.ownerId) {
-      return "error:access denied";
+    // Access control: resolve permission via tiered system
+    const perm = await resolvePermission(
+      { ownerId: session.ownerId, accessLevel: session.accessLevel, acl: session.acl },
+      userId,
+      shareToken,
+      this.store,
+      sessionId,
+    );
+    if (!perm.allowed) {
+      return `error:${perm.reason || "access denied"}`;
     }
 
     const id = crypto.randomUUID();

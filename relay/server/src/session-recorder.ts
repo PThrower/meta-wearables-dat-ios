@@ -44,6 +44,10 @@ export class SessionRecorder {
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private _deviceInfo: Record<string, string | null> = {};
   private _active = false;
+  private _accessLevel: string = "link";
+  private _acl: Array<{ userId: string; email: string; role: string }> = [];
+  private _ownerId: string | undefined;
+  private _ownerEmail: string | undefined;
 
   // Per-segment timing for accurate framerate in MP4 export
   private segFrameCount = 0;
@@ -70,6 +74,22 @@ export class SessionRecorder {
 
   set deviceInfo(info: Record<string, string | null>) {
     this._deviceInfo = info;
+  }
+
+  set accessLevel(level: string) {
+    this._accessLevel = level;
+  }
+
+  set acl(entries: Array<{ userId: string; email: string; role: string }>) {
+    this._acl = entries;
+  }
+
+  set ownerId(id: string | undefined) {
+    this._ownerId = id;
+  }
+
+  set ownerEmail(email: string | undefined) {
+    this._ownerEmail = email;
   }
 
   start(params: Record<string, string | null>) {
@@ -245,6 +265,10 @@ export class SessionRecorder {
       startedAt: new Date(this.startedAt).toISOString(),
       ...(final ? { finishedAt: new Date().toISOString(), durationMs: Date.now() - this.startedAt } : {}),
       device: this._deviceInfo,
+      accessLevel: this._accessLevel,
+      acl: this._acl,
+      ownerId: this._ownerId,
+      ownerEmail: this._ownerEmail,
       recording: {
         segmentsWritten: this.flushedSegments,
         audioChunks: this.chunkIndex,
