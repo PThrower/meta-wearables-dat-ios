@@ -846,12 +846,16 @@ const server = Bun.serve<WsData>({
         } else {
           // Binary frame from viewer — forward FRAU audio to publisher
           const buf = message as Uint8Array;
+          console.log(`[relay] Viewer binary frame: ${buf.length} bytes magic=${buf.slice(0, 4).join(',')}`);
           if (isAudioFrame(buf)) {
             const viewerId = ws.data.viewerId;
+            console.log(`[relay] FRAU from viewer ${viewerId?.slice(0, 8) ?? 'none'} hasViewerId=${!!viewerId}`);
             if (viewerId) {
               const found = registry.findViewerSession(viewerId);
+              console.log(`[relay] Found session=${!!found} hasPublisher=${!!found?.session.publisher}`);
               if (found && found.session.publisher) {
                 found.session.publisher.ws.send(buf);
+                console.log(`[relay] Forwarded ${buf.length}B viewer audio to publisher`);
               }
             }
           }
