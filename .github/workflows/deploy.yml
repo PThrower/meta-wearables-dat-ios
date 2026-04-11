@@ -36,6 +36,14 @@ jobs:
               echo "relay-protocol rebuilt"
             fi
 
+            echo ">>> Building viewer if needed"
+            cd /root/relay-server/hosted/viewer
+            if [ ! -d dist ] || [ "$(find src index.html style.css -newer dist -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+              /root/.bun/bin/bun install
+              /root/.bun/bin/bun x vite build
+              echo "viewer rebuilt"
+            fi
+
             echo ">>> Installing server deps if needed"
             cd /root/relay-server/hosted/server
             /root/.bun/bin/bun install
