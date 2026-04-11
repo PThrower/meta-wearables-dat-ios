@@ -148,12 +148,24 @@ export function handleGoogleLogin(response: { credential: string }): void {
 export async function initAuth(): Promise<void> {
   const cfg = await loadConfig();
   const clientId = cfg.googleClientId;
-  if (clientId) {
-    const onload = document.getElementById("g_id_onload");
-    if (onload) onload.setAttribute("data-client_id", clientId);
-    document.querySelectorAll("[data-client_id]").forEach(el => el.setAttribute("data-client_id", clientId));
-  }
+
   (window as any).handleGoogleLogin = handleGoogleLogin;
+
+  if (clientId) {
+    // Use imperative API — GIS script may have already loaded with empty data-client_id
+    const google = (window as any).google;
+    if (google?.accounts?.id) {
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleGoogleLogin,
+      });
+      // Re-render the sign-in button inside the overlay
+      google.accounts.id.renderButton(
+        document.querySelector("#loginOverlay .g_id_signin"),
+        { type: "standard", size: "large", theme: "filled_black", text: "sign_in_with", shape: "rectangular", logo_alignment: "left" },
+      );
+    }
+  }
   // Restore user info if already logged in (page reload)
   updateUserInfo();
 }
