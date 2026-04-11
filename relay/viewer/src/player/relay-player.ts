@@ -210,9 +210,9 @@ export class RelayPlayer {
     const source = this.micContext.createMediaStreamSource(this.micStream);
     this.micSource = source;
 
-    // bufferSize 2560 = 160ms at 16kHz equivalent (we decimate 3:1 from 48kHz)
-    // At 48kHz, 2560 samples = ~53ms, decimated to ~853 samples at 16kHz
-    const bufferSize = 2560;
+    // bufferSize must be a power of 2 (256..16384).
+    // 2048 at 48kHz = ~43ms, decimated to ~683 samples at 16kHz
+    const bufferSize = 2048;
     const processor = this.micContext.createScriptProcessor(bufferSize, 1, 1);
     this.micProcessor = processor;
 
