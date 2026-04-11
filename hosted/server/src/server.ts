@@ -641,7 +641,9 @@ const server = Bun.serve<WsData>({
     // Viewer page now served by Caddy (SPA) — only handle WebSocket upgrades
     const wsUpgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
     if (isView && !wsUpgrade) {
-      return Response.json({ error: "Not found" }, { status: 404 });
+      const proto = req.headers.get("x-forwarded-proto") || "https";
+      const host = req.headers.get("host") || url.host;
+      return Response.redirect(`${proto}://${host}/`);
     }
 
     const role = isPublish ? "publish" : "view";
