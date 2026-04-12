@@ -327,6 +327,33 @@ const server = Bun.serve<WsData>({
       // Allow anonymous access — will only see public sessions
       const userId = user?.sub;
       const data = await galleryCached(userId, user?.email);
+
+      // Merge live sessions that aren't in R2 yet
+      const r2Ids = new Set(data.map(s => s.sessionId));
+      const liveSessions = registry.listActive();
+      for (const s of liveSessions) {
+        if (r2Ids.has(s.id)) continue;
+        data.unshift({
+          sessionId: s.id,
+          live: true,
+          startedAt: new Date(Date.now() - s.uptimeMs).toISOString(),
+          device: {
+            deviceName: s.metadata.deviceName,
+            deviceModel: s.metadata.deviceModel,
+            wearableType: s.metadata.wearableType,
+          },
+          segments: 0,
+          audioChunks: 0,
+          exportCached: false,
+          thumbnailUrl: `/session/${s.id}/thumbnail`,
+          videoUrl: `/session/${s.id}/video.mp4?audio`,
+          ownerId: s.metadata.accessLevel === "public" ? undefined : s.metadata.ownerEmail ? undefined : undefined,
+          accessLevel: s.metadata.accessLevel as any || "public",
+          acl: [],
+          viewerRole: "public",
+        });
+      }
+
       return Response.json(data, {
         headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
       });
