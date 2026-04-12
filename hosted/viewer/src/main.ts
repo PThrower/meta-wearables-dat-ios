@@ -18,7 +18,11 @@ onCardAction((action, data) => {
       break;
     case "play":
       if (requireAuth()) return;
-      playVideo(data.url);
+      if (data.live === "true") {
+        watchLive(data.sessionId);
+      } else {
+        playVideo(data.url);
+      }
       break;
   }
 });

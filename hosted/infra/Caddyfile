@@ -26,9 +26,22 @@ relay.simulationapi.com {
     handle /latest/* {
         reverse_proxy localhost:8080
     }
-    handle /session/* {
+    # Session API sub-routes (video, audio, thumbnail, export, etc.)
+    handle /session/*/* {
         reverse_proxy localhost:8080
     }
+    # /session/<id> share token routes (POST/PATCH/DELETE)
+    handle /session/*/share* {
+        reverse_proxy localhost:8080
+    }
+    handle /session/*/access {
+        reverse_proxy localhost:8080
+    }
+    handle /session/*/audio-in {
+        reverse_proxy localhost:8080
+    }
+    # /session/<id> bare path — serve SPA (live viewer picks up session from URL)
+    # This must come AFTER the API sub-route handles above
 
     # Landing page at root (rewrite, not redirect — URL stays /)
     @isRoot path /
