@@ -39,6 +39,7 @@ export class SessionRecorder {
   private failedAudioParts: Buffer[] = [];
   private segIndex = 0;
   private chunkIndex = 0;
+  private resumedFromExisting = false;
   private lastFlush = Date.now();
   private startedAt: number = 0;
   private flushedSegments = 0;
@@ -94,9 +95,73 @@ export class SessionRecorder {
     this._ownerEmail = email;
   }
 
-  start(params: Record<string, string | null>) {
+  async start(params: Record<string, string | null>) {
     this._deviceInfo = { ...params };
-    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} created (recording starts on first frame)`);
+
+    // Detect existing recording in R2 and resume from last segment/chunk index
+    try {
+      const keys = await this.store.list(`sessions/${this.sessionId}/`) as string[];
+      const segKeys = keys.filter(k => k.endsWith(".mjpeg")).sort();
+      const audioKeys = keys.filter(k => k.endsWith(".pcm")).sort();
+
+      if (segKeys.length > 0) {
+        // Resume video segment index
+        const lastSeg = segKeys[segKeys.length - 1];
+        const segMatch = lastSeg.match(/seg-(\d+)\.mjpeg$/);
+        if (segMatch) {
+          this.segIndex = parseInt(segMatch[1]);
+          this.flushedSegments = this.segIndex;
+        }
+
+        // Resume audio chunk index
+        if (audioKeys.length > 0) {
+          const lastChunk = audioKeys[audioKeys.length - 1];
+          const chunkMatch = lastChunk.match(/chunk-(\d+)\.pcm$/);
+          if (chunkMatch) {
+            this.chunkIndex = parseInt(chunkMatch[1]);
+          }
+        }
+
+        this.resumedFromExisting = true;
+        // Mark as active so meta.json gets updated with correct startedAt
+        this._active = true;
+        this.startedAt = Date.now();
+        this.lastFlush = this.startedAt;
+        this.flushTimer = setInterval(() => this.tick(), SEGMENT_FLUSH_MS);
+
+        // Read existing meta for startedAt and bytesToBucket
+        const metaBuf = await this.store.get(`sessions/${this.sessionId}/meta.json`);
+        if (metaBuf) {
+          const existing = JSON.parse(new TextDecoder().decode(metaBuf));
+          if (existing.startedAt) this.startedAt = new Date(existing.startedAt).getTime();
+          if (existing.recording?.bytesToBucket) this.bytesToBucket = existing.recording.bytesToBucket;
+          if (existing.recording?.audioChunks) {
+            // Use whichever is larger: detected files or meta record
+            this.chunkIndex = Math.max(this.chunkIndex, existing.recording.audioChunks);
+          }
+        }
+
+        // Load existing manifest so the MP4 export sees the full history
+        const manifestBuf = await this.store.get(`sessions/${this.sessionId}/manifest.json`);
+        if (manifestBuf) {
+          try {
+            const existingManifest = JSON.parse(new TextDecoder().decode(manifestBuf));
+            if (Array.isArray(existingManifest.videoSegments)) {
+              this.videoManifest = existingManifest.videoSegments;
+            }
+            if (Array.isArray(existingManifest.audioChunks)) {
+              this.audioManifest = existingManifest.audioChunks;
+            }
+          } catch { /* corrupt manifest — start fresh */ }
+        }
+
+        console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} resuming from seg ${this.segIndex}, chunk ${this.chunkIndex} (${segKeys.length} video, ${audioKeys.length} audio)`);
+      } else {
+        console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} created (recording starts on first frame)`);
+      }
+    } catch {
+      console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} created (recording starts on first frame)`);
+    }
   }
 
   /** Activate recording on first video frame — avoids empty shells from audio-only sessions */
@@ -110,8 +175,18 @@ export class SessionRecorder {
     console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} recording activated`);
   }
 
+  /** Resume an already-active recording (reconnected publisher) */
+  private ensureResumed() {
+    if (this._active) return;
+    this._active = true;
+    this.lastFlush = Date.now();
+    this.flushTimer = setInterval(() => this.tick(), SEGMENT_FLUSH_MS);
+    this.writeMeta(false);
+    console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} recording resumed`);
+  }
+
   appendVideo(frame: Uint8Array) {
-    this.ensureActive();
+    if (this.resumedFromExisting) this.ensureResumed(); else this.ensureActive();
     const jpeg = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
     this.videoParts.push(Buffer.from(jpeg));
 
@@ -126,7 +201,9 @@ export class SessionRecorder {
 
   appendAudio(frame: Uint8Array) {
     // Buffer audio silently until first video frame activates the recorder
-    if (!this._active) return;
+    // (unless resuming — audio can flow alongside existing video)
+    if (!this._active && !this.resumedFromExisting) return;
+    if (this.resumedFromExisting) this.ensureResumed();
     const pcm = frame.length > 29 ? frame.subarray(29) : frame;
     this.audioParts.push(Buffer.from(pcm));
 

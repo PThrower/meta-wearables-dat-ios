@@ -156,8 +156,11 @@ export class SessionRegistry {
       session.metadata.accessLevel = "public";
     }
 
-    // Start recorder
-    session.recorder = new SessionRecorder(id, this.store);
+    // Start recorder — reuse stable recordingId so reconnects append to same R2 prefix
+    if (!session.recordingId) {
+      session.recordingId = crypto.randomUUID();
+    }
+    session.recorder = new SessionRecorder(session.recordingId, this.store);
     session.recorder.start({});
 
     console.log(`[registry] Publisher connected: ${id.slice(0, 8)} session=${sessionId} ip=${clientIp}`);
@@ -455,7 +458,7 @@ export class SessionRegistry {
       let bucketUrl: string | null = null;
       if (session.recorder && session.publisher) {
         try {
-          bucketUrl = await this.store.signedUrl(`sessions/${session.publisher.id}/meta.json`, 3600);
+          bucketUrl = await this.store.signedUrl(`sessions/${session.recordingId}/meta.json`, 3600);
         } catch { bucketUrl = null; }
       }
 

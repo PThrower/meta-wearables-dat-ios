@@ -1009,7 +1009,7 @@ const server = Bun.serve<WsData>({
 
             // Now register the connection
             if (role === "publish") {
-              const err = registry.claimPublisher(sessionId, ws, ws.data.clientIp, user.sub, user.email);
+              const err = registry.claimPublisher(sessionId, ws, ws.data.clientIp, user?.sub, user?.email);
               if (err) {
                 ws.close(err === "session owned by another user" ? 4003 : 4001, err);
                 return;
@@ -1053,7 +1053,7 @@ const server = Bun.serve<WsData>({
                 }
               }
             } else if (role === "view") {
-              const result = await registry.addViewer(sessionId, ws, ws.data.clientIp, user.sub, user.email, shareTok);
+              const result = await registry.addViewer(sessionId, ws, ws.data.clientIp, user?.sub, user?.email, shareTok);
               if (result.startsWith("error:")) {
                 ws.close(4003, result.slice(6));
                 return;

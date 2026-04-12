@@ -124,4 +124,5 @@ export interface Session {
   accessLevel: AccessLevel;
   acl: AclEntry[];
   publisherClaiming: boolean;   // Mutex for atomic publisher claim
+  recordingId?: string;         // Stable R2 prefix — survives reconnections
 }
