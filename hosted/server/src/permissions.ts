@@ -242,6 +242,12 @@ export function canSeeInGallery(
   // Public sessions visible to all
   if (meta.accessLevel === "public") return true;
 
+  // Link sessions with no owner are discoverable (anyone with the link)
+  if (meta.accessLevel === "link" && !meta.ownerId && !meta.ownerEmail) return true;
+
+  // Private sessions with no owner — treat as public (orphaned)
+  if (meta.accessLevel === "private" && !meta.ownerId && !meta.ownerEmail) return true;
+
   // Owner always sees their sessions (by sub ID or email fallback)
   if (userId && meta.ownerId === userId) return true;
   if (userEmail && meta.ownerEmail === userEmail) return true;

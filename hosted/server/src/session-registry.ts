@@ -8,7 +8,7 @@
 
 import type { ServerWebSocket } from "bun";
 import type { ObjectStore } from "@ebowwa/object-store";
-import type { WsData, Publisher, Viewer, Session, SessionMetadata } from "./types.js";
+import type { WsData, Publisher, Viewer, Session, SessionMetadata, AccessLevel, AclEntry } from "./types.js";
 import { SessionRecorder } from "./session-recorder.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
@@ -424,6 +424,10 @@ export class SessionRegistry {
     viewerCount: number;
     metadata: SessionMetadata;
     uptimeMs: number;
+    ownerId: string | undefined;
+    ownerEmail: string | undefined;
+    accessLevel: AccessLevel;
+    acl: AclEntry[];
   }> {
     const now = Date.now();
     return [...this.sessions.values()].map(s => ({
@@ -432,6 +436,10 @@ export class SessionRegistry {
       viewerCount: s.viewers.size,
       metadata: s.metadata,
       uptimeMs: now - s.createdAt,
+      ownerId: s.ownerId,
+      ownerEmail: s.ownerEmail,
+      accessLevel: s.accessLevel,
+      acl: s.acl,
     }));
   }
 

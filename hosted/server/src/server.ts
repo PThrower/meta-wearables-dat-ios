@@ -54,6 +54,7 @@ import {
 import {
   resolvePermission,
   hasRole,
+  canSeeInGallery,
   createShareToken,
   revokeShareToken,
   listShareTokens,
@@ -198,6 +199,30 @@ async function findLatestSessionId(): Promise<string | null> {
   return latestId;
 }
 
+/** Filter session IDs to only those visible to a given user */
+async function filterSessionIdsByVisibility(
+  ids: string[],
+  userId?: string,
+  userEmail?: string,
+): Promise<string[]> {
+  const visible: string[] = [];
+  for (const id of ids) {
+    const buf = await store.get(`sessions/${id}/meta.json`);
+    if (!buf) continue;
+    try {
+      const meta = JSON.parse(new TextDecoder().decode(buf));
+      if (canSeeInGallery(
+        { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
+        userId,
+        userEmail,
+      )) {
+        visible.push(id);
+      }
+    } catch { /* skip corrupt meta */ }
+  }
+  return visible;
+}
+
 // --- Auth config injection into viewer HTML ---
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
@@ -328,28 +353,43 @@ const server = Bun.serve<WsData>({
       const userId = user?.sub;
       const recorded = await galleryCached(userId, user?.email, showAll);
 
-      // Merge live sessions that aren't in R2 yet
+      // Merge live sessions that aren't in R2 yet (apply same visibility rules)
       const r2Ids = new Set(recorded.map(s => s.sessionId));
       const liveEntries = registry.listActive()
         .filter(s => !r2Ids.has(s.id))
-        .map(s => ({
-          sessionId: s.id,
-          live: true,
-          startedAt: new Date(Date.now() - s.uptimeMs).toISOString(),
-          device: {
-            deviceName: s.metadata.deviceName,
-            deviceModel: s.metadata.deviceModel,
-            wearableType: s.metadata.wearableType,
-          },
-          segments: 0,
-          audioChunks: 0,
-          exportCached: false,
-          thumbnailUrl: `/session/${s.id}/thumbnail`,
-          videoUrl: `/session/${s.id}/video.mp4?audio`,
-          accessLevel: (s.metadata.accessLevel || "public") as AccessLevel,
-          acl: [] as AclEntry[],
-          viewerRole: "public" as const,
-        }));
+        .filter(s => showAll || canSeeInGallery(
+          { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
+          userId,
+          user?.email,
+        ))
+        .map(s => {
+          // Determine viewer role for this live session
+          let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
+
+          if (userId && s.ownerId === userId) viewerRole = "owner";
+          else if (userId && s.acl.find((e: AclEntry) => e.userId === userId)?.role === "editor") viewerRole = "editor";
+          else if (userId && s.acl.find((e: AclEntry) => e.userId === userId)) viewerRole = "viewer";
+          else if (s.accessLevel === "public") viewerRole = "public";
+
+          return {
+            sessionId: s.id,
+            live: true,
+            startedAt: new Date(Date.now() - s.uptimeMs).toISOString(),
+            device: {
+              deviceName: s.metadata.deviceName,
+              deviceModel: s.metadata.deviceModel,
+              wearableType: s.metadata.wearableType,
+            },
+            segments: 0,
+            audioChunks: 0,
+            exportCached: false,
+            thumbnailUrl: `/session/${s.id}/thumbnail`,
+            videoUrl: `/session/${s.id}/video.mp4?audio`,
+            accessLevel: s.accessLevel as AccessLevel,
+            acl: s.acl as AclEntry[],
+            viewerRole,
+          };
+        });
 
       return Response.json([...liveEntries, ...recorded], {
         headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
@@ -366,14 +406,29 @@ const server = Bun.serve<WsData>({
       }
 
       const active = registry.listActive();
+      const showAll = NO_AUTH_FLAG;
+
+      // Filter active sessions by visibility
+      const visibleActive = showAll ? active : active.filter(s =>
+        canSeeInGallery(
+          { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
+          user.sub,
+          user.email,
+        ),
+      );
 
       // Use cached session list instead of scanning all R2 keys
       const historicalSessionIds = await getCachedSessionIds();
 
+      // Filter historical sessions by ownership
+      const visibleHistorical = showAll ? historicalSessionIds : await filterSessionIdsByVisibility(
+        historicalSessionIds, user.sub, user.email,
+      );
+
       // Combine: active sessions (with live metadata) + historical (id only)
-      const activeIds = new Set(active.map(s => s.id));
+      const activeIds = new Set(visibleActive.map(s => s.id));
       const result = [
-        ...active.map(s => ({
+        ...visibleActive.map(s => ({
           id: s.id,
           live: true,
           publisherConnected: s.publisherConnected,
@@ -381,7 +436,7 @@ const server = Bun.serve<WsData>({
           metadata: s.metadata,
           uptimeMs: s.uptimeMs,
         })),
-        ...historicalSessionIds
+        ...visibleHistorical
           .filter(id => !activeIds.has(id))
           .map(id => ({ id, live: false })),
       ];
@@ -499,9 +554,8 @@ const server = Bun.serve<WsData>({
     const audioInMatch = url.pathname.match(/^\/session\/([^/]+)\/audio-in$/);
     if (audioInMatch && req.method === "POST") {
       const sessionId = audioInMatch[1];
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
+      if (authResult instanceof Response) return authResult;
 
       const buf = await req.arrayBuffer();
       if (buf.byteLength < 29) return Response.json({ error: "Payload too small" }, { status: 400 });
@@ -602,11 +656,14 @@ const server = Bun.serve<WsData>({
       return Response.json(meta);
     }
 
-    // --- S3 Retrieval Endpoints ---
+    // --- S3 Retrieval Endpoints (auth-gated) ---
 
     const videoMatch = url.pathname.match(/^\/session\/([^/]+)\/video\/(.+)$/);
     if (videoMatch) {
       const [, id, seg] = videoMatch;
+      const authResult = await requireSessionAccess(id, req, url, "viewer");
+      if (authResult instanceof Response) return authResult;
+
       const key = `sessions/${id}/video/${seg}`;
       try {
         const signed = await store.signedUrl(key, 3600);
@@ -619,6 +676,9 @@ const server = Bun.serve<WsData>({
     const audioMatch = url.pathname.match(/^\/session\/([^/]+)\/audio\/(.+)$/);
     if (audioMatch) {
       const [, id, chunk] = audioMatch;
+      const authResult = await requireSessionAccess(id, req, url, "viewer");
+      if (authResult instanceof Response) return authResult;
+
       const key = `sessions/${id}/audio/${chunk}`;
       try {
         const signed = await store.signedUrl(key, 3600);
