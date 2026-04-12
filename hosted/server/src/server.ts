@@ -122,12 +122,121 @@ await loadWasm();
 
 setInterval(() => registry.cleanupStale(), 5_000);
 
-// --- Gallery cache (per-user, 30s TTL) ---
+// --- Gallery index (server-side, updated incrementally) ---
+
+const GALLERY_INDEX_TTL_MS = 120_000; // refresh full index every 2 min
+
+// Background gallery index refresh — keeps index warm so requests aren't blocked
+setInterval(async () => {
+  try {
+    await buildGalleryIndex();
+    const currentIds = new Set([...galleryIndex.keys()]);
+    pruneGalleryIndex(currentIds);
+  } catch (err) { console.error("[gallery-index] refresh failed:", err); }
+}, GALLERY_INDEX_TTL_MS);
+
+// --- Gallery index (server-side, updated incrementally) ---
+
+// Stores parsed meta.json per session — avoids full R2 scan on every request
+const galleryIndex = new Map<string, { meta: Record<string, any>; exportCached: boolean; updatedAt: number }>();
+let galleryIndexReady = false;
+
+/** Build the gallery index from R2 (parallel reads) */
+async function buildGalleryIndex(): Promise<void> {
+  const keys = await store.list("sessions/") as string[];
+  const metaKeys = keys.filter(k => k.startsWith("sessions/") && k.endsWith("/meta.json"));
+  const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
+
+  // Parallel reads — much faster than serial loop
+  const entries = await Promise.all(metaKeys.map(async (mk) => {
+    const sessionId = mk.slice("sessions/".length, mk.length - "/meta.json".length);
+    try {
+      const buf = await store.get(mk);
+      if (!buf) return null;
+      const meta = JSON.parse(new TextDecoder().decode(buf));
+      return { sessionId, meta, exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`) };
+    } catch { return null; }
+  }));
+
+  // Merge into index (preserve newer entries if concurrent update)
+  for (const entry of entries) {
+    if (!entry) continue;
+    const existing = galleryIndex.get(entry.sessionId);
+    if (!existing || existing.updatedAt < Date.now()) {
+      galleryIndex.set(entry.sessionId, { meta: entry.meta, exportCached: entry.exportCached, updatedAt: Date.now() });
+    }
+  }
+  galleryIndexReady = true;
+}
+
+/** Update a single session in the index (called when recorder finishes) */
+function updateGalleryIndexEntry(sessionId: string, meta: Record<string, any>, exportCached = false): void {
+  galleryIndex.set(sessionId, { meta, exportCached, updatedAt: Date.now() });
+}
+
+/** Remove sessions from index that no longer exist in R2 */
+function pruneGalleryIndex(currentIds: Set<string>): void {
+  for (const id of galleryIndex.keys()) {
+    if (!currentIds.has(id)) galleryIndex.delete(id);
+  }
+}
+
+/** Build a filtered GallerySession[] from the in-memory index */
+function galleryFromIndex(
+  liveSessionIds: Set<string>,
+  userId?: string,
+  userEmail?: string,
+  showAll?: boolean,
+): GallerySession[] {
+  const sessions: GallerySession[] = [];
+  for (const [sessionId, entry] of galleryIndex) {
+    const meta = entry.meta;
+    const accessLevel: AccessLevel = meta.accessLevel || "link";
+    const acl: AclEntry[] = meta.acl || [];
+    const ownerId: string | undefined = meta.ownerId;
+    const ownerEmail: string | undefined = meta.ownerEmail;
+
+    if (!showAll && !canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail)) continue;
+
+    let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
+    if (userId && ownerId === userId) viewerRole = "owner";
+    else if (userId && acl.find((e: AclEntry) => e.userId === userId)?.role === "editor") viewerRole = "editor";
+    else if (userId && acl.find((e: AclEntry) => e.userId === userId)) viewerRole = "viewer";
+    else if (accessLevel === "public") viewerRole = "public";
+
+    sessions.push({
+      sessionId,
+      live: liveSessionIds.has(sessionId),
+      startedAt: meta.startedAt || new Date(0).toISOString(),
+      finishedAt: meta.finishedAt,
+      durationMs: meta.durationMs,
+      device: {
+        deviceName: meta.device?.deviceName || null,
+        deviceModel: meta.device?.deviceModel || null,
+        wearableType: meta.device?.wearableType || null,
+      },
+      segments: meta.recording?.segmentsWritten || 0,
+      audioChunks: meta.recording?.audioChunks || 0,
+      exportCached: entry.exportCached,
+      thumbnailUrl: `/session/${sessionId}/thumbnail`,
+      videoUrl: `/session/${sessionId}/video.mp4?audio`,
+      ownerId,
+      ownerEmail,
+      accessLevel,
+      acl,
+      viewerRole,
+    });
+  }
+  sessions.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+  return sessions;
+}
+
+// --- Per-user response cache (short TTL, avoids re-filtering on every request) ---
 
 const galleryCacheMap = new Map<string, { data: GallerySession[]; expiry: number }>();
 const GALLERY_TTL_MS = 30_000;
 
-// --- Session list cache (avoid scanning all R2 keys repeatedly) ---
+// --- Session list cache ---
 
 let sessionListCache: { ids: string[]; expiry: number } | null = null;
 const SESSION_LIST_TTL_MS = 60_000;
@@ -152,7 +261,7 @@ async function galleryCached(userId?: string, userEmail?: string, showAll?: bool
   const cacheKey = showAll ? "__all" : (userId || "__anon");
   const now = Date.now();
 
-  // Evict expired entries to prevent unbounded growth
+  // Evict expired per-user caches
   for (const [key, entry] of galleryCacheMap) {
     if (now >= entry.expiry) galleryCacheMap.delete(key);
   }
@@ -162,9 +271,13 @@ async function galleryCached(userId?: string, userEmail?: string, showAll?: bool
     return cached.data.map(s => ({ ...s, live: liveIds.has(s.sessionId) }));
   }
 
-  const active = registry.listActive();
-  const liveIds = new Set(active.map(s => s.id));
-  const data = await getGalleryData(store, liveIds, userId, userEmail, showAll);
+  // Build index on first request or when stale
+  if (!galleryIndexReady) {
+    await buildGalleryIndex();
+  }
+
+  const liveIds = new Set(registry.listActive().map(s => s.id));
+  const data = galleryFromIndex(liveIds, userId, userEmail, showAll);
   galleryCacheMap.set(cacheKey, { data, expiry: now + GALLERY_TTL_MS });
   return data;
 }
@@ -1027,6 +1140,16 @@ const server = Bun.serve<WsData>({
 
       if (role === "publish") {
         await registry.releasePublisher(sessionId);
+        // Update gallery index incrementally — recorder already wrote final meta.json to R2
+        try {
+          const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
+          if (metaBuf) {
+            const meta = JSON.parse(new TextDecoder().decode(metaBuf));
+            updateGalleryIndexEntry(sessionId, meta);
+          }
+        } catch { /* non-critical */ }
+        invalidateGalleryCache();
+        invalidateSessionListCache();
       } else {
         const viewerId = ws.data.viewerId;
         if (viewerId) {
