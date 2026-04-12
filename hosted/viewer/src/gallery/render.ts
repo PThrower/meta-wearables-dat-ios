@@ -18,6 +18,7 @@ export interface GallerySession {
   segments?: number;
   audioChunks?: number;
   exportCached?: boolean;
+  hasThumbnail?: boolean;
   thumbnailUrl?: string;
   videoUrl?: string;
   device?: { deviceName?: string; deviceModel?: string; wearableType?: string };
@@ -100,9 +101,10 @@ function cardHtml(s: GallerySession, delay: number): string {
   const lockIcon = isPrivate ? `<span class="lock-icon" title="Private">&#x1F512;</span>` : "";
   const ownerBadge = isOwner ? `<span class="owner-badge">Owner</span>` : "";
   const shareBtn = canEdit ? `<button class="action-btn share-btn" data-action="share" data-session-id="${escAttr(s.sessionId)}">Share</button>` : "";
-  const thumb = (s.segments ?? 0) > 0
+  const hasVideo = (s.segments ?? 0) > 0;
+  const thumb = (s.hasThumbnail ?? false)
     ? `<img class="card-thumb" src="${escAttr(authUrl(s.thumbnailUrl ?? ""))}" alt="" loading="lazy">`
-    : `<div class="card-thumb-placeholder">No video</div>`;
+    : `<div class="card-thumb-placeholder">${hasVideo ? "Processing" : "No video"}</div>`;
   const safeVideoUrl = escAttr(authUrl(s.videoUrl ?? ""));
   return `<div class="card" style="animation-delay:${delay}ms">
     ${thumb}
@@ -120,7 +122,7 @@ function cardHtml(s: GallerySession, delay: number): string {
         <div class="row"><span class="label">ID</span><span class="value">${escAttr(s.sessionId.slice(0, 8))}</span></div>
       </div>
       <div class="card-actions">
-        ${(s.segments ?? 0) > 0 ? `<button class="action-btn primary" data-action="play" data-url="${safeVideoUrl}">Play</button>
+        ${hasVideo ? `<button class="action-btn primary" data-action="play" data-url="${safeVideoUrl}">Play</button>
         <a class="action-btn" href="${safeVideoUrl}" target="_blank" rel="noopener">Download</a>` : ""}
         ${s.live ? `<a class="action-btn primary" href="/session/${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
         ${shareBtn}

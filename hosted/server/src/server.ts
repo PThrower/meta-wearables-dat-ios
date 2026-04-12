@@ -122,6 +122,51 @@ await loadWasm();
 
 setInterval(() => registry.cleanupStale(), 5_000);
 
+// --- One-time empty shell cleanup (prunes R2 sessions with 0 video segments) ---
+
+async function pruneEmptyShells(): Promise<void> {
+  try {
+    const keys = await store.list("sessions/") as string[];
+    const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
+    const videoKeys = new Set(
+      keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"))
+        .map(k => { const m = k.match(/^sessions\/([^/]+)\//); return m ? m[1] : ""; })
+        .filter(Boolean),
+    );
+
+    let pruned = 0;
+    for (const mk of metaKeys) {
+      const sessionId = mk.slice("sessions/".length, mk.length - "/meta.json".length);
+      if (videoKeys.has(sessionId)) continue; // has video — keep
+
+      const buf = await store.get(mk);
+      if (!buf) continue;
+      try {
+        const meta = JSON.parse(new TextDecoder().decode(buf));
+        const segments = meta.recording?.segmentsWritten || 0;
+        if (segments > 0) continue; // has segments — keep
+      } catch { continue; }
+
+      // Empty shell — delete all keys for this session
+      const sessionKeys = keys.filter(k => k.startsWith(`sessions/${sessionId}/`));
+      for (const sk of sessionKeys) {
+        await store.delete(sk);
+      }
+      pruned++;
+    }
+    if (pruned > 0) {
+      console.log(`[cleanup] Pruned ${pruned} empty shell session(s) from R2`);
+      invalidateSessionListCache();
+      invalidateGalleryCache();
+    }
+  } catch (err) {
+    console.error("[cleanup] Empty shell prune failed:", err);
+  }
+}
+
+// Run once after first gallery index build
+setTimeout(pruneEmptyShells, 15_000);
+
 // --- Gallery index (server-side, updated incrementally) ---
 
 const GALLERY_INDEX_TTL_MS = 120_000; // refresh full index every 2 min
@@ -214,6 +259,11 @@ function galleryFromIndex(
     const acl: AclEntry[] = meta.acl || [];
     const ownerId: string | undefined = meta.ownerId;
     const ownerEmail: string | undefined = meta.ownerEmail;
+    const segments: number = meta.recording?.segmentsWritten || 0;
+    const isLive = liveSessionIds.has(sessionId);
+
+    // Filter out empty shell sessions (0 segments, not live)
+    if (segments === 0 && !isLive) continue;
 
     if (!showAll && !canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail)) continue;
 
@@ -225,7 +275,7 @@ function galleryFromIndex(
 
     sessions.push({
       sessionId,
-      live: liveSessionIds.has(sessionId),
+      live: isLive,
       startedAt: meta.startedAt || new Date(0).toISOString(),
       finishedAt: meta.finishedAt,
       durationMs: meta.durationMs,
@@ -234,7 +284,7 @@ function galleryFromIndex(
         deviceModel: meta.device?.deviceModel || null,
         wearableType: meta.device?.wearableType || null,
       },
-      segments: meta.recording?.segmentsWritten || 0,
+      segments,
       audioChunks: meta.recording?.audioChunks || 0,
       exportCached: entry.exportCached,
       hasThumbnail: entry.hasThumbnail,

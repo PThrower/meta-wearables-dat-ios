@@ -99,7 +99,7 @@ export class SessionRecorder {
     console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} created (recording starts on first frame)`);
   }
 
-  /** Activate recording on first video frame — avoids recording pre-button frames */
+  /** Activate recording on first video frame — avoids empty shells from audio-only sessions */
   private ensureActive() {
     if (this._active) return;
     this._active = true;
@@ -125,7 +125,8 @@ export class SessionRecorder {
   }
 
   appendAudio(frame: Uint8Array) {
-    this.ensureActive();
+    // Buffer audio silently until first video frame activates the recorder
+    if (!this._active) return;
     const pcm = frame.length > 29 ? frame.subarray(29) : frame;
     this.audioParts.push(Buffer.from(pcm));
 
