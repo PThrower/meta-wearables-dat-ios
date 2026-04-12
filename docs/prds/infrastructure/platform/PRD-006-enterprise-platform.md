@@ -212,3 +212,122 @@ The final product will be available via enterprise deployment with mobile apps o
 
 1. **Stakeholder Review:** Review this document with key stakeholders and secure sign-off.
 2. **Resolve Open Issues (Phase 1):** Prioritize and finalize decisions on the four critical open issues (AI Safety Protocols, Core PRD Content, Hardware Latency Feasibility, and Hardware Variant Management).
+
+---
+
+## 11. Market Context
+
+### 11.1 Market Size
+
+| Segment | 2025 | 2030 | CAGR | Source |
+|---------|-------|------|------|--------|
+| Smart glasses (total) | $2.5B | $8B+ | 24% | Grand View Research |
+| AI smart glasses | $540M | $2B+ | 34% | Intel Market Research |
+| Connected worker platforms | $8.6B | $20B+ | 15% | GlobeNewsWire |
+| AR/VR training | $8-10B | $16B | 23% | PMarketResearch |
+| Computer vision QA | $9-12B | $23B | 12% | MarketGenics |
+
+IDC: XR shipments grew 44% YoY in 2025, almost entirely driven by smart glasses (not headsets). Meta holds 72.2% of total XR market. AI is now the primary differentiator in XR devices.
+
+### 11.2 Market Inflection
+
+Three simultaneous shifts create the opportunity:
+
+1. **Microsoft exited enterprise AR.** HoloLens 2 discontinued October 2024, no successor announced. Microsoft exited all MR hardware February 2025. This leaves a vacuum in high-end enterprise AR.
+
+2. **Consumer glasses became enterprise-capable.** Meta sold 7M+ units in 2025 (3x prior two years combined). At $299-499, a pair of Meta glasses delivers 80% of what a $3,150 RealWear Navigator does for streaming and remote assistance.
+
+3. **Displays are optional for v1.** The fastest-growing segment is "no display" glasses (camera + speaker + AI). Voice-first interaction makes displays optional, keeping hardware at consumer price points. IDC projects display-enabled glasses surpass VR/MR headsets by 2027 -- but the software platform must be ready first.
+
+### 11.3 Chinese ODM Ecosystem
+
+- Alibaba lists 999+ ODM smart glasses products
+- Wholesale price for camera+speaker+Bluetooth glasses: $15-30/unit at volume
+- Shenzhen Xingyi AR99: holographic display at $137 retail (September 2025)
+- China produces 73% of global smart glasses hardware
+- The hardware is commoditizing; the software layer is where value accrues
+
+**Why:** These numbers validate the market exists, is growing fast, and the timing is right. The Chinese ODM data specifically supports the hardware-agnostic strategy -- the hardware is already cheap and plentiful, what's missing is the intelligence layer.
+
+**How to apply:** Use these figures in investor pitches, customer presentations, and competitive positioning. The 34% CAGR for AI smart glasses is the segment CaringMind targets directly.
+
+---
+
+## 12. Competitive Landscape
+
+### 12.1 Competitive Matrix
+
+| Category | Players | Price | What They Do | What They Don't Do |
+|----------|---------|-------|--------------|-------------------|
+| Industrial AR headsets | RealWear ($3,150), Vuzix ($1,799) | $1.5K-3.5K | Ruggedized hardware, voice control, MDM | AI guidance, hardware abstraction, enterprise integration |
+| AR work instructions | PTC Vuforia, TeamViewer Frontline, Siemens | $50K-250K/yr | Step-by-step overlays, remote assist | Hardware abstraction, real-time AI QA, multi-brand fleet |
+| Fixed-camera AI QA | Cognex, Keyence, Retrocausal | $50K-150K/line | Defect detection, assembly verification | Wearable, real-time worker guidance, portability |
+| Smart glasses OS | Meta (proprietary), Mentra (open source) | Free/OS-level | Device ecosystem, app store, streaming | Enterprise features, AI guidance, CRM integration |
+| AI worker copilot | Retrocausal ($5.3M raised), VisionRD (early) | TBD | Real-time AI watches worker, flags errors | Hardware abstraction, enterprise integration, multi-device |
+| **CaringMind** | **This platform** | **TBD** | **All of the above in one platform** | **Doesn't sell hardware** |
+
+### 12.2 Positioning
+
+CaringMind is the **hardware-agnostic intelligence layer** for smart glasses. It does not compete with glasses manufacturers -- it makes their products enterprise-ready.
+
+- vs. RealWear/Vuzix: "You don't need to buy $3,000 headsets. Use the glasses you already have."
+- vs. PTC/Siemens: "You don't need a $250K platform tied to one hardware vendor. One platform, every pair."
+- vs. Retrocausal: "AI guidance that follows the worker, not the workstation. Anywhere on the floor."
+- vs. Meta/Mentra: "We don't replace your glasses OS. We add the enterprise brain on top."
+
+**Why:** Sales team and stakeholders need clear competitive positioning for customer conversations.
+**How to apply:** Use the "vs." lines as talk tracks. Use the matrix to identify competitive threats and partnership opportunities.
+
+---
+
+## 13. Revenue Model
+
+### 13.1 Pricing Benchmarks
+
+| Tier | Typical Price | Examples | CaringMind Target |
+|------|---------------|----------|-------------------|
+| Per user/month | $50-200 | Augmentir, TeamViewer | Primary model |
+| Per site/year | $15K-50K | Factory AI, Intellect | Enterprise tier |
+| Pilot kit | $5K-20K | RealWear ROI Kits | Entry point |
+| Enterprise custom | $50K-250K+/yr | PTC, Siemens | Large accounts |
+
+### 13.2 Proposed Pricing Structure
+
+| Tier | Price | Includes |
+|------|-------|----------|
+| **Pilot Kit** | $5K-15K | 5-20 devices, 60-90 days, ROI measurement, dedicated support |
+| **Per Worker** | $75-150/month | AI guidance, QA checks, fleet management, analytics |
+| **Per Site** | $25K-50K/year | Unlimited workers at one facility, enterprise integration, custom workflows |
+| **Enterprise** | Custom | Multi-site, CRM integration, custom AI models, dedicated CSM |
+
+### 13.3 Unit Economics Target
+
+| Metric | Target |
+|--------|--------|
+| Gross margin (software) | 80%+ |
+| Customer payback period | 8-12 months |
+| Pilot-to-expand conversion | 60%+ |
+| Net revenue retention | 120%+ (expansion within accounts) |
+
+**Why:** Pricing model must be defined before pilot conversations begin. The pilot-to-expand model is industry standard (RealWear, Vuzix, Augmentir all use it).
+**How to apply:** Use pilot pricing in initial customer conversations. Per-worker pricing for expansion. Per-site for enterprise deals.
+
+---
+
+## 14. Positioning Statement
+
+**CaringMind is the intelligence layer that makes any smart glasses enterprise-ready.**
+
+We don't sell glasses. We sell the software that turns any pair -- Meta, INMO, Mentra, Lensmoo, HeyCyan, or future hardware -- into an AI-guided worker tool with real-time task assistance, quality assurance, fleet management, and enterprise integration.
+
+**For** operations managers at manufacturing, logistics, construction, and field service companies **who** are drowning in device fragmentation, disconnected systems, and error-prone manual processes, **CaringMind** is the hardware-agnostic AI platform **that** delivers real-time worker guidance, automated quality checks, and seamless CRM/ERP integration across every pair of smart glasses in your fleet -- **unlike** RealWear (expensive single-vendor hardware), PTC (tied to specific devices), or Retrocausal (fixed cameras only).
+
+**Key differentiators:**
+1. **Hardware-agnostic**: One platform across all glasses brands. Swap hardware without retraining or reintegrating.
+2. **AI copilot, not autopilot**: The AI suggests, the worker decides. Real-time visual + voice guidance.
+3. **Zero additional hardware**: Works with glasses you already own or can buy for $299-499.
+4. **Enterprise-native**: Salesforce, HubSpot, and logistics integration out of the box.
+5. **Sub-500ms, zero frame loss**: Proven streaming infrastructure with encrypted bi-directional data.
+
+**Why:** This positioning statement drives all external communications -- landing page, pitch deck, sales conversations, and investor materials.
+**How to apply:** Every section of the landing page, every slide of the pitch deck, and every sales conversation should map back to this positioning.
