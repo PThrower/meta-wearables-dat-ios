@@ -276,6 +276,7 @@ export async function getGalleryData(
   liveSessionIds: Set<string>,
   userId?: string,
   userEmail?: string,
+  showAll?: boolean,
 ): Promise<GallerySession[]> {
   const keys = await store.list("sessions/") as string[];
   const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
@@ -297,8 +298,8 @@ export async function getGalleryData(
       const ownerId: string | undefined = meta.ownerId;
       const ownerEmail: string | undefined = meta.ownerEmail;
 
-      // Gallery visibility check
-      if (!canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail)) continue;
+      // Gallery visibility check (bypassed in NO_AUTH mode)
+      if (!showAll && !canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail)) continue;
 
       // Determine viewer role
       let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";

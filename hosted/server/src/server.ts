@@ -147,8 +147,8 @@ function invalidateSessionListCache(): void {
   sessionListCache = null;
 }
 
-async function galleryCached(userId?: string, userEmail?: string): Promise<GallerySession[]> {
-  const cacheKey = userId || "__anon";
+async function galleryCached(userId?: string, userEmail?: string, showAll?: boolean): Promise<GallerySession[]> {
+  const cacheKey = showAll ? "__all" : (userId || "__anon");
   const now = Date.now();
 
   // Evict expired entries to prevent unbounded growth
@@ -158,13 +158,12 @@ async function galleryCached(userId?: string, userEmail?: string): Promise<Galle
   const cached = galleryCacheMap.get(cacheKey);
   if (cached && now < cached.expiry) {
     const liveIds = new Set(registry.listActive().map(s => s.id));
-    // Return a shallow clone with updated live status (don't mutate cached array)
     return cached.data.map(s => ({ ...s, live: liveIds.has(s.sessionId) }));
   }
 
   const active = registry.listActive();
   const liveIds = new Set(active.map(s => s.id));
-  const data = await getGalleryData(store, liveIds, userId, userEmail);
+  const data = await getGalleryData(store, liveIds, userId, userEmail, showAll);
   galleryCacheMap.set(cacheKey, { data, expiry: now + GALLERY_TTL_MS });
   return data;
 }
@@ -324,9 +323,12 @@ const server = Bun.serve<WsData>({
     if (url.pathname === "/gallery/api") {
       const token = extractToken(req, url);
       const user = await verifyToken(token);
-      // Allow anonymous access — will only see public sessions
+      const token = extractToken(req, url);
+      const user = await verifyToken(token);
+      // NO_AUTH mode: show all sessions regardless of ownership
+      const showAll = NO_AUTH_FLAG;
       const userId = user?.sub;
-      const recorded = await galleryCached(userId, user?.email);
+      const recorded = await galleryCached(userId, user?.email, showAll);
 
       // Merge live sessions that aren't in R2 yet
       const r2Ids = new Set(recorded.map(s => s.sessionId));
