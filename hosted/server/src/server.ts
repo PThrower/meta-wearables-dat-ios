@@ -326,14 +326,13 @@ const server = Bun.serve<WsData>({
       const user = await verifyToken(token);
       // Allow anonymous access — will only see public sessions
       const userId = user?.sub;
-      const data = await galleryCached(userId, user?.email);
+      const recorded = await galleryCached(userId, user?.email);
 
       // Merge live sessions that aren't in R2 yet
-      const r2Ids = new Set(data.map(s => s.sessionId));
-      const liveSessions = registry.listActive();
-      for (const s of liveSessions) {
-        if (r2Ids.has(s.id)) continue;
-        data.unshift({
+      const r2Ids = new Set(recorded.map(s => s.sessionId));
+      const liveEntries = registry.listActive()
+        .filter(s => !r2Ids.has(s.id))
+        .map(s => ({
           sessionId: s.id,
           live: true,
           startedAt: new Date(Date.now() - s.uptimeMs).toISOString(),
@@ -347,14 +346,12 @@ const server = Bun.serve<WsData>({
           exportCached: false,
           thumbnailUrl: `/session/${s.id}/thumbnail`,
           videoUrl: `/session/${s.id}/video.mp4?audio`,
-          ownerId: s.metadata.accessLevel === "public" ? undefined : s.metadata.ownerEmail ? undefined : undefined,
-          accessLevel: s.metadata.accessLevel as any || "public",
-          acl: [],
-          viewerRole: "public",
-        });
-      }
+          accessLevel: (s.metadata.accessLevel || "public") as AccessLevel,
+          acl: [] as AclEntry[],
+          viewerRole: "public" as const,
+        }));
 
-      return Response.json(data, {
+      return Response.json([...liveEntries, ...recorded], {
         headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
       });
     }
