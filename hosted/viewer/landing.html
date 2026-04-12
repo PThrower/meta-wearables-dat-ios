@@ -1096,21 +1096,26 @@
       border: 1px solid var(--card-border);
       border-radius: var(--radius-sm);
       transition: all 0.2s;
-      flex: 1 1 280px;
-      max-width: 360px;
+      flex: 1 1 320px;
+      max-width: 420px;
     }
     .hw-card:hover {
       background: var(--card-hover);
       border-color: rgba(255,255,255,0.12);
       transform: translateY(-1px);
     }
-    .hw-card .hw-icon {
-      font-size: 24px;
-      width: 40px; height: 40px;
-      display: flex; align-items: center; justify-content: center;
+    .hw-card .hw-img {
+      width: 72px; height: 72px;
       border-radius: 12px;
       background: rgba(255,255,255,0.04);
       flex-shrink: 0;
+      object-fit: cover;
+      overflow: hidden;
+    }
+    .hw-card .hw-img img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      border-radius: 12px;
     }
     .hw-card .hw-info { flex: 1; min-width: 0; }
     .hw-card .hw-name {
@@ -1785,7 +1790,7 @@
         <div class="hw-tier-label">Available Now</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x25CE;</div>
+            <div class="hw-img"><img src="https://about.fb.com/wp-content/uploads/2023/09/04_Looks_1-carousel.jpg" alt="Meta Smart Glasses" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">Meta Smart Glasses</div>
               <div class="hw-spec">Ray-Ban, Oakley &amp; more &middot; Live streaming &middot; Bi-directional audio</div>
@@ -1793,7 +1798,7 @@
             <span class="hw-badge available">Live</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x25C9;</div>
+            <div class="hw-img"><img src="https://www.inmoxr.com/cdn/shop/files/AIR3-main-1.jpg?v=1766728843" alt="INMO Air 3S" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">INMO Air 3S</div>
               <div class="hw-spec">AndroidXR &middot; Live streaming &middot; Bi-directional audio</div>
@@ -1807,7 +1812,7 @@
         <div class="hw-tier-label">Under Evaluation</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x25CB;</div>
+            <div class="hw-img"><img src="https://img.diylooks.com/upload/store/product_l/SYA002931901A.jpg" alt="Lensmoo W600" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">Lensmoo W600</div>
               <div class="hw-spec">HD video streaming &middot; Bi-directional audio</div>
@@ -1815,7 +1820,7 @@
             <span class="hw-badge evaluation">Eval</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x25CB;</div>
+            <div class="hw-img"><img src="https://oriwhiz.com/cdn/shop/files/SYA002947301A_1_5ea1eeea-277b-49b5-a743-3efd3303c5b4.jpg?v=1761362601&width=600" alt="HeyCyan M01" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">HeyCyan M01 / W610 / W611</div>
               <div class="hw-spec">8 MP camera &middot; Live streaming &middot; Multi-model lineup</div>
@@ -1823,7 +1828,7 @@
             <span class="hw-badge evaluation">Eval</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x25CE;</div>
+            <div class="hw-img"><img src="https://mentraglass.com/assets/product_photos/frame2.png" alt="Mentra Live" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">Mentra Live</div>
               <div class="hw-spec">HD 1080p &middot; 119&deg; FOV &middot; Live streaming</div>
@@ -1837,7 +1842,7 @@
         <div class="hw-tier-label">Future Support</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x25C8;</div>
+            <div class="hw-img"><img src="https://www.apple.com/v/apple-vision-pro/j/images/overview/hero/hero__cvgr5aj1ttsi_large.jpg" alt="Apple Vision Pro" loading="lazy"></div>
             <div class="hw-info">
               <div class="hw-name">Apple Vision Pro</div>
               <div class="hw-spec">Spatial computing &middot; Immersive workflows</div>
