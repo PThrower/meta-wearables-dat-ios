@@ -68,7 +68,12 @@ export async function resolvePermission(
     return { allowed: false, role: "none", reason: "invalid or expired share token" };
   }
 
-  // 4. Access level fallback
+  // 4. Orphaned sessions (no owner) — treat as public for any authenticated user
+  if (!input.ownerId && !input.acl?.length) {
+    return { allowed: true, role: "public" };
+  }
+
+  // 5. Access level fallback
   if (input.accessLevel === "public") {
     return { allowed: true, role: "public" };
   }
