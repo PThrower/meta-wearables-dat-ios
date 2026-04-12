@@ -323,8 +323,6 @@ const server = Bun.serve<WsData>({
     if (url.pathname === "/gallery/api") {
       const token = extractToken(req, url);
       const user = await verifyToken(token);
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
       const userId = user?.sub;
