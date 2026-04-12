@@ -138,7 +138,7 @@ setInterval(async () => {
 // --- Gallery index (server-side, updated incrementally) ---
 
 // Stores parsed meta.json per session — avoids full R2 scan on every request
-const galleryIndex = new Map<string, { meta: Record<string, any>; exportCached: boolean; updatedAt: number }>();
+const galleryIndex = new Map<string, { meta: Record<string, any>; exportCached: boolean; hasThumbnail: boolean; updatedAt: number }>();
 let galleryIndexReady = false;
 
 /** Build the gallery index from R2 (parallel reads) */
@@ -146,6 +146,15 @@ async function buildGalleryIndex(): Promise<void> {
   const keys = await store.list("sessions/") as string[];
   const metaKeys = keys.filter(k => k.startsWith("sessions/") && k.endsWith("/meta.json"));
   const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
+  const thumbKeys = new Set(keys.filter(k => k.endsWith("/thumb.jpg")));
+  const videoKeys = keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"));
+
+  // Build a set of sessions that have at least one video segment or a cached thumbnail
+  const sessionsWithVideo = new Set<string>();
+  for (const vk of videoKeys) {
+    const match = vk.match(/^sessions\/([^/]+)\/video\//);
+    if (match) sessionsWithVideo.add(match[1]);
+  }
 
   // Parallel reads — much faster than serial loop
   const entries = await Promise.all(metaKeys.map(async (mk) => {
@@ -154,7 +163,12 @@ async function buildGalleryIndex(): Promise<void> {
       const buf = await store.get(mk);
       if (!buf) return null;
       const meta = JSON.parse(new TextDecoder().decode(buf));
-      return { sessionId, meta, exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`) };
+      return {
+        sessionId,
+        meta,
+        exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`),
+        hasThumbnail: thumbKeys.has(`sessions/${sessionId}/thumb.jpg`) || sessionsWithVideo.has(sessionId),
+      };
     } catch { return null; }
   }));
 
@@ -163,15 +177,20 @@ async function buildGalleryIndex(): Promise<void> {
     if (!entry) continue;
     const existing = galleryIndex.get(entry.sessionId);
     if (!existing || existing.updatedAt < Date.now()) {
-      galleryIndex.set(entry.sessionId, { meta: entry.meta, exportCached: entry.exportCached, updatedAt: Date.now() });
+      galleryIndex.set(entry.sessionId, {
+        meta: entry.meta,
+        exportCached: entry.exportCached,
+        hasThumbnail: entry.hasThumbnail,
+        updatedAt: Date.now(),
+      });
     }
   }
   galleryIndexReady = true;
 }
 
 /** Update a single session in the index (called when recorder finishes) */
-function updateGalleryIndexEntry(sessionId: string, meta: Record<string, any>, exportCached = false): void {
-  galleryIndex.set(sessionId, { meta, exportCached, updatedAt: Date.now() });
+function updateGalleryIndexEntry(sessionId: string, meta: Record<string, any>, exportCached = false, hasThumbnail = true): void {
+  galleryIndex.set(sessionId, { meta, exportCached, hasThumbnail, updatedAt: Date.now() });
 }
 
 /** Remove sessions from index that no longer exist in R2 */
@@ -218,6 +237,7 @@ function galleryFromIndex(
       segments: meta.recording?.segmentsWritten || 0,
       audioChunks: meta.recording?.audioChunks || 0,
       exportCached: entry.exportCached,
+      hasThumbnail: entry.hasThumbnail,
       thumbnailUrl: `/session/${sessionId}/thumbnail`,
       videoUrl: `/session/${sessionId}/video.mp4?audio`,
       ownerId,
@@ -496,6 +516,7 @@ const server = Bun.serve<WsData>({
             segments: 0,
             audioChunks: 0,
             exportCached: false,
+            hasThumbnail: false,
             thumbnailUrl: `/session/${s.id}/thumbnail`,
             videoUrl: `/session/${s.id}/video.mp4?audio`,
             accessLevel: s.accessLevel as AccessLevel,
@@ -1140,14 +1161,17 @@ const server = Bun.serve<WsData>({
 
       if (role === "publish") {
         await registry.releasePublisher(sessionId);
-        // Update gallery index incrementally — recorder already wrote final meta.json to R2
+        // Update gallery index incrementally and generate thumbnail
         try {
           const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
           if (metaBuf) {
             const meta = JSON.parse(new TextDecoder().decode(metaBuf));
-            updateGalleryIndexEntry(sessionId, meta);
+            const exportCached = (await store.list(`sessions/${sessionId}/`)).includes(`sessions/${sessionId}/export.mp4`);
+            updateGalleryIndexEntry(sessionId, meta, exportCached);
           }
         } catch { /* non-critical */ }
+        // Generate thumbnail in background — don't block disconnect
+        getSessionThumbnail(sessionId, store).catch(() => {});
         invalidateGalleryCache();
         invalidateSessionListCache();
       } else {

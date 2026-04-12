@@ -262,6 +262,7 @@ export interface GallerySession {
   segments: number;
   audioChunks: number;
   exportCached: boolean;
+  hasThumbnail: boolean;
   thumbnailUrl: string;
   videoUrl: string;
   ownerId?: string;
@@ -281,6 +282,13 @@ export async function getGalleryData(
   const keys = await store.list("sessions/") as string[];
   const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
   const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
+  const thumbKeys = new Set(keys.filter(k => k.endsWith("/thumb.jpg")));
+  const videoKeys = keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"));
+  const sessionsWithVideo = new Set<string>();
+  for (const vk of videoKeys) {
+    const match = vk.match(/^sessions\/([^/]+)\/video\//);
+    if (match) sessionsWithVideo.add(match[1]);
+  }
 
   const sessions: GallerySession[] = [];
 
@@ -322,6 +330,7 @@ export async function getGalleryData(
         segments: meta.recording?.segmentsWritten || 0,
         audioChunks: meta.recording?.audioChunks || 0,
         exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`),
+        hasThumbnail: thumbKeys.has(`sessions/${sessionId}/thumb.jpg`) || sessionsWithVideo.has(sessionId),
         thumbnailUrl: `/session/${sessionId}/thumbnail`,
         videoUrl: `/session/${sessionId}/video.mp4?audio`,
         ownerId,
