@@ -385,34 +385,43 @@
       border: 1px solid var(--card-border);
       border-radius: var(--radius-sm);
       transition: all 0.2s;
-      min-width: 240px;
+      flex: 1 1 280px;
+      max-width: 360px;
     }
     .hw-card:hover {
       background: var(--card-hover);
       border-color: rgba(255,255,255,0.12);
+      transform: translateY(-1px);
     }
     .hw-card .hw-icon {
-      font-size: 28px;
-      width: 44px; height: 44px;
+      font-size: 24px;
+      width: 40px; height: 40px;
       display: flex; align-items: center; justify-content: center;
       border-radius: 12px;
       background: rgba(255,255,255,0.04);
       flex-shrink: 0;
     }
+    .hw-card .hw-info { flex: 1; min-width: 0; }
     .hw-card .hw-name {
       font-size: 14px; font-weight: 600;
       color: var(--text-primary);
+      white-space: nowrap;
     }
     .hw-card .hw-spec {
       font-size: 12px; color: var(--text-tertiary);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .hw-card .hw-badge {
       font-size: 10px;
-      padding: 2px 8px;
+      padding: 3px 8px;
       border-radius: 6px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      flex-shrink: 0;
     }
     .hw-badge.available {
       background: rgba(34,197,94,0.12);
@@ -776,16 +785,16 @@
         <div class="hw-tier-label">Available Now</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25CE;</div>
+            <div class="hw-info">
               <div class="hw-name">Meta Smart Glasses</div>
-              <div class="hw-spec">Live streaming &middot; Bi-directional audio &middot; Ray-Ban, Oakley &amp; more</div>
+              <div class="hw-spec">Ray-Ban, Oakley &amp; more &middot; Live streaming &middot; Bi-directional audio</div>
             </div>
             <span class="hw-badge available">Live</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25C9;</div>
+            <div class="hw-info">
               <div class="hw-name">INMO Air 3S</div>
               <div class="hw-spec">AndroidXR &middot; Live streaming &middot; Bi-directional audio</div>
             </div>
@@ -798,26 +807,26 @@
         <div class="hw-tier-label">Under Evaluation</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25CB;</div>
+            <div class="hw-info">
               <div class="hw-name">Lensmoo W600</div>
-              <div class="hw-spec">High-quality video streaming</div>
+              <div class="hw-spec">HD video streaming &middot; Bi-directional audio</div>
             </div>
             <span class="hw-badge evaluation">Eval</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25CB;</div>
+            <div class="hw-info">
               <div class="hw-name">HeyCyan M01 / W610 / W611</div>
-              <div class="hw-spec">8 MP camera &middot; Multi-model lineup</div>
+              <div class="hw-spec">8 MP camera &middot; Live streaming &middot; Multi-model lineup</div>
             </div>
             <span class="hw-badge evaluation">Eval</span>
           </div>
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25CE;</div>
+            <div class="hw-info">
               <div class="hw-name">Mentra Live</div>
-              <div class="hw-spec">HD 1080p camera &middot; 119&deg; FOV &middot; Live streaming</div>
+              <div class="hw-spec">HD 1080p &middot; 119&deg; FOV &middot; Live streaming</div>
             </div>
             <span class="hw-badge evaluation">Eval</span>
           </div>
@@ -828,10 +837,10 @@
         <div class="hw-tier-label">Future Support</div>
         <div class="hw-grid">
           <div class="hw-card">
-            <div class="hw-icon">&#x1F453;</div>
-            <div>
+            <div class="hw-icon">&#x25C8;</div>
+            <div class="hw-info">
               <div class="hw-name">Apple Vision Pro</div>
-              <div class="hw-spec">visionOS &middot; Spatial computing workflows</div>
+              <div class="hw-spec">Spatial computing &middot; Immersive workflows</div>
             </div>
             <span class="hw-badge future">Planned</span>
           </div>
