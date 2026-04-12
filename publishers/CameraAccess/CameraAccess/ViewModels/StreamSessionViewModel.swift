@@ -106,6 +106,10 @@ class StreamSessionViewModel: ObservableObject {
   @Published var capturedPhoto: UIImage?
   @Published var showPhotoPreview: Bool = false
 
+  // Background handling
+  private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = .invalid
+  private var wasStreamingBeforeBackground: Bool = false
+
   // Active wearable tracking (captures device identity when using auto-select)
   private var activeWearableId: DeviceIdentifier?
   private var activeWearableType: String?
@@ -527,6 +531,71 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     NSLog("[StreamSession] Audio input route: \(session.currentRoute.inputs.map { "\($0.portName)(\($0.portType.rawValue))" })")
+  }
+
+  // MARK: - Background Handling
+
+  func handleEnterBackground() {
+    guard isStreaming else { return }
+    wasStreamingBeforeBackground = true
+
+    // Request ~30s background grace for pending frames to flush
+    backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(
+      withName: "StreamSession.backgroundFlush"
+    ) { [weak self] in
+      self?.endBackgroundTask()
+    }
+
+    telemetryService?.pauseUptimeAccumulation()
+    NSLog("[StreamSession] Entered background — background task started")
+  }
+
+  func handleEnterForeground() {
+    endBackgroundTask()
+
+    guard wasStreamingBeforeBackground else { return }
+    wasStreamingBeforeBackground = false
+
+    telemetryService?.resumeUptimeAccumulation()
+
+    // Staleness check: if last frame is >5s stale, attempt reconnection
+    if let lastFrame = telemetryService?.lastFrameTime {
+      let staleness = ContinuousClock.Instant.now - lastFrame
+      let stalenessMs = durationToMs(staleness)
+      if stalenessMs > TelemetryService.staleThresholdMs {
+        NSLog("[StreamSession] Stream stale (\(String(format: "%.1f", stalenessMs))ms) — reconnecting relay")
+
+        Task {
+          // Relay was connected: reconnect it
+          if isRelaying, await relayStage.connected {
+            do {
+              try await relayStage.reconnect()
+              NSLog("[StreamSession] Relay reconnected on foreground recovery")
+            } catch {
+              NSLog("[StreamSession] Relay reconnect failed: \(error)")
+            }
+          }
+
+          // Session reports streaming but no frames: let auto-retry handle restart
+          if streamingStatus == .streaming && !hasReceivedFirstFrame {
+            await stopSession()
+            // Auto-retry will pick up the restart
+          }
+        }
+      }
+    }
+    NSLog("[StreamSession] Entered foreground — uptime resumed")
+  }
+
+  private func endBackgroundTask() {
+    guard backgroundTaskIdentifier != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
+    backgroundTaskIdentifier = .invalid
+  }
+
+  private func durationToMs(_ duration: Duration) -> Double {
+    let components = duration.components
+    return Double(components.seconds) * 1000.0 + Double(components.attoseconds) / 1_000_000_000_000_000.0
   }
 
   // MARK: - Auto-Retry

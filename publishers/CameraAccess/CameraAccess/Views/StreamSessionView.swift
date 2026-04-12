@@ -20,6 +20,7 @@ struct StreamSessionView: View {
   @StateObject private var viewModel: StreamSessionViewModel
   @ObservedObject private var telemetryService: TelemetryService
   @State private var orientation: UIInterfaceOrientation?
+  @Environment(\.scenePhase) private var scenePhase
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService) {
     self.wearables = wearables
@@ -67,6 +68,16 @@ struct StreamSessionView: View {
         OrientationLock.shared.unlock()
       } else {
         OrientationLock.shared.lock(to: .portrait)
+      }
+    }
+    .onChange(of: scenePhase) { newPhase in
+      switch newPhase {
+      case .background:
+        viewModel.handleEnterBackground()
+      case .active:
+        viewModel.handleEnterForeground()
+      default:
+        break
       }
     }
   }

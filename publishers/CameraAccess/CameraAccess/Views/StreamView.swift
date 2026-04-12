@@ -21,6 +21,7 @@ struct StreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
   @State private var showErrorLog = false
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     ZStack {
@@ -86,6 +87,7 @@ struct StreamView: View {
       .padding(.all, 24)
     }
     .onDisappear {
+      guard scenePhase != .background else { return }
       Task {
         if viewModel.streamingStatus != .stopped {
           await viewModel.stopSession()

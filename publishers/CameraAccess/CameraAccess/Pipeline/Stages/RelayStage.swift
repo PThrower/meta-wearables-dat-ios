@@ -68,6 +68,17 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     // Background tasks for receive loop and keepalive
     private var receiveLoopTask: Task<Void, Never>?
     private var keepAliveTask: Task<Void, Never>?
+    private var reconnectTask: Task<Void, Never>?
+
+    // Reconnection config
+    private var shouldAutoReconnect = false
+    private var reconnectDelay: UInt64 = 1_000_000_000 // 1 second
+    private let maxReconnectDelay: UInt64 = 30_000_000_000 // 30 seconds
+    private var lastConnectedURL: String?
+    private var lastConnectedToken: String?
+
+    /// Public accessor for the URL last connected to (for foreground reconnection).
+    var currentURL: String? { lastConnectedURL }
 
     // JPEG encoding — CIContext for YUV->RGB, CGImageDestination for JPEG (no UIKit)
     private let jpegQuality: CGFloat
@@ -105,6 +116,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         disconnect()
 
         NSLog("[RelayStage] Connecting to \(urlString) ...")
+
+        // Store for reconnection
+        lastConnectedURL = urlString
+        lastConnectedToken = idToken
 
         let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             var resumed = false
@@ -146,6 +161,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         if connected {
             isConnected = true
+            shouldAutoReconnect = true
+            reconnectDelay = 1_000_000_000 // Reset backoff on successful connect
             sendHello()
             startReceiveLoop()
             startKeepAlive()
@@ -157,6 +174,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     }
 
     func disconnect() {
+        shouldAutoReconnect = false
+        reconnectTask?.cancel()
+        reconnectTask = nil
         receiveLoopTask?.cancel()
         keepAliveTask?.cancel()
         receiveLoopTask = nil
@@ -225,6 +245,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 } catch {
                     NSLog("[RelayStage] Receive loop ended: \(error.localizedDescription)")
                     self.isConnected = false
+                    Task { [weak self] in await self?.triggerReconnect() }
                     break
                 }
             }
@@ -392,13 +413,47 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func markDisconnected() {
         isConnected = false
+        Task { [weak self] in await self?.triggerReconnect() }
     }
 
     private func clearEncodingFlag() {
         isEncoding = false
     }
 
-    // MARK: - Device Identity
+    // MARK: - Reconnection
+
+    /// Internal reconnection with exponential backoff (same pattern as AudioTapClient).
+    private func triggerReconnect() {
+        guard shouldAutoReconnect else { return }
+        guard let urlString = lastConnectedURL else { return }
+
+        reconnectTask?.cancel()
+        reconnectTask = Task {
+            try? await Task.sleep(nanoseconds: reconnectDelay)
+            guard !Task.isCancelled else { return }
+            guard self.shouldAutoReconnect else { return }
+
+            NSLog("[RelayStage] Reconnecting in \(self.reconnectDelay / 1_000_000_000)s ...")
+
+            // Exponential backoff
+            self.reconnectDelay = min(self.reconnectDelay * 2, self.maxReconnectDelay)
+
+            do {
+                try await self.connect(to: urlString, idToken: self.lastConnectedToken)
+            } catch {
+                NSLog("[RelayStage] Reconnect failed: \(error)")
+            }
+        }
+    }
+
+    /// Explicit reconnect for foreground recovery. Resets backoff delay.
+    func reconnect() async throws {
+        guard let urlString = lastConnectedURL else {
+            throw RelayError.notConnected
+        }
+        reconnectDelay = 1_000_000_000
+        try await connect(to: urlString, idToken: lastConnectedToken)
+    }
 
     // MARK: - Device Identity
 

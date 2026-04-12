@@ -47,6 +47,15 @@ final class TelemetryService: ObservableObject {
     private var firstFrameTime: ContinuousClock.Instant?
     private var stateHistory: [SessionStateEvent] = []
 
+    // Frame-gated effective uptime
+    private var effectiveUptimeAccumulated: Duration = .zero
+    private var currentSegmentStart: ContinuousClock.Instant?
+    private var isUptimePaused: Bool = false
+    private var backgroundEnterTime: ContinuousClock.Instant?
+    private var totalBackgroundDuration: Duration = .zero
+    static let staleThresholdMs: Double = 5000.0
+    var lastFrameTime: ContinuousClock.Instant? { lastFrameInstant }
+
     // MARK: - Error Tracking
 
     private var errorCounts: [String: UInt64] = [:]
@@ -130,6 +139,36 @@ final class TelemetryService: ObservableObject {
         TelemetryLogger.photos.info("Photo capture requested")
     }
 
+    // MARK: - Uptime Pause/Resume (background transitions)
+
+    func pauseUptimeAccumulation() {
+        guard !isUptimePaused else { return }
+        isUptimePaused = true
+        backgroundEnterTime = ContinuousClock.Instant.now
+
+        // Close current segment into accumulated
+        if let segStart = currentSegmentStart {
+            effectiveUptimeAccumulated += ContinuousClock.Instant.now - segStart
+            currentSegmentStart = nil
+        }
+    }
+
+    func resumeUptimeAccumulation() {
+        guard isUptimePaused else { return }
+        isUptimePaused = false
+
+        // Track background duration
+        if let bgEnter = backgroundEnterTime {
+            totalBackgroundDuration += ContinuousClock.Instant.now - bgEnter
+            backgroundEnterTime = nil
+        }
+
+        // Start new segment if streaming
+        if currentSessionState == .streaming {
+            currentSegmentStart = ContinuousClock.Instant.now
+        }
+    }
+
     // MARK: - Handlers
 
     private func handleSessionState(_ newState: StreamSessionState) {
@@ -145,6 +184,11 @@ final class TelemetryService: ObservableObject {
             streamingStartTime = now
         }
         if newState == .stopped || newState == .paused {
+            // Close current uptime segment
+            if let segStart = currentSegmentStart {
+                effectiveUptimeAccumulated += now - segStart
+                currentSegmentStart = nil
+            }
             streamingStartTime = nil
         }
 
@@ -159,6 +203,12 @@ final class TelemetryService: ObservableObject {
             fpsFrameCount = 0
             fpsWindowStart = nil
             effectiveFPS = 0
+            effectiveUptimeAccumulated = .zero
+            totalBackgroundDuration = .zero
+        }
+
+        if newState == .streaming && !isUptimePaused && currentSegmentStart == nil {
+            currentSegmentStart = now
         }
 
         updateDisplayStrings()
@@ -193,11 +243,19 @@ final class TelemetryService: ObservableObject {
             }
         }
 
-        // Detect dropped frame gaps (> 2x expected interval)
+        // Detect dropped frame gaps (> 2x expected interval) and stale gaps
         if let lastTs = lastFrameInstant {
             let gap = now - lastTs
-            if durationToMs(gap) > durationToMs(targetFrameInterval) * 2.0 {
+            let gapMs = durationToMs(gap)
+            if gapMs > durationToMs(targetFrameInterval) * 2.0 {
                 droppedFrameGaps += 1
+            }
+            // Stale gap: close previous segment at lastTs, start new segment now
+            if gapMs > Self.staleThresholdMs {
+                if let segStart = currentSegmentStart {
+                    effectiveUptimeAccumulated += lastTs - segStart
+                }
+                currentSegmentStart = now
             }
         }
 
@@ -302,9 +360,8 @@ final class TelemetryService: ObservableObject {
 
         sessionStateText = String(describing: currentSessionState).lowercased()
 
-        // Uptime
-        if let start = streamingStartTime {
-            let uptime = ContinuousClock.Instant.now - start
+        // Uptime (frame-gated effective uptime)
+        if let uptime = computeUptime() {
             uptimeText = formatDuration(uptime)
         } else {
             uptimeText = "0s"
@@ -396,8 +453,12 @@ final class TelemetryService: ObservableObject {
     }
 
     private func computeUptime() -> Duration? {
-        guard let start = streamingStartTime else { return nil }
-        return ContinuousClock.Instant.now - start
+        guard streamingStartTime != nil else { return nil }
+        var total = effectiveUptimeAccumulated
+        if let segStart = currentSegmentStart {
+            total += ContinuousClock.Instant.now - segStart
+        }
+        return total
     }
 
     private func computeTTFF() -> Duration? {
