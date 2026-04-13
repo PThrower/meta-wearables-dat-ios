@@ -71,6 +71,8 @@ export class SessionRegistry {
         accessLevel: "link",
         acl: [],
         publisherClaiming: false,
+        activeAppId: null,
+        appPipeline: null,
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);

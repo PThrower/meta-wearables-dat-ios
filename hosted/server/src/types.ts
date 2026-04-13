@@ -6,6 +6,7 @@
 
 import type { ServerWebSocket } from "bun";
 import type { FrameTiming as FrameTimingType, QualityPreset as QualityPresetType } from "@ebowwa/relay-protocol";
+import type { AppPipeline } from "./app-types.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "@ebowwa/relay-protocol";
 
 // --- Protocol types from shared package ---
@@ -125,4 +126,6 @@ export interface Session {
   acl: AclEntry[];
   publisherClaiming: boolean;   // Mutex for atomic publisher claim
   recordingId?: string;         // Stable R2 prefix — survives reconnections
+  activeAppId: string | null;   // Currently active app for this session
+  appPipeline: AppPipeline | null; // Runtime pipeline for active app
 }

@@ -41,6 +41,8 @@ import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
+import { ControlEventBus } from "./control-event-bus.js";
+import { AppRegistry } from "./app-registry.js";
 import { verifyToken, extractToken, extractShareToken } from "./auth.js";
 import {
   getSessionExportMeta,
@@ -94,6 +96,15 @@ const registry = new SessionRegistry(store);
 // Add custom taps via: audioTapBus.subscribe()
 
 const audioTapBus = new AudioTapBus();
+
+// --- Control Event Bus ---
+// Pub/sub for gesture/control events from iOS publisher.
+
+const controlEventBus = new ControlEventBus();
+
+// --- App Registry ---
+
+const appRegistry = new AppRegistry();
 
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)
@@ -880,6 +891,12 @@ const server = Bun.serve<WsData>({
       });
     }
 
+    // --- App Registry ---
+
+    if (url.pathname === "/apps") {
+      return Response.json(appRegistry.listApps());
+    }
+
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
@@ -1126,8 +1143,37 @@ const server = Bun.serve<WsData>({
                 session.recorder.ownerId = session.ownerId;
                 session.recorder.ownerEmail = session.ownerEmail;
               }
+            } else if (cmd.type === "gesture") {
+              // Hand gesture from iOS publisher
+              controlEventBus.publish({
+                type: "gesture",
+                gesture: cmd.gesture,
+                confidence: cmd.confidence,
+                timestampMs: cmd.timestampMs || Date.now(),
+              });
+              console.log(`[relay] Gesture: ${cmd.gesture} confidence=${cmd.confidence} session=${sessionId}`);
+            } else if (cmd.type === "activate_app") {
+              // Activate an app for this session
+              const appId = cmd.appId as string;
+              const pipeline = appRegistry.resolvePipeline(appId);
+              if (pipeline) {
+                session.activeAppId = appId;
+                session.appPipeline = pipeline;
+                console.log(`[relay] App activated: ${appId} binding=${pipeline.primitiveId} session=${sessionId}`);
+                // Confirm to publisher
+                ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
+              } else {
+                console.warn(`[relay] App activation failed: ${appId} not found`);
+                ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+              }
+            } else if (cmd.type === "deactivate_app") {
+              const prevApp = session.activeAppId;
+              session.activeAppId = null;
+              session.appPipeline = null;
+              console.log(`[relay] App deactivated: ${prevApp} session=${sessionId}`);
+              ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
             }
-          } catch (err) { console.warn("[relay] Publisher hello parse error:", err); }
+          } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
           // Binary frame (Uint8Array in Bun)
           const buf = message as Uint8Array;

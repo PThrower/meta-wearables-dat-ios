@@ -1,0 +1,30 @@
+{
+  "primitives": [
+    {
+      "id": "s2s-gemini-live",
+      "input": { "format": "pcm-audio", "sampleRate": 16000 },
+      "output": { "format": "pcm-audio" }
+    },
+    {
+      "id": "hand-pose",
+      "input": { "format": "jpeg-image" },
+      "output": { "format": "gesture-event" }
+    }
+  ],
+  "apps": [
+    {
+      "id": "spanish-co-pilot",
+      "name": "Spanish Co-pilot",
+      "description": "Learn Spanish through conversation and visual context",
+      "icon": "text.bubble",
+      "binding": "s2s-gemini-live",
+      "systemPrompt": "You are a friendly Spanish language coach. The user is wearing smart glasses with a camera and microphone. Respond in a mix of Spanish and English appropriate for a beginner. When the user points at objects, identify them in Spanish. Keep responses short and conversational. Correct pronunciation gently.",
+      "config": {
+        "model": "gemini-3.1-flash-live-preview",
+        "voice": "Kore",
+        "visionFps": 1,
+        "gestures": ["thumbs_up", "thumbs_down", "open_palm", "pointing"]
+      }
+    }
+  ]
+}
