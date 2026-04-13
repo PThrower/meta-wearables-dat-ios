@@ -1,171 +1,19 @@
 /**
- * Authentication — Google OAuth via GIS
- *
- * Centralized auth module: JWT decode, token lifecycle, auth-aware fetch,
- * user info display, logout.
+ * Auth barrel — re-exports from split modules + initAuth() orchestrator.
+ * Zero breaking changes for existing imports.
  */
 
-import { loadConfig, getConfig } from "./config.js";
+// Re-export from core (pure logic — zero DOM)
+export { getToken, isNoAuth, requireAuth, authFetch, authUrl, getUserEmail, escHtml } from "./auth/core.js";
 
-const loginOverlay = document.getElementById("loginOverlay")!;
+// Re-export from account (UI — all DOM)
+export { loginOverlay, logout, handleGoogleLogin } from "./auth/account.js";
 
-export { loginOverlay };
-
-// --- JWT decode (client-side only — UX, not security boundary) ---
-
-interface JwtPayload {
-  exp?: number;
-  email?: string;
-  sub?: string;
-  [key: string]: unknown;
-}
-
-function decodeJwtPayload(token: string): JwtPayload | null {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return null;
-    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = decodeURIComponent(
-      atob(b64).split("").map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join(""),
-    );
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
-
-// --- HTML escape ---
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// --- Token accessors ---
-
-export function getToken(): string | null {
-  return localStorage.getItem("relay_token");
-}
-
-// --- Config helpers ---
-
-export function isNoAuth(): boolean {
-  try { return getConfig().noAuth; } catch { return false; }
-}
-
-// --- Auth gate ---
-
-export function requireAuth(): boolean {
-  if (isNoAuth()) return false;
-  const token = getToken();
-  if (!token) {
-    loginOverlay.classList.remove("hidden");
-    return true;
-  }
-  // Check expiry — proactively prompt re-login before server rejects
-  const payload = decodeJwtPayload(token);
-  if (payload?.exp && payload.exp * 1000 < Date.now()) {
-    localStorage.removeItem("relay_token");
-    updateUserInfo();
-    loginOverlay.classList.remove("hidden");
-    return true;
-  }
-  return false;
-}
-
-// --- Auth-aware fetch ---
-
-export async function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    ...(opts.headers as Record<string, string> || {}),
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(url, { ...opts, headers });
-  if (res.status === 401) {
-    localStorage.removeItem("relay_token");
-    loginOverlay.classList.remove("hidden");
-    updateUserInfo();
-    window.dispatchEvent(new CustomEvent("auth:logout"));
-  }
-  return res;
-}
-
-// --- URL token appending (for <img>, <video> src) ---
-
-export function authUrl(url: string): string {
-  const token = getToken();
-  if (!token) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}token=${encodeURIComponent(token)}`;
-}
-
-// --- User info ---
-
-export function getUserEmail(): string | null {
-  const token = getToken();
-  if (!token) return null;
-  return decodeJwtPayload(token)?.email ?? null;
-}
-
-function updateUserInfo(): void {
-  const el = document.getElementById("userInfo");
-  if (!el) return;
-  const email = getUserEmail();
-  if (email) {
-    el.innerHTML = `<span class="user-email">${escHtml(email)}</span><button id="logoutBtn" class="logout-btn">Logout</button>`;
-    document.getElementById("logoutBtn")?.addEventListener("click", logout);
-  } else if (!isNoAuth()) {
-    el.innerHTML = `<button id="signinBtn" class="signin-btn">Sign in</button>`;
-    document.getElementById("signinBtn")?.addEventListener("click", () => {
-      loginOverlay.classList.remove("hidden");
-    });
-  } else {
-    el.innerHTML = "";
-  }
-}
-
-// --- Logout ---
-
-export function logout(): void {
-  localStorage.removeItem("relay_token");
-  loginOverlay.classList.remove("hidden");
-  updateUserInfo();
-  window.dispatchEvent(new CustomEvent("auth:logout"));
-}
-
-// --- Google GIS callback ---
-
-export function handleGoogleLogin(response: { credential: string }): void {
-  const token = response.credential;
-  localStorage.setItem("relay_token", token);
-  loginOverlay.classList.add("hidden");
-  updateUserInfo();
-  window.dispatchEvent(new CustomEvent("auth:login"));
-}
-
-// --- Init ---
+// Internal imports for initAuth orchestrator
+import { loadConfig } from "./config.js";
+import { initAccountUI } from "./auth/account.js";
 
 export async function initAuth(): Promise<void> {
   const cfg = await loadConfig();
-  const clientId = cfg.googleClientId;
-
-  (window as any).handleGoogleLogin = handleGoogleLogin;
-
-  if (clientId) {
-    // Use imperative API — GIS script may have already loaded with empty data-client_id
-    const google = (window as any).google;
-    if (google?.accounts?.id) {
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleGoogleLogin,
-      });
-      // Re-render the sign-in button inside the overlay
-      google.accounts.id.renderButton(
-        document.getElementById("g_id_signin"),
-        { type: "standard", size: "large", theme: "filled_black", text: "sign_in_with", shape: "rectangular", logo_alignment: "left" },
-      );
-    }
-  }
-  // Restore user info if already logged in (page reload)
-  updateUserInfo();
+  initAccountUI(cfg.googleClientId);
 }
