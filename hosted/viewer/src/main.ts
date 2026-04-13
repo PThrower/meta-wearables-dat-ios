@@ -65,6 +65,7 @@ pttBtn.addEventListener("mouseup", pttStop);
 pttBtn.addEventListener("mouseleave", pttStop);
 pttBtn.addEventListener("touchend", pttStop);
 pttBtn.addEventListener("touchcancel", pttStop);
+pttBtn.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // Auth login handler
 window.addEventListener("auth:login", () => {
@@ -165,6 +166,7 @@ function shareTokenFromUrl(): string | null {
       pendingShareToken = shareToken;
     }
   } else {
+    if (requireAuth()) return; // show login overlay, auth:login handler will call fetchGallery()
     fetchGallery();
   }
 })();
