@@ -105,8 +105,7 @@ function extractFirstJpeg(mjpeg: Buffer): Buffer | null {
  */
 export async function getCachedMp4Url(sessionId: string, store: ObjectStore): Promise<string | null> {
   const key = `sessions/${sessionId}/export.mp4`;
-  const keys = await store.list(`sessions/${sessionId}/`);
-  if (!keys.includes(key)) return null;
+  if (!await store.exists(key)) return null;
 
   try {
     return await store.signedUrl(key, 3600);

@@ -147,11 +147,9 @@ async function pruneEmptyShells(): Promise<void> {
         if (segments > 0) continue; // has segments — keep
       } catch { continue; }
 
-      // Empty shell — delete all keys for this session
+      // Empty shell — batch delete all keys for this session
       const sessionKeys = keys.filter(k => k.startsWith(`sessions/${sessionId}/`));
-      for (const sk of sessionKeys) {
-        await store.delete(sk);
-      }
+      await store.deleteBatch(sessionKeys);
       pruned++;
     }
     if (pruned > 0) {
@@ -1216,7 +1214,7 @@ const server = Bun.serve<WsData>({
           const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
           if (metaBuf) {
             const meta = JSON.parse(new TextDecoder().decode(metaBuf));
-            const exportCached = (await store.list(`sessions/${sessionId}/`)).includes(`sessions/${sessionId}/export.mp4`);
+            const exportCached = await store.exists(`sessions/${sessionId}/export.mp4`);
             updateGalleryIndexEntry(sessionId, meta, exportCached);
           }
         } catch { /* non-critical */ }
