@@ -108,6 +108,8 @@ export async function fetchGallery(): Promise<void> {
   }
   try {
     const res = await authFetch("/gallery/api");
+    const data = await res.json();
+    console.log("[gallery] status:", res.status, "sessions:", data.length ?? "err", data?.error ?? "");
     // Server returns 401 when token is expired/invalid — re-auth
     if (res.status === 401) {
       localStorage.removeItem("relay_token");
@@ -165,6 +167,8 @@ function shareTokenFromUrl(): string | null {
 
   const sessionId = sessionIdFromUrl();
   const shareToken = shareTokenFromUrl();
+
+  console.log("[boot] sessionId:", sessionId, "shareToken:", !!shareToken, "token:", !!getToken(), "noAuth:", isNoAuth());
 
   if (sessionId) {
     const authNeeded = watchLive(sessionId, shareToken ?? undefined);
