@@ -5,15 +5,19 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/publish": "http://localhost:8080",
-      "/view":   "http://localhost:8080",
-      "/sessions": "http://localhost:8080",
-      "/gallery/api":  "http://localhost:8080",
-      "/gallery":  "http://localhost:8080",
-      "/session":  "http://localhost:8080",
-      "/stats":    "http://localhost:8080",
-      "/tap":      { target: "http://localhost:8080", ws: true },
-      "/latest":   "http://localhost:8080",
+      // WebSocket routes go directly to relay server (no gateway hop)
+      "/publish": { target: "http://localhost:8080", ws: true },
+      "/view":    { target: "http://localhost:8080", ws: true },
+      "/tap":     { target: "http://localhost:8080", ws: true },
+
+      // HTTP API routes go through auth gateway (matches Caddy routing)
+      "/sessions":   "http://localhost:3000",
+      "/gallery/api":  "http://localhost:3000",
+      "/gallery":  "http://localhost:3000",
+      "/session":  "http://localhost:3000",
+      "/stats":    "http://localhost:3000",
+      "/latest":   "http://localhost:3000",
+      "/api":      "http://localhost:3000",
     },
   },
   build: {
