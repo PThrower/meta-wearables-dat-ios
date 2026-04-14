@@ -215,7 +215,7 @@ export class SessionStore {
 
       if (segments === 0 && !isLive) continue;
       const visible = canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail);
-      if (sessions.length < 2) console.log(`[gallery-filter] ${sessionId.slice(0,8)} access=${accessLevel} ownerEmail=${ownerEmail} ownerId=${ownerId} userId=${userId} userEmail=${userEmail} visible=${visible}`);
+      if (sessions.length < 2) console.log(`[gallery-filter] ${sessionId.slice(0,8)} access=${accessLevel} ownerEmail="${ownerEmail}" ownerId=${ownerId} userId=${userId} userEmail="${userEmail}" showAll=${showAll} visible=${visible} emailMatch=${userEmail === ownerEmail}`);
       if (!showAll && !visible) continue;
 
       let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
