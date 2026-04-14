@@ -156,6 +156,27 @@ async function findLatestSessionId(): Promise<string | null> {
   return latestId;
 }
 
+/** Find the latest session visible to a specific user. Returns 404-safe null when user can't see any session. */
+async function findLatestSessionIdForUser(userId?: string, userEmail?: string): Promise<string | null> {
+  const sessionIds = await sessionStore.getSessionIds();
+  if (sessionIds.length === 0) return null;
+
+  let latestId: string | null = null;
+  let latestTime = 0;
+  for (const id of sessionIds) {
+    const meta = await sessionStore.getMeta(id);
+    if (!meta) continue;
+    if (!canSeeInGallery(
+      { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
+      userId,
+      userEmail,
+    )) continue;
+    const t = new Date(meta.startedAt || 0).getTime();
+    if (t > latestTime) { latestTime = t; latestId = id; }
+  }
+  return latestId;
+}
+
 /** Filter session IDs to only those visible to a given user */
 async function filterSessionIdsByVisibility(
   ids: string[],
@@ -181,6 +202,7 @@ async function filterSessionIdsByVisibility(
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
+const REQUIRE_PUBLISHER_AUTH = process.env.RELAY_REQUIRE_PUBLISHER_AUTH === "1";
 const VIEWER_GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const VIEWER_BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
 
@@ -258,10 +280,16 @@ const server = Bun.serve<WsData>({
   async fetch(req, server) {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
 
-    // --- Latest session (timestamp-ordered, most recent) ---
+    // --- Latest session (auth-gated, user-scoped) ---
 
     if (url.pathname === "/latest/video.mp4") {
-      const latestId = await findLatestSessionId();
+      const user = await getAuthenticatedUser(req, url);
+      if (!user && !NO_AUTH_FLAG) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const latestId = NO_AUTH_FLAG
+        ? await findLatestSessionId()
+        : await findLatestSessionIdForUser(user?.sub, user?.email);
       if (!latestId) {
         return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
@@ -271,7 +299,13 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/latest/export") {
-      const latestId = await findLatestSessionId();
+      const user = await getAuthenticatedUser(req, url);
+      if (!user && !NO_AUTH_FLAG) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const latestId = NO_AUTH_FLAG
+        ? await findLatestSessionId()
+        : await findLatestSessionIdForUser(user?.sub, user?.email);
       if (!latestId) {
         return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
@@ -775,8 +809,8 @@ const server = Bun.serve<WsData>({
             const shareTok = cmd.shareToken || ws.data.shareToken;
             const user = await verifyToken(token);
 
-            // Allow publishers without auth (iOS client doesn't send tokens yet)
-            if (!user && role !== "publish") {
+            // Require auth for all roles; publishers exempted until RELAY_REQUIRE_PUBLISHER_AUTH=1
+            if (!user && !(role === "publish" && !REQUIRE_PUBLISHER_AUTH)) {
               ws.close(4001, "auth failed");
               return;
             }

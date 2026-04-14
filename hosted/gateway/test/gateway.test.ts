@@ -14,6 +14,7 @@
 
 import { describe, test, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { join } from "node:path";
+import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { createFetchHandler } from "../src/index.js";
 
 // --- Port allocation ---
@@ -54,6 +55,7 @@ interface CapturedRequest {
 }
 
 let captured: CapturedRequest | null = null;
+let tempDistDir: string;
 let relayServer: ReturnType<typeof Bun.serve>;
 let gatewayServer: ReturnType<typeof Bun.serve>;
 let authGatewayServer: ReturnType<typeof Bun.serve>;
@@ -105,19 +107,27 @@ beforeAll(async () => {
   gatewayPort = ports[1];
   authGatewayPort = ports[2];
 
+  // Create temp viewer dist with fixture files
+  tempDistDir = join(import.meta.dir, "__dist_fixture__");
+  mkdirSync(join(tempDistDir, "assets"), { recursive: true });
+  writeFileSync(join(tempDistDir, "landing.html"), "<html><body>landing</body></html>");
+  writeFileSync(join(tempDistDir, "index.html"), "<html><body>spa</body></html>");
+  writeFileSync(join(tempDistDir, "assets", "main-D1XAAt4f.js"), "console.log(1);");
+  writeFileSync(join(tempDistDir, "assets", "main-DHQaXpJ5.css"), "body{margin:0}");
+
   // Set env so proxy.ts targets the mock relay (evaluated per-request now)
   process.env.RELAY_PORT = String(relayPort);
-  process.env.VIEWER_DIST = join(import.meta.dir, "../../viewer/dist");
+  process.env.VIEWER_DIST = tempDistDir;
 
   // Start mock relay
   relayServer = Bun.serve({ port: relayPort, hostname: "127.0.0.1", fetch: mockRelayHandler });
 
   // Start gateway (NO_AUTH mode)
-  const noAuthHandler = createFetchHandler({ noAuth: true, viewerDist: process.env.VIEWER_DIST });
+  const noAuthHandler = createFetchHandler({ noAuth: true, viewerDist: tempDistDir });
   gatewayServer = Bun.serve({ port: gatewayPort, hostname: "127.0.0.1", fetch: noAuthHandler });
 
   // Start auth-enforcing gateway (shares same relay)
-  const authHandler = createFetchHandler({ noAuth: false, viewerDist: process.env.VIEWER_DIST });
+  const authHandler = createFetchHandler({ noAuth: false, viewerDist: tempDistDir });
   authGatewayServer = Bun.serve({ port: authGatewayPort, hostname: "127.0.0.1", fetch: authHandler });
 });
 
@@ -125,6 +135,7 @@ afterAll(() => {
   relayServer?.stop?.();
   gatewayServer?.stop?.();
   authGatewayServer?.stop?.();
+  try { rmSync(tempDistDir, { recursive: true, force: true }); } catch {}
 });
 
 afterEach(() => { resetCaptured(); });
@@ -332,17 +343,18 @@ describe("Public routes", () => {
     expect(captured!.headers["x-user-id"]).toBeUndefined();
   });
 
-  test("GET /latest/video.mp4 proxies without auth", async () => {
+  test("GET /latest/video.mp4 proxies with dev user (auth required)", async () => {
     const res = await gw("/latest/video.mp4");
     expect(res.status).toBe(200);
     expect(captured!.path).toBe("/latest/video.mp4");
-    expect(captured!.headers["x-user-id"]).toBeUndefined();
+    expect(captured!.headers["x-user-id"]).toBe("dev");
   });
 
-  test("GET /latest/export proxies without auth", async () => {
+  test("GET /latest/export proxies with dev user (auth required)", async () => {
     const res = await gw("/latest/export");
     expect(res.status).toBe(200);
     expect(captured!.path).toBe("/latest/export");
+    expect(captured!.headers["x-user-id"]).toBe("dev");
   });
 });
 
@@ -537,9 +549,9 @@ describe("Auth rejection (NO_AUTH=false)", () => {
     expect(res.status).toBe(200);
   });
 
-  test("GET /latest/* → 200 without auth", async () => {
+  test("GET /latest/* → 401 without auth", async () => {
     const res = await fetch(`${AGW()}/latest/export`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   test("static files served without auth", async () => {
@@ -558,9 +570,19 @@ describe("Auth rejection (NO_AUTH=false)", () => {
     expect(res.status).toBe(200);
   });
 
-  test("GET /session/{id}/audio/* → 401 without token", async () => {
+  test("GET /session/{id}/audio/* → 401 without token or share", async () => {
     const res = await fetch(`${AGW()}/session/abc/audio/chunk-001.pcm`);
     expect(res.status).toBe(401);
+  });
+
+  test("GET /session/{id}/audio/* → 200 with share token", async () => {
+    const res = await fetch(`${AGW()}/session/abc/audio/chunk-001.pcm?share=shr_test`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+  });
+
+  test("GET /session/{id}/video/* → 200 with share token", async () => {
+    const res = await fetch(`${AGW()}/session/abc/video/seg-001.mjpeg?share=shr_test`, { redirect: "manual" });
+    expect(res.status).toBe(302);
   });
 
   test("DELETE /session/{id}/share/{token} → 401 without token", async () => {

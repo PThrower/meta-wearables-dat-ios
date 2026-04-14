@@ -104,6 +104,22 @@ export function createFetchHandler(config?: {
     return verifyToken(token);
   };
 
+  // Static file serving (closure over _viewerDist)
+  function _serveStatic(filePath: string): Response | null {
+    const fullPath = join(_viewerDist, filePath);
+    const file = Bun.file(fullPath);
+    if (file.size === 0) return null;
+
+    const ext = extname(fullPath);
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
+    return new Response(file, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+      },
+    });
+  }
+
   async function _requireAuth(req: Request, url: URL): Promise<{ user: AuthUser } | Response> {
     const token = extractToken(req, url);
     const user = await _verifyToken(token);
@@ -179,21 +195,21 @@ export function createFetchHandler(config?: {
     // --- Static files: landing page at root ---
 
     if (pathname === "/" || pathname === "/index.html") {
-      const resp = serveStatic("landing.html") || serveStatic("index.html");
+      const resp = _serveStatic("landing.html") || _serveStatic("index.html");
       if (resp) return resp;
     }
 
     // --- Static files: assets with hash ---
 
     if (pathname.startsWith("/assets/")) {
-      const resp = serveStatic(pathname.slice(1));
+      const resp = _serveStatic(pathname.slice(1));
       if (resp) return resp;
     }
 
     // --- Gallery SPA entry ---
 
     if (pathname === "/gallery" || pathname === "/gallery/") {
-      const resp = serveStatic("index.html");
+      const resp = _serveStatic("index.html");
       if (resp) return resp;
     }
 
@@ -227,15 +243,18 @@ export function createFetchHandler(config?: {
     }
 
     // --- Apps registry ---
+    // Intentionally public: iOS client needs app discovery before login.
 
     if (pathname === "/apps") {
       return proxyRequest(req, pathname);
     }
 
-    // --- Latest session ---
+    // --- Latest session (auth required) ---
 
     if (pathname.startsWith("/latest/")) {
-      return proxyRequest(req, pathname);
+      const authResult = await _requireAuth(req, url);
+      if (authResult instanceof Response) return authResult;
+      return proxyRequest(req, pathname, authResult.user);
     }
 
     // --- Session sub-routes ---
@@ -308,11 +327,12 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname, user || undefined);
     }
 
-    // S3 retrieval
+    // S3 retrieval (share token OR user auth required)
     const videoSegMatch = pathname.match(/^\/session\/([^/]+)\/video\/(.+)$/);
     if (videoSegMatch) {
+      const shareTok = extractShareToken(url);
       const user = await _optionalAuth(req, url);
-      if (!user && !_noAuth) {
+      if (!user && !shareTok && !_noAuth) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       return proxyRequest(req, pathname, user || undefined);
@@ -320,8 +340,9 @@ export function createFetchHandler(config?: {
 
     const audioSegMatch = pathname.match(/^\/session\/([^/]+)\/audio\/(.+)$/);
     if (audioSegMatch) {
+      const shareTok = extractShareToken(url);
       const user = await _optionalAuth(req, url);
-      if (!user && !_noAuth) {
+      if (!user && !shareTok && !_noAuth) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       return proxyRequest(req, pathname, user || undefined);
@@ -329,7 +350,7 @@ export function createFetchHandler(config?: {
 
     // --- SPA fallback ---
 
-    const staticResp = serveStatic("index.html");
+    const staticResp = _serveStatic("index.html");
     if (staticResp) return staticResp;
 
     return Response.json({ error: "Not found" }, { status: 404 });
