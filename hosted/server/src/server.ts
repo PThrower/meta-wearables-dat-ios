@@ -296,6 +296,12 @@ const server = Bun.serve<WsData>({
     if (url.pathname === "/gallery/api") {
       const token = extractToken(req, url);
       const user = await verifyToken(token);
+      // Token was sent but verification failed — tell client to re-auth
+      if (token && !user && !NO_AUTH_FLAG) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "token expired" }));
+        return;
+      }
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
       const userId = user?.sub;
