@@ -299,7 +299,6 @@ const server = Bun.serve<WsData>({
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
       const userId = user?.sub;
-      if (token) console.log(`[gallery] user=${userId ?? "null"} email=${user?.email ?? "null"} showAll=${showAll}`);
       const recorded = await sessionStore.galleryCached(userId, user?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
 
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
