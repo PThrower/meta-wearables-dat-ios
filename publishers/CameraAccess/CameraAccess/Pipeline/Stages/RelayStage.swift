@@ -472,7 +472,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
             let systemVersion = UIDevice.current.systemVersion
 
-            let hello: [String: String] = [
+            var hello: [String: String] = [
                 "type": "hello",
                 "deviceId": deviceId,
                 "deviceName": deviceName,
@@ -483,6 +483,11 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             ]
+
+            // Include auth token so relay server can verify identity (deferred WS auth)
+            if let token = await self.lastConnectedToken {
+                hello["token"] = token
+            }
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
                   let str = String(data: data, encoding: .utf8) else { return }

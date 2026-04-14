@@ -97,6 +97,9 @@ class StreamSessionViewModel: ObservableObject {
 
   // Auth state
   @Published var idToken: String?
+  @Published var isAuthenticated: Bool = false
+  @Published var authError: String?
+  private let authService = GoogleAuthService()
 
   var isStreaming: Bool {
     streamingStatus != .stopped
@@ -342,12 +345,45 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  // MARK: - Auth
+
+  func signIn() async {
+    do {
+      let token = try await authService.getIdToken()
+      idToken = token
+      isAuthenticated = true
+      authError = nil
+    } catch {
+      authError = error.localizedDescription
+      isAuthenticated = false
+    }
+  }
+
+  func signOut() async {
+    await authService.signOut()
+    idToken = nil
+    isAuthenticated = false
+  }
+
   // MARK: - Relay (video + audio)
 
   // THREADING REVIEW [FIXED]:
   // Permission check runs on @MainActor here (safe for AVAudioSession APIs).
   // audioStage.start() no longer touches AVAudioSession — permission handled above.
   func startRelay() async {
+    // Require auth before streaming
+    if idToken == nil {
+      do {
+        let token = try await authService.getIdToken()
+        idToken = token
+        isAuthenticated = true
+      } catch {
+        errorMessage = "Sign in required: \(error.localizedDescription)"
+        showError = true
+        return
+      }
+    }
+
     let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !url.isEmpty else {
       errorMessage = "Enter a relay URL (e.g. ws://192.168.1.x:8080/publish)"
