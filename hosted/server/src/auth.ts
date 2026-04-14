@@ -4,17 +4,42 @@
  * When requests come through the gateway (RELAY_TRUST_HEADERS=1), reads user
  * identity from trusted headers (X-User-Id, X-User-Email) set by the gateway.
  *
- * For WebSocket connections (which bypass the gateway), falls back to direct
- * Google JWT verification. For local dev (RELAY_NO_AUTH=1), returns dev user.
+ * For WebSocket connections (which bypass the gateway), verifies session tokens
+ * (HMAC-SHA256 signed JWTs minted by the gateway) first, then falls back to
+ * direct Google JWT verification. For local dev (RELAY_NO_AUTH=1), returns dev user.
  */
 
+import { createHmac } from "node:crypto";
 import { OAuth2Client } from "google-auth-library";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH = process.env.RELAY_NO_AUTH === "1";
 const TRUST_HEADERS = process.env.RELAY_TRUST_HEADERS === "1";
+const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 
 const oauthClient = new OAuth2Client(CLIENT_ID);
+
+// --- Session token verification (mirrors gateway/src/auth.ts) ---
+
+function b64urlDecode(s: string): string {
+  return Buffer.from(s, "base64url").toString();
+}
+
+function verifySessionToken(token: string): AuthUser | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts;
+  const expected = createHmac("sha256", SESSION_SECRET).update(`${header}.${payload}`).digest("base64url");
+  if (signature !== expected) return null;
+  try {
+    const data = JSON.parse(b64urlDecode(payload));
+    if (!data.sub || !data.email) return null;
+    if (data.exp && data.exp * 1000 < Date.now()) return null;
+    return { sub: data.sub, email: data.email };
+  } catch {
+    return null;
+  }
+}
 
 export interface AuthUser {
   sub: string;
@@ -57,13 +82,19 @@ export async function getAuthenticatedUser(req: Request, url: URL): Promise<Auth
 }
 
 /**
- * Verify a Google ID token and return the user identity.
+ * Verify a token and return the user identity.
+ * Tries session token first (fast HMAC, minted by gateway), then falls back to Google JWT.
  * Returns null if the token is invalid, expired, or missing required fields.
- * Used for WebSocket hello messages that bypass the gateway.
  */
 export async function verifyToken(token: string | null | undefined): Promise<AuthUser | null> {
   if (NO_AUTH) return { sub: "dev", email: "dev@localhost" };
   if (!token) return null;
+
+  // Fast path: session token (HMAC-SHA256, no network call)
+  const sessionUser = verifySessionToken(token);
+  if (sessionUser) return sessionUser;
+
+  // Slow path: Google JWT verification
   try {
     const ticket = await oauthClient.verifyIdToken({
       idToken: token,
