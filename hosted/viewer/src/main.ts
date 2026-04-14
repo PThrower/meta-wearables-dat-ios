@@ -109,7 +109,6 @@ export async function fetchGallery(): Promise<void> {
   try {
     const res = await authFetch("/gallery/api");
     const data = await res.json();
-    console.log("[gallery] status:", res.status, "sessions:", data.length ?? "err", data?.error ?? "");
     // Server returns 401 when token is expired/invalid — re-auth
     if (res.status === 401) {
       localStorage.removeItem("relay_token");
@@ -121,7 +120,7 @@ export async function fetchGallery(): Promise<void> {
       return;
     }
     clearNetworkError();
-    ingest(await res.json());
+    ingest(data);
     hasGalleryData = true;
   } catch (err) {
     showNetworkError("Network error — relay server unreachable");
