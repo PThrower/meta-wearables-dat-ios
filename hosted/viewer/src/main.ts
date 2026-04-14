@@ -3,7 +3,7 @@
  */
 
 import { loadConfig } from "./config.js";
-import { initAuth, requireAuth, authFetch, isTokenExpired, isNoAuth } from "./auth.js";
+import { initAuth, requireAuth, authFetch, isNoAuth, getToken } from "./auth.js";
 import { ingest, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
@@ -101,14 +101,16 @@ initVideoPlayerEvents();
 
 /** Auth-aware gallery fetch */
 export async function fetchGallery(): Promise<void> {
-  // Check if token is expired before fetching
-  if (!isNoAuth() && isTokenExpired()) {
+  // If no token at all, show login instead of making a doomed request
+  if (!isNoAuth() && !getToken()) {
     requireAuth();
     return;
   }
   try {
     const res = await authFetch("/gallery/api");
+    // Server returns 401 when token is expired/invalid — re-auth
     if (res.status === 401) {
+      localStorage.removeItem("relay_token");
       requireAuth();
       return;
     }
