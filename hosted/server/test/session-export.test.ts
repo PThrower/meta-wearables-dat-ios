@@ -116,10 +116,12 @@ describe("getGalleryData", () => {
   test("lists sessions sorted by most recent first", async () => {
     await store.put("sessions/old/meta.json", Buffer.from(JSON.stringify({
       startedAt: "2026-04-01T10:00:00.000Z",
+      accessLevel: "public",
       recording: { segmentsWritten: 5 },
     })));
     await store.put("sessions/new/meta.json", Buffer.from(JSON.stringify({
       startedAt: "2026-04-09T15:00:00.000Z",
+      accessLevel: "public",
       recording: { segmentsWritten: 3 },
     })));
 
@@ -132,6 +134,7 @@ describe("getGalleryData", () => {
   test("marks live sessions", async () => {
     await store.put("sessions/live-one/meta.json", Buffer.from(JSON.stringify({
       startedAt: "2026-04-09T10:00:00.000Z",
+      accessLevel: "public",
     })));
 
     const gallery = await getGalleryData(store as any, new Set(["live-one"]));
@@ -141,6 +144,7 @@ describe("getGalleryData", () => {
   test("detects cached exports", async () => {
     await store.put("sessions/s1/meta.json", Buffer.from(JSON.stringify({
       startedAt: "2026-04-09T10:00:00.000Z",
+      accessLevel: "public",
     })));
     await store.put("sessions/s1/export.mp4", Buffer.alloc(1024));
 

@@ -63,12 +63,12 @@ export class SessionRegistry {
           wearableType: null,
           resolution: null,
           ownerEmail: null,
-          accessLevel: "link",
+          accessLevel: "private",
           acl: [],
         },
         ownerId: undefined,
         ownerEmail: undefined,
-        accessLevel: "link",
+        accessLevel: "private",
         acl: [],
         publisherClaiming: false,
         activeAppId: null,
@@ -158,10 +158,10 @@ export class SessionRegistry {
       session.metadata.accessLevel = session.accessLevel;
     }
 
-    // Unauthenticated publisher → public session so viewers can connect
+    // Unauthenticated publisher → link session (viewers need share token)
     if (!userId && !session.ownerId) {
-      session.accessLevel = "public";
-      session.metadata.accessLevel = "public";
+      session.accessLevel = "link";
+      session.metadata.accessLevel = "link";
     }
 
     // Start recorder — reuse stable recordingId so reconnects append to same R2 prefix

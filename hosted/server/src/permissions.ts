@@ -68,10 +68,9 @@ export async function resolvePermission(
     return { allowed: false, role: "none", reason: "invalid or expired share token" };
   }
 
-  // 4. Orphaned sessions (no owner) — treat as viewer for any authenticated user
-  if (!input.ownerId && !input.acl?.length) {
-    return { allowed: true, role: "viewer" };
-  }
+  // 4. Orphaned sessions (no owner) — only visible if explicitly public
+  // Previously treated as viewer for any authenticated user, which leaked
+  // cross-user data when ownerId wasn't persisted to R2 meta.json.
 
   // 5. Access level fallback
   if (input.accessLevel === "public") {
@@ -247,11 +246,17 @@ export function canSeeInGallery(
   // Public sessions visible to all
   if (meta.accessLevel === "public") return true;
 
-  // Link sessions with no owner are discoverable (anyone with the link)
-  if (meta.accessLevel === "link" && !meta.ownerId && !meta.ownerEmail) return true;
-
-  // Private sessions with no owner — treat as public (orphaned)
-  if (meta.accessLevel === "private" && !meta.ownerId && !meta.ownerEmail) return true;
+  // Link sessions visible only with a share token (checked at route level).
+  // Orphaned link sessions (no owner) are NOT visible in gallery to prevent
+  // cross-user data leakage.
+  if (meta.accessLevel === "link") {
+    // Owner always sees their own sessions
+    if (userId && meta.ownerId === userId) return true;
+    if (userEmail && meta.ownerEmail === userEmail) return true;
+    // ACL match
+    if (userId && meta.acl?.some(e => e.userId === userId)) return true;
+    return false;
+  }
 
   // Owner always sees their sessions (by sub ID or email fallback)
   if (userId && meta.ownerId === userId) return true;
