@@ -3,7 +3,7 @@
  * All DOM manipulation for auth lives here.
  */
 
-import { getUserEmail, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout } from "./core.js";
+import { getUserEmail, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout, isTokenExpired } from "./core.js";
 
 const loginOverlay = document.getElementById("loginOverlay")!;
 
@@ -90,6 +90,11 @@ export function initAccountUI(clientId?: string): void {
   window.addEventListener("auth:unauthenticated", () => {
     showLoginOverlay();
     updateUserInfo();
+    // Auto-prompt One Tap for returning users
+    const google = (window as any).google;
+    if (google?.accounts?.id) {
+      google.accounts.id.prompt();
+    }
   });
 
   // Restore user info if already logged in (page reload)

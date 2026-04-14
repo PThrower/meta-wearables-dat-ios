@@ -70,6 +70,17 @@ export function requireAuth(): boolean {
   return false;
 }
 
+// --- Token expiration check ---
+
+export function isTokenExpired(): boolean {
+  const token = getToken();
+  if (!token) return true;
+  const payload = decodeJwtPayload(token);
+  if (!payload?.exp) return true;
+  // Consider token expired 5 minutes before actual expiration
+  return payload.exp * 1000 < Date.now() + 300_000;
+}
+
 // --- Auth-aware fetch ---
 
 export async function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {

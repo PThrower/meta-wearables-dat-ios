@@ -4,7 +4,7 @@
  */
 
 // Re-export from core (pure logic — zero DOM)
-export { getToken, isNoAuth, requireAuth, authFetch, authUrl, getUserEmail, escHtml } from "./auth/core.js";
+export { getToken, isNoAuth, requireAuth, authFetch, authUrl, getUserEmail, escHtml, isTokenExpired } from "./auth/core.js";
 
 // Re-export from account (UI — all DOM)
 export { loginOverlay, logout, handleGoogleLogin } from "./auth/account.js";

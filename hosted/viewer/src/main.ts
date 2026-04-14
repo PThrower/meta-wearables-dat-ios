@@ -3,7 +3,7 @@
  */
 
 import { loadConfig } from "./config.js";
-import { initAuth, requireAuth, authFetch } from "./auth.js";
+import { initAuth, requireAuth, authFetch, isTokenExpired, isNoAuth } from "./auth.js";
 import { ingest, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
@@ -101,6 +101,11 @@ initVideoPlayerEvents();
 
 /** Auth-aware gallery fetch */
 export async function fetchGallery(): Promise<void> {
+  // Check if token is expired before fetching
+  if (!isNoAuth() && isTokenExpired()) {
+    requireAuth();
+    return;
+  }
   try {
     const res = await authFetch("/gallery/api");
     if (res.status === 401) {
