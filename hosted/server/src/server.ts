@@ -61,6 +61,7 @@ import {
   revokeShareToken,
   listShareTokens,
 } from "./permissions.js";
+import { SessionStore } from "./session-store.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -85,6 +86,7 @@ const serverStartTime = Date.now();
 // --- Object Store ---
 
 const store: ObjectStore = createObjectStore();
+const sessionStore = new SessionStore(store);
 
 // --- Session Registry ---
 
@@ -133,260 +135,23 @@ await loadWasm();
 
 setInterval(() => registry.cleanupStale(), 5_000);
 
-// --- One-time empty shell cleanup (prunes R2 sessions with 0 video segments) ---
+// --- Background timers for gallery index and cleanup ---
 
-async function pruneEmptyShells(): Promise<void> {
-  try {
-    const keys = await store.list("sessions/") as string[];
-    const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-    const videoKeys = new Set(
-      keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"))
-        .map(k => { const m = k.match(/^sessions\/([^/]+)\//); return m ? m[1] : ""; })
-        .filter(Boolean),
-    );
-
-    let pruned = 0;
-    for (const mk of metaKeys) {
-      const sessionId = mk.slice("sessions/".length, mk.length - "/meta.json".length);
-      if (videoKeys.has(sessionId)) continue; // has video — keep
-
-      const buf = await store.get(mk);
-      if (!buf) continue;
-      try {
-        const meta = JSON.parse(new TextDecoder().decode(buf));
-        const segments = meta.recording?.segmentsWritten || 0;
-        if (segments > 0) continue; // has segments — keep
-      } catch { continue; }
-
-      // Empty shell — batch delete all keys for this session
-      const sessionKeys = keys.filter(k => k.startsWith(`sessions/${sessionId}/`));
-      await store.deleteBatch(sessionKeys);
-      pruned++;
-    }
-    if (pruned > 0) {
-      console.log(`[cleanup] Pruned ${pruned} empty shell session(s) from R2`);
-      invalidateSessionListCache();
-      invalidateGalleryCache();
-    }
-  } catch (err) {
-    console.error("[cleanup] Empty shell prune failed:", err);
-  }
-}
-
-// Run once after first gallery index build
-setTimeout(pruneEmptyShells, 15_000);
-
-// --- Gallery index (server-side, updated incrementally) ---
-
-const GALLERY_INDEX_TTL_MS = 120_000; // refresh full index every 2 min
-
-// Background gallery index refresh — keeps index warm so requests aren't blocked
-setInterval(async () => {
-  try {
-    await buildGalleryIndex();
-    const currentIds = new Set([...galleryIndex.keys()]);
-    pruneGalleryIndex(currentIds);
-  } catch (err) { console.error("[gallery-index] refresh failed:", err); }
-}, GALLERY_INDEX_TTL_MS);
-
-// --- Gallery index (server-side, updated incrementally) ---
-
-// Stores parsed meta.json per session — avoids full R2 scan on every request
-const galleryIndex = new Map<string, { meta: Record<string, any>; exportCached: boolean; hasThumbnail: boolean; updatedAt: number }>();
-let galleryIndexReady = false;
-
-/** Build the gallery index from R2 (parallel reads) */
-async function buildGalleryIndex(): Promise<void> {
-  const keys = await store.list("sessions/") as string[];
-  const metaKeys = keys.filter(k => k.startsWith("sessions/") && k.endsWith("/meta.json"));
-  const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
-  const thumbKeys = new Set(keys.filter(k => k.endsWith("/thumb.jpg")));
-  const videoKeys = keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"));
-
-  // Build a set of sessions that have at least one video segment or a cached thumbnail
-  const sessionsWithVideo = new Set<string>();
-  for (const vk of videoKeys) {
-    const match = vk.match(/^sessions\/([^/]+)\/video\//);
-    if (match) sessionsWithVideo.add(match[1]);
-  }
-
-  // Parallel reads — much faster than serial loop
-  const entries = await Promise.all(metaKeys.map(async (mk) => {
-    const sessionId = mk.slice("sessions/".length, mk.length - "/meta.json".length);
-    try {
-      const buf = await store.get(mk);
-      if (!buf) return null;
-      const meta = JSON.parse(new TextDecoder().decode(buf));
-      return {
-        sessionId,
-        meta,
-        exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`),
-        hasThumbnail: thumbKeys.has(`sessions/${sessionId}/thumb.jpg`) || sessionsWithVideo.has(sessionId),
-      };
-    } catch { return null; }
-  }));
-
-  // Merge into index (preserve newer entries if concurrent update)
-  for (const entry of entries) {
-    if (!entry) continue;
-    const existing = galleryIndex.get(entry.sessionId);
-    if (!existing || existing.updatedAt < Date.now()) {
-      galleryIndex.set(entry.sessionId, {
-        meta: entry.meta,
-        exportCached: entry.exportCached,
-        hasThumbnail: entry.hasThumbnail,
-        updatedAt: Date.now(),
-      });
-    }
-  }
-  galleryIndexReady = true;
-}
-
-/** Update a single session in the index (called when recorder finishes) */
-function updateGalleryIndexEntry(sessionId: string, meta: Record<string, any>, exportCached = false, hasThumbnail = true): void {
-  galleryIndex.set(sessionId, { meta, exportCached, hasThumbnail, updatedAt: Date.now() });
-}
-
-/** Remove sessions from index that no longer exist in R2 */
-function pruneGalleryIndex(currentIds: Set<string>): void {
-  for (const id of galleryIndex.keys()) {
-    if (!currentIds.has(id)) galleryIndex.delete(id);
-  }
-}
-
-/** Build a filtered GallerySession[] from the in-memory index */
-function galleryFromIndex(
-  liveSessionIds: Set<string>,
-  userId?: string,
-  userEmail?: string,
-  showAll?: boolean,
-): GallerySession[] {
-  const sessions: GallerySession[] = [];
-  for (const [sessionId, entry] of galleryIndex) {
-    const meta = entry.meta;
-    const accessLevel: AccessLevel = meta.accessLevel || "link";
-    const acl: AclEntry[] = meta.acl || [];
-    const ownerId: string | undefined = meta.ownerId;
-    const ownerEmail: string | undefined = meta.ownerEmail;
-    const segments: number = meta.recording?.segmentsWritten || 0;
-    const isLive = liveSessionIds.has(sessionId);
-
-    // Filter out empty shell sessions (0 segments, not live)
-    if (segments === 0 && !isLive) continue;
-
-    if (!showAll && !canSeeInGallery({ accessLevel, acl, ownerId, ownerEmail }, userId, userEmail)) continue;
-
-    let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
-    if (userId && ownerId === userId) viewerRole = "owner";
-    else if (userId && acl.find((e: AclEntry) => e.userId === userId)?.role === "editor") viewerRole = "editor";
-    else if (userId && acl.find((e: AclEntry) => e.userId === userId)) viewerRole = "viewer";
-    else if (accessLevel === "public") viewerRole = "public";
-
-    sessions.push({
-      sessionId,
-      live: isLive,
-      startedAt: meta.startedAt || new Date(0).toISOString(),
-      finishedAt: meta.finishedAt,
-      durationMs: meta.durationMs,
-      device: {
-        deviceName: meta.device?.deviceName || null,
-        deviceModel: meta.device?.deviceModel || null,
-        wearableType: meta.device?.wearableType || null,
-      },
-      segments,
-      audioChunks: meta.recording?.audioChunks || 0,
-      exportCached: entry.exportCached,
-      hasThumbnail: entry.hasThumbnail,
-      thumbnailUrl: `/session/${sessionId}/thumbnail`,
-      videoUrl: `/session/${sessionId}/video.mp4?audio`,
-      ownerId,
-      ownerEmail,
-      accessLevel,
-      acl,
-      viewerRole,
-    });
-  }
-  sessions.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-  return sessions;
-}
-
-// --- Per-user response cache (short TTL, avoids re-filtering on every request) ---
-
-const galleryCacheMap = new Map<string, { data: GallerySession[]; expiry: number }>();
-const GALLERY_TTL_MS = 30_000;
-
-// --- Session list cache ---
-
-let sessionListCache: { ids: string[]; expiry: number } | null = null;
-const SESSION_LIST_TTL_MS = 60_000;
-
-async function getCachedSessionIds(): Promise<string[]> {
-  const now = Date.now();
-  if (sessionListCache && now < sessionListCache.expiry) {
-    return sessionListCache.ids;
-  }
-  const keys = await store.list("sessions/") as string[];
-  const metaKeys = keys.filter(k => k.startsWith("sessions/") && k.endsWith("/meta.json"));
-  const ids = metaKeys.map(k => k.slice("sessions/".length, k.length - "/meta.json".length));
-  sessionListCache = { ids, expiry: now + SESSION_LIST_TTL_MS };
-  return ids;
-}
-
-function invalidateSessionListCache(): void {
-  sessionListCache = null;
-}
-
-async function galleryCached(userId?: string, userEmail?: string, showAll?: boolean): Promise<GallerySession[]> {
-  const cacheKey = showAll ? "__all" : (userId || "__anon");
-  const now = Date.now();
-
-  // Evict expired per-user caches
-  for (const [key, entry] of galleryCacheMap) {
-    if (now >= entry.expiry) galleryCacheMap.delete(key);
-  }
-  const cached = galleryCacheMap.get(cacheKey);
-  if (cached && now < cached.expiry) {
-    const liveIds = new Set(registry.listActive().map(s => s.id));
-    return cached.data.map(s => ({ ...s, live: liveIds.has(s.sessionId) }));
-  }
-
-  // Build index on first request or when stale
-  if (!galleryIndexReady) {
-    await buildGalleryIndex();
-  }
-
-  const liveIds = new Set(registry.listActive().map(s => s.id));
-  const data = galleryFromIndex(liveIds, userId, userEmail, showAll);
-  galleryCacheMap.set(cacheKey, { data, expiry: now + GALLERY_TTL_MS });
-  return data;
-}
-
-/** Invalidate gallery cache for a specific user (or all) */
-function invalidateGalleryCache(userId?: string): void {
-  if (userId) {
-    galleryCacheMap.delete(userId);
-    galleryCacheMap.delete("__anon"); // anon cache may change too
-  } else {
-    galleryCacheMap.clear();
-  }
-}
+sessionStore.startBackgroundTimers(() => new Set(registry.listActive().map(s => s.id)));
 
 // --- Helpers ---
 
 async function findLatestSessionId(): Promise<string | null> {
-  const sessionIds = await getCachedSessionIds();
+  const sessionIds = await sessionStore.getSessionIds();
   if (sessionIds.length === 0) return null;
 
   let latestId: string | null = null;
   let latestTime = 0;
   for (const id of sessionIds) {
-    const buf = await store.get(`sessions/${id}/meta.json`);
-    if (!buf) continue;
-    try {
-      const meta = JSON.parse(new TextDecoder().decode(buf));
-      const t = new Date(meta.startedAt).getTime();
-      if (t > latestTime) { latestTime = t; latestId = id; }
-    } catch { console.warn(`[findLatest] Corrupt meta for session ${id}`); }
+    const meta = await sessionStore.getMeta(id);
+    if (!meta) continue;
+    const t = new Date(meta.startedAt || 0).getTime();
+    if (t > latestTime) { latestTime = t; latestId = id; }
   }
   return latestId;
 }
@@ -399,18 +164,15 @@ async function filterSessionIdsByVisibility(
 ): Promise<string[]> {
   const visible: string[] = [];
   for (const id of ids) {
-    const buf = await store.get(`sessions/${id}/meta.json`);
-    if (!buf) continue;
-    try {
-      const meta = JSON.parse(new TextDecoder().decode(buf));
-      if (canSeeInGallery(
-        { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
-        userId,
-        userEmail,
-      )) {
-        visible.push(id);
-      }
-    } catch { /* skip corrupt meta */ }
+    const meta = await sessionStore.getMeta(id);
+    if (!meta) continue;
+    if (canSeeInGallery(
+      { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
+      userId,
+      userEmail,
+    )) {
+      visible.push(id);
+    }
   }
   return visible;
 }
@@ -432,13 +194,7 @@ interface SessionMetaFromR2 {
 }
 
 async function getSessionMetaFromR2(sessionId: string): Promise<SessionMetaFromR2 | null> {
-  const buf = await store.get(`sessions/${sessionId}/meta.json`);
-  if (!buf) return null;
-  try {
-    return JSON.parse(new TextDecoder().decode(buf));
-  } catch {
-    return null;
-  }
+  return sessionStore.getMeta(sessionId);
 }
 
 type AuthResult = { user: { sub: string; email: string }; role: SessionRole | "public" | "none" } | Response;
@@ -543,7 +299,8 @@ const server = Bun.serve<WsData>({
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
       const userId = user?.sub;
-      const recorded = await galleryCached(userId, user?.email, showAll);
+      if (token) console.log(`[gallery] user=${userId ?? "null"} email=${user?.email ?? "null"} showAll=${showAll}`);
+      const recorded = await sessionStore.galleryCached(userId, user?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
 
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
       const r2Ids = new Set(recorded.map(s => s.sessionId));
@@ -611,7 +368,7 @@ const server = Bun.serve<WsData>({
       );
 
       // Use cached session list instead of scanning all R2 keys
-      const historicalSessionIds = await getCachedSessionIds();
+      const historicalSessionIds = await sessionStore.getSessionIds();
 
       // Filter historical sessions by ownership
       const visibleHistorical = showAll ? historicalSessionIds : await filterSessionIdsByVisibility(
@@ -726,16 +483,10 @@ const server = Bun.serve<WsData>({
         }
 
         // Update R2 meta.json
-        const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
-        if (metaBuf) {
-          const meta = JSON.parse(new TextDecoder().decode(metaBuf));
-          if (body.accessLevel) meta.accessLevel = body.accessLevel;
-          if (body.acl) meta.acl = body.acl;
-          await store.put(`sessions/${sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2)));
-        }
+        await sessionStore.patchMeta(sessionId, { accessLevel: body.accessLevel, acl: body.acl });
 
-        invalidateGalleryCache();
-        invalidateSessionListCache();
+        sessionStore.invalidateGalleryCache();
+        sessionStore.invalidateSessionListCache();
         return Response.json({ ok: true });
       } catch {
         return Response.json({ error: "Invalid request body" }, { status: 400 });
@@ -859,7 +610,7 @@ const server = Bun.serve<WsData>({
 
       const key = `sessions/${id}/video/${seg}`;
       try {
-        const signed = await store.signedUrl(key, 3600);
+        const signed = await sessionStore.signedUrl(key, 3600);
         return Response.redirect(signed);
       } catch {
         return Response.json({ error: "Not found" }, { status: 404 });
@@ -874,7 +625,7 @@ const server = Bun.serve<WsData>({
 
       const key = `sessions/${id}/audio/${chunk}`;
       try {
-        const signed = await store.signedUrl(key, 3600);
+        const signed = await sessionStore.signedUrl(key, 3600);
         return Response.redirect(signed);
       } catch {
         return Response.json({ error: "Not found" }, { status: 404 });
@@ -1257,17 +1008,16 @@ const server = Bun.serve<WsData>({
         await registry.releasePublisher(sessionId);
         // Update gallery index incrementally and generate thumbnail
         try {
-          const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
-          if (metaBuf) {
-            const meta = JSON.parse(new TextDecoder().decode(metaBuf));
-            const exportCached = await store.exists(`sessions/${sessionId}/export.mp4`);
-            updateGalleryIndexEntry(sessionId, meta, exportCached);
+          const meta = await sessionStore.getMeta(sessionId);
+          if (meta) {
+            const exportCached = await sessionStore.exists(`sessions/${sessionId}/export.mp4`);
+            sessionStore.updateGalleryIndexEntry(sessionId, meta, exportCached);
           }
         } catch { /* non-critical */ }
         // Generate thumbnail in background — don't block disconnect
         getSessionThumbnail(sessionId, store).catch(() => {});
-        invalidateGalleryCache();
-        invalidateSessionListCache();
+        sessionStore.invalidateGalleryCache();
+        sessionStore.invalidateSessionListCache();
       } else {
         const viewerId = ws.data.viewerId;
         if (viewerId) {

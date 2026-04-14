@@ -35,7 +35,8 @@ export async function verifyToken(token: string | null | undefined): Promise<Aut
     const payload = ticket.getPayload();
     if (!payload?.sub || !payload?.email) return null;
     return { sub: payload.sub, email: payload.email };
-  } catch {
+  } catch (err) {
+    console.warn("[auth] token verify failed:", (err as Error).message?.slice(0, 120));
     return null;
   }
 }
