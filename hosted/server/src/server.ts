@@ -298,9 +298,7 @@ const server = Bun.serve<WsData>({
       const user = await verifyToken(token);
       // Token was sent but verification failed — tell client to re-auth
       if (token && !user && !NO_AUTH_FLAG) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "token expired" }));
-        return;
+        return Response.json({ error: "token expired" }, { status: 401 });
       }
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
