@@ -34,3 +34,12 @@ hosted/viewer/dist/
 hosted/viewer/node_modules/
 hosted/packages/relay-protocol/dist/
 hosted/packages/relay-protocol/node_modules/
+/sessions
+.wrangler
+
+# Playwright
+test-results/
+
+# Server-embedded viewer build
+hosted/server/viewer/dist/
+hosted/server/viewer/node_modules/

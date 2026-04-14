@@ -99,10 +99,12 @@ export class RelayPlayer {
   // --- Connection ---
 
   private _pendingShareToken: string | null = null;
+  private _authToken: string | null = null;
 
-  connect(url: string, shareToken?: string): void {
+  connect(url: string, shareToken?: string, authToken?: string): void {
     this.lastUrl = url;
     this._pendingShareToken = shareToken ?? null;
+    this._authToken = authToken ?? null;
     this.intentionalClose = false;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.ws) this.ws.close();
@@ -115,10 +117,11 @@ export class RelayPlayer {
       this._resetStreamState();
       this.cb.onConnectionState("connected");
       this.cb.onStatus("CONNECTED");
-      // Send viewer identity with version info
+      // Send viewer identity with version info and auth token
       let v = { gitCommit: "unknown", buildVersion: "unknown" };
       try { v = getConfig().version; } catch {}
-      this.ws!.send(JSON.stringify({ type: "hello", ...v }));
+      const token = this._authToken || localStorage.getItem("relay_token") || "";
+      this.ws!.send(JSON.stringify({ type: "hello", token, ...v }));
     };
 
     this.ws.onmessage = (event) => this._handleMessage(event);
@@ -147,7 +150,11 @@ export class RelayPlayer {
         this.cb.onConnectionState("reconnecting");
         this.cb.onStatus(`RECONN ${Math.round(this.reconnectDelay / 1000)}s`);
         this.reconnectTimer = setTimeout(() => {
-          if (this.lastUrl) this.connect(this.lastUrl);
+          if (this.lastUrl) {
+            // Re-read token from localStorage on reconnect (may have been refreshed)
+            const freshToken = localStorage.getItem("relay_token") || undefined;
+            this.connect(this.lastUrl, this._pendingShareToken ?? undefined, freshToken);
+          }
         }, this.reconnectDelay);
         this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.RECONNECT_MAX);
       }

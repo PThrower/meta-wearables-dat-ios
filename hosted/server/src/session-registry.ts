@@ -93,7 +93,7 @@ export class SessionRegistry {
   // --- Publisher management ---
 
   /** Claim the publisher slot for a session. Returns error string or null on success. */
-  claimPublisher(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string): string | null {
+  async claimPublisher(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string): Promise<string | null> {
     const session = this.getOrCreate(sessionId);
 
     // Ownership enforcement: if session already has an owner, verify identity
@@ -110,6 +110,12 @@ export class SessionRegistry {
       return "publisher claim in progress";
     }
     session.publisherClaiming = true;
+
+    // Finish any existing recorder before starting a new one (prevents overlap)
+    if (session.recorder) {
+      try { await session.recorder.finish(); } catch { /* non-critical */ }
+      session.recorder = null;
+    }
 
     // Track reconnects — session already existed with a disconnected publisher
     if (session.publisher === null && this.sessions.has(sessionId) && session.createdAt < Date.now() - 1000) {

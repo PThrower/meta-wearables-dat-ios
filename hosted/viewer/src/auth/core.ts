@@ -34,10 +34,25 @@ export function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// --- Constants ---
+
+const TOKEN_KEY = "relay_token";
+const EXPIRY_BUFFER_MS = 300_000; // 5 minutes — single source of truth
+
 // --- Token accessors ---
 
 export function getToken(): string | null {
-  return localStorage.getItem("relay_token");
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+  syncTokenCookie(token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+  syncTokenCookie(null);
 }
 
 export function getTokenPayload(): JwtPayload | null {
@@ -46,42 +61,47 @@ export function getTokenPayload(): JwtPayload | null {
   return decodeJwtPayload(token);
 }
 
+// --- Cookie sync (keeps relay_token cookie in sync for media requests) ---
+
+function syncTokenCookie(token: string | null): void {
+  if (token) {
+    document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; path=/; SameSite=Strict; max-age=${7 * 24 * 60 * 60}`;
+  } else {
+    document.cookie = `${TOKEN_KEY}=; path=/; SameSite=Strict; max-age=0`;
+  }
+}
+
 // --- Config helpers ---
 
 export function isNoAuth(): boolean {
   try { return getConfig().noAuth; } catch { return false; }
 }
 
-// --- Auth gate (pure logic — returns boolean, dispatches events) ---
+// --- Unified token expiry check (single source of truth) ---
 
-export function requireAuth(): boolean {
-  if (isNoAuth()) return false;
-  const token = getToken();
-  if (!token) {
-    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
-    return true;
-  }
-  const payload = decodeJwtPayload(token);
-  if (payload?.exp && payload.exp * 1000 < Date.now()) {
-    localStorage.removeItem("relay_token");
-    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
-    return true;
-  }
-  return false;
-}
-
-// --- Token expiration check ---
+const EXPIRY_BUFFER_SEC = EXPIRY_BUFFER_MS / 1000;
 
 export function isTokenExpired(): boolean {
   const token = getToken();
   if (!token) return true;
   const payload = decodeJwtPayload(token);
   if (!payload?.exp) return true;
-  // Consider token expired 5 minutes before actual expiration
-  return payload.exp * 1000 < Date.now() + 300_000;
+  return payload.exp < Math.floor(Date.now() / 1000) + EXPIRY_BUFFER_SEC;
 }
 
-// --- Auth-aware fetch ---
+// --- Auth gate (pure logic — returns boolean, dispatches events) ---
+
+export function requireAuth(): boolean {
+  if (isNoAuth()) return false;
+  if (isTokenExpired()) {
+    clearToken();
+    window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
+    return true;
+  }
+  return false;
+}
+
+// --- Auth-aware fetch (single 401 handler) ---
 
 export async function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   const token = getToken();
@@ -91,20 +111,18 @@ export async function authFetch(url: string, opts: RequestInit = {}): Promise<Re
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(url, { ...opts, headers });
   if (res.status === 401) {
-    localStorage.removeItem("relay_token");
+    clearToken();
     window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
     window.dispatchEvent(new CustomEvent("auth:logout"));
   }
   return res;
 }
 
-// --- URL token appending (for <img>, <video> src) ---
+// --- URL token appending (fallback for media — cookie is preferred) ---
 
 export function authUrl(url: string): string {
-  const token = getToken();
-  if (!token) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}token=${encodeURIComponent(token)}`;
+  // Cookie-based auth is preferred; authUrl is a fallback for cross-origin cases
+  return url;
 }
 
 // --- User info ---
@@ -113,6 +131,87 @@ export function getUserEmail(): string | null {
   const token = getToken();
   if (!token) return null;
   return decodeJwtPayload(token)?.email ?? null;
+}
+
+// --- Session token exchange ---
+
+export async function exchangeCredential(credential: string): Promise<{ token: string; email: string } | null> {
+  try {
+    const res = await fetch("/api/auth/exchange", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.token || !data.user?.email) return null;
+    return { token: data.token, email: data.user.email };
+  } catch (err) {
+    console.warn("[auth] credential exchange failed:", err);
+    return null;
+  }
+}
+
+// --- Token refresh ---
+
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startRefreshTimer(): void {
+  stopRefreshTimer();
+  // Check every 60 seconds
+  refreshTimer = setInterval(async () => {
+    const token = getToken();
+    if (!token) return;
+
+    const payload = decodeJwtPayload(token);
+    if (!payload?.exp) return;
+
+    const remaining = payload.exp - Math.floor(Date.now() / 1000);
+    // Refresh if < 24h remaining
+    if (remaining > 0 && remaining < 24 * 60 * 60) {
+      try {
+        const res = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.token) {
+            setToken(data.token);
+            console.log("[auth] session token refreshed");
+          }
+        }
+      } catch {
+        // Silent fail — next interval will retry
+      }
+    }
+  }, 60_000);
+}
+
+export function stopRefreshTimer(): void {
+  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+}
+
+// --- Cross-tab synchronization ---
+
+let storageListenerActive = false;
+
+export function startCrossTabSync(): void {
+  if (storageListenerActive) return;
+  storageListenerActive = true;
+
+  window.addEventListener("storage", (e: StorageEvent) => {
+    if (e.key !== TOKEN_KEY) return;
+    if (e.newValue === null) {
+      // Token removed (logout in another tab)
+      window.dispatchEvent(new CustomEvent("auth:logout"));
+      window.dispatchEvent(new CustomEvent("auth:unauthenticated"));
+    } else if (e.newValue && e.oldValue !== e.newValue) {
+      // Token changed (login or refresh in another tab)
+      syncTokenCookie(e.newValue);
+      window.dispatchEvent(new CustomEvent("auth:login"));
+    }
+  });
 }
 
 // --- Event dispatchers ---

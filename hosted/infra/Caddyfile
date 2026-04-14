@@ -1,10 +1,5 @@
 relay.simulationapi.com {
-    root * /root/relay-server/hosted/viewer/dist
-
-    # API and WebSocket proxy to Bun — highest priority
-    handle /api/* {
-        reverse_proxy localhost:8080
-    }
+    # WebSocket routes go directly to relay server (no gateway hop)
     handle /publish {
         reverse_proxy localhost:8080
     }
@@ -14,42 +9,9 @@ relay.simulationapi.com {
     handle /tap/* {
         reverse_proxy localhost:8080
     }
-    handle /sessions {
-        reverse_proxy localhost:8080
-    }
-    handle /stats {
-        reverse_proxy localhost:8080
-    }
-    handle /gallery/api {
-        reverse_proxy localhost:8080
-    }
-    handle /latest/* {
-        reverse_proxy localhost:8080
-    }
-    # Session API sub-routes (video, audio, thumbnail, export, etc.)
-    handle /session/*/* {
-        reverse_proxy localhost:8080
-    }
-    # /session/<id> share token routes (POST/PATCH/DELETE)
-    handle /session/*/share* {
-        reverse_proxy localhost:8080
-    }
-    handle /session/*/access {
-        reverse_proxy localhost:8080
-    }
-    handle /session/*/audio-in {
-        reverse_proxy localhost:8080
-    }
-    # /session/<id> bare path — serve SPA (live viewer picks up session from URL)
-    # This must come AFTER the API sub-route handles above
 
-    # Landing page at root (rewrite, not redirect — URL stays /)
-    @isRoot path /
-    rewrite @isRoot /landing.html
-
-    # Static files + SPA fallback
+    # Everything else goes to the auth gateway (static files + API proxy)
     handle {
-        file_server
-        try_files {path} /index.html
+        reverse_proxy localhost:3000
     }
 }

@@ -172,7 +172,7 @@ publisher.onmessage(frame)
 | `hosted/server/src/session-export.ts` | Gallery data, MP4 export, thumbnails |
 | `hosted/server/src/session-recorder.ts` | Server-side recording |
 | `hosted/server/src/types.ts` | Shared TypeScript types |
-| `hosted/crate/src/lib.rs` | Rust WASM `FrameRelay.should_relay()` |
+| `hosted/packages/frame-relay-wasm/src/lib.rs` | Rust WASM `FrameRelay.should_relay()` |
 | `hosted/viewer/index.html` | Browser viewer (canvas, A/V sync, ring buffer) |
 | `hosted/viewer/directory.html` | Session directory listing |
 | `hosted/viewer/gallery.html` | Creator gallery (stored sessions) |
@@ -220,7 +220,7 @@ The refactor is confined to `server.ts` and `session-registry.ts`:
 6. Update viewer HTML to accept and pass `session` param
 7. Instantiate `FrameRelay` per session instead of globally
 
-**Zero changes** to `hosted/crate` (Rust WASM) -- `FrameRelay` is already stateless per instance.  
+**Zero changes** to `hosted/packages/frame-relay-wasm` (Rust WASM) -- `FrameRelay` is already stateless per instance.  
 **Additive change** to viewer HTML -- session picker + param passthrough.  
 **iOS client change** -- append `?session=<id>` to the relay URL (P1-1 in PRD-001).
 

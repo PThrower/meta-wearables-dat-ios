@@ -1,0 +1,19 @@
+{
+  "name": "caringmind-gateway",
+  "version": "0.1.0",
+  "description": "Auth gateway — JWT verification, permission checks, static serving, and proxy to relay server",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test"
+  },
+  "keywords": ["gateway", "auth", "proxy", "caringmind"],
+  "license": "MIT",
+  "dependencies": {
+    "google-auth-library": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11"
+  }
+}

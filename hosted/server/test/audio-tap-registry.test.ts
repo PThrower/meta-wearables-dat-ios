@@ -64,6 +64,9 @@ describe("AudioTapBus + SessionRegistry integration", () => {
     session.recorder = new SessionRecorder(sessionId, store as any);
     session.recorder.start({});
 
+    // Activate recorder with a video frame (recorder only activates on video)
+    session.recorder.appendVideo(buildFRLYFrame({}));
+
     // Publish audio through bus + forward to recorder
     for (let i = 0; i < 5; i++) {
       const frame = buildFRAUFrame({

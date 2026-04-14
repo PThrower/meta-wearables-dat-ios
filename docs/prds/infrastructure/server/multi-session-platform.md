@@ -140,7 +140,7 @@ The root `/` page changes from a single-stream viewer to a **session directory**
 
 | Package | Scope | What Changes |
 |---------|-------|-------------|
-| `hosted/crate` | None | `FrameRelay` is already stateless-per-instance. Instantiate one per session instead of one globally. |
+| `hosted/packages/frame-relay-wasm` | None | `FrameRelay` is already stateless-per-instance. Instantiate one per session instead of one globally. |
 | `hosted/server` | Major | Replace `let publisher` + global `viewers` with `sessions` map. Route by `session` query param. Add `/sessions` and `/session/:id` endpoints. Per-session stale-cleanup. |
 | `hosted/viewer` | Additive | Accept `?session=` param. Add session-chooser UI for directory page. Auto-reconnect stays, scoped to session. |
 

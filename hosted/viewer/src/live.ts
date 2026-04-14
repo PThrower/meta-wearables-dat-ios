@@ -29,9 +29,8 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   if (requireAuth()) return true;
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const authToken = getToken() || "";
-  // Server reads token from URL during WebSocket upgrade via extractToken()
-  let wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(authToken)}`;
+  // No token in URL — auth is done via hello message (RelayPlayer includes it)
+  let wsUrl = `${proto}//${location.host}/view?session=${encodeURIComponent(sessionId)}`;
   if (shareToken) wsUrl += `&share=${encodeURIComponent(shareToken)}`;
 
   if (player) { player.destroy(); player = null; }
@@ -62,7 +61,8 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
 
   document.getElementById("gallery")!.classList.add("hidden");
   document.getElementById("livePlayer")!.classList.add("active");
-  player.connect(wsUrl, shareToken);
+  // Pass token separately — RelayPlayer includes it in the hello message
+  player.connect(wsUrl, shareToken, getToken() || undefined);
   return false;
 }
 

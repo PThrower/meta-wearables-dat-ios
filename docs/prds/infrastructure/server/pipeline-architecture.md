@@ -173,7 +173,7 @@ Built in:
 
 ## Relay Crate (Rust/WASM)
 
-Location: `hosted/crate/`
+Location: `hosted/packages/frame-relay-wasm/`
 
 Package: `frame-relay-wasm` v0.1.0
 

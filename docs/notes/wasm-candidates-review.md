@@ -27,7 +27,7 @@
 
 | Location | Language | Lines | What it does |
 |----------|----------|-------|-------------|
-| `hosted/crate/src/lib.rs:88-124` | Rust/Wasm | ~37 | `encode_frame_prefix()` + `decode_frame_prefix()` with `FrameHeader` struct |
+| `hosted/packages/frame-relay-wasm/src/lib.rs:88-124` | Rust/Wasm | ~37 | `encode_frame_prefix()` + `decode_frame_prefix()` with `FrameHeader` struct |
 | `hosted/server/src/server.ts:316-327` | TypeScript | ~12 | `parseHeader()` with DataView |
 | `samples/.../RelayStage.swift` | Swift | ~30 | Manual byte-by-byte construction with `Data` |
 | `hosted/viewer/index.html:348-356` | JavaScript | ~9 | DataView parsing inline |
@@ -52,7 +52,7 @@
 
 Three independent implementations with different semantics:
 
-**Rust (Wasm) -- `hosted/crate/src/lib.rs:57-66`:**
+**Rust (Wasm) -- `hosted/packages/frame-relay-wasm/src/lib.rs:57-66`:**
 ```rust
 pub fn should_relay(&mut self, now_ms: u64) -> bool {
     self.frames_received += 1;
@@ -393,7 +393,7 @@ Audio DSP: 1 implementation (Rust/Wasm)
 
 ### Phase 1: Extend the Rust Crate (Highest Impact, Lowest Risk)
 
-The existing `hosted/crate/src/lib.rs` becomes the universal protocol+telemetry module.
+The existing `hosted/packages/frame-relay-wasm/src/lib.rs` becomes the universal protocol+telemetry module.
 
 **1a. Add FRAU protocol:**
 ```
@@ -462,8 +462,8 @@ Each uses the FlatBuffer schema from Phase 2 for zero-copy data exchange.
 
 | File | Role |
 |------|------|
-| `hosted/crate/src/lib.rs` | Current Rust/Wasm crate (FRLY + throttle) |
-| `hosted/crate/Cargo.toml` | Crate config (cdylib, wasm-bindgen, opt-level "s", LTO) |
+| `hosted/packages/frame-relay-wasm/src/lib.rs` | Current Rust/Wasm crate (FRLY + throttle) |
+| `hosted/packages/frame-relay-wasm/Cargo.toml` | Crate config (cdylib, wasm-bindgen, opt-level "s", LTO) |
 | `hosted/server/src/server.ts` | Bun server: FRLY/FRAU parsing, fanout, timing, recording |
 | `hosted/viewer/index.html` | Browser viewer: FRLY/FRAU decode, ring buffer, resampling, A/V sync |
 | `samples/.../Pipeline/FramePipelineManager.swift` | Frame dispatch to stages |

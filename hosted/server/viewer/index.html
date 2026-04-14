@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>CaringMind</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- LOGIN OVERLAY -->
+  <div id="loginOverlay" class="hidden">
+    <h2>Sign in to CaringMind</h2>
+    <p>Authentication required to view live streams and access stats.</p>
+    <div id="g_id_signin"></div>
+  </div>
+
+  <!-- GALLERY -->
+  <div id="gallery">
+    <header>
+      <div class="header-left">
+        <a href="/" class="header-home">CaringMind</a>
+        <p id="subtitle"></p>
+      </div>
+      <div class="filters">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="mine">My Sessions</button>
+        <button class="filter-btn" data-filter="live">Live</button>
+        <button class="filter-btn" data-filter="recorded">Recorded</button>
+      </div>
+      <div id="userInfo"></div>
+    </header>
+    <div id="grid"></div>
+    <div id="status-bar">
+      <span id="last-refresh">--</span>
+      <span><a href="/stats">Stats</a> &middot; Auto-refresh 30s</span>
+    </div>
+  </div>
+
+  <!-- SHARE DIALOG -->
+  <div id="shareDialog" class="hidden">
+    <div class="share-dialog-content">
+      <div class="share-dialog-header">
+        <h3>Share Session</h3>
+        <button id="closeShareDialog" class="close-btn">&times;</button>
+      </div>
+      <div class="share-dialog-body">
+        <div class="share-create-row">
+          <select id="shareExpiry">
+            <option value="1">1 hour</option>
+            <option value="24">1 day</option>
+            <option value="168" selected>7 days</option>
+            <option value="720">30 days</option>
+          </select>
+          <button id="shareCreateBtn" class="action-btn primary">Create Link</button>
+        </div>
+        <div class="share-link-row">
+          <input type="text" id="shareLink" readonly placeholder="Share link will appear here">
+          <button id="shareCopyBtn" class="action-btn">Copy</button>
+        </div>
+        <div id="shareTokenList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE PLAYER -->
+  <div id="livePlayer">
+    <div class="player-top">
+      <button class="back-btn" id="backBtn">&larr; Back</button>
+      <span>FPS <span class="val" id="p-fps">--</span></span>
+      <span>SIZE <span class="val" id="p-size">--</span></span>
+      <span>LATENCY <span class="val" id="p-latency">--</span></span>
+      <span>DROP <span class="val" id="p-drop">--</span></span>
+      <span>AUDIO <span class="audio-val" id="p-audio">OFF</span>
+        <span id="audio-meter"><span id="audio-meter-fill"></span></span>
+      </span>
+      <select id="quality-select">
+        <option value="high">High (30 FPS)</option>
+        <option value="medium">Medium (15 FPS)</option>
+        <option value="low">Low (8 FPS)</option>
+        <option value="mini">Mini (4 FPS)</option>
+      </select>
+      <button id="ptt-btn" class="ptt-button" title="Push to Talk">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="player-canvas">
+      <canvas id="liveCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- RECORDED VIDEO -->
+  <div id="videoPlayer">
+    <button class="close-btn" id="closeVideoBtn">&times;</button>
+    <video id="recVideo" controls autoplay></video>
+  </div>
+
+  <!-- UNMUTE -->
+  <div id="unmute">
+    <div>
+      <div class="icon">&#x1f50a;</div>
+      <div class="text">Tap anywhere to enable audio</div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

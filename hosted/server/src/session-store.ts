@@ -334,17 +334,29 @@ export class SessionStore {
 
   // --- Background timers ---
 
+  private _timers: ReturnType<typeof setInterval | typeof setTimeout>[] = [];
+
   startBackgroundTimers(getLiveIds: () => Set<string>): void {
     // Refresh gallery index every 2 min
-    setInterval(async () => {
+    const galleryTimer = setInterval(async () => {
       try {
         await this.buildGalleryIndex();
         const currentIds = new Set([...this.galleryIndex.keys()]);
         this.pruneGalleryIndex(currentIds);
       } catch (err) { console.error("[gallery-index] refresh failed:", err); }
     }, this.GALLERY_INDEX_TTL_MS);
+    this._timers.push(galleryTimer);
 
     // One-time empty shell cleanup after 15s
-    setTimeout(() => this.pruneEmptyShells(), 15_000);
+    const shellTimer = setTimeout(() => this.pruneEmptyShells(), 15_000);
+    this._timers.push(shellTimer);
+  }
+
+  stopBackgroundTimers(): void {
+    for (const t of this._timers) {
+      clearInterval(t as ReturnType<typeof setInterval>);
+      clearTimeout(t as ReturnType<typeof setTimeout>);
+    }
+    this._timers = [];
   }
 }

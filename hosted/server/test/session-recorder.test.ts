@@ -57,6 +57,7 @@ describe("SessionRecorder", () => {
         channels: 1,
         pcmPayload: pcmData,
       });
+      recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(frame);
       await recorder.finish();
 
@@ -72,6 +73,7 @@ describe("SessionRecorder", () => {
 
     test("stores raw PCM when frame has no FRAU header", async () => {
       const rawPcm = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
+      recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(rawPcm);
       await recorder.finish();
 
@@ -109,6 +111,7 @@ describe("SessionRecorder", () => {
 
     test("captures sample rate from FRAU header", async () => {
       // All frames in one flush cycle → single chunk with last frame's sample rate
+      recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(buildFRAUFrame({
         sampleRate: 8000,
         channels: 1,
@@ -164,6 +167,7 @@ describe("SessionRecorder", () => {
     });
 
     test("records audio chunk metadata with sample rate", async () => {
+      recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(buildFRAUFrame({
         sampleRate: 16000,
         channels: 1,

@@ -43,7 +43,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry } from "./app-registry.js";
-import { verifyToken, extractToken, extractShareToken } from "./auth.js";
+import { verifyToken, extractToken, extractShareToken, getAuthenticatedUser, extractTrustedUser } from "./auth.js";
 import {
   getSessionExportMeta,
   getSessionThumbnail,
@@ -133,7 +133,7 @@ await loadWasm();
 
 // --- Stale cleanup ---
 
-setInterval(() => registry.cleanupStale(), 5_000);
+const staleCleanupTimer = setInterval(() => registry.cleanupStale(), 5_000);
 
 // --- Background timers for gallery index and cleanup ---
 
@@ -210,8 +210,8 @@ async function requireSessionAccess(
   url: URL,
   minimumRole: SessionRole | "public",
 ): Promise<AuthResult> {
-  const token = extractToken(req, url);
-  const user = await verifyToken(token);
+  // Use gateway trusted headers first, fall back to JWT for direct/WS connections
+  const user = await getAuthenticatedUser(req, url);
   const shareTok = extractShareToken(url) ?? undefined;
 
   // Check live session first
@@ -252,7 +252,7 @@ async function requireSessionAccess(
 // --- Server ---
 
 const server = Bun.serve<WsData>({
-  hostname: "0.0.0.0",
+  hostname: process.env.RELAY_TRUST_HEADERS === "1" ? "127.0.0.1" : "0.0.0.0",
   port: PORT,
   idleTimeout: 120,
   async fetch(req, server) {
@@ -282,8 +282,7 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
@@ -294,17 +293,18 @@ const server = Bun.serve<WsData>({
     // --- Gallery API ---
 
     if (url.pathname === "/gallery/api") {
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
-      // Token was sent but verification failed — tell client to re-auth
-      if (token && !user && !NO_AUTH_FLAG) {
-        return Response.json({ error: "token expired" }, { status: 401 });
+      const user = await getAuthenticatedUser(req, url);
+      // If gateway sent trusted headers, trust them; otherwise check for direct token
+      const trustedUser = extractTrustedUser(req);
+      if (!trustedUser && !user && !NO_AUTH_FLAG) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
+      const resolvedUser = trustedUser || user;
       // NO_AUTH mode: show all sessions regardless of ownership
       const showAll = NO_AUTH_FLAG;
-      const userId = user?.sub;
-      console.log(`[gallery] userId=${userId} email=${user?.email} showAll=${showAll}`);
-      const recorded = await sessionStore.galleryCached(userId, user?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
+      const userId = resolvedUser?.sub;
+      console.log(`[gallery] userId=${userId} email=${resolvedUser?.email} showAll=${showAll}`);
+      const recorded = await sessionStore.galleryCached(userId, resolvedUser?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
       console.log(`[gallery] recorded=${recorded.length}`);
 
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
@@ -314,7 +314,7 @@ const server = Bun.serve<WsData>({
         .filter(s => showAll || canSeeInGallery(
           { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
           userId,
-          user?.email,
+          resolvedUser?.email,
         ))
         .map(s => {
           // Determine viewer role for this live session
@@ -354,8 +354,7 @@ const server = Bun.serve<WsData>({
     // --- Live Sessions (active relay sessions) ---
 
     if (url.pathname === "/sessions") {
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
@@ -403,8 +402,7 @@ const server = Bun.serve<WsData>({
     const shareCreateMatch = url.pathname.match(/^\/session\/([^/]+)\/share$/);
     if (shareCreateMatch && req.method === "POST") {
       const sessionId = shareCreateMatch[1];
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
       const authResult = await requireSessionAccess(sessionId, req, url, "editor");
@@ -426,8 +424,7 @@ const server = Bun.serve<WsData>({
     if (shareRevokeMatch && req.method === "DELETE") {
       const sessionId = shareRevokeMatch[1];
       const tokenStr = shareRevokeMatch[2];
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
       const authResult = await requireSessionAccess(sessionId, req, url, "owner");
@@ -443,8 +440,7 @@ const server = Bun.serve<WsData>({
     const shareListMatch = url.pathname.match(/^\/session\/([^/]+)\/shares$/);
     if (shareListMatch && req.method === "GET") {
       const sessionId = shareListMatch[1];
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
       const authResult = await requireSessionAccess(sessionId, req, url, "editor");
@@ -459,8 +455,7 @@ const server = Bun.serve<WsData>({
     const accessMatch = url.pathname.match(/^\/session\/([^/]+)\/access$/);
     if (accessMatch && req.method === "PATCH") {
       const sessionId = accessMatch[1];
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
       const authResult = await requireSessionAccess(sessionId, req, url, "owner");
@@ -568,7 +563,10 @@ const server = Bun.serve<WsData>({
         const cachedUrl = await getCachedMp4Url(sessionId, store);
         if (cachedUrl) {
           console.log(`[export] Proxying cached MP4 for ${sessionId.slice(0, 8)}`);
-          const mp4Resp = await fetch(cachedUrl);
+          const abortCtrl = new AbortController();
+          // Abort R2 fetch if client disconnects
+          req.signal?.addEventListener("abort", () => abortCtrl.abort(), { once: true });
+          const mp4Resp = await fetch(cachedUrl, { signal: abortCtrl.signal });
           if (mp4Resp.ok) {
             return new Response(mp4Resp.body, {
               headers: {
@@ -637,7 +635,7 @@ const server = Bun.serve<WsData>({
       }
     }
 
-    // --- Runtime config for SPA ---
+    // --- Runtime config for SPA (gateway handles this, but keep as fallback for direct access) ---
 
     if (url.pathname === "/api/config") {
       return Response.json({
@@ -656,8 +654,7 @@ const server = Bun.serve<WsData>({
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
-      const token = extractToken(req, url);
-      const user = await verifyToken(token);
+      const user = await getAuthenticatedUser(req, url);
       if (!user) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
@@ -692,9 +689,10 @@ const server = Bun.serve<WsData>({
       || "unknown";
     const shareTok = extractShareToken(url);
 
-    // Auth: accept token from query param (backward compat) or defer to hello message
+    // Auth: accept token from query param (backward compat) or trusted headers, or defer to hello message
+    const trustedUser = extractTrustedUser(req);
     const token = extractToken(req, url);
-    const user = token ? await verifyToken(token) : null;
+    const user = trustedUser || (token ? await verifyToken(token) : null);
     // If no token in URL, upgrade will succeed but viewer/publisher auth is deferred
     // to the hello message handler which sends the token
     if (!user && !NO_AUTH_FLAG) {
@@ -710,9 +708,17 @@ const server = Bun.serve<WsData>({
     async open(ws) {
       const { role, clientIp, sessionId, authPending } = ws.data;
 
-      // If auth is deferred to hello message, don't register yet
+      // If auth is deferred to hello message, don't register yet — start auth timeout
       if (authPending) {
         console.log(`[relay] ${role} connected (auth pending) session=${sessionId}`);
+        // Close connection if no hello received within 10 seconds
+        const authTimeout = setTimeout(() => {
+          if (ws.data.authPending) {
+            console.log(`[relay] ${role} auth timeout session=${sessionId}`);
+            try { ws.close(4001, "auth timeout"); } catch {}
+          }
+        }, 10_000);
+        ws.data = { ...ws.data, authTimeout };
         return;
       }
 
@@ -742,7 +748,7 @@ const server = Bun.serve<WsData>({
       }
 
       if (role === "publish") {
-        const err = registry.claimPublisher(sessionId, ws, clientIp, ws.data.userId, ws.data.email);
+        const err = await registry.claimPublisher(sessionId, ws, clientIp, ws.data.userId, ws.data.email);
         if (err) {
           ws.close(err === "session owned by another user" ? 4003 : 4001, err);
           return;
@@ -763,6 +769,8 @@ const server = Bun.serve<WsData>({
         try {
           const cmd = JSON.parse(message);
           if (cmd.type === "hello") {
+            // Clear auth timeout
+            if (ws.data.authTimeout) { clearTimeout(ws.data.authTimeout); ws.data.authTimeout = undefined; }
             const token = cmd.token || "";
             const shareTok = cmd.shareToken || ws.data.shareToken;
             const user = await verifyToken(token);
@@ -780,7 +788,7 @@ const server = Bun.serve<WsData>({
 
             // Now register the connection
             if (role === "publish") {
-              const err = registry.claimPublisher(sessionId, ws, ws.data.clientIp, user?.sub, user?.email);
+              const err = await registry.claimPublisher(sessionId, ws, ws.data.clientIp, user?.sub, user?.email);
               if (err) {
                 ws.close(err === "session owned by another user" ? 4003 : 4001, err);
                 return;
@@ -1033,7 +1041,28 @@ const server = Bun.serve<WsData>({
   },
 });
 
-console.log(`[relay] Server on 0.0.0.0:${PORT}`);
+console.log(`[relay] Server on ${process.env.RELAY_TRUST_HEADERS === "1" ? "127.0.0.1" : "0.0.0.0"}:${PORT}`);
+console.log(`[relay] Trusted headers: ${process.env.RELAY_TRUST_HEADERS === "1" ? "ON (gateway mode)" : "OFF (direct mode)"}`);
 console.log(`[relay] Publisher: ws://${wifiIp}:${PORT}/publish[?session=<id>]`);
-console.log(`[relay] Viewer:   http://${wifiIp}:${PORT}/ (served by Caddy)`);
+console.log(`[relay] Viewer:   http://${wifiIp}:${PORT}/ (served by gateway)`);
 console.log(`[relay] API:      http://${wifiIp}:${PORT}/api/config`);
+
+// --- Graceful shutdown ---
+
+function shutdown() {
+  console.log("[relay] Shutting down...");
+  clearInterval(staleCleanupTimer);
+  sessionStore.stopBackgroundTimers();
+  // Finish all active recorders
+  for (const entry of registry.listActive()) {
+    const s = registry.get(entry.id);
+    if (s?.recorder) {
+      s.recorder.finish().catch(() => {});
+    }
+  }
+  server.stop(true);
+  process.exit(0);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

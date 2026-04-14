@@ -3,7 +3,10 @@
  * All DOM manipulation for auth lives here.
  */
 
-import { getUserEmail, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout, isTokenExpired } from "./core.js";
+import {
+  getUserEmail, getToken, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout,
+  setToken, clearToken, exchangeCredential, startRefreshTimer, stopRefreshTimer,
+} from "./core.js";
 
 const loginOverlay = document.getElementById("loginOverlay")!;
 
@@ -31,17 +34,35 @@ function updateUserInfo(): void {
 // --- Logout ---
 
 export function logout(): void {
-  localStorage.removeItem("relay_token");
+  // Revoke token server-side (fire-and-forget)
+  const token = getToken();
+  if (token) {
+    fetch("/api/auth/logout", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` },
+    }).catch(() => {});
+  }
+  clearToken();
+  stopRefreshTimer();
   loginOverlay.classList.remove("hidden");
   updateUserInfo();
   dispatchAuthLogout();
 }
 
-// --- Google GIS callback ---
+// --- Google GIS callback (exchanges Google JWT for session token) ---
 
-export function handleGoogleLogin(response: { credential: string }): void {
-  const token = response.credential;
-  localStorage.setItem("relay_token", token);
+export async function handleGoogleLogin(response: { credential: string }): Promise<void> {
+  // Exchange the Google credential for a server-signed session token
+  const result = await exchangeCredential(response.credential);
+  if (result) {
+    setToken(result.token);
+    startRefreshTimer();
+  } else {
+    // Fallback: store Google JWT directly (works if gateway also accepts Google JWTs)
+    console.warn("[auth] session exchange failed, falling back to direct Google JWT");
+    setToken(response.credential);
+    startRefreshTimer();
+  }
   loginOverlay.classList.add("hidden");
   updateUserInfo();
   dispatchAuthLogin();
@@ -74,9 +95,6 @@ export function initAccountUI(clientId?: string): void {
       );
     }
   }
-
-  // Set up global handler for GIS callback
-  (window as any).handleGoogleLogin = handleGoogleLogin;
 
   // Listen for auth events
   window.addEventListener("auth:login", () => {

@@ -42,12 +42,17 @@ jobs:
             /root/.bun/bin/bun x vite build
             echo "viewer rebuilt"
 
-            echo ">>> Installing server deps if needed"
+            echo ">>> Installing server deps"
             cd /root/relay-server/hosted/server
+            /root/.bun/bin/bun install
+
+            echo ">>> Installing gateway deps"
+            cd /root/relay-server/hosted/gateway
             /root/.bun/bin/bun install
 
             echo ">>> Syncing infra configs"
             cp /root/relay-server/hosted/infra/caringmind-relay.service /etc/systemd/system/
+            cp /root/relay-server/hosted/infra/caringmind-gateway.service /etc/systemd/system/
             cp /root/relay-server/hosted/infra/Caddyfile /etc/caddy/
             systemctl daemon-reload
 
@@ -57,24 +62,35 @@ jobs:
             echo ">>> Restarting relay service"
             systemctl restart caringmind-relay.service
 
-            echo ">>> Waiting for startup"
+            echo ">>> Waiting for relay startup"
             sleep 2
 
-            echo ">>> Health check"
+            echo ">>> Restarting gateway service"
+            systemctl restart caringmind-gateway.service
+
+            echo ">>> Waiting for gateway startup"
+            sleep 2
+
+            echo ">>> Health check (gateway)"
             for i in 1 2 3 4 5; do
-              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
+              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/config)
               if [ "$STATUS" = "200" ]; then
-                echo "OK after attempt $i"
+                echo "Gateway OK after attempt $i"
                 break
               fi
               if [ "$i" = "5" ]; then
-                echo "FAIL: health check returned $STATUS after 5 attempts"
-                systemctl status caringmind-relay.service --no-pager
+                echo "FAIL: gateway health check returned $STATUS after 5 attempts"
+                systemctl status caringmind-gateway.service --no-pager
                 exit 1
               fi
               echo "attempt $i: got $STATUS, retrying in 2s..."
               sleep 2
             done
 
+            echo ">>> Health check (relay)"
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
+            echo "Relay status: $STATUS"
+
             echo ">>> Deploy complete"
             systemctl status caringmind-relay.service --no-pager
+            systemctl status caringmind-gateway.service --no-pager

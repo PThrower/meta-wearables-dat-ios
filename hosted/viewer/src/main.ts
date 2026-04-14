@@ -108,17 +108,12 @@ export async function fetchGallery(): Promise<void> {
   }
   try {
     const res = await authFetch("/gallery/api");
-    const data = await res.json();
-    // Server returns 401 when token is expired/invalid — re-auth
-    if (res.status === 401) {
-      localStorage.removeItem("relay_token");
-      requireAuth();
-      return;
-    }
+    // authFetch already handles 401 (clears token, dispatches events) — no duplicate handling here
     if (!res.ok) {
-      showNetworkError(`Server error ${res.status}`);
+      if (res.status !== 401) showNetworkError(`Server error ${res.status}`);
       return;
     }
+    const data = await res.json();
     clearNetworkError();
     ingest(data);
     hasGalleryData = true;

@@ -55,6 +55,7 @@ export interface WsData {
   unsub?: () => void;   // Audio tap unsubscribe callback
   shareToken?: string;  // share token for link-access sessions
   authPending?: boolean; // true if auth deferred to hello message
+  authTimeout?: ReturnType<typeof setTimeout>; // 10s timeout for deferred auth
 }
 
 // --- Publisher ---
