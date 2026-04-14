@@ -83,6 +83,14 @@ export function filtered(): GallerySession[] {
   return allSessions;
 }
 
+export function clearGallery(): void {
+  allSessions = [];
+  activeFilter = "all";
+  grid.innerHTML = "";
+  subtitle.textContent = "";
+  lastRefresh.textContent = "";
+}
+
 export function ingest(data: GallerySession[]): void {
   allSessions = data;
   render(filtered());

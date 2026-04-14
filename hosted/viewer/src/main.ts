@@ -4,7 +4,7 @@
 
 import { loadConfig } from "./config.js";
 import { initAuth, requireAuth, authFetch, isNoAuth, getToken } from "./auth.js";
-import { ingest, initFilters, onCardAction } from "./gallery/render.js";
+import { ingest, clearGallery, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
 import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
 import "./share.js";
@@ -78,7 +78,8 @@ window.addEventListener("auth:login", () => {
     if (pending) {
       clearPendingLiveSession();
       watchLive(pending.sessionId, pending.shareToken);
-    } else if (!hasGalleryData) {
+    } else {
+      // Always re-fetch — user may have changed (different account)
       fetchGallery();
     }
   }
@@ -87,10 +88,7 @@ window.addEventListener("auth:login", () => {
 // Auth logout handler
 window.addEventListener("auth:logout", () => {
   hasGalleryData = false;
-  const grid = document.getElementById("grid");
-  if (grid) grid.innerHTML = "";
-  const subtitle = document.getElementById("subtitle");
-  if (subtitle) subtitle.textContent = "";
+  clearGallery();
 });
 
 // Init filter buttons
