@@ -7,12 +7,14 @@
 export {
   getToken, setToken, clearToken, isNoAuth, requireAuth, authFetch, authUrl,
   getUserEmail, escHtml, isTokenExpired,
-  exchangeCredential, startRefreshTimer, stopRefreshTimer, startCrossTabSync,
+  // exchangeCredential, // OAuth disabled
+  startRefreshTimer, stopRefreshTimer, startCrossTabSync,
   dispatchAuthLogin, dispatchAuthLogout,
 } from "./auth/core.js";
 
 // Re-export from account (UI — all DOM)
-export { loginOverlay, logout, handleGoogleLogin } from "./auth/account.js";
+export { loginOverlay, logout } from "./auth/account.js";
+// OAuth disabled — export { handleGoogleLogin } from "./auth/account.js";
 
 // Internal imports for initAuth orchestrator
 import { loadConfig } from "./config.js";
@@ -21,7 +23,7 @@ import { startRefreshTimer, stopRefreshTimer, startCrossTabSync } from "./auth/c
 
 export async function initAuth(): Promise<void> {
   const cfg = await loadConfig();
-  initAccountUI(cfg.googleClientId);
+  initAccountUI(); // cfg.googleClientId removed — OAuth disabled
   startCrossTabSync();
 
   // Start refresh timer if already logged in

@@ -133,24 +133,23 @@ export function getUserEmail(): string | null {
   return decodeJwtPayload(token)?.email ?? null;
 }
 
-// --- Session token exchange ---
-
-export async function exchangeCredential(credential: string): Promise<{ token: string; email: string } | null> {
-  try {
-    const res = await fetch("/api/auth/exchange", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credential }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.token || !data.user?.email) return null;
-    return { token: data.token, email: data.user.email };
-  } catch (err) {
-    console.warn("[auth] credential exchange failed:", err);
-    return null;
-  }
-}
+// --- Session token exchange (DISABLED — OAuth removed) ---
+// export async function exchangeCredential(credential: string): Promise<{ token: string; email: string } | null> {
+//   try {
+//     const res = await fetch("/api/auth/exchange", {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({ credential }),
+//     });
+//     if (!res.ok) return null;
+//     const data = await res.json();
+//     if (!data.token || !data.user?.email) return null;
+//     return { token: data.token, email: data.user.email };
+//   } catch (err) {
+//     console.warn("[auth] credential exchange failed:", err);
+//     return null;
+//   }
+// }
 
 // --- Token refresh ---
 

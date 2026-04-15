@@ -10,14 +10,17 @@
  */
 
 import { createHmac } from "node:crypto";
-import { OAuth2Client } from "google-auth-library";
+// OAuth disabled — Google Sign-In removed
+// import { OAuth2Client } from "google-auth-library";
 
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+// OAuth disabled
+// const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH = process.env.RELAY_NO_AUTH === "1";
 const TRUST_HEADERS = process.env.RELAY_TRUST_HEADERS === "1";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 
-const oauthClient = new OAuth2Client(CLIENT_ID);
+// OAuth disabled
+// const oauthClient = new OAuth2Client(CLIENT_ID);
 
 // --- Session token verification (mirrors gateway/src/auth.ts) ---
 
@@ -94,19 +97,21 @@ export async function verifyToken(token: string | null | undefined): Promise<Aut
   const sessionUser = verifySessionToken(token);
   if (sessionUser) return sessionUser;
 
-  // Slow path: Google JWT verification
-  try {
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: token,
-      audience: CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload?.sub || !payload?.email) return null;
-    return { sub: payload.sub, email: payload.email };
-  } catch (err) {
-    console.warn("[auth] token verify failed:", (err as Error).message?.slice(0, 120));
-    return null;
-  }
+  // OAuth disabled — Google JWT verification removed
+  // try {
+  //   const ticket = await oauthClient.verifyIdToken({
+  //     idToken: token,
+  //     audience: CLIENT_ID,
+  //   });
+  //   const payload = ticket.getPayload();
+  //   if (!payload?.sub || !payload?.email) return null;
+  //   return { sub: payload.sub, email: payload.email };
+  // } catch (err) {
+  //   console.warn("[auth] token verify failed:", (err as Error).message?.slice(0, 120));
+  //   return null;
+  // }
+
+  return null;
 }
 
 /**

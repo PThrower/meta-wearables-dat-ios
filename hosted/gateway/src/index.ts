@@ -23,7 +23,7 @@ import type { AuthUser } from "./types.js";
 const PORT = parseInt(process.env.GATEWAY_PORT || "3000");
 const RELAY_PORT = process.env.RELAY_PORT || "8080";
 const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../viewer/dist");
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+// OAuth disabled — const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH = process.env.GATEWAY_NO_AUTH === "1";
 const GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
@@ -93,7 +93,7 @@ export function createFetchHandler(config?: {
   buildVersion?: string;
 }) {
   const _noAuth = config?.noAuth ?? NO_AUTH;
-  const _clientId = config?.googleClientId ?? GOOGLE_CLIENT_ID;
+  // OAuth disabled — const _clientId = config?.googleClientId ?? GOOGLE_CLIENT_ID;
   const _gitCommit = config?.gitCommit ?? GIT_COMMIT;
   const _buildVersion = config?.buildVersion ?? BUILD_VERSION;
   const _viewerDist = config?.viewerDist ?? VIEWER_DIST;
@@ -140,25 +140,25 @@ export function createFetchHandler(config?: {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
     const { pathname } = url;
 
-    // --- Auth: exchange Google JWT for session token ---
-
-    if (pathname === "/api/auth/exchange" && req.method === "POST") {
-      try {
-        const body = await req.json() as { credential?: string };
-        const credential = body.credential;
-        if (!credential) return Response.json({ error: "Missing credential" }, { status: 400 });
-
-        // Verify the Google JWT via google-auth-library
-        const user = await verifyToken(credential);
-        if (!user) return Response.json({ error: "Invalid credential" }, { status: 401 });
-
-        // Mint a long-lived session token
-        const token = mintSessionToken(user.sub, user.email);
-        return Response.json({ token, user: { sub: user.sub, email: user.email } });
-      } catch {
-        return Response.json({ error: "Invalid request" }, { status: 400 });
-      }
-    }
+    // --- Auth: exchange Google JWT for session token (DISABLED) ---
+    // OAuth disabled — exchange endpoint commented out
+    // if (pathname === "/api/auth/exchange" && req.method === "POST") {
+    //   try {
+    //     const body = await req.json() as { credential?: string };
+    //     const credential = body.credential;
+    //     if (!credential) return Response.json({ error: "Missing credential" }, { status: 400 });
+    //
+    //     // Verify the Google JWT via google-auth-library
+    //     const user = await verifyToken(credential);
+    //     if (!user) return Response.json({ error: "Invalid credential" }, { status: 401 });
+    //
+    //     // Mint a long-lived session token
+    //     const token = mintSessionToken(user.sub, user.email);
+    //     return Response.json({ token, user: { sub: user.sub, email: user.email } });
+    //   } catch {
+    //     return Response.json({ error: "Invalid request" }, { status: 400 });
+    //   }
+    // }
 
     // --- Auth: refresh session token ---
 
@@ -186,7 +186,7 @@ export function createFetchHandler(config?: {
 
     if (pathname === "/api/config") {
       return Response.json({
-        googleClientId: _clientId,
+        // googleClientId: _clientId, // OAuth disabled
         noAuth: _noAuth,
         version: { gitCommit: _gitCommit, buildVersion: _buildVersion },
       });

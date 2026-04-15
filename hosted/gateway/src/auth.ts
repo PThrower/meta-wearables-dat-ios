@@ -3,7 +3,7 @@
  *
  * Supports two token types:
  *   1. Session tokens (HMAC-SHA256 signed JWT, minted by this gateway)
- *   2. Google ID tokens (verified via google-auth-library, used during exchange)
+ *   2. Google ID tokens — DISABLED (OAuth commented out)
  *
  * Token sources: query param, Authorization header, cookie.
  *
@@ -11,16 +11,19 @@
  */
 
 import { createHmac } from "node:crypto";
-import { OAuth2Client } from "google-auth-library";
+// OAuth disabled — Google Sign-In removed
+// import { OAuth2Client } from "google-auth-library";
 import type { AuthUser } from "./types.js";
 
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+// OAuth disabled
+// const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH = process.env.GATEWAY_NO_AUTH === "1";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 const SESSION_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
 const REFRESH_THRESHOLD_SEC = 24 * 60 * 60; // refresh if < 24h remaining
 
-const oauthClient = new OAuth2Client(CLIENT_ID);
+// OAuth disabled
+// const oauthClient = new OAuth2Client(CLIENT_ID);
 
 // --- Revocation list (in-memory, lost on restart) ---
 // Maps jti → expiry timestamp so we can prune expired entries
@@ -109,30 +112,32 @@ export function shouldRefreshSession(token: string): boolean {
 
 /**
  * Verify a token and return the user identity.
- * Tries session token first (fast HMAC), then falls back to Google JWT.
+ * Session tokens only (HMAC). Google JWT path disabled.
  * In dev mode, returns a synthetic dev user.
  */
 export async function verifyToken(token: string | null | undefined): Promise<AuthUser | null> {
   if (NO_AUTH) return { sub: "dev", email: "dev@localhost" };
   if (!token) return null;
 
-  // Fast path: session token (no network call)
+  // Session token (HMAC-SHA256, no network call)
   const sessionUser = verifySessionToken(token);
   if (sessionUser) return sessionUser;
 
-  // Slow path: Google JWT verification
-  try {
-    const ticket = await oauthClient.verifyIdToken({
-      idToken: token,
-      audience: CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload?.sub || !payload?.email) return null;
-    return { sub: payload.sub, email: payload.email };
-  } catch (err) {
-    console.warn("[gateway:auth] token verify failed:", (err as Error).message?.slice(0, 120));
-    return null;
-  }
+  // OAuth disabled — Google JWT verification removed
+  // try {
+  //   const ticket = await oauthClient.verifyIdToken({
+  //     idToken: token,
+  //     audience: CLIENT_ID,
+  //   });
+  //   const payload = ticket.getPayload();
+  //   if (!payload?.sub || !payload?.email) return null;
+  //   return { sub: payload.sub, email: payload.email };
+  // } catch (err) {
+  //   console.warn("[gateway:auth] token verify failed:", (err as Error).message?.slice(0, 120));
+  //   return null;
+  // }
+
+  return null;
 }
 
 /**

@@ -243,8 +243,11 @@ export function canSeeInGallery(
   userId?: string,
   userEmail?: string,
 ): boolean {
-  // Public sessions visible to all
-  if (meta.accessLevel === "public") return true;
+  // Public sessions visible to all — commented out to prevent orphaned
+  // pre-auth sessions from leaking across accounts. Re-enable once R2
+  // data is backfilled with proper ownerId values.
+  // if (meta.accessLevel === "public") return true;
+  if (meta.accessLevel === "public" && meta.ownerId) return true;
 
   // Link sessions visible only with a share token (checked at route level).
   // Orphaned link sessions (no owner) are NOT visible in gallery to prevent

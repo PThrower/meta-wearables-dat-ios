@@ -1,12 +1,14 @@
 /**
- * Account UI — renders #userInfo, manages loginOverlay, Google GIS button.
+ * Account UI — renders #userInfo, manages loginOverlay.
  * All DOM manipulation for auth lives here.
+ * OAuth / Google GIS disabled.
  */
 
 import {
   getUserEmail, getToken, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout,
-  setToken, clearToken, exchangeCredential, startRefreshTimer, stopRefreshTimer,
+  setToken, clearToken, startRefreshTimer, stopRefreshTimer,
 } from "./core.js";
+// OAuth disabled — import { exchangeCredential } from "./core.js";
 
 const loginOverlay = document.getElementById("loginOverlay")!;
 
@@ -49,24 +51,21 @@ export function logout(): void {
   dispatchAuthLogout();
 }
 
-// --- Google GIS callback (exchanges Google JWT for session token) ---
-
-export async function handleGoogleLogin(response: { credential: string }): Promise<void> {
-  // Exchange the Google credential for a server-signed session token
-  const result = await exchangeCredential(response.credential);
-  if (result) {
-    setToken(result.token);
-    startRefreshTimer();
-  } else {
-    // Fallback: store Google JWT directly (works if gateway also accepts Google JWTs)
-    console.warn("[auth] session exchange failed, falling back to direct Google JWT");
-    setToken(response.credential);
-    startRefreshTimer();
-  }
-  loginOverlay.classList.add("hidden");
-  updateUserInfo();
-  dispatchAuthLogin();
-}
+// --- Google GIS callback (DISABLED — OAuth removed) ---
+// export async function handleGoogleLogin(response: { credential: string }): Promise<void> {
+//   const result = await exchangeCredential(response.credential);
+//   if (result) {
+//     setToken(result.token);
+//     startRefreshTimer();
+//   } else {
+//     console.warn("[auth] session exchange failed, falling back to direct Google JWT");
+//     setToken(response.credential);
+//     startRefreshTimer();
+//   }
+//   loginOverlay.classList.add("hidden");
+//   updateUserInfo();
+//   dispatchAuthLogin();
+// }
 
 // --- Overlay helpers ---
 
@@ -80,21 +79,21 @@ export function hideLoginOverlay(): void {
 
 // --- Init account UI (called once from initAuth) ---
 
-export function initAccountUI(clientId?: string): void {
-  // Set up Google GIS
-  if (clientId) {
-    const google = (window as any).google;
-    if (google?.accounts?.id) {
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleGoogleLogin,
-      });
-      google.accounts.id.renderButton(
-        document.getElementById("g_id_signin"),
-        { type: "standard", size: "large", theme: "filled_black", text: "sign_in_with", shape: "rectangular", logo_alignment: "left" },
-      );
-    }
-  }
+export function initAccountUI(_clientId?: string): void {
+  // OAuth disabled — Google GIS setup commented out
+  // if (clientId) {
+  //   const google = (window as any).google;
+  //   if (google?.accounts?.id) {
+  //     google.accounts.id.initialize({
+  //       client_id: clientId,
+  //       callback: handleGoogleLogin,
+  //     });
+  //     google.accounts.id.renderButton(
+  //       document.getElementById("g_id_signin"),
+  //       { type: "standard", size: "large", theme: "filled_black", text: "sign_in_with", shape: "rectangular", logo_alignment: "left" },
+  //     );
+  //   }
+  // }
 
   // Listen for auth events
   window.addEventListener("auth:login", () => {
@@ -108,11 +107,11 @@ export function initAccountUI(clientId?: string): void {
   window.addEventListener("auth:unauthenticated", () => {
     showLoginOverlay();
     updateUserInfo();
-    // Auto-prompt One Tap for returning users
-    const google = (window as any).google;
-    if (google?.accounts?.id) {
-      google.accounts.id.prompt();
-    }
+    // Auto-prompt One Tap for returning users — OAuth disabled
+    // const google = (window as any).google;
+    // if (google?.accounts?.id) {
+    //   google.accounts.id.prompt();
+    // }
   });
 
   // Restore user info if already logged in (page reload)

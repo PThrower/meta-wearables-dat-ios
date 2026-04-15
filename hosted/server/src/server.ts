@@ -200,7 +200,7 @@ async function filterSessionIdsByVisibility(
 
 // --- Auth config injection into viewer HTML ---
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+// OAuth disabled — const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
 const REQUIRE_PUBLISHER_AUTH = process.env.RELAY_REQUIRE_PUBLISHER_AUTH === "1";
 const VIEWER_GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
@@ -673,7 +673,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/api/config") {
       return Response.json({
-        googleClientId: GOOGLE_CLIENT_ID,
+        // googleClientId: GOOGLE_CLIENT_ID, // OAuth disabled
         noAuth: NO_AUTH_FLAG,
         version: { gitCommit: VIEWER_GIT_COMMIT, buildVersion: VIEWER_BUILD_VERSION },
       });

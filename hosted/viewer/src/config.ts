@@ -4,7 +4,7 @@
  */
 
 export interface ViewerConfig {
-  googleClientId: string;
+  // googleClientId: string; // OAuth disabled
   noAuth: boolean;
   version: { gitCommit: string; buildVersion: string };
 }
