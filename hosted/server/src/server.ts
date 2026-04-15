@@ -232,6 +232,11 @@ async function requireSessionAccess(
   url: URL,
   minimumRole: SessionRole | "public",
 ): Promise<AuthResult> {
+  // No-auth mode: skip all permission checks — everything is public
+  if (NO_AUTH_FLAG) {
+    return { user: { sub: "", email: "" }, role: "owner" };
+  }
+
   // Use gateway trusted headers first, fall back to JWT for direct/WS connections
   const user = await getAuthenticatedUser(req, url);
   const shareTok = extractShareToken(url) ?? undefined;
@@ -389,7 +394,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/sessions") {
       const user = await getAuthenticatedUser(req, url);
-      if (!user) {
+      if (!user && !NO_AUTH_FLAG) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
 
@@ -400,8 +405,8 @@ const server = Bun.serve<WsData>({
       const visibleActive = showAll ? active : active.filter(s =>
         canSeeInGallery(
           { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
-          user.sub,
-          user.email,
+          user!.sub,
+          user!.email,
         ),
       );
 
@@ -410,7 +415,7 @@ const server = Bun.serve<WsData>({
 
       // Filter historical sessions by ownership
       const visibleHistorical = showAll ? historicalSessionIds : await filterSessionIdsByVisibility(
-        historicalSessionIds, user.sub, user.email,
+        historicalSessionIds, user!.sub, user!.email,
       );
 
       // Combine: active sessions (with live metadata) + historical (id only)
