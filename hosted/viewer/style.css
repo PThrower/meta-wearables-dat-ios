@@ -102,6 +102,20 @@ header {
   font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.5); flex-shrink: 0;
 }
 .profile-duration { font-size: 14px; font-weight: 600; color: #e0e0e0; }
+.profile-placeholder {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: 8px;
+  background: rgba(255,255,255,0.02); border: 1px dashed rgba(255,255,255,0.08);
+  font-size: 10px; color: rgba(255,255,255,0.25);
+}
+.profile-placeholder svg { color: rgba(255,255,255,0.15); flex-shrink: 0; }
+.profile-fleet-row {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: rgba(255,255,255,0.4); padding: 5px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.profile-fleet-label { color: rgba(255,255,255,0.35); }
+.profile-fleet-na { font-size: 10px; color: rgba(255,255,255,0.15); }
 .profile-setting {
   display: flex; justify-content: space-between; align-items: center;
   font-size: 11px; color: rgba(255,255,255,0.5); padding: 6px 0;
