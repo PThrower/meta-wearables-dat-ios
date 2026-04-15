@@ -53,10 +53,11 @@ function toggleProfileModal(): void {
   const totalDuration = sessions.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
   const hasVideo = sessions.filter(s => (s.segments ?? 0) > 0).length;
 
-  // Group wearables: map of wearableType -> { models: Set<string>, count, live }
+  // Group wearables — only actual wearables (glasses), not host device (iPhone)
   const wearableMap = new Map<string, { models: Set<string>; count: number; live: number }>();
   for (const s of sessions) {
-    const wt = s.device?.wearableType || s.device?.deviceName || "Unknown";
+    const wt = s.device?.wearableType;
+    if (!wt) continue; // skip sessions with no wearable connected
     const model = s.device?.deviceModel || "";
     const entry = wearableMap.get(wt) ?? { models: new Set<string>(), count: 0, live: 0 };
     if (model) entry.models.add(model);
