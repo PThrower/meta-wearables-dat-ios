@@ -56,6 +56,18 @@ header {
   background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.35);
   border: 1px solid rgba(255,255,255,0.06); text-transform: uppercase; letter-spacing: 0.5px;
 }
+.profile-modal-org {
+  margin-top: 8px; display: flex; flex-direction: column; gap: 6px;
+  width: 100%;
+}
+.profile-org-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: 6px;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+}
+.profile-org-row svg { color: rgba(255,255,255,0.25); flex-shrink: 0; }
+.profile-org-label { font-size: 10px; color: rgba(255,255,255,0.3); }
+.profile-org-value { font-size: 10px; color: rgba(255,255,255,0.5); margin-left: auto; }
 .profile-section { margin-top: 16px; }
 .profile-section-title { font-size: 9px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
 .profile-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }

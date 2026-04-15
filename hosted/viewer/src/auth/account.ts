@@ -94,6 +94,18 @@ function toggleProfileModal(): void {
         </div>
         <span class="profile-modal-email">guest@local</span>
         <span class="profile-modal-badge">Viewer</span>
+        <div class="profile-modal-org">
+          <div class="profile-org-row">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span class="profile-org-label">Organization</span>
+            <span class="profile-org-value">Personal</span>
+          </div>
+          <div class="profile-org-row">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span class="profile-org-label">Role</span>
+            <span class="profile-org-value">Member</span>
+          </div>
+        </div>
       </div>
 
       <div class="profile-section">
