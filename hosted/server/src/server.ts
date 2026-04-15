@@ -334,8 +334,8 @@ const server = Bun.serve<WsData>({
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const resolvedUser = trustedUser || user;
-      // Always filter by ownership — no longer bypass in no-auth mode
-      const showAll = false;
+      // No ownership enforcement — show all sessions (no auth / no ownerId on existing data)
+      const showAll = true;
       const userId = resolvedUser?.sub;
       console.log(`[gallery] userId=${userId} email=${resolvedUser?.email} showAll=${showAll}`);
       const recorded = await sessionStore.galleryCached(userId, resolvedUser?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
