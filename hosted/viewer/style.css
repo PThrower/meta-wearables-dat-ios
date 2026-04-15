@@ -23,15 +23,50 @@ header {
 .header-left p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px; }
 .filters { display: flex; gap: 6px; }
 #userInfo { display: flex; align-items: center; gap: 8px; margin-left: 12px; }
-.user-email { font-size: 11px; color: rgba(255,255,255,0.5); }
+.user-email { font-size: 11px; color: rgba(255,255,255,0.5); cursor: pointer; }
+.user-email:hover { color: rgba(255,255,255,0.7); }
 .profile-icon {
   width: 28px; height: 28px; border-radius: 50%;
   background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.4);
+  color: rgba(255,255,255,0.4); cursor: pointer;
   transition: all 0.15s ease;
 }
 .profile-icon:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.7); }
+
+/* --- Profile Modal --- */
+.profile-modal { position: fixed; inset: 0; z-index: 1000; }
+.profile-modal-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.6); }
+.profile-modal-content {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+  min-width: 280px; padding: 24px; text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.profile-modal-header { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.profile-modal-avatar {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.4);
+}
+.profile-modal-email { font-size: 13px; color: #e0e0e0; font-weight: 600; }
+.profile-modal-badge {
+  font-size: 9px; padding: 2px 8px; border-radius: 4px;
+  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4);
+  border: 1px solid rgba(255,255,255,0.08); text-transform: uppercase; letter-spacing: 0.5px;
+}
+.profile-modal-body { margin-top: 16px; }
+.profile-modal-note { font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.6; }
+.profile-modal-footer { margin-top: 20px; }
+.profile-modal-close {
+  font-family: inherit; font-size: 11px;
+  padding: 6px 20px; border-radius: 6px;
+  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
+  border: 1px solid rgba(255,255,255,0.1);
+  cursor: pointer; transition: all 0.15s ease;
+}
+.profile-modal-close:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8); }
 .logout-btn {
   font-family: inherit; font-size: 10px;
   padding: 3px 10px; border-radius: 6px;
