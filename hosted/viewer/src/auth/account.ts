@@ -50,9 +50,21 @@ function toggleProfileModal(): void {
   const sessions = getAllSessions();
   const live = sessions.filter(s => s.live).length;
   const recorded = sessions.length - live;
-  const devices = new Set(sessions.map(s => s.device?.deviceName ?? s.device?.deviceModel).filter(Boolean));
   const totalDuration = sessions.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
   const hasVideo = sessions.filter(s => (s.segments ?? 0) > 0).length;
+
+  // Group wearables: map of wearableType -> { models: Set<string>, count, live }
+  const wearableMap = new Map<string, { models: Set<string>; count: number; live: number }>();
+  for (const s of sessions) {
+    const wt = s.device?.wearableType || s.device?.deviceName || "Unknown";
+    const model = s.device?.deviceModel || "";
+    const entry = wearableMap.get(wt) ?? { models: new Set<string>(), count: 0, live: 0 };
+    if (model) entry.models.add(model);
+    entry.count++;
+    if (s.live) entry.live++;
+    wearableMap.set(wt, entry);
+  }
+  const wearables = [...wearableMap.entries()];
 
   let versionStr = "--";
   try {
@@ -105,12 +117,26 @@ function toggleProfileModal(): void {
         </div>
       </div>
 
-      ${devices.size > 0 ? `
+      ${wearables.length > 0 ? `
       <div class="profile-section">
-        <div class="profile-section-title">Devices</div>
-        <div class="profile-devices">
-          ${[...devices].map(d => `<span class="profile-device-chip">${escHtml(d!)}</span>`).join("")}
-        </div>
+        <div class="profile-section-title">Wearables</div>
+        ${wearables.map(([type, info]) => `
+          <div class="profile-wearable">
+            <div class="profile-wearable-icon">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+              </svg>
+            </div>
+            <div class="profile-wearable-info">
+              <span class="profile-wearable-type">${escHtml(type)}</span>
+              <span class="profile-wearable-detail">
+                ${info.models.size > 0 ? [...info.models].map(m => escHtml(m)).join(", ") : ""}
+                ${info.live > 0 ? `<span class="profile-wearable-live">${info.live} live</span>` : ""}
+              </span>
+            </div>
+            <span class="profile-wearable-count">${info.count}</span>
+          </div>
+        `).join("")}
       </div>` : ""}
 
       ${totalDuration > 0 ? `
