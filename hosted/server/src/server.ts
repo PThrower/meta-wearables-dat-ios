@@ -15,7 +15,7 @@
  *   /tap/audio?session=<id>  - WebSocket, audio tap for AI pipeline
  *   /sessions                - JSON list of active + historical sessions
  *   /gallery/api             - JSON feed with metadata + thumbnails
- *   /session/<id>/thumbnail  - First-frame JPEG (cached to R2)
+ *   /session/<id>/thumbnail  - Mid-frame JPEG (cached to R2)
  *   /session/<id>/video.mp4  - MP4 export (cached to R2 after first build)
  *   /session/<id>/export     - JSON metadata about recorded session
  *   /session/<id>/share      - Create share token (POST)
@@ -339,8 +339,9 @@ const server = Bun.serve<WsData>({
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const resolvedUser = trustedUser || user;
-      // No ownership enforcement — show all sessions (no auth / no ownerId on existing data)
-      const showAll = true;
+      // Respect NO_AUTH_FLAG: show all sessions only when auth is disabled;
+      // when auth is active, enforce ownership/visibility via canSeeInGallery
+      const showAll = !!NO_AUTH_FLAG;
       const userId = resolvedUser?.sub;
       console.log(`[gallery] userId=${userId} email=${resolvedUser?.email} showAll=${showAll}`);
       const recorded = await sessionStore.galleryCached(userId, resolvedUser?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));

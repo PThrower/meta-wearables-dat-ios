@@ -63,9 +63,12 @@ const imgObserver = new MutationObserver((mutations) => {
         node.querySelectorAll<HTMLImageElement>("img.card-thumb").forEach(img => {
           if (img.dataset.wired) return;
           img.dataset.wired = "1";
-          const retries = Number(img.dataset.retries ?? "0");
           img.addEventListener("load", () => img.classList.add("loaded"));
+          // Handle already-loaded images (cache hit before handler attached)
+          if (img.complete) img.classList.add("loaded");
           img.addEventListener("error", () => {
+            // Re-read retries from dataset each time (was captured by closure before)
+            const retries = Number(img.dataset.retries ?? "0");
             if (retries < 1) {
               // Retry once — server may need time for on-demand extraction
               img.dataset.retries = String(retries + 1);

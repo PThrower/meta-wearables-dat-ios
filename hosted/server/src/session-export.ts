@@ -7,7 +7,7 @@
  * Routes:
  *   GET /session/{id}/video.mp4        — video only (cached to R2 after first build)
  *   GET /session/{id}/video.mp4?audio  — video + audio mixed in
- *   GET /session/{id}/thumbnail        — first JPEG frame (cached to R2 as thumb.jpg)
+ *   GET /session/{id}/thumbnail        — mid-frame JPEG (cached to R2 as thumb.jpg)
  *   GET /session/{id}/export           — JSON metadata (segment counts, etc.)
  *   GET /gallery/api                   — all sessions with metadata for gallery
  */
@@ -53,51 +53,8 @@ export async function getSessionExportMeta(sessionId: string, store: ObjectStore
   };
 }
 
-/**
- * Extract the first JPEG frame from a session's first video segment.
- * Caches the result to R2 as `sessions/<id>/thumb.jpg`.
- * Returns the JPEG Buffer or null if no video data exists.
- */
-export async function getSessionThumbnail(sessionId: string, store: ObjectStore): Promise<Buffer | null> {
-  const cacheKey = `sessions/${sessionId}/thumb.jpg`;
-  const cached = await store.get(cacheKey);
-  if (cached) return cached;
-
-  const segKeys = (await store.list(`sessions/${sessionId}/video/`))
-    .filter(k => k.endsWith(".mjpeg"))
-    .sort();
-
-  if (segKeys.length === 0) return null;
-
-  const firstSeg = await store.get(segKeys[0]);
-  if (!firstSeg || firstSeg.length < 4) return null;
-
-  // MJPEG = concatenated JPEGs. Each starts with FF D8, ends with FF D9.
-  // Extract from byte 0 to end of first FF D9 marker.
-  const jpeg = extractFirstJpeg(firstSeg);
-  if (!jpeg) return null;
-
-  store.put(cacheKey, jpeg).catch(err =>
-    console.error(`[export] thumbnail cache write failed:`, err.message)
-  );
-
-  console.log(`[export] Thumbnail cached for ${sessionId.slice(0, 8)}: ${jpeg.length} bytes`);
-  return jpeg;
-}
-
-function extractFirstJpeg(mjpeg: Buffer): Buffer | null {
-  // Find SOI marker (FF D8)
-  if (mjpeg[0] !== 0xFF || mjpeg[1] !== 0xD8) return null;
-
-  // Scan for EOI marker (FF D9)
-  for (let i = 2; i < mjpeg.length - 1; i++) {
-    if (mjpeg[i] === 0xFF && mjpeg[i + 1] === 0xD9) {
-      return Buffer.from(mjpeg.subarray(0, i + 2));
-    }
-  }
-  // No EOI found — return entire buffer as best-effort
-  return Buffer.from(mjpeg);
-}
+// Thumbnail extraction moved to dedicated module
+export { getSessionThumbnail } from "./thumbnail.js";
 
 /**
  * Check if a cached MP4 export exists in R2.
