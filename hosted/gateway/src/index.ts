@@ -24,7 +24,8 @@ const PORT = parseInt(process.env.GATEWAY_PORT || "3000");
 const RELAY_PORT = process.env.RELAY_PORT || "8080";
 const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../viewer/dist");
 // OAuth disabled — const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const NO_AUTH = process.env.GATEWAY_NO_AUTH === "1";
+// No login mechanism available — default to no-auth mode
+const NO_AUTH = process.env.GATEWAY_NO_AUTH !== "0";
 const GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
 

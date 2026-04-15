@@ -17,7 +17,8 @@ import type { AuthUser } from "./types.js";
 
 // OAuth disabled
 // const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const NO_AUTH = process.env.GATEWAY_NO_AUTH === "1";
+// No login mechanism — default to no-auth (set GATEWAY_NO_AUTH=0 to enforce)
+const NO_AUTH = process.env.GATEWAY_NO_AUTH !== "0";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 const SESSION_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
 const REFRESH_THRESHOLD_SEC = 24 * 60 * 60; // refresh if < 24h remaining

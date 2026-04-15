@@ -15,7 +15,8 @@ import { createHmac } from "node:crypto";
 
 // OAuth disabled
 // const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const NO_AUTH = process.env.RELAY_NO_AUTH === "1";
+// No login mechanism — default to no-auth (set RELAY_NO_AUTH=0 to enforce)
+const NO_AUTH = process.env.RELAY_NO_AUTH !== "0";
 const TRUST_HEADERS = process.env.RELAY_TRUST_HEADERS === "1";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 
