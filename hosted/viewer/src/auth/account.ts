@@ -8,6 +8,8 @@ import {
   getUserEmail, getToken, isNoAuth, escHtml, dispatchAuthLogin, dispatchAuthLogout,
   setToken, clearToken, startRefreshTimer, stopRefreshTimer,
 } from "./core.js";
+import { getConfig } from "../config.js";
+import { getAllSessions } from "../gallery/render.js";
 // OAuth disabled — import { exchangeCredential } from "./core.js";
 
 const loginOverlay = document.getElementById("loginOverlay")!;
@@ -45,6 +47,28 @@ function toggleProfileModal(): void {
   const existing = document.getElementById("profileModal");
   if (existing) { existing.remove(); return; }
 
+  const sessions = getAllSessions();
+  const live = sessions.filter(s => s.live).length;
+  const recorded = sessions.length - live;
+  const devices = new Set(sessions.map(s => s.device?.deviceName ?? s.device?.deviceModel).filter(Boolean));
+  const totalDuration = sessions.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);
+  const hasVideo = sessions.filter(s => (s.segments ?? 0) > 0).length;
+
+  let versionStr = "--";
+  try {
+    const cfg = getConfig();
+    versionStr = cfg.version.buildVersion || cfg.version.gitCommit.slice(0, 8);
+  } catch {}
+
+  const fmtDuration = (ms: number): string => {
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ${sec % 60}s`;
+    const hr = Math.floor(min / 60);
+    return `${hr}h ${min % 60}m`;
+  };
+
   const modal = document.createElement("div");
   modal.id = "profileModal";
   modal.className = "profile-modal";
@@ -56,16 +80,80 @@ function toggleProfileModal(): void {
           <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
         <span class="profile-modal-email">guest@local</span>
+        <span class="profile-modal-badge">Viewer</span>
       </div>
-      <div class="profile-modal-body">
-        <p class="profile-modal-note">Account management coming soon.</p>
+
+      <div class="profile-section">
+        <div class="profile-section-title">Sessions</div>
+        <div class="profile-stats">
+          <div class="profile-stat">
+            <span class="profile-stat-value">${sessions.length}</span>
+            <span class="profile-stat-label">Total</span>
+          </div>
+          <div class="profile-stat">
+            <span class="profile-stat-value">${live}</span>
+            <span class="profile-stat-label">Live</span>
+          </div>
+          <div class="profile-stat">
+            <span class="profile-stat-value">${recorded}</span>
+            <span class="profile-stat-label">Recorded</span>
+          </div>
+          <div class="profile-stat">
+            <span class="profile-stat-value">${hasVideo}</span>
+            <span class="profile-stat-label">With Video</span>
+          </div>
+        </div>
       </div>
-      <div class="profile-modal-footer">
+
+      ${devices.size > 0 ? `
+      <div class="profile-section">
+        <div class="profile-section-title">Devices</div>
+        <div class="profile-devices">
+          ${[...devices].map(d => `<span class="profile-device-chip">${escHtml(d!)}</span>`).join("")}
+        </div>
+      </div>` : ""}
+
+      ${totalDuration > 0 ? `
+      <div class="profile-section">
+        <div class="profile-section-title">Total Duration</div>
+        <span class="profile-duration">${fmtDuration(totalDuration)}</span>
+      </div>` : ""}
+
+      <div class="profile-section">
+        <div class="profile-section-title">Settings</div>
+        <div class="profile-setting">
+          <span>Auto-refresh</span>
+          <span class="profile-setting-value">30s</span>
+        </div>
+        <div class="profile-setting">
+          <span>Quality</span>
+          <select id="profile-quality" class="profile-select">
+            <option value="high">High (30 FPS)</option>
+            <option value="medium">Medium (15 FPS)</option>
+            <option value="low">Low (8 FPS)</option>
+            <option value="mini">Mini (4 FPS)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="profile-footer">
+        <div class="profile-version">v${escHtml(versionStr)}</div>
         <button class="profile-modal-close">Close</button>
       </div>
     </div>
   `;
   document.body.appendChild(modal);
+
+  // Sync quality select with current value
+  const qualitySelect = modal.querySelector("#profile-quality") as HTMLSelectElement | null;
+  const mainQuality = document.getElementById("quality-select") as HTMLSelectElement | null;
+  if (qualitySelect && mainQuality) {
+    qualitySelect.value = mainQuality.value;
+    qualitySelect.addEventListener("change", () => {
+      mainQuality.value = qualitySelect.value;
+      mainQuality.dispatchEvent(new Event("change"));
+    });
+  }
 
   // Close handlers
   modal.querySelector(".profile-modal-backdrop")!.addEventListener("click", () => modal.remove());
