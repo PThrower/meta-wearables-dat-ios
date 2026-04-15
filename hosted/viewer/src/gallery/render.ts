@@ -63,9 +63,16 @@ const imgObserver = new MutationObserver((mutations) => {
         node.querySelectorAll<HTMLImageElement>("img.card-thumb").forEach(img => {
           if (img.dataset.wired) return;
           img.dataset.wired = "1";
+          const retries = Number(img.dataset.retries ?? "0");
           img.addEventListener("load", () => img.classList.add("loaded"));
           img.addEventListener("error", () => {
-            img.outerHTML = '<div class="card-thumb-placeholder">No preview</div>';
+            if (retries < 1) {
+              // Retry once — server may need time for on-demand extraction
+              img.dataset.retries = String(retries + 1);
+              setTimeout(() => { img.src = img.src; }, 2000);
+            } else {
+              img.outerHTML = '<div class="card-thumb-placeholder">No preview</div>';
+            }
           });
         });
       }
@@ -111,9 +118,10 @@ function cardHtml(s: GallerySession, delay: number): string {
   const ownerBadge = isOwner ? `<span class="owner-badge">Owner</span>` : "";
   const shareBtn = canEdit ? `<button class="action-btn share-btn" data-action="share" data-session-id="${escAttr(s.sessionId)}">Share</button>` : "";
   const hasVideo = (s.segments ?? 0) > 0;
-  const thumb = (s.hasThumbnail ?? false)
+  // Always try thumbnail for sessions with video — server does on-demand extraction
+  const thumb = hasVideo
     ? `<img class="card-thumb" src="${escAttr(authUrl(s.thumbnailUrl ?? ""))}" alt="" loading="lazy">`
-    : `<div class="card-thumb-placeholder">${hasVideo ? "Processing" : "No video"}</div>`;
+    : `<div class="card-thumb-placeholder">No video</div>`;
   const safeVideoUrl = escAttr(authUrl(s.videoUrl ?? ""));
   return `<div class="card" style="animation-delay:${delay}ms">
     ${thumb}
