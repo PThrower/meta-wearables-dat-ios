@@ -339,9 +339,9 @@ const server = Bun.serve<WsData>({
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const resolvedUser = trustedUser || user;
-      // Respect NO_AUTH_FLAG: show all sessions only when auth is disabled;
-      // when auth is active, enforce ownership/visibility via canSeeInGallery
-      const showAll = !!NO_AUTH_FLAG;
+      // Legacy sessions have ownerEmail but no ownerId — can't enforce per-user
+      // visibility until R2 data is backfilled with proper ownerId sub IDs.
+      const showAll = true;
       const userId = resolvedUser?.sub;
       console.log(`[gallery] userId=${userId} email=${resolvedUser?.email} showAll=${showAll}`);
       const recorded = await sessionStore.galleryCached(userId, resolvedUser?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
