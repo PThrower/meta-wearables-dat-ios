@@ -19,18 +19,21 @@ export { loginOverlay };
 function updateUserInfo(): void {
   const el = document.getElementById("userInfo");
   if (!el) return;
-  const email = getUserEmail();
-  if (email) {
-    el.innerHTML = `<span class="user-email">${escHtml(email)}</span><button id="logoutBtn" class="logout-btn">Logout</button>`;
-    document.getElementById("logoutBtn")?.addEventListener("click", logout);
-  } else if (!isNoAuth()) {
-    el.innerHTML = `<button id="signinBtn" class="signin-btn">Sign in</button>`;
-    document.getElementById("signinBtn")?.addEventListener("click", () => {
-      loginOverlay.classList.remove("hidden");
-    });
-  } else {
-    el.innerHTML = "";
-  }
+  // Auth disabled — show placeholder account chip (no login/logout)
+  // Restore the real branch below when re-enabling OAuth.
+  // const email = getUserEmail();
+  // if (email) {
+  //   el.innerHTML = `<span class="user-email">${escHtml(email)}</span><button id="logoutBtn" class="logout-btn">Logout</button>`;
+  //   document.getElementById("logoutBtn")?.addEventListener("click", logout);
+  // } else if (!isNoAuth()) {
+  //   el.innerHTML = `<button id="signinBtn" class="signin-btn">Sign in</button>`;
+  //   document.getElementById("signinBtn")?.addEventListener("click", () => {
+  //     loginOverlay.classList.remove("hidden");
+  //   });
+  // } else {
+  //   el.innerHTML = "";
+  // }
+  el.innerHTML = `<span class="user-email">guest@local</span>`;
 }
 
 // --- Logout ---

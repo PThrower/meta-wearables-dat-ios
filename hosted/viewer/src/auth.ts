@@ -24,9 +24,13 @@ import { startRefreshTimer, stopRefreshTimer, startCrossTabSync } from "./auth/c
 export async function initAuth(): Promise<void> {
   const cfg = await loadConfig();
   initAccountUI(); // cfg.googleClientId removed — OAuth disabled
-  startCrossTabSync();
 
-  // Start refresh timer if already logged in
-  const existingToken = localStorage.getItem("relay_token");
-  if (existingToken) startRefreshTimer();
+  // Auth disabled — skip cross-tab sync and refresh timer
+  // startCrossTabSync();
+  // const existingToken = localStorage.getItem("relay_token");
+  // if (existingToken) startRefreshTimer();
+
+  // Never show login overlay while auth is disabled
+  const overlay = document.getElementById("loginOverlay");
+  if (overlay) overlay.classList.add("hidden");
 }

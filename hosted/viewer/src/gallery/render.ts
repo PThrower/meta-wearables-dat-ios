@@ -79,7 +79,8 @@ export function getAllSessions(): GallerySession[] { return allSessions; }
 export function filtered(): GallerySession[] {
   if (activeFilter === "live") return allSessions.filter(s => s.live);
   if (activeFilter === "recorded") return allSessions.filter(s => !s.live);
-  if (activeFilter === "mine") return allSessions.filter(s => s.viewerRole === "owner" || s.viewerRole === "editor");
+  // "mine" filter disabled — auth off, no ownership
+  // if (activeFilter === "mine") return allSessions.filter(s => s.viewerRole === "owner" || s.viewerRole === "editor");
   return allSessions;
 }
 
