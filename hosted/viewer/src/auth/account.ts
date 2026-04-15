@@ -146,6 +146,11 @@ function toggleProfileModal(): void {
                 ${info.models.size > 0 ? [...info.models].map(m => escHtml(m)).join(", ") : ""}
                 ${info.live > 0 ? `<span class="profile-wearable-live">${info.live} live</span>` : ""}
               </span>
+              <div class="profile-wearable-fleet">
+                <span>Battery --</span>
+                <span>Signal --</span>
+                <span>Firmware --</span>
+              </div>
             </div>
             <span class="profile-wearable-count">${info.count}</span>
           </div>
@@ -163,26 +168,6 @@ function toggleProfileModal(): void {
         <div class="profile-placeholder">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Team roster available with organizations</span>
-        </div>
-      </div>
-
-      <div class="profile-section">
-        <div class="profile-section-title">Fleet</div>
-        <div class="profile-placeholder">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
-          <span>Device status requires iOS telemetry</span>
-        </div>
-        <div class="profile-fleet-row">
-          <span class="profile-fleet-label">Battery</span>
-          <span class="profile-fleet-na">--</span>
-        </div>
-        <div class="profile-fleet-row">
-          <span class="profile-fleet-label">Signal</span>
-          <span class="profile-fleet-na">--</span>
-        </div>
-        <div class="profile-fleet-row">
-          <span class="profile-fleet-label">Firmware</span>
-          <span class="profile-fleet-na">--</span>
         </div>
       </div>
 

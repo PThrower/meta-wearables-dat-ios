@@ -101,6 +101,10 @@ header {
 .profile-wearable-live {
   color: #4ade80; font-weight: 600; margin-left: 6px;
 }
+.profile-wearable-fleet {
+  display: flex; gap: 8px;
+  font-size: 9px; color: rgba(255,255,255,0.15); margin-top: 2px;
+}
 .profile-wearable-count {
   font-size: 14px; font-weight: 600; color: rgba(255,255,255,0.5); flex-shrink: 0;
 }
@@ -112,13 +116,6 @@ header {
   font-size: 10px; color: rgba(255,255,255,0.25);
 }
 .profile-placeholder svg { color: rgba(255,255,255,0.15); flex-shrink: 0; }
-.profile-fleet-row {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 11px; color: rgba(255,255,255,0.4); padding: 5px 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-}
-.profile-fleet-label { color: rgba(255,255,255,0.35); }
-.profile-fleet-na { font-size: 10px; color: rgba(255,255,255,0.15); }
 .profile-setting {
   display: flex; justify-content: space-between; align-items: center;
   font-size: 11px; color: rgba(255,255,255,0.5); padding: 6px 0;
