@@ -24,6 +24,14 @@ header {
 .filters { display: flex; gap: 6px; }
 #userInfo { display: flex; align-items: center; gap: 8px; margin-left: 12px; }
 .user-email { font-size: 11px; color: rgba(255,255,255,0.5); }
+.profile-icon {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.4);
+  transition: all 0.15s ease;
+}
+.profile-icon:hover { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.7); }
 .logout-btn {
   font-family: inherit; font-size: 10px;
   padding: 3px 10px; border-radius: 6px;
