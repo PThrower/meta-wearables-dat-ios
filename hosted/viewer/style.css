@@ -51,11 +51,6 @@ header {
   color: rgba(255,255,255,0.4);
 }
 .profile-modal-email { font-size: 13px; color: #e0e0e0; font-weight: 600; }
-.profile-modal-badge {
-  font-size: 9px; padding: 2px 8px; border-radius: 4px;
-  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4);
-  border: 1px solid rgba(255,255,255,0.08); text-transform: uppercase; letter-spacing: 0.5px;
-}
 .profile-modal-body { margin-top: 16px; }
 .profile-modal-note { font-size: 11px; color: rgba(255,255,255,0.4); line-height: 1.6; }
 .profile-modal-footer { margin-top: 20px; }
