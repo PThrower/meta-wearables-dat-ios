@@ -64,43 +64,53 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
     sessions[id] = {
       publisher: session.publisher ? {
         id: session.publisher.id,
-        clientIp: session.publisher.clientIp,
-        deviceId: session.publisher.deviceId,
-        deviceName: session.publisher.deviceName,
-        deviceModel: session.publisher.deviceModel,
-        systemVersion: session.publisher.systemVersion,
-        wearableId: session.publisher.wearableId,
-        wearableType: session.publisher.wearableType,
-        appVersion: session.publisher.appVersion,
-        buildNumber: session.publisher.buildNumber,
-        frameCount: session.publisher.frameCount,
-        totalBytes: session.publisher.totalBytes,
-        totalMB: Math.round(session.publisher.totalBytes / 1048576 * 100) / 100,
-        audioCount: session.publisher.audioCount,
-        audioBytes: session.publisher.audioBytes,
-        audioMB: Math.round(session.publisher.audioBytes / 1048576 * 100) / 100,
-        audioTaps: Object.fromEntries(
-          [...session.publisher.audioTaps.entries()].map(([ct, tap]) => [ct, {
-            codecType: ct,
-            label: ct === 0 ? "built-in mic" : ct === 1 ? "glasses HFP mic" : ct === 2 ? "TTS playback" : `unknown(${ct})`,
-            frameCount: tap.count,
-            bytes: tap.bytes,
-            sampleRate: tap.sampleRate,
-            lastAtMs: tap.lastAt,
-          }])
-        ),
-        uptimeMs: pubUptimeMs,
-        latencyMs: session.publisher.timing.lastReceivedAt > 0
-          ? Math.round(now - session.publisher.timing.lastReceivedAt)
-          : null,
-        video: session.publisher.lastHeader,
-        timing: formatTiming(session.publisher.timing),
+        connection: {
+          clientIp: session.publisher.clientIp,
+          uptimeMs: pubUptimeMs,
+          wireLatencyMs: session.publisher.timing.lastReceivedAt > 0
+            ? Math.round(now - session.publisher.timing.lastReceivedAt)
+            : null,
+          timing: formatTiming(session.publisher.timing),
+        },
+        device: {
+          id: session.publisher.deviceId,
+          name: session.publisher.deviceName,
+          model: session.publisher.deviceModel,
+          systemVersion: session.publisher.systemVersion,
+        },
+        wearable: {
+          id: session.publisher.wearableId,
+          type: session.publisher.wearableType,
+        },
+        app: {
+          version: session.publisher.appVersion,
+          buildNumber: session.publisher.buildNumber,
+        },
+        video: {
+          frames: session.publisher.frameCount,
+          bytes: session.publisher.totalBytes,
+          mb: Math.round(session.publisher.totalBytes / 1048576 * 100) / 100,
+          lastHeader: session.publisher.lastHeader,
+        },
+        audio: {
+          frames: session.publisher.audioCount,
+          bytes: session.publisher.audioBytes,
+          mb: Math.round(session.publisher.audioBytes / 1048576 * 100) / 100,
+          taps: Object.fromEntries(
+            [...session.publisher.audioTaps.entries()].map(([ct, tap]) => [ct, {
+              codecType: ct,
+              label: ct === 0 ? "built-in mic" : ct === 1 ? "glasses HFP mic" : ct === 2 ? "TTS playback" : `unknown(${ct})`,
+              frameCount: tap.count,
+              bytes: tap.bytes,
+              sampleRate: tap.sampleRate,
+              lastAtMs: tap.lastAt,
+            }])
+          ),
+        },
+        rates: { videoMbps: videoBitrateMbps, audioKbps: audioBitrateKbps, fps: framesPerSecond },
       } : null,
-      rates: { videoBitrateMbps, audioBitrateKbps, framesPerSecond },
-      recording: session.recorder ? session.recorder.getStats() : { active: false },
-      bucketUrl,
-      viewers: session.viewers.size,
-      viewerStats: Object.fromEntries(
+      viewerCount: session.viewers.size,
+      viewers: Object.fromEntries(
         [...session.viewers.entries()].map(([vid, v]) => [vid.slice(0, 8), {
           clientIp: v.clientIp,
           quality: v.quality,
@@ -115,55 +125,71 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
           buildVersion: v.buildVersion,
         }])
       ),
+      recording: session.recorder ? session.recorder.getStats() : { active: false },
+      bucketUrl,
     };
   }
 
   // Aggregate bandwidth
-  let totalBytesIn = 0;
-  let totalBytesOut = 0;
+  let publisherBytesIn = 0;
+  let viewerBytesOut = 0;
   for (const session of src.sessions.values()) {
     if (session.publisher) {
-      totalBytesIn += session.publisher.totalBytes + session.publisher.audioBytes;
+      publisherBytesIn += session.publisher.totalBytes + session.publisher.audioBytes;
     }
     for (const viewer of session.viewers.values()) {
-      totalBytesOut += viewer.totalBytes;
+      viewerBytesOut += viewer.totalBytes;
     }
   }
 
   const serverUptimeMs = now - serverStartTime;
   const serverUptimeSec = serverUptimeMs / 1000;
   const totalBandwidthMbps = serverUptimeSec > 0
-    ? Math.round((totalBytesIn + totalBytesOut) / serverUptimeSec * 8 / 125000 * 100) / 100
+    ? Math.round((publisherBytesIn + viewerBytesOut) / serverUptimeSec * 8 / 125000 * 100) / 100
     : 0;
 
   return {
     server: {
       uptimeMs: serverUptimeMs,
       wasmLoaded: src.wasmLoaded(),
-      sessionCount: src.sessions.size,
+      gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
+      buildVersion: process.env.BUILD_VERSION ?? "dev",
       ip: wifiIp,
       port,
       memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
-      activeConnections: activePublisherCount + src.totalViewers(),
-      gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
-      buildVersion: process.env.BUILD_VERSION ?? "dev",
+      sessions: {
+        active: src.sessions.size,
+        started: src.sessionsStarted,
+      },
+      connections: {
+        publishers: activePublisherCount,
+        viewers: src.totalViewers(),
+        total: activePublisherCount + src.totalViewers(),
+      },
       hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
     },
     aggregate: {
-      totalViewers: src.totalViewers(),
-      peakViewers: src.peakViewers,
-      totalBandwidthMbps,
-      totalBytesInMB: Math.round(totalBytesIn / 1048576 * 100) / 100,
-      totalBytesOutMB: Math.round(totalBytesOut / 1048576 * 100) / 100,
-      totalFramesRelayed: src.totalFramesRelayed,
-      totalDroppedFrames: src.totalDroppedFrames,
-      sessionsStarted: src.sessionsStarted,
+      viewers: {
+        current: src.totalViewers(),
+        peak: src.peakViewers,
+      },
+      bandwidth: {
+        publisherInMB: Math.round(publisherBytesIn / 1048576 * 100) / 100,
+        viewerOutMB: Math.round(viewerBytesOut / 1048576 * 100) / 100,
+        totalMbps: totalBandwidthMbps,
+      },
+      frames: {
+        relayed: src.totalFramesRelayed,
+        dropped: src.totalDroppedFrames,
+      },
     },
     reliability: {
       viewersRejected: src.viewersRejected,
       publisherReconnects: src.publisherReconnects,
-      framesThrottledWasm: src.framesThrottledWasm,
-      framesThrottledQuality: src.framesThrottledQuality,
+      throttled: {
+        wasm: src.framesThrottledWasm,
+        quality: src.framesThrottledQuality,
+      },
     },
     audioTaps: audioTapCount,
     sessions,
