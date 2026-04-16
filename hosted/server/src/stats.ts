@@ -165,9 +165,6 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
       framesThrottledWasm: src.framesThrottledWasm,
       framesThrottledQuality: src.framesThrottledQuality,
     },
-    gallery: {
-      note: "Use /gallery/api for historical gallery data",
-    },
     audioTaps: audioTapCount,
     sessions,
   };
