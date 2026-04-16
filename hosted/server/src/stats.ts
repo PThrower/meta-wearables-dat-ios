@@ -10,12 +10,14 @@ import type { Session } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { formatTiming } from "./protocol.js";
 import { probeHostedServices } from "./health.js";
+import type { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 
 /** Shape the registry must expose for stats computation */
 export interface StatsSource {
   sessions: Map<string, Session>;
   store: ObjectStore;
   wasmLoaded(): boolean;
+  orchestrator: GuidanceOrchestrator;
   totalViewers(): number;
   peakViewers: number;
   totalFramesRelayed: number;
@@ -147,7 +149,7 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
       activeConnections: activePublisherCount + src.totalViewers(),
       gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
       buildVersion: process.env.BUILD_VERSION ?? "dev",
-      hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
+      hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded(), orchestrator: src.orchestrator }),
     },
     aggregate: {
       totalViewers: src.totalViewers(),

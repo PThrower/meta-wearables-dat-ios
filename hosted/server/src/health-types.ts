@@ -17,8 +17,15 @@ export interface ServiceProbe {
   error?: string;
 }
 
+export interface AIProviderEntry {
+  provider: string;
+  activeSessions: number;
+  recentErrors: Array<{ message: string; at: string }>;
+}
+
 export interface HostedSection {
   relay: { ok: true; uptimeMs: number; wasmLoaded: boolean; memoryUsageMb: number };
   gateway: ServiceProbe;
   objectStore: ServiceProbe;
+  aiProviders: AIProviderEntry[];
 }

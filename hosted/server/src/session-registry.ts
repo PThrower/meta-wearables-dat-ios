@@ -14,6 +14,7 @@ import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
 import { resolvePermission } from "./permissions.js";
 import { computeStats, type StatsSource } from "./stats.js";
+import type { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 
 const DEFAULT_SESSION_ID = "default";
 const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no viewers for 60s
@@ -21,6 +22,7 @@ const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no view
 export class SessionRegistry {
   private sessions = new Map<string, Session>();
   private store: ObjectStore;
+  private _orchestrator: GuidanceOrchestrator | null = null;
   private FrameRelayClass: any | null = null; // WASM class constructor, not instance
 
   // --- Aggregate counters (lifetime, reset on process restart) ---
@@ -44,6 +46,7 @@ export class SessionRegistry {
       sessions: self.sessions,
       store: self.store,
       wasmLoaded: () => self.FrameRelayClass !== null,
+      orchestrator: self._orchestrator!,
       totalViewers: () => self.totalViewers(),
       get peakViewers() { return self.peakViewers; },
       get totalFramesRelayed() { return self.totalFramesRelayed; },
@@ -64,6 +67,11 @@ export class SessionRegistry {
   /** Whether the WASM FrameRelay class is loaded */
   wasmLoaded(): boolean {
     return this.FrameRelayClass !== null;
+  }
+
+  /** Set the guidance orchestrator (called once at startup) */
+  setOrchestrator(orch: GuidanceOrchestrator): void {
+    this._orchestrator = orch;
   }
 
   // --- Session lifecycle ---

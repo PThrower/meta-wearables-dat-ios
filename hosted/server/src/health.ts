@@ -6,10 +6,11 @@
  */
 
 import type { ObjectStore } from "@ebowwa/object-store";
-import type { HealthResponse, HostedSection, ServiceProbe } from "./health-types.js";
+import type { HealthResponse, HostedSection, ServiceProbe, AIProviderEntry } from "./health-types.js";
+import type { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 
 // --- Re-export types for convenience ---
-export type { HealthResponse, HostedSection, ServiceProbe };
+export type { HealthResponse, HostedSection, ServiceProbe, AIProviderEntry };
 
 // --- Sync health ---
 
@@ -35,6 +36,7 @@ export interface ProbeParams {
   store: ObjectStore;
   serverStartTime: number;
   wasmLoaded: boolean;
+  orchestrator: GuidanceOrchestrator;
 }
 
 const GATEWAY_URL = process.env.GATEWAY_HEALTH_URL || "http://127.0.0.1:3000/api/config";
@@ -97,5 +99,6 @@ export async function probeHostedServices(params: ProbeParams): Promise<HostedSe
     },
     gateway,
     objectStore,
+    aiProviders: params.orchestrator.getProvidersStatus(),
   };
 }
