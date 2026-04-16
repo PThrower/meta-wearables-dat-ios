@@ -18,7 +18,6 @@ export interface ServiceProbe {
 }
 
 export interface HostedSection {
-  relay: { ok: true; uptimeMs: number; wasmLoaded: boolean; memoryUsageMb: number };
   gateway: ServiceProbe;
   objectStore: ServiceProbe;
 }

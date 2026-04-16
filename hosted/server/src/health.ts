@@ -89,12 +89,6 @@ export async function probeHostedServices(params: ProbeParams): Promise<HostedSe
   ]);
 
   return {
-    relay: {
-      ok: true,
-      uptimeMs: Date.now() - params.serverStartTime,
-      wasmLoaded: params.wasmLoaded,
-      memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
-    },
     gateway,
     objectStore,
   };
