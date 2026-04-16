@@ -171,30 +171,32 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
         },
         ...(await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() })),
       },
+      metrics: {
+        aggregate: {
+          viewers: {
+            peak: src.peakViewers,
+          },
+          bandwidth: {
+            publisherInMB: Math.round(publisherBytesIn / 1048576 * 100) / 100,
+            viewerOutMB: Math.round(viewerBytesOut / 1048576 * 100) / 100,
+            totalMbps: totalBandwidthMbps,
+          },
+          frames: {
+            relayed: src.totalFramesRelayed,
+            dropped: src.totalDroppedFrames,
+          },
+        },
+        reliability: {
+          viewersRejected: src.viewersRejected,
+          publisherReconnects: src.publisherReconnects,
+          throttled: {
+            wasm: src.framesThrottledWasm,
+            quality: src.framesThrottledQuality,
+          },
+        },
+        audioTaps: audioTapCount,
+        sessions,
+      },
     },
-    aggregate: {
-      viewers: {
-        peak: src.peakViewers,
-      },
-      bandwidth: {
-        publisherInMB: Math.round(publisherBytesIn / 1048576 * 100) / 100,
-        viewerOutMB: Math.round(viewerBytesOut / 1048576 * 100) / 100,
-        totalMbps: totalBandwidthMbps,
-      },
-      frames: {
-        relayed: src.totalFramesRelayed,
-        dropped: src.totalDroppedFrames,
-      },
-    },
-    reliability: {
-      viewersRejected: src.viewersRejected,
-      publisherReconnects: src.publisherReconnects,
-      throttled: {
-        wasm: src.framesThrottledWasm,
-        quality: src.framesThrottledQuality,
-      },
-    },
-    audioTaps: audioTapCount,
-    sessions,
   };
 }
