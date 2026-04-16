@@ -43,7 +43,7 @@ jobs:
 
             echo ">>> Building WASM frame relay"
             cd /root/relay-server/hosted/packages/frame-relay-wasm
-            wasm-pack build --target bundler --out-dir ../../server/pkg
+            wasm-pack build --target nodejs --out-dir ../../server/pkg
             echo "WASM rebuilt"
 
             echo ">>> Building relay-protocol if needed"
