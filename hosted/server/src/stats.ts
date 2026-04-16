@@ -9,6 +9,7 @@ import type { ObjectStore } from "@ebowwa/object-store";
 import type { Session } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { formatTiming } from "./protocol.js";
+import { probeHostedServices } from "./health.js";
 
 /** Shape the registry must expose for stats computation */
 export interface StatsSource {
@@ -166,6 +167,7 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
     gallery: {
       note: "Use /gallery/api for historical gallery data",
     },
+    hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
     audioTaps: audioTapCount,
     sessions,
   };

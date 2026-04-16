@@ -61,6 +61,11 @@ export class SessionRegistry {
     this.FrameRelayClass = cls;
   }
 
+  /** Whether the WASM FrameRelay class is loaded */
+  wasmLoaded(): boolean {
+    return this.FrameRelayClass !== null;
+  }
+
   // --- Session lifecycle ---
 
   /** Get an existing session or create a new one */

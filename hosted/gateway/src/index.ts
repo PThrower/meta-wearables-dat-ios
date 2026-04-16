@@ -15,6 +15,7 @@ import type { AuthUser } from "./types.js";
 
 // --- Config ---
 
+const gatewayStartTime = Date.now();
 const PORT = parseInt(process.env.GATEWAY_PORT || "3000");
 const RELAY_PORT = process.env.RELAY_PORT || "8080";
 const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../viewer/dist");
@@ -64,7 +65,7 @@ function serveStatic(baseDir: string, filePath: string): Response | null {
 
 interface WsBridgeData {
   targetUrl: string;
-  upstream: WebSocket | null;
+  upstream?: WebSocket | null;
 }
 
 // --- Route handler (exported for testing) ---
@@ -104,6 +105,18 @@ export function createFetchHandler(config?: {
       const token = extractToken(req, url);
       if (token) revokeToken(token);
       return Response.json({ ok: true });
+    }
+
+    // --- Health (gateway-only, zero I/O, no relay dependency) ---
+
+    if (pathname === "/health") {
+      return Response.json({
+        ok: true,
+        uptimeMs: Date.now() - gatewayStartTime,
+        timestamp: new Date().toISOString(),
+        gitCommit: _gitCommit,
+        buildVersion: _buildVersion,
+      });
     }
 
     // --- Runtime config for SPA ---
@@ -242,7 +255,7 @@ export const wsHandler = {
     ws.data.upstream = upstream;
   },
 
-  message(ws: any, message: string | ArrayBuffer) {
+  message(ws: any, message: string | ArrayBuffer | Buffer) {
     const { upstream } = ws.data as WsBridgeData;
     if (upstream && upstream.readyState === WebSocket.OPEN) {
       upstream.send(message);

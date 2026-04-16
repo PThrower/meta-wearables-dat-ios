@@ -40,6 +40,7 @@ import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 import type { WsData, QualityPreset, AccessLevel, AclEntry } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
+import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
@@ -234,6 +235,15 @@ const server = Bun.serve<WsData>({
       }
       const meta = await getSessionExportMeta(latestId, store);
       return Response.json({ ...meta, sessionId: latestId });
+    }
+
+    // --- Health (zero I/O) ---
+
+    if (url.pathname === "/health") {
+      return Response.json(computeHealth({
+        serverStartTime,
+        wasmLoaded: registry.wasmLoaded(),
+      }));
     }
 
     // --- Stats ---
