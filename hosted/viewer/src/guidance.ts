@@ -166,7 +166,7 @@ export class GuidancePanel {
         <span id="guidanceStatusDot" class="guidance-status-dot" style="background:${STATUS_COLORS[this.status.status]}"></span>
       </button>
       <div id="guidanceContent" class="guidance-content">
-        <div id="guidanceControl" class="guidance-section">${this.renderControlSection()}</div>
+        <div id="guidanceControl" class="guidance-section">${this.renderControlInner()}</div>
         <div id="guidanceLog" class="guidance-section guidance-log">${this.renderEventLogInner()}</div>
         <div id="guidanceTelemetry" class="guidance-section">${this.renderTelemetryInner()}</div>
       </div>
