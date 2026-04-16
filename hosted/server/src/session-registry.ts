@@ -39,19 +39,20 @@ export class SessionRegistry {
 
   /** Expose read-only view for stats computation */
   asStatsSource(): StatsSource {
+    const self = this;
     return {
-      sessions: this.sessions,
-      store: this.store,
-      wasmLoaded: () => this.FrameRelayClass !== null,
-      totalViewers: () => this.totalViewers(),
-      get peakViewers() { return this.peakViewers; },
-      get totalFramesRelayed() { return this.totalFramesRelayed; },
-      get totalDroppedFrames() { return this.totalDroppedFrames; },
-      get sessionsStarted() { return this.sessionsStarted; },
-      get viewersRejected() { return this.viewersRejected; },
-      get publisherReconnects() { return this.publisherReconnects; },
-      get framesThrottledWasm() { return this.framesThrottledWasm; },
-      get framesThrottledQuality() { return this.framesThrottledQuality; },
+      sessions: self.sessions,
+      store: self.store,
+      wasmLoaded: () => self.FrameRelayClass !== null,
+      totalViewers: () => self.totalViewers(),
+      get peakViewers() { return self.peakViewers; },
+      get totalFramesRelayed() { return self.totalFramesRelayed; },
+      get totalDroppedFrames() { return self.totalDroppedFrames; },
+      get sessionsStarted() { return self.sessionsStarted; },
+      get viewersRejected() { return self.viewersRejected; },
+      get publisherReconnects() { return self.publisherReconnects; },
+      get framesThrottledWasm() { return self.framesThrottledWasm; },
+      get framesThrottledQuality() { return self.framesThrottledQuality; },
     } as StatsSource;
   }
 
