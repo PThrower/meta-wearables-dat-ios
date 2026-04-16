@@ -167,10 +167,17 @@ export class GeminiLiveService implements AIService {
         });
 
         this.ws.addEventListener("message", (event) => {
-          const data = typeof event.data === "string" ? event.data : "";
-
-          // Bun WebSocket can deliver ArrayBuffer
-          if (!data && event.data instanceof ArrayBuffer) return; // shouldn't happen for Gemini
+          // Bun delivers WS messages as Buffer, string, or ArrayBuffer
+          let data: string;
+          if (typeof event.data === "string") {
+            data = event.data;
+          } else if (Buffer.isBuffer(event.data)) {
+            data = event.data.toString("utf8");
+          } else if (event.data instanceof ArrayBuffer) {
+            data = Buffer.from(event.data).toString("utf8");
+          } else {
+            return;
+          }
 
           let msg: GeminiServerMessage;
           try {
