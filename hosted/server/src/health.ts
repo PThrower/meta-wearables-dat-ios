@@ -2,7 +2,7 @@
  * health.ts — Health check logic
  *
  * - computeHealth(): pure sync, zero I/O
- * - probeHostedServices(): async, probes gateway + object store in parallel
+ * - probeHostedServices(): async, probes gateway + web platform + object store in parallel
  */
 
 import type { ObjectStore } from "@ebowwa/object-store";
@@ -39,6 +39,22 @@ export interface ProbeParams {
 
 const GATEWAY_URL = process.env.GATEWAY_HEALTH_URL || "http://127.0.0.1:3000/api/config";
 const GATEWAY_TIMEOUT_MS = 3000;
+
+async function probeWebPlatform(): Promise<ServiceProbe> {
+  const start = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), GATEWAY_TIMEOUT_MS);
+    const resp = await fetch(`http://127.0.0.1:3000/`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return { ok: false, latencyMs: Date.now() - start, error: `HTTP ${resp.status}` };
+    const body = await resp.text();
+    const hasSPA = body.includes("<!DOCTYPE") || body.includes("<html");
+    return { ok: hasSPA, latencyMs: Date.now() - start, error: hasSPA ? undefined : "response not HTML" };
+  } catch (err: any) {
+    return { ok: false, latencyMs: null, error: err?.code ?? err?.message ?? String(err) };
+  }
+}
 
 async function probeGateway(): Promise<ServiceProbe> {
   const start = Date.now();
@@ -83,13 +99,15 @@ async function probeObjectStore(store: ObjectStore): Promise<ServiceProbe> {
 }
 
 export async function probeHostedServices(params: ProbeParams): Promise<HostedSection> {
-  const [gateway, objectStore] = await Promise.all([
+  const [gateway, webPlatform, objectStore] = await Promise.all([
     probeGateway(),
+    probeWebPlatform(),
     probeObjectStore(params.store),
   ]);
 
   return {
     gateway,
+    webPlatform,
     objectStore,
   };
 }

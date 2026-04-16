@@ -19,5 +19,6 @@ export interface ServiceProbe {
 
 export interface HostedSection {
   gateway: ServiceProbe;
+  webPlatform: ServiceProbe;
   objectStore: ServiceProbe;
 }
