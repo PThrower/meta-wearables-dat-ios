@@ -26,6 +26,8 @@ jobs:
             cd /root/relay-server
 
             echo ">>> Pulling latest"
+            cd /root/relay-server
+            git checkout -- hosted/server/pkg/ 2>/dev/null || true
             git pull origin feat/stream-registry
 
             echo ">>> Installing build tools (idempotent)"
