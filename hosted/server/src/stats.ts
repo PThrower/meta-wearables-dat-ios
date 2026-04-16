@@ -156,18 +156,20 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
       ip: wifiIp,
       port,
       memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
-      relay: {
-        wasmLoaded: src.wasmLoaded(),
-        sessions: {
-          active: src.sessions.size,
-          started: src.sessionsStarted,
+      hosted: {
+        relay: {
+          wasmLoaded: src.wasmLoaded(),
+          sessions: {
+            active: src.sessions.size,
+            started: src.sessionsStarted,
+          },
+          connections: {
+            publishers: activePublisherCount,
+            viewers: src.totalViewers(),
+            total: activePublisherCount + src.totalViewers(),
+          },
         },
-        connections: {
-          publishers: activePublisherCount,
-          viewers: src.totalViewers(),
-          total: activePublisherCount + src.totalViewers(),
-        },
-        hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
+        ...(await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() })),
       },
     },
     aggregate: {
