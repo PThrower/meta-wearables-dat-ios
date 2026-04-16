@@ -1,0 +1,33 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_frameheader_free: (a: number, b: number) => void;
+export const __wbg_get_frameheader_sequence: (a: number) => bigint;
+export const __wbg_set_frameheader_sequence: (a: number, b: bigint) => void;
+export const __wbg_get_frameheader_width: (a: number) => number;
+export const __wbg_set_frameheader_width: (a: number, b: number) => void;
+export const __wbg_get_frameheader_height: (a: number) => number;
+export const __wbg_set_frameheader_height: (a: number, b: number) => void;
+export const __wbg_get_frameheader_quality: (a: number) => number;
+export const __wbg_set_frameheader_quality: (a: number, b: number) => void;
+export const __wbg_get_frameheader_timestamp_ms: (a: number) => bigint;
+export const __wbg_set_frameheader_timestamp_ms: (a: number, b: bigint) => void;
+export const __wbg_framerelay_free: (a: number, b: number) => void;
+export const __wbg_get_framerelay_frames_dropped: (a: number) => bigint;
+export const __wbg_set_framerelay_frames_dropped: (a: number, b: bigint) => void;
+export const __wbg_get_framerelay_last_relayed_sequence: (a: number) => bigint;
+export const __wbg_set_framerelay_last_relayed_sequence: (a: number, b: bigint) => void;
+export const framerelay_new: (a: number) => number;
+export const framerelay_should_relay: (a: number, b: bigint) => number;
+export const framerelay_reset: (a: number) => void;
+export const framerelay_effective_fps: (a: number, b: bigint) => number;
+export const encode_frame_prefix: (a: number) => [number, number];
+export const decode_frame_prefix: (a: number, b: number) => number;
+export const __wbg_set_framerelay_frames_received: (a: number, b: bigint) => void;
+export const __wbg_set_framerelay_frames_relayed: (a: number, b: bigint) => void;
+export const __wbg_get_framerelay_frames_received: (a: number) => bigint;
+export const __wbg_get_framerelay_frames_relayed: (a: number) => bigint;
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;
