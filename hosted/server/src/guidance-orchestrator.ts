@@ -318,6 +318,13 @@ export class GuidanceOrchestrator {
     state.service.sendText(text);
   }
 
+  /** Update vision FPS for the active AI service at runtime */
+  setVisionFps(sessionId: string, fps: number): void {
+    const state = this.aiState.get(sessionId);
+    if (!state) return;
+    state.service.setVisionFps?.(fps);
+  }
+
   // --- Status / telemetry ---
 
   getStatus(sessionId: string): AIStatus {

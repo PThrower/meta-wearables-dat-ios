@@ -102,6 +102,7 @@ export class GuidancePanel {
   private events: GuidanceEvent[] = [];
   private collapsed = true;
   private appsLoaded = false;
+  private visionFps = 0.5;
 
   constructor(container: HTMLElement, sendFn: (msg: object) => void) {
     this.container = container;
@@ -148,6 +149,9 @@ export class GuidancePanel {
     } else if (msg.type === "ai_telemetry") {
       this.telemetry = msg as unknown as AITelemetry;
       this.renderTelemetry();
+    } else if (msg.type === "vision_fps") {
+      this.visionFps = (msg as { fps: number }).fps;
+      this.updateFpsDisplay();
     }
   }
 
@@ -248,9 +252,21 @@ export class GuidancePanel {
       infoHtml = `<div class="guidance-info">Model: ${esc(s.config.model)}</div>`;
     }
 
+    // Vision FPS slider (only when active)
+    let fpsHtml = "";
+    if (isActive) {
+      const fpsLabel = this.visionFps >= 1 ? `${this.visionFps} FPS` : `${this.visionFps} FPS (~1 frame / ${Math.round(1 / this.visionFps)}s)`;
+      fpsHtml = `<div class="guidance-fps-row">
+        <span class="guidance-fps-label">Vision</span>
+        <input id="guidanceFpsSlider" type="range" min="0.1" max="5" step="0.1" value="${this.visionFps}" class="guidance-slider">
+        <span id="guidanceFpsValue" class="guidance-fps-value">${fpsLabel}</span>
+      </div>`;
+    }
+
     return `
       <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
       ${gesturesHtml}
+      ${fpsHtml}
       ${infoHtml}
     `;
   }
@@ -350,6 +366,12 @@ export class GuidancePanel {
         }
       });
     }
+
+    // Vision FPS slider
+    const fpsSlider = document.getElementById("guidanceFpsSlider") as HTMLInputElement | null;
+    if (fpsSlider) {
+      fpsSlider.addEventListener("input", () => this.handleFpsChange(parseFloat(fpsSlider.value)));
+    }
   }
 
   private handleActivate(): void {
@@ -367,6 +389,21 @@ export class GuidancePanel {
 
   private handleGestureTrigger(gesture: string): void {
     this.sendFn({ type: "trigger_gesture", gesture });
+  }
+
+  private handleFpsChange(fps: number): void {
+    this.visionFps = fps;
+    this.sendFn({ type: "set_vision_fps", fps });
+    this.updateFpsDisplay();
+  }
+
+  private updateFpsDisplay(): void {
+    const val = document.getElementById("guidanceFpsValue");
+    if (val) {
+      val.textContent = this.visionFps >= 1
+        ? `${this.visionFps} FPS`
+        : `${this.visionFps} FPS (~1 frame / ${Math.round(1 / this.visionFps)}s)`;
+    }
   }
 }
 

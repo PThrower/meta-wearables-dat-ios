@@ -643,6 +643,10 @@ const server = Bun.serve<WsData>({
               ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
               // Notify orchestrator
               orchestrator.deactivateApp(sessionId).catch(() => {});
+            } else if (cmd.type === "set_vision_fps" && typeof cmd.fps === "number") {
+              const fps = Math.max(0.1, Math.min(cmd.fps, 5));
+              orchestrator.setVisionFps(sessionId, fps);
+              ws.send(JSON.stringify({ type: "vision_fps", fps }));
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
@@ -744,6 +748,12 @@ const server = Bun.serve<WsData>({
               if (viewerPipeline) {
                 orchestrator.activateApp(sessionId, viewerPipeline.appId).catch(() => {});
               }
+            } else if (cmd.type === "set_vision_fps" && typeof cmd.fps === "number") {
+              // Viewer updates vision FPS at runtime
+              const fps = Math.max(0.1, Math.min(cmd.fps, 5));
+              orchestrator.setVisionFps(sessionId, fps);
+              console.log(`[relay] Vision FPS set to ${fps} session=${sessionId}`);
+              ws.send(JSON.stringify({ type: "vision_fps", fps }));
             } else if (cmd.type === "ai_telemetry") {
               // Viewer requests telemetry
               ws.send(JSON.stringify({

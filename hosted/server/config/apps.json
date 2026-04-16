@@ -22,7 +22,7 @@
       "config": {
         "model": "gemini-2.5-flash-native-audio-latest",
         "voice": "Kore",
-        "visionFps": 1,
+        "visionFps": 0.5,
         "gestures": ["thumbs_up", "thumbs_down", "open_palm", "pointing"]
       }
     }

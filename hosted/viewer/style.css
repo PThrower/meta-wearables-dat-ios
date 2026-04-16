@@ -631,6 +631,42 @@ header {
   margin-top: 4px;
 }
 
+.guidance-fps-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.guidance-fps-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  min-width: 36px;
+}
+.guidance-slider {
+  flex: 1;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255,255,255,0.15);
+  border-radius: 2px;
+  outline: none;
+}
+.guidance-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #4ade80;
+  cursor: pointer;
+}
+.guidance-fps-value {
+  font-size: 9px;
+  color: rgba(255,255,255,0.45);
+  min-width: 80px;
+  text-align: right;
+}
+
 /* Event log */
 .guidance-log {
   flex: 1;

@@ -310,6 +310,13 @@ export class GeminiLiveService implements AIService {
     this.callbacks?.onStatusChange("disconnected");
     this.config = null;
   }
+
+  setVisionFps(fps: number): void {
+    if (this.config) {
+      this.config.visionFps = fps;
+      console.log(`[gemini-live] Vision FPS updated to ${fps}`);
+    }
+  }
 }
 
 // --- Utilities ---

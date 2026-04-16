@@ -63,6 +63,9 @@ export interface AIService {
   /** Gracefully close the AI session */
   disconnect(): void;
 
+  /** Update vision FPS rate limit at runtime */
+  setVisionFps?(fps: number): void;
+
   /** Current connection status */
   readonly status: AIServiceStatus;
 }
