@@ -115,6 +115,8 @@ const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
 orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
   if (pcm.length === 0) return;
 
+  console.log(`[relay] AI audio push: ${pcm.length} bytes session=${sessionId}`);
+
   // Build FRAU frame: codecType=3 (relay-inbound), 16kHz, mono, 16-bit
   const seq = BigInt(Date.now());
   const timestampMs = BigInt(Date.now());

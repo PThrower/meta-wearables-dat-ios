@@ -210,13 +210,17 @@ export class GeminiLiveService implements AIService {
               if (part.inlineData?.data) {
                 // Audio response from Gemini (24kHz PCM 16-bit LE)
                 const raw = base64ToUint8(part.inlineData.data);
+                console.log(`[gemini-live] Audio part: ${raw.length} bytes, mime=${part.inlineData.mimeType}`);
                 // Copy into a clean ArrayBuffer to avoid Buffer byteOffset/alignment issues
                 const clean = new Uint8Array(raw);
                 const pcm24 = new Int16Array(clean.buffer);
                 const pcm16 = resample24to16(pcm24);
-                callbacks.onAudio(new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength * 2));
+                const outPcm = new Uint8Array(pcm16.buffer, pcm16.byteOffset, pcm16.byteLength * 2);
+                console.log(`[gemini-live] Resampled: ${outPcm.length} bytes (16kHz)`);
+                callbacks.onAudio(outPcm);
               }
               if (part.text) {
+                console.log(`[gemini-live] Text part: ${part.text.slice(0, 80)}`);
                 callbacks.onText(part.text);
               }
             }
