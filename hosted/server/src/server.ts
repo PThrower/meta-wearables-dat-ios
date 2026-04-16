@@ -110,7 +110,6 @@ const appRegistry = new AppRegistry();
 // (Gemini Live, etc.) for real multimodal inference.
 
 const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
-registry.setOrchestrator(orchestrator);
 
 // Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
 // push through the relay's audio-in path (fan-out to publisher + viewers).

@@ -18,8 +18,7 @@ import type { ControlEvent, AppConfig, AppPipeline } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks } from "./ai-service.js";
-import { createAIService, listAIProviders } from "./ai-service.js";
-import type { AIProviderEntry } from "./health-types.js";
+import { createAIService } from "./ai-service.js";
 // Import to register the gemini provider
 import "./gemini-live-service.js";
 
@@ -102,10 +101,6 @@ export class GuidanceOrchestrator {
   // Latency tracking for telemetry averages
   private latencySum = new Map<string, number>();
   private latencyCount = new Map<string, number>();
-
-  // Recent AI error ring buffer (last 20 errors across all providers)
-  private recentErrors: Array<{ provider: string; message: string; at: number }> = [];
-  private static readonly MAX_RECENT_ERRORS = 20;
 
   constructor(controlBus: ControlEventBus, appRegistry: AppRegistry) {
     this.controlBus = controlBus;
@@ -207,7 +202,6 @@ export class GuidanceOrchestrator {
       },
       onError: (error) => {
         console.error(`[orchestrator] AI error: ${error.message} session=${sessionId}`);
-        this.pushError(provider, error.message);
         this.emitGuidanceEvent(sessionId, {
           type: "guidance.alert",
           content: `AI error: ${error.message}`,
@@ -362,24 +356,6 @@ export class GuidanceOrchestrator {
     return this.eventHistory.get(sessionId) ?? [];
   }
 
-  /** AI provider availability + recent errors (read from registry, no hard-coding) */
-  getProvidersStatus(): AIProviderEntry[] {
-    const registered = listAIProviders();
-    return registered.map(provider => {
-      // Count active sessions using this provider
-      let activeSessions = 0;
-      for (const state of this.aiState.values()) {
-        if (state.service.status === "connected") activeSessions++;
-      }
-      // Filter recent errors for this provider
-      const recentErrors = this.recentErrors
-        .filter(e => e.provider === provider)
-        .slice(-5)
-        .map(e => ({ message: e.message, at: new Date(e.at).toISOString() }));
-      return { provider, activeSessions, recentErrors };
-    });
-  }
-
   // --- Lifecycle ---
 
   start(): void {
@@ -403,13 +379,6 @@ export class GuidanceOrchestrator {
   }
 
   // --- Private ---
-
-  private pushError(provider: string, message: string): void {
-    this.recentErrors.push({ provider, message, at: Date.now() });
-    if (this.recentErrors.length > GuidanceOrchestrator.MAX_RECENT_ERRORS) {
-      this.recentErrors.shift();
-    }
-  }
 
   private resolveProvider(primitiveId: string): string {
     // Map primitive IDs to AI provider names
