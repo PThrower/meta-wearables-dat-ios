@@ -30,6 +30,13 @@ jobs:
             git checkout -- hosted/server/pkg/ 2>/dev/null || true
             git pull origin feat/stream-registry
 
+            echo ">>> Updating version env vars"
+            NEW_COMMIT=$(git rev-parse --short HEAD)
+            NEW_VERSION="$(date +%Y%m%d-%H%M)"
+            sed -i "s/^GIT_COMMIT=.*/GIT_COMMIT=$NEW_COMMIT/" hosted/server/.env
+            sed -i "s/^BUILD_VERSION=.*/BUILD_VERSION=$NEW_VERSION/" hosted/server/.env
+            echo "GIT_COMMIT=$NEW_COMMIT BUILD_VERSION=$NEW_VERSION"
+
             echo ">>> Installing build tools (idempotent)"
             apt-get install -y build-essential &>/dev/null || true
 
