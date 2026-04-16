@@ -125,16 +125,16 @@ class AudioTapClientTests: XCTestCase {
         let bus = AudioEventBus()
         let client = AudioTapClient(eventBus: bus)
 
-        let url = await client.tapURL(for: "ws://192.168.1.5:8080", session: "test-session")
-        XCTAssertEqual(url, "ws://192.168.1.5:8080/tap/audio?session=test-session")
+        let url = await client.tapURL(for: "ws://192.168.1.5:3000", session: "test-session")
+        XCTAssertEqual(url, "ws://192.168.1.5:3000/tap/audio?session=test-session")
     }
 
     func testClientBuildsTapURLDefaultSession() async {
         let bus = AudioEventBus()
         let client = AudioTapClient(eventBus: bus)
 
-        let url = await client.tapURL(for: "ws://192.168.1.5:8080", session: nil)
-        XCTAssertEqual(url, "ws://192.168.1.5:8080/tap/audio?session=default")
+        let url = await client.tapURL(for: "ws://192.168.1.5:3000", session: nil)
+        XCTAssertEqual(url, "ws://192.168.1.5:3000/tap/audio?session=default")
     }
 
     func testClientBuildsTapURLFromPublishURL() async {

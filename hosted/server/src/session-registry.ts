@@ -200,18 +200,6 @@ export class SessionRegistry {
   async addViewer(sessionId: string, ws: ServerWebSocket<WsData>, clientIp: string, userId?: string, email?: string, shareToken?: string): Promise<string> {
     const session = this.getOrCreate(sessionId);
 
-    // Access control: resolve permission via tiered system
-    const perm = await resolvePermission(
-      { ownerId: session.ownerId, accessLevel: session.accessLevel, acl: session.acl },
-      userId,
-      shareToken,
-      this.store,
-      sessionId,
-    );
-    if (!perm.allowed) {
-      return `error:${perm.reason || "access denied"}`;
-    }
-
     const id = crypto.randomUUID();
     ws.data.viewerId = id;
 

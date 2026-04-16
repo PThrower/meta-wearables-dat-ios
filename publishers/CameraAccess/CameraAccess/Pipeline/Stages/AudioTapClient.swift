@@ -1,13 +1,13 @@
 /*
  * AudioTapClient.swift
  *
- * WebSocket client that connects to the relay server's /tap/audio endpoint
+ * WebSocket client that connects to the gateway's /tap/audio endpoint
  * and receives JSON audio frames. Decodes them to AudioPacket and publishes
  * to the local AudioEventBus for any consumer (transcription, VU meter, etc.)
  * to use.
  *
  * Architecture:
- *   Relay Server /tap/audio --[WebSocket JSON]--> AudioTapClient
+ *   Gateway /tap/audio --[WebSocket JSON]--> AudioTapClient
  *     --> RemoteAudioFrame --> AudioPacket --> AudioEventBus --> subscribers
  *
  * Features:
@@ -104,7 +104,7 @@ actor AudioTapClient {
 
     // MARK: - Connection
 
-    /// Connect to the relay server's /tap/audio endpoint.
+    /// Connect to the gateway's /tap/audio endpoint.
     /// Optionally auto-reconnects on disconnect.
     func connect(to relayURL: String, session: String? = nil, autoReconnect: Bool = true) async throws {
         disconnect()

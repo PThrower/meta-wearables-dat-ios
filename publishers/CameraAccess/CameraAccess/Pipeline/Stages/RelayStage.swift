@@ -3,7 +3,7 @@
  *
  * Pipeline stage that encodes CMSampleBuffer frames as JPEG,
  * wraps them in the FRLY wire protocol, and sends them over
- * a WebSocket connection to the relay server.
+ * a WebSocket connection to the gateway (which proxies to the relay server).
  *
  * Wire protocol per frame:
  *   [4 bytes "FRLY"][8 bytes sequence][4 bytes width][4 bytes height]
@@ -75,7 +75,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private var reconnectDelay: UInt64 = 1_000_000_000 // 1 second
     private let maxReconnectDelay: UInt64 = 30_000_000_000 // 30 seconds
     private var lastConnectedURL: String?
-    private var lastConnectedToken: String?
 
     /// Public accessor for the URL last connected to (for foreground reconnection).
     var currentURL: String? { lastConnectedURL }
@@ -101,16 +100,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Connection
 
-    func connect(to urlString: String, idToken: String? = nil) async throws {
-        // Append token to URL if provided
-        var fullUrlString = urlString
-        if let token = idToken, !token.isEmpty {
-            let separator = urlString.contains("?") ? "&" : "?"
-            fullUrlString = "\(urlString)\(separator)token=\(token)"
-        }
-
-        guard let url = URL(string: fullUrlString) else {
-            throw RelayError.invalidURL(fullUrlString)
+    func connect(to urlString: String) async throws {
+        guard let url = URL(string: urlString) else {
+            throw RelayError.invalidURL(urlString)
         }
 
         disconnect()
@@ -119,7 +111,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
         // Store for reconnection
         lastConnectedURL = urlString
-        lastConnectedToken = idToken
 
         let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             var resumed = false
@@ -166,10 +157,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             sendHello()
             startReceiveLoop()
             startKeepAlive()
-            NSLog("[RelayStage] Connected to \(fullUrlString)")
+            NSLog("[RelayStage] Connected to \(urlString)")
         } else {
             disconnect()
-            throw RelayError.connectionFailed(fullUrlString)
+            throw RelayError.connectionFailed(urlString)
         }
     }
 
@@ -439,7 +430,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             self.reconnectDelay = min(self.reconnectDelay * 2, self.maxReconnectDelay)
 
             do {
-                try await self.connect(to: urlString, idToken: self.lastConnectedToken)
+                try await self.connect(to: urlString)
             } catch {
                 NSLog("[RelayStage] Reconnect failed: \(error)")
             }
@@ -452,7 +443,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             throw RelayError.notConnected
         }
         reconnectDelay = 1_000_000_000
-        try await connect(to: urlString, idToken: lastConnectedToken)
+        try await connect(to: urlString)
     }
 
     // MARK: - Device Identity
@@ -483,11 +474,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             ]
-
-            // Include auth token so relay server can verify identity (deferred WS auth)
-            if let token = await self.lastConnectedToken {
-                hello["token"] = token
-            }
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
                   let str = String(data: data, encoding: .utf8) else { return }
@@ -546,16 +532,12 @@ enum RelayError: LocalizedError {
     case invalidURL(String)
     case notConnected
     case connectionFailed(String)
-    case authRequired
-    case accessDenied
 
     var errorDescription: String? {
         switch self {
         case .invalidURL(let url): return "Invalid relay URL: \(url)"
         case .notConnected: return "Relay not connected"
         case .connectionFailed(let url): return "Failed to connect to relay: \(url)"
-        case .authRequired: return "Authentication required"
-        case .accessDenied: return "Access denied"
         }
     }
 }
