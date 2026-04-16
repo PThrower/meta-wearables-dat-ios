@@ -312,7 +312,10 @@ export class GeminiLiveService implements AIService {
           console.log(`[gemini-live] Closed: code=${event.code} reason=${event.reason}`);
           if (this._status !== "error") {
             this._status = "disconnected";
-            callbacks.onStatusChange("disconnected");
+            callbacks.onStatusChange("disconnected", {
+              closeCode: event.code,
+              closeReason: event.reason,
+            });
           }
         });
       } catch (err) {

@@ -85,6 +85,7 @@ class StreamSessionViewModel: ObservableObject {
   // Relay state
   @Published var isRelaying: Bool = false
   @Published var isTapConnected: Bool = false
+  @Published var activeAppId: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
@@ -374,6 +375,20 @@ class StreamSessionViewModel: ObservableObject {
       // Wire server-to-publisher FRAU audio to direct playback.
       // Uses AVAudioEngine (not AVAudioPlayer) — works reliably with .playAndRecord.
       // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
+      // Wire control message callback so ViewModel stays in sync with server state
+      await relayStage.setOnControlMessage { [weak self] msg in
+        guard msg["type"] as? String == "app_status" else { return }
+        let status = msg["status"] as? String
+        let appId = msg["appId"] as? String
+        Task { @MainActor [weak self] in
+          if status == "active" {
+            self?.activeAppId = appId
+          } else if status == "inactive" || status == "error" {
+            self?.activeAppId = nil
+          }
+        }
+      }
+
       await relayStage.setOnReceivedAudio { [weak self] data in
         guard data.count >= 29 else { return }
 
@@ -459,7 +474,23 @@ class StreamSessionViewModel: ObservableObject {
 
     await relayStage.disconnect()
     isRelaying = false
+    activeAppId = nil
     NSLog("[StreamSession] Relay disconnected")
+  }
+
+  // MARK: - AI App Activation
+
+  func activateApp(_ appId: String) {
+    guard isRelaying else { return }
+    activeAppId = appId
+    Task { await relayStage.sendJson(["type": "activate_app", "appId": appId]) }
+  }
+
+  func deactivateApp() {
+    guard isRelaying else { return }
+    let _ = activeAppId
+    activeAppId = nil
+    Task { await relayStage.sendJson(["type": "deactivate_app"]) }
   }
 
   // MARK: - Microphone Permission
@@ -692,6 +723,7 @@ class StreamSessionViewModel: ObservableObject {
     if isRelaying {
       await stopRelay()
     }
+    activeAppId = nil
     cancelRetry()
     await streamSession.stop()
 

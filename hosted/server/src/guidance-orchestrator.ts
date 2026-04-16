@@ -17,7 +17,7 @@
 import type { ControlEvent, AppConfig, AppPipeline } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
-import type { AIService, AIServiceCallbacks } from "./ai-service.js";
+import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
 import { createAIService } from "./ai-service.js";
 // Import to register the gemini provider
 import "./gemini-live-service.js";
@@ -78,6 +78,7 @@ interface SessionAIState {
   appId: string;
   lastAudioAt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  consecutiveReconnects: number;
 }
 
 // --- Orchestrator ---
@@ -179,6 +180,7 @@ export class GuidanceOrchestrator {
       appId,
       lastAudioAt: 0,
       reconnectTimer: null,
+      consecutiveReconnects: 0,
     };
     this.aiState.set(sessionId, state);
 
@@ -193,8 +195,8 @@ export class GuidanceOrchestrator {
       onToolCall: (toolCall) => {
         this.handleToolCall(sessionId, appId, toolCall);
       },
-      onStatusChange: (aiStatus) => {
-        this.handleAIStatusChange(sessionId, appId, aiStatus);
+      onStatusChange: (aiStatus, context) => {
+        this.handleAIStatusChange(sessionId, appId, aiStatus, context);
       },
       onUsage: (usage) => {
         // Could track token usage per session in telemetry
@@ -249,6 +251,8 @@ export class GuidanceOrchestrator {
       this.broadcastStatus(sessionId);
 
       console.log(`[orchestrator] App activated: ${appId} provider=${provider} model=${app.config.model} session=${sessionId}`);
+      // Reset reconnect counter on successful activation
+      state.consecutiveReconnects = 0;
     } catch (err) {
       console.error(`[orchestrator] AI connect failed:`, err);
       this.aiState.delete(sessionId);
@@ -452,7 +456,7 @@ export class GuidanceOrchestrator {
     }
   }
 
-  private handleAIStatusChange(sessionId: string, appId: string, aiStatus: string): void {
+  private handleAIStatusChange(sessionId: string, appId: string, aiStatus: string, context?: AIServiceStatusContext): void {
     const current = this.getStatus(sessionId);
     if (current.appId !== appId) return; // stale
 
@@ -461,14 +465,67 @@ export class GuidanceOrchestrator {
         ...current,
         status: "error",
       });
-      // Auto-reconnect on error (e.g. Gemini session deadline)
-      this.scheduleReconnect(sessionId, appId);
-    } else if (aiStatus === "disconnected" && current.status === "active") {
-      // Auto-reconnect — Gemini Live sessions expire after ~60s, this is normal
-      console.log(`[orchestrator] AI disconnected (session expiry), auto-reconnecting session=${sessionId}`);
+      this.broadcastStatus(sessionId);
+      return;
+    }
+
+    if (aiStatus === "disconnected" && current.status === "active") {
+      const code = context?.closeCode ?? 0;
+      const reason = context?.closeReason ?? "";
+
+      // Fatal close codes — do not reconnect
+      // 1007 = policy violation (bad API key, auth failure)
+      // 1008 = policy violation (quota exceeded, terms of service)
+      const isFatal = code === 1007 || code === 1008 || /invalid|not valid|quota|exceeded/i.test(reason);
+
+      if (isFatal) {
+        console.error(`[orchestrator] AI fatal disconnect: code=${code} reason="${reason}" — NOT reconnecting session=${sessionId}`);
+        this.setStatus(sessionId, {
+          ...current,
+          status: "error",
+        });
+        this.emitGuidanceEvent(sessionId, {
+          type: "guidance.alert",
+          content: `AI disconnected: ${reason || `code ${code}`}. Check API key and quota.`,
+          confidence: 1.0,
+          source: appId,
+          trigger: "ai_fatal_error",
+          timestampMs: Date.now(),
+          metadata: { severity: "critical" },
+        });
+        this.broadcastStatus(sessionId);
+        this.disconnectAI(sessionId);
+        return;
+      }
+
+      // Recoverable disconnect (e.g., session deadline) — reconnect with backoff
+      const state = this.aiState.get(sessionId);
+      const retries = state ? state.consecutiveReconnects : 0;
+      const maxRetries = 10;
+
+      if (retries >= maxRetries) {
+        console.error(`[orchestrator] Max reconnect retries (${maxRetries}) reached — stopping session=${sessionId}`);
+        this.setStatus(sessionId, {
+          ...current,
+          status: "error",
+        });
+        this.emitGuidanceEvent(sessionId, {
+          type: "guidance.alert",
+          content: `AI reconnect failed after ${maxRetries} attempts. Deactivating.`,
+          confidence: 1.0,
+          source: appId,
+          trigger: "ai_max_retries",
+          timestampMs: Date.now(),
+          metadata: { severity: "critical" },
+        });
+        this.broadcastStatus(sessionId);
+        this.disconnectAI(sessionId);
+        return;
+      }
+
+      console.log(`[orchestrator] AI disconnected (recoverable), reconnecting ${retries + 1}/${maxRetries} session=${sessionId}`);
       this.scheduleReconnect(sessionId, appId);
     }
-    this.broadcastStatus(sessionId);
   }
 
   private scheduleReconnect(sessionId: string, appId: string): void {
@@ -478,7 +535,11 @@ export class GuidanceOrchestrator {
     // Clear any existing timer
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
 
-    console.log(`[orchestrator] Reconnecting in 1s session=${sessionId} app=${appId}`);
+    state.consecutiveReconnects++;
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
+    const delay = Math.min(1000 * Math.pow(2, state.consecutiveReconnects - 1), 30_000);
+
+    console.log(`[orchestrator] Reconnecting in ${delay / 1000}s (attempt ${state.consecutiveReconnects}) session=${sessionId} app=${appId}`);
     state.reconnectTimer = setTimeout(() => {
       // Only reconnect if still the active app
       const current = this.getStatus(sessionId);
@@ -486,11 +547,10 @@ export class GuidanceOrchestrator {
         console.log(`[orchestrator] Auto-reconnecting session=${sessionId}`);
         this.activateApp(sessionId, appId).catch((err) => {
           console.error(`[orchestrator] Auto-reconnect failed: ${err}`);
-          // Retry again
           this.scheduleReconnect(sessionId, appId);
         });
       }
-    }, 1000);
+    }, delay);
   }
 
   /** Simple heuristic to classify AI text responses into guidance event types */

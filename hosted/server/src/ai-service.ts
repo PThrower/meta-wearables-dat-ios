@@ -34,7 +34,7 @@ export interface AIServiceCallbacks {
   /** AI made a tool call (e.g. emit_guidance_event) */
   onToolCall: (toolCall: { name: string; args: Record<string, unknown> }) => void;
   /** AI session status changed */
-  onStatusChange: (status: AIServiceStatus) => void;
+  onStatusChange: (status: AIServiceStatus, context?: AIServiceStatusContext) => void;
   /** Provider reported usage/token counts */
   onUsage: (usage: { promptTokens: number; responseTokens: number }) => void;
   /** Recoverable error -- service should still be usable */
@@ -46,6 +46,14 @@ export type AIServiceStatus =
   | "connecting"
   | "connected"
   | "error";
+
+/** Context passed with status changes to help the orchestrator decide what to do. */
+export interface AIServiceStatusContext {
+  /** WebSocket close code (e.g., 1000=normal, 1007=policy violation, 1008=protocol error) */
+  closeCode?: number;
+  /** Human-readable close reason from the provider */
+  closeReason?: string;
+}
 
 // --- Interface ---
 

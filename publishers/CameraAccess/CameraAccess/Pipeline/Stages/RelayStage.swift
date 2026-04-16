@@ -87,6 +87,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Set by StreamSessionViewModel before connecting.
     private var onReceivedAudio: (@Sendable (Data) -> Void)?
 
+    /// Callback for JSON control responses from the server (e.g. app_status).
+    /// Set by StreamSessionViewModel before connecting.
+    var onControlMessage: (@Sendable ([String: Any]) -> Void)?
+
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
@@ -215,6 +219,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                     switch message {
                     case .string(let text):
                         NSLog("[RelayStage] Received: \(text.prefix(100))")
+                        if let data = text.data(using: .utf8),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            if let handler = await self.onControlMessage {
+                                handler(json)
+                            }
+                        }
                     case .data(let data):
                         // Check if this is a FRAU audio frame (server → publisher)
                         if data.count >= 29 {
@@ -383,6 +393,23 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Raw Data Send (for audio and other binary protocols)
 
+    /// Send a JSON control message over the WebSocket.
+    /// Used for app activation/deactivation and other control plane messages.
+    func sendJson(_ dict: [String: Any]) {
+        guard isConnected, let webSocketTask else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let str = String(data: data, encoding: .utf8) else {
+            NSLog("[RelayStage] sendJson: failed to serialize")
+            return
+        }
+        webSocketTask.send(.string(str)) { [weak self] error in
+            if let error {
+                NSLog("[RelayStage] sendJson error: \(error)")
+                Task { [weak self] in await self?.markDisconnected() }
+            }
+        }
+    }
+
     /// Send pre-built binary data (e.g. FRAU audio frames) over the WebSocket.
     /// The caller is responsible for building the wire protocol header.
     func sendRawData(_ data: Data) {
@@ -523,6 +550,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Called by StreamSessionViewModel before connecting.
     func setOnReceivedAudio(_ handler: @Sendable @escaping (Data) -> Void) {
         self.onReceivedAudio = handler
+    }
+
+    /// Set the callback for JSON control responses from the server.
+    /// Called by StreamSessionViewModel before connecting.
+    func setOnControlMessage(_ handler: @Sendable @escaping ([String: Any]) -> Void) {
+        self.onControlMessage = handler
     }
 }
 

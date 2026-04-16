@@ -249,6 +249,22 @@ struct ControlsView: View {
           viewModel.capturePhoto()
         }
         .accessibilityIdentifier("capture_photo_button")
+
+        // AI app toggle — only when relaying
+        if viewModel.isRelaying {
+          CircleButton(
+            icon: viewModel.activeAppId != nil ? "brain.head.profile.fill" : "brain.head.profile",
+            text: nil
+          ) {
+            if viewModel.activeAppId != nil {
+              viewModel.deactivateApp()
+            } else {
+              viewModel.activateApp("spanish-co-pilot")
+            }
+          }
+          .foregroundColor(viewModel.activeAppId != nil ? .cyan : .white)
+          .accessibilityIdentifier("ai_app_toggle")
+        }
       }
 
       // Audio source picker — shown when relay is active
