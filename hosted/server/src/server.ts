@@ -239,7 +239,7 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      const s = await registry.stats(wifiIp, PORT, serverStartTime, store);
+      const s = await registry.stats(wifiIp, PORT, serverStartTime);
       return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
 
@@ -840,3 +840,9 @@ function shutdown() {
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("unhandledRejection", (err) => {
+  console.error("[relay] Unhandled rejection (not crashing):", err);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[relay] Uncaught exception (not crashing):", err);
+});

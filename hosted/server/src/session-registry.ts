@@ -443,8 +443,7 @@ export class SessionRegistry {
   }
 
   /** Platform-wide stats plus per-session breakdown, with gallery totals from R2 */
-  async stats(wifiIp: string, port: number, serverStartTime: number, storeOverride?: ObjectStore) {
-    const queryStore = storeOverride ?? this.store;
+  async stats(wifiIp: string, port: number, serverStartTime: number) {
     const now = Date.now();
     const sessions: Record<string, any> = {};
     let activePublisherCount = 0;
@@ -550,30 +549,7 @@ export class SessionRegistry {
       ? Math.round((totalBytesIn + totalBytesOut) / serverUptimeSec * 8 / 125000 * 100) / 100
       : 0;
 
-    // Gallery: aggregate historical recording stats from R2
-    let galleryTotalRecorded = 0;
-    let galleryTotalDurationMs = 0;
-    let galleryTotalStorageBytes = 0;
-    let galleryCachedExports = 0;
-    try {
-      const keys = await queryStore.list("sessions/") as string[];
-      const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-      const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
-      galleryTotalRecorded = metaKeys.length;
-      galleryCachedExports = exportKeys.size;
-
-      for (const mk of metaKeys) {
-        const buf = await queryStore.get(mk);
-        if (!buf) continue;
-        try {
-          const meta = JSON.parse(new TextDecoder().decode(buf));
-          if (meta.durationMs) galleryTotalDurationMs += meta.durationMs;
-          if (meta.recording?.bytesToBucket) galleryTotalStorageBytes += meta.recording.bytesToBucket;
-        } catch (err) { console.warn(`[stats] Gallery meta parse error:`, err); }
-      }
-    } catch (err) {
-      console.error("[stats] Gallery stats failed:", err);
-    }
+    // Gallery stats removed from /stats — use /gallery/api for historical data
 
     return {
       server: {
@@ -604,10 +580,7 @@ export class SessionRegistry {
         framesThrottledQuality: this.framesThrottledQuality,
       },
       gallery: {
-        totalRecordedSessions: galleryTotalRecorded,
-        totalDurationMs: galleryTotalDurationMs,
-        totalStorageMB: Math.round(galleryTotalStorageBytes / 1048576 * 100) / 100,
-        cachedExports: galleryCachedExports,
+        note: "Use /gallery/api for historical gallery data",
       },
       sessions,
     };

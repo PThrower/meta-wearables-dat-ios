@@ -39,12 +39,19 @@ export async function proxyRequest(req: Request, path: string, user?: AuthUser):
 
   try {
     const hasBody = req.body != null && !["GET", "HEAD"].includes(req.method);
-    return await fetch(target.toString(), {
-      method: req.method,
-      headers,
-      body: hasBody ? req.body : undefined,
-      redirect: "manual",
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      return await fetch(target.toString(), {
+        method: req.method,
+        headers,
+        body: hasBody ? req.body : undefined,
+        redirect: "manual",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch (err) {
     console.error("[gateway:proxy] relay fetch failed:", err);
     return Response.json({ error: "Relay server unavailable" }, { status: 502 });
