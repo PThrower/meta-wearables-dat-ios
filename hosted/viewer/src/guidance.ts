@@ -13,7 +13,8 @@ export interface GuidanceEvent {
     | "guidance.alert"
     | "guidance.correction"
     | "guidance.identification"
-    | "guidance.acknowledgment";
+    | "guidance.acknowledgment"
+    | "guidance.transcript";
   content: string;
   confidence: number;
   source: string;
@@ -72,6 +73,7 @@ const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.correction": "#facc15",
   "guidance.identification": "#4ade80",
   "guidance.acknowledgment": "rgba(255,255,255,0.45)",
+  "guidance.transcript": "rgba(255,255,255,0.15)",
 };
 
 const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
@@ -80,6 +82,7 @@ const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
   "guidance.correction": "CORR",
   "guidance.identification": "ID",
   "guidance.acknowledgment": "ACK",
+  "guidance.transcript": "",
 };
 
 export class GuidancePanel {
@@ -279,12 +282,21 @@ export class GuidancePanel {
       .map((e) => {
         const color = EVENT_COLORS[e.type] || "#fff";
         const label = EVENT_LABELS[e.type] || "???";
-        const confidence = Math.round(e.confidence * 100);
         const time = new Date(e.timestampMs).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
         });
+
+        // Transcript entries: compact, unstyled, no badge
+        if (e.type === "guidance.transcript") {
+          return `<div class="guidance-event guidance-transcript">
+            <span class="guidance-transcript-time">${time}</span>
+            <span class="guidance-transcript-text">${esc(e.content)}</span>
+          </div>`;
+        }
+
+        const confidence = Math.round(e.confidence * 100);
         const stepMeta =
           e.metadata?.stepNumber != null
             ? ` <span class="guidance-step-num">#${e.metadata.stepNumber}</span>`

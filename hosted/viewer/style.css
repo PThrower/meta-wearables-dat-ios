@@ -667,6 +667,26 @@ header {
   text-align: right;
 }
 
+/* Transcript entries — compact, muted */
+.guidance-transcript {
+  padding: 2px 6px !important;
+  border-left: 2px solid rgba(255,255,255,0.08) !important;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.guidance-transcript-time {
+  font-size: 8px;
+  color: rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.guidance-transcript-text {
+  font-size: 9px;
+  color: rgba(255,255,255,0.3);
+  line-height: 1.3;
+  word-break: break-word;
+}
+
 /* Event log */
 .guidance-log {
   flex: 1;

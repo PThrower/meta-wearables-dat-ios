@@ -29,8 +29,10 @@ export interface AIServiceConfig {
 export interface AIServiceCallbacks {
   /** AI produced a spoken response -- PCM 16-bit LE, 16kHz, mono */
   onAudio: (pcm: Uint8Array) => void;
-  /** AI produced a text response (transcript of speech or standalone) */
+  /** AI produced a text response (thinking/transcript -- not spoken) */
   onText: (text: string) => void;
+  /** AI made a tool call (e.g. emit_guidance_event) */
+  onToolCall: (toolCall: { name: string; args: Record<string, unknown> }) => void;
   /** AI session status changed */
   onStatusChange: (status: AIServiceStatus) => void;
   /** Provider reported usage/token counts */

@@ -42,6 +42,13 @@ interface GeminiSetup {
   systemInstruction?: {
     parts: Array<{ text: string }>;
   };
+  tools?: Array<{
+    functionDeclarations: Array<{
+      name: string;
+      description: string;
+      parameters: Record<string, unknown>;
+    }>;
+  }>;
 }
 
 interface GeminiRealtimeInput {
@@ -145,6 +152,42 @@ export class GeminiLiveService implements AIService {
       };
     }
 
+    // Register tools the AI can call
+    setup.tools = [
+      {
+        functionDeclarations: [
+          {
+            name: "emit_guidance_event",
+            description: "Emit a guidance event to the user's viewer panel. Use this to log important guidance, corrections, alerts, or identification of objects. Do NOT use this for casual conversation — that goes through spoken audio only.",
+            parameters: {
+              type: "object",
+              properties: {
+                eventType: {
+                  type: "string",
+                  enum: ["step", "alert", "correction", "identification"],
+                  description: "The type of guidance event",
+                },
+                content: {
+                  type: "string",
+                  description: "The guidance message to display",
+                },
+                confidence: {
+                  type: "number",
+                  description: "Confidence score 0-1",
+                },
+                severity: {
+                  type: "string",
+                  enum: ["info", "warning", "critical"],
+                  description: "Severity level (default: info)",
+                },
+              },
+              required: ["eventType", "content"],
+            },
+          },
+        ],
+      },
+    ];
+
     return new Promise<void>((resolve, reject) => {
       try {
         const url = `${GEMINI_WS_URL}?key=${apiKey}`;
@@ -226,6 +269,26 @@ export class GeminiLiveService implements AIService {
               if (part.text) {
                 console.log(`[gemini-live] Text part: ${part.text.slice(0, 80)}`);
                 callbacks.onText(part.text);
+              }
+            }
+          }
+
+          // Tool calls (e.g. emit_guidance_event)
+          if (msg.toolCall?.functionCalls) {
+            for (const fc of msg.toolCall.functionCalls) {
+              const name = fc.name as string;
+              const args = (fc.args ?? {}) as Record<string, unknown>;
+              const id = fc.id as string | undefined;
+              console.log(`[gemini-live] Tool call: ${name} args=${JSON.stringify(args).slice(0, 120)}`);
+              callbacks.onToolCall({ name, args });
+
+              // Send tool response back so Gemini can continue
+              if (id) {
+                this.ws!.send(JSON.stringify({
+                  toolResponse: {
+                    functionResponses: [{ id, name, response: { ok: true } }],
+                  },
+                }));
               }
             }
           }

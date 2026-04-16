@@ -29,7 +29,8 @@ export type GuidanceEventType =
   | "guidance.alert"
   | "guidance.correction"
   | "guidance.identification"
-  | "guidance.acknowledgment";
+  | "guidance.acknowledgment"
+  | "guidance.transcript";
 
 export interface GuidanceEvent {
   type: GuidanceEventType;
@@ -186,6 +187,9 @@ export class GuidanceOrchestrator {
       },
       onText: (text) => {
         this.handleAIText(sessionId, appId, text);
+      },
+      onToolCall: (toolCall) => {
+        this.handleToolCall(sessionId, appId, toolCall);
       },
       onStatusChange: (aiStatus) => {
         this.handleAIStatusChange(sessionId, appId, aiStatus);
@@ -409,21 +413,40 @@ export class GuidanceOrchestrator {
   }
 
   private handleAIText(sessionId: string, appId: string, text: string): void {
-    // Classify the text into a guidance event type
-    const eventType = this.classifyText(text);
+    // Text parts are the AI's thinking/transcript — emit as plain transcript
     this.emitGuidanceEvent(sessionId, {
-      type: eventType,
+      type: "guidance.transcript",
       content: text,
-      confidence: 0.9,
+      confidence: 1.0,
       source: appId,
-      trigger: "ai_response",
+      trigger: "ai_thinking",
       timestampMs: Date.now(),
     });
 
     const t = this.getOrCreateTelemetry(sessionId);
     t.triggers++;
-    this.addLatency(sessionId, 0);
     this.broadcastTelemetry(sessionId);
+  }
+
+  private handleToolCall(sessionId: string, appId: string, toolCall: { name: string; args: Record<string, unknown> }): void {
+    if (toolCall.name === "emit_guidance_event") {
+      const eventType = `guidance.${toolCall.args.eventType ?? "step"}` as GuidanceEventType;
+      this.emitGuidanceEvent(sessionId, {
+        type: eventType,
+        content: (toolCall.args.content as string) ?? "",
+        confidence: (toolCall.args.confidence as number) ?? 0.9,
+        source: appId,
+        trigger: "ai_tool_call",
+        timestampMs: Date.now(),
+        metadata: {
+          severity: (toolCall.args.severity as "info" | "warning" | "critical") ?? "info",
+        },
+      });
+
+      const t = this.getOrCreateTelemetry(sessionId);
+      t.guidanceEvents++;
+      this.broadcastTelemetry(sessionId);
+    }
   }
 
   private handleAIStatusChange(sessionId: string, appId: string, aiStatus: string): void {
