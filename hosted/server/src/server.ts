@@ -239,8 +239,7 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      const s = await registry.stats(wifiIp, PORT, serverStartTime);
-      return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
+      return Response.json(await registry.stats(wifiIp, PORT, serverStartTime, audioTapBus.tapCount()));
     }
 
     // --- Gallery API ---
