@@ -211,7 +211,7 @@ export class GuidanceOrchestrator {
     try {
       await service.connect(
         {
-          model: app.config.model ?? "gemini-2.0-flash-live-001",
+          model: app.config.model ?? "gemini-2.5-flash-native-audio-latest",
           systemPrompt: app.systemPrompt,
           voice: app.config.voice,
           visionFps: app.config.visionFps,
