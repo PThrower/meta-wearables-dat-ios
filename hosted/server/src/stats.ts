@@ -147,6 +147,7 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
       activeConnections: activePublisherCount + src.totalViewers(),
       gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
       buildVersion: process.env.BUILD_VERSION ?? "dev",
+      hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
     },
     aggregate: {
       totalViewers: src.totalViewers(),
@@ -167,7 +168,6 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
     gallery: {
       note: "Use /gallery/api for historical gallery data",
     },
-    hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
     audioTaps: audioTapCount,
     sessions,
   };

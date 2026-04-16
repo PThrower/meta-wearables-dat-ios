@@ -54,13 +54,7 @@ async function probeGateway(): Promise<ServiceProbe> {
   }
 }
 
-async function probeObjectStore(store: ObjectStore): Promise<{ ok: boolean; type: "s3" | "memory"; endpoint: string | null; canary: ServiceProbe }> {
-  // Detect store type via constructor name (S3Store vs MemoryStore)
-  const ctorName = (store as any).constructor?.name ?? "";
-  const isS3 = ctorName === "S3Store" || ctorName.includes("S3");
-  const type: "s3" | "memory" = isS3 ? "s3" : "memory";
-  const endpoint = isS3 ? (process.env.S3_ENDPOINT ?? process.env.R2_ENDPOINT ?? null) : null;
-
+async function probeObjectStore(store: ObjectStore): Promise<ServiceProbe> {
   // Canary: put → get → delete a tiny key
   const canaryKey = "__health_canary__";
   const canaryValue = Buffer.from(`ok:${Date.now()}`);
@@ -74,26 +68,16 @@ async function probeObjectStore(store: ObjectStore): Promise<{ ok: boolean; type
     const ok = retrieved != null;
     return {
       ok,
-      type,
-      endpoint,
-      canary: {
-        ok,
-        latencyMs: Date.now() - start,
-        error: ok ? undefined : "canary value mismatch",
-      },
+      latencyMs: Date.now() - start,
+      error: ok ? undefined : "canary value mismatch",
     };
   } catch (err: any) {
     // Best-effort cleanup
     try { await store.delete(canaryKey); } catch {}
     return {
       ok: false,
-      type,
-      endpoint,
-      canary: {
-        ok: false,
-        latencyMs: Date.now() - start,
-        error: err?.message ?? String(err),
-      },
+      latencyMs: Date.now() - start,
+      error: err?.message ?? String(err),
     };
   }
 }
