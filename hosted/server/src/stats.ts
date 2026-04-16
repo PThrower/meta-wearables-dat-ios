@@ -172,7 +172,6 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
     },
     aggregate: {
       viewers: {
-        current: src.totalViewers(),
         peak: src.peakViewers,
       },
       bandwidth: {
