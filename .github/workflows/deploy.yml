@@ -10,7 +10,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Deploy via SSH
@@ -19,7 +19,7 @@ jobs:
           host: relay.simulationapi.com
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 3m
+          command_timeout: 5m
           script: |
             set -euo pipefail
 
@@ -27,6 +27,21 @@ jobs:
 
             echo ">>> Pulling latest"
             git pull origin feat/stream-registry
+
+            echo ">>> Installing Rust toolchain (idempotent)"
+            if ! command -v rustc &>/dev/null; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source "$HOME/.cargo/env"
+            fi
+            if ! command -v wasm-pack &>/dev/null; then
+              curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+            fi
+            source "$HOME/.cargo/env"
+
+            echo ">>> Building WASM frame relay"
+            cd /root/relay-server/hosted/packages/frame-relay-wasm
+            wasm-pack build --target bundler --out-dir ../../server/pkg
+            echo "WASM rebuilt"
 
             echo ">>> Building relay-protocol if needed"
             cd /root/relay-server/hosted/packages/relay-protocol
@@ -71,9 +86,15 @@ jobs:
             echo ">>> Waiting for gateway startup"
             sleep 2
 
+            echo ">>> Health check (relay)"
+            RELAY_HEALTH=$(curl -s http://localhost:8080/health)
+            echo "Relay: $RELAY_HEALTH"
+            WASM_LOADED=$(echo "$RELAY_HEALTH" | grep -o '"wasmLoaded":[a-z]*' | head -1)
+            echo "WASM status: $WASM_LOADED"
+
             echo ">>> Health check (gateway)"
             for i in 1 2 3 4 5; do
-              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/config)
+              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health)
               if [ "$STATUS" = "200" ]; then
                 echo "Gateway OK after attempt $i"
                 break
@@ -86,10 +107,6 @@ jobs:
               echo "attempt $i: got $STATUS, retrying in 2s..."
               sleep 2
             done
-
-            echo ">>> Health check (relay)"
-            STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/api/config)
-            echo "Relay status: $STATUS"
 
             echo ">>> Deploy complete"
             systemctl status caringmind-relay.service --no-pager
