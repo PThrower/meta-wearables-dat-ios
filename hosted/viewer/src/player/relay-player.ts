@@ -76,6 +76,9 @@ export class RelayPlayer {
   private micSeqNum = 0;
   private isMicActive = false;
 
+  // Guidance panel JSON message callback
+  onJsonMessage: ((msg: Record<string, unknown>) => void) | null = null;
+
   constructor(options: RelayPlayerOptions) {
     this.canvas = options.canvas;
     this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
@@ -191,6 +194,13 @@ export class RelayPlayer {
   resumeAudio(): void {
     if (this.audioCtx && this.audioCtx.state === "suspended") {
       this.audioCtx.resume().then(() => { this.audioResumed = true; });
+    }
+  }
+
+  /** Send a JSON message to the server via the active WebSocket. */
+  sendJson(msg: object): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(msg));
     }
   }
 
@@ -331,7 +341,15 @@ export class RelayPlayer {
   }
 
   private _handleMessage(event: MessageEvent): void {
-    if (typeof event.data === "string") return;
+    if (typeof event.data === "string") {
+      try {
+        const msg = JSON.parse(event.data) as Record<string, unknown>;
+        if (this.onJsonMessage) this.onJsonMessage(msg);
+      } catch {
+        // Non-JSON string — ignore
+      }
+      return;
+    }
 
     const buf = new Uint8Array(event.data);
     if (buf.length < 4) return;

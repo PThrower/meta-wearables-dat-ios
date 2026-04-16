@@ -3,7 +3,7 @@
 **Product:** com.mwdat-ios / Relay Server
 **Owner:** @ebowwa
 **Status:** P0 Complete
-**Last Updated:** 2026-04-10
+**Last Updated:** 2026-04-15
 **Depends On:** PRD-001 (iOS Client publishes), PRD-005 (Browser Viewer consumes), PRD-007 (Auth)
 
 ---
@@ -41,6 +41,14 @@ The current relay server handles one publisher at a time. A second publisher is 
 | `/view` | WebSocket | N viewers, fan-out of FRLY/FRAU frames |
 | `/` | HTTP GET | Serves `viewer/index.html` |
 | `/stats` | HTTP GET | JSON: FPS, bytes, connections |
+| `/tap/audio?session=<id>` | WebSocket | Audio tap for AI pipeline (FRAU binary) |
+| `/session/<id>/audio-in` | HTTP POST | Push FRAU audio to publisher |
+| `/session/<id>/thumbnail` | HTTP GET | Mid-frame JPEG thumbnail |
+| `/session/<id>/video.mp4` | HTTP GET | MP4 export (cached to R2) |
+| `/session/<id>/export` | HTTP GET | Session export metadata |
+| `/gallery/api` | HTTP GET | Session gallery with metadata + thumbnails |
+| `/apps` | HTTP GET | Available app definitions |
+| `/api/config` | HTTP GET | Runtime config (auth, version) |
 
 ### Features
 
@@ -49,6 +57,13 @@ The current relay server handles one publisher at a time. A second publisher is 
 - Stale connection cleanup: 15s publisher timeout, 30s viewer timeout
 - Device identity tracking on publisher connect
 - FRLY/FRAU binary passthrough (no transcoding)
+- App/primitive binding system with `AppRegistry` (config/apps.json)
+- Gesture event bus (`ControlEventBus`) for iOS publisher gesture events
+- Audio tap bus (`AudioTapBus`) with WebSocket endpoint for AI pipeline consumption
+- Bidirectional audio (viewer mic -> publisher, server audio -> publisher)
+- MP4 export via ffmpeg with R2 caching
+- Gallery API with live session merging and R2 persistence
+- Share token system (create/revoke time-limited access links)
 
 ### Gaps
 
@@ -56,7 +71,7 @@ The current relay server handles one publisher at a time. A second publisher is 
 2. ~~**No session isolation**~~ -- RESOLVED: per-session publisher slot, viewer maps, WASM throttle instances
 3. **No auth** -- anyone with the URL can publish or view (see PRD-007 for Google OAuth implementation)
 4. ~~**No persistence**~~ -- RESOLVED: `SessionRecorder` writes FRLY/FRAU to S3 bucket (PRD-004)
-5. **No AI video worker fan-out** -- `AudioTapBus` handles audio taps; no video analysis WebSocket endpoint yet
+5. **No AI analysis WebSocket** -- `/analyze?session=<id>` endpoint not built; AudioTapBus and ControlEventBus are ready for AI worker consumption but no worker connects yet (see PRD-008)
 6. ~~**No session metadata storage**~~ -- RESOLVED: `meta.json` written on session start/end; device info persisted
 7. ~~**Manual deploy**~~ -- RESOLVED: systemd service `caringmind-relay` on Hetzner VPS
 8. ~~**Gallery is static**~~ -- PARTIALLY RESOLVED: live bucket queries with 30s TTL cache; unified page replaces separate gallery.html
@@ -83,11 +98,12 @@ The current relay server handles one publisher at a time. A second publisher is 
 |----|-------------|---------------------|
 | P1-1 | Session token auth for publishers | `/publish?session=<id>&token=<secret>` prevents session hijacking; token generated on session creation; see PRD-007 for auth implementation |
 | P1-2 | Google OAuth viewer auth | Viewers authenticate via Google before accessing any session; see PRD-007 for implementation details |
-| P1-3 | AI worker fan-out endpoint (`/analyze?session=<id>`) | Same binary frames forwarded to AI worker WebSocket connections; throttled independently of viewers |
+| P1-3 | AI worker fan-out endpoint (`/analyze?session=<id>`) | WebSocket endpoint receives FRLY frames + JSON control events (gestures, app activations) + audio tap events; event-driven: AI worker receives frames on trigger, not continuously; worker sends back structured GuidanceEvent JSON; relay forwards guidance events to publisher and viewers |
 | P1-4 | Per-session stats (`/stats?session=<id>`) | Scoped metrics: publisher FPS, viewer count, bandwidth, jitter, per-viewer quality preset |
 | P1-5 | Systemd service + deploy script | ~~`systemctl restart caringmind-relay`~~ RESOLVED: systemd service `caringmind-relay` running on Hetzner VPS |
-| P1-6 | Bidirectional audio: push FRAU to iOS client | Relay sends FRAU frames (codecType 3) to publisher's WebSocket; enables server-side TTS, remote expert voice, AI guidance audio; uses existing publish WebSocket connection (no new endpoint) |
-| P1-7 | Viewer audio forwarding to publisher | Relay receives binary FRAU frames (codecType 3) from viewer WebSocket (new: currently viewers only send JSON control messages); forwards to session publisher's WebSocket unchanged; when multiple viewers talk simultaneously, relay mixes PCM streams (server-side summation with clipping protection) before forwarding single mixed stream |
+| P1-6 | ~~Bidirectional audio: push FRAU to iOS client~~ | RESOLVED: `POST /session/<id>/audio-in` accepts FRAU codecType 3; relay forwards to publisher WebSocket; iOS `AudioPlaybackStage` decodes and plays via AVAudioEngine; viewers also receive audio-in frames via fanout |
+| P1-7 | ~~Viewer audio forwarding to publisher~~ | RESOLVED: Viewer captures mic via getUserMedia (16kHz mono PCM), wraps as FRAU codecType 3, sends binary on viewer WS; relay forwards FRAU to publisher WebSocket; multi-viewer mixing not yet implemented (individual streams forwarded) |
+| P1-8 | Guidance event orchestrator | Server-side component subscribes to ControlEventBus + AudioTapBus per session; routes triggers to connected /analyze workers; dispatches GuidanceEvent results to publisher (audio-in) and viewers (JSON); see PRD-008 |
 
 ### P2 -- Could Have
 
@@ -170,9 +186,15 @@ publisher.onmessage(frame)
 | `hosted/server/src/session-registry.ts` | Session CRUD, stale cleanup |
 | `hosted/server/src/protocol.ts` | FRLY/FRAU parsing, timing helpers |
 | `hosted/server/src/session-export.ts` | Gallery data, MP4 export, thumbnails |
+| `hosted/server/src/audio-tap.ts` | AudioTapBus -- pub/sub for parsed audio frames |
+| `hosted/server/src/control-event-bus.ts` | ControlEventBus -- pub/sub for gesture/control events |
+| `hosted/server/src/app-registry.ts` | AppRegistry -- loads apps.json, resolves app bindings |
+| `hosted/server/src/app-types.ts` | App/primitive type definitions |
+| `hosted/server/src/thumbnail.ts` | Mid-frame JPEG thumbnail extraction |
 | `hosted/server/src/session-recorder.ts` | Server-side recording |
 | `hosted/server/src/types.ts` | Shared TypeScript types |
 | `hosted/packages/frame-relay-wasm/src/lib.rs` | Rust WASM `FrameRelay.should_relay()` |
+| `hosted/server/config/apps.json` | App definitions with systemPrompt, model, gestures |
 | `hosted/viewer/index.html` | Browser viewer (canvas, A/V sync, ring buffer) |
 | `hosted/viewer/directory.html` | Session directory listing |
 | `hosted/viewer/gallery.html` | Creator gallery (stored sessions) |

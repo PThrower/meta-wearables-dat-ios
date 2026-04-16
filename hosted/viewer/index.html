@@ -89,6 +89,18 @@
     </div>
     <div class="player-canvas">
       <canvas id="liveCanvas"></canvas>
+      <!-- AI Guidance Panel (right side overlay) -->
+      <div id="guidancePanel" class="guidance-panel collapsed">
+        <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">
+          <span class="guidance-toggle-label">AI</span>
+          <span id="guidanceStatusDot" class="guidance-status-dot" style="background:rgba(255,255,255,0.25)"></span>
+        </button>
+        <div id="guidanceContent" class="guidance-content">
+          <div id="guidanceControl" class="guidance-section"></div>
+          <div id="guidanceLog" class="guidance-section guidance-log"></div>
+          <div id="guidanceTelemetry" class="guidance-section"></div>
+        </div>
+      </div>
     </div>
   </div>
 

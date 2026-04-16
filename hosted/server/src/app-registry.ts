@@ -61,4 +61,14 @@ export class AppRegistry {
 
     return { appId, primitiveId: app.binding };
   }
+
+  /** Find which app handles a given gesture by checking each app's config.gestures array */
+  resolveByGesture(gesture: string): AppPipeline | null {
+    for (const app of this.apps.values()) {
+      if (app.config.gestures?.includes(gesture)) {
+        return this.resolvePipeline(app.id);
+      }
+    }
+    return null;
+  }
 }

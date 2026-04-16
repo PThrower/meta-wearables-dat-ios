@@ -53,6 +53,7 @@ export interface WsData {
   userId?: string;
   email?: string;
   unsub?: () => void;   // Audio tap unsubscribe callback
+  guidanceUnsub?: () => void; // Guidance orchestrator unsubscribe callback
 }
 
 // --- Publisher ---

@@ -3,7 +3,7 @@
 **Product:** com.mwdat-ios / AIStage  
 **Owner:** @ebowwa  
 **Status:** Draft  
-**Last Updated:** 2026-04-06  
+**Last Updated:** 2026-04-15  
 **Depends On:** PRD-001 (FramePipelineManager, FramePipelineStage protocol)
 
 ---
@@ -57,9 +57,11 @@ The `FramePipelineManager` already supports registering arbitrary stages. An `AI
 |----|-------------|---------------------|
 | P1-1 | Detection events forwarded to `TelemetryService` | AI detections appear in telemetry HUD (DEBUG builds) |
 | P1-2 | Detection events forwarded over relay WebSocket | JSON control message alongside FRLY binary; viewer can render overlays |
-| P1-3 | Barcode/QR code scanning via `VNDetectBarcodesRequest` | Returns decoded barcode/QR string and symbology type |
-| P1-4 | CoreML custom model support | Load `.mlmodel` from app bundle; run inference on `CVPixelBuffer` from `FramePacket` |
-| P1-5 | Detection throttling (deduplicate rapid-fire events) | Don't emit "person detected" every 250ms; debounce to once per second while continuously detected |
+| P1-3 | Detection events published to ControlEventBus | AIStage detections flow into the server's ControlEventBus; other services (AI worker, viewer overlays) subscribe to detection events; enables device-side detections to trigger server-side AI engagement |
+| P1-4 | Barcode/QR code scanning via `VNDetectBarcodesRequest` | Returns decoded barcode/QR string and symbology type |
+| P1-5 | CoreML custom model support | Load `.mlmodel` from app bundle; run inference on `CVPixelBuffer` from `FramePacket` |
+| P1-6 | Detection throttling (deduplicate rapid-fire events) | Don't emit "person detected" every 250ms; debounce to once per second while continuously detected |
+| P1-7 | Gesture-to-inference binding | When a gesture event arrives (e.g., pointing), AIStage performs targeted inference on the next frame (e.g., identify pointed object); detections tagged with triggering gesture type |
 
 ### P2 -- Could Have
 
@@ -167,7 +169,45 @@ FramePipelineManager
               +---> RelayStage control channel (JSON -> viewer overlay)
               +---> Local Core Data (P2-5)
               +---> Notification/alert (CaringMind system)
+              +---> ControlEventBus -> relay server -> /analyze workers (triggers server-side AI)
 ```
+
+---
+
+## Integration with Server-Side AI
+
+On-device detections are not just local alerts -- they are trigger sources for server-side AI engagement.
+
+### Trigger Flow
+
+```
+AIStage (4fps) -> AIDetection event
+    |
+    +---> Local alert (hud, notification)
+    +---> Relay JSON -> ControlEventBus (server) -> /analyze workers
+                                                    |
+                                                    v
+                                              Server AI reasons about
+                                              the detection context
+                                                    |
+                                                    v
+                                              GuidanceEvent -> audio-in -> operator hears
+```
+
+### Example Triggers
+
+| Detection | Server Action | Guidance Output |
+|-----------|--------------|-----------------|
+| Person count increases from 0 to 1 | VLM describes the person and their activity | "A person in a yellow vest has entered the workspace" |
+| Text detected (sign/document) | OCR + context analysis | "The sign reads 'High Voltage Area -- Authorized Personnel Only'" |
+| Barcode scanned | Look up part/material in database | "Part number A-4821: hydraulic seal, compatible with pump model H300" |
+| Gesture: pointing + object detected | Targeted VLM analysis on pointed region | "That is a 10mm socket wrench, used for..." |
+
+### Design Principle
+
+The on-device AI is a **trigger source and context provider**, not the full guidance system. It detects "something changed" at low latency (on-device, <50ms). The server-side AI provides understanding at higher latency but with more context (VLM, LLM, database access).
+
+This split is critical for the guidance loop: device detects -> server reasons -> operator hears.
 
 ---
 

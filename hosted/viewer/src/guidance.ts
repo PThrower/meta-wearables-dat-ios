@@ -1,0 +1,389 @@
+/**
+ * GuidancePanel -- AI Guidance Control Panel & Telemetry Display
+ *
+ * Renders the AI control panel (app selector, activate/deactivate, gesture triggers),
+ * a scrollable color-coded guidance event log, and compact telemetry stats.
+ * Receives guidance events and status updates via handleMessage callback.
+ * Sends control messages via the injected sendFn.
+ */
+
+export interface GuidanceEvent {
+  type:
+    | "guidance.step"
+    | "guidance.alert"
+    | "guidance.correction"
+    | "guidance.identification"
+    | "guidance.acknowledgment";
+  content: string;
+  confidence: number;
+  source: string;
+  trigger: string;
+  timestampMs: number;
+  metadata?: {
+    stepNumber?: number;
+    severity?: "info" | "warning" | "critical";
+    objectLabel?: string;
+  };
+}
+
+export interface AIStatus {
+  appId: string | null;
+  status: "idle" | "activating" | "active" | "error";
+  config?: {
+    model?: string;
+    voice?: string;
+    visionFps?: number;
+    gestures?: string[];
+  };
+  activatedAt?: number;
+  triggerCount: number;
+  lastResponseMs?: number;
+}
+
+export interface AITelemetry {
+  triggers: number;
+  guidanceEvents: number;
+  avgLatencyMs: number;
+  lastLatencyMs: number | null;
+  queueDepth: number;
+  uptimeMs: number;
+}
+
+export interface AppInfo {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  config: { gestures?: string[]; model?: string; voice?: string };
+}
+
+const MAX_EVENTS = 50;
+
+const STATUS_COLORS: Record<AIStatus["status"], string> = {
+  idle: "rgba(255,255,255,0.25)",
+  activating: "#facc15",
+  active: "#4ade80",
+  error: "#f87171",
+};
+
+const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
+  "guidance.step": "#60a5fa",
+  "guidance.alert": "#fb923c",
+  "guidance.correction": "#facc15",
+  "guidance.identification": "#4ade80",
+  "guidance.acknowledgment": "rgba(255,255,255,0.45)",
+};
+
+const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
+  "guidance.step": "STEP",
+  "guidance.alert": "ALERT",
+  "guidance.correction": "CORR",
+  "guidance.identification": "ID",
+  "guidance.acknowledgment": "ACK",
+};
+
+export class GuidancePanel {
+  private container: HTMLElement;
+  private sendFn: (msg: object) => void;
+  private apps: AppInfo[] = [];
+  private status: AIStatus = {
+    appId: null,
+    status: "idle",
+    triggerCount: 0,
+  };
+  private telemetry: AITelemetry = {
+    triggers: 0,
+    guidanceEvents: 0,
+    avgLatencyMs: 0,
+    lastLatencyMs: null,
+    queueDepth: 0,
+    uptimeMs: 0,
+  };
+  private events: GuidanceEvent[] = [];
+  private collapsed = true;
+  private appsLoaded = false;
+
+  constructor(container: HTMLElement, sendFn: (msg: object) => void) {
+    this.container = container;
+    this.sendFn = sendFn;
+    this.render();
+    this.bindEvents();
+  }
+
+  async loadApps(): Promise<void> {
+    try {
+      const res = await fetch("/apps");
+      if (!res.ok) {
+        this.apps = [];
+        this.appsLoaded = true;
+        this.render();
+        return;
+      }
+      const data = await res.json();
+      this.apps = Array.isArray(data) ? data : data.apps ?? [];
+      this.appsLoaded = true;
+      this.render();
+      this.bindEvents();
+    } catch {
+      this.apps = [];
+      this.appsLoaded = true;
+      this.render();
+    }
+  }
+
+  handleMessage(msg: Record<string, unknown>): void {
+    if (msg.type === "ai_status") {
+      this.status = msg as unknown as AIStatus;
+      this.renderControlSection();
+      this.updateStatusDot();
+    } else if (msg.type === "guidance_event") {
+      const evt = (msg as { event: GuidanceEvent }).event;
+      if (evt) {
+        this.events.push(evt);
+        if (this.events.length > MAX_EVENTS) {
+          this.events = this.events.slice(-MAX_EVENTS);
+        }
+        this.renderEventLog();
+      }
+    } else if (msg.type === "ai_telemetry") {
+      this.telemetry = msg as unknown as AITelemetry;
+      this.renderTelemetry();
+    }
+  }
+
+  toggle(): void {
+    this.collapsed = !this.collapsed;
+    this.container.classList.toggle("collapsed", this.collapsed);
+  }
+
+  // --- Rendering ---
+
+  render(): void {
+    this.container.classList.toggle("collapsed", this.collapsed);
+    this.container.innerHTML = `
+      <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">
+        <span class="guidance-toggle-label">AI</span>
+        <span id="guidanceStatusDot" class="guidance-status-dot" style="background:${STATUS_COLORS[this.status.status]}"></span>
+      </button>
+      <div id="guidanceContent" class="guidance-content">
+        <div id="guidanceControl" class="guidance-section">${this.renderControlSection()}</div>
+        <div id="guidanceLog" class="guidance-section guidance-log">${this.renderEventLogInner()}</div>
+        <div id="guidanceTelemetry" class="guidance-section">${this.renderTelemetryInner()}</div>
+      </div>
+    `;
+  }
+
+  private renderControlSection(): void {
+    const el = document.getElementById("guidanceControl");
+    if (el) el.innerHTML = this.renderControlInner();
+  }
+
+  private renderEventLog(): void {
+    const el = document.getElementById("guidanceLog");
+    if (el) {
+      el.innerHTML = this.renderEventLogInner();
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+
+  private renderTelemetry(): void {
+    const el = document.getElementById("guidanceTelemetry");
+    if (el) el.innerHTML = this.renderTelemetryInner();
+  }
+
+  private updateStatusDot(): void {
+    const dot = document.getElementById("guidanceStatusDot");
+    if (dot) dot.style.background = STATUS_COLORS[this.status.status];
+  }
+
+  private renderControlInner(): string {
+    const s = this.status;
+    const isActive = s.status === "active";
+    const isActivating = s.status === "activating";
+    const isIdle = s.status === "idle";
+
+    // App selector
+    let appSelectHtml: string;
+    if (!this.appsLoaded) {
+      appSelectHtml = `<span class="guidance-hint">Loading apps...</span>`;
+    } else if (this.apps.length === 0) {
+      appSelectHtml = `<span class="guidance-hint">No AI apps available</span>`;
+    } else {
+      const options = this.apps
+        .map(
+          (a) =>
+            `<option value="${esc(a.id)}" ${s.appId === a.id ? "selected" : ""}>${esc(a.name)}</option>`
+        )
+        .join("");
+      appSelectHtml = `<select id="guidanceAppSelect" class="guidance-select">${options}</select>`;
+    }
+
+    // Activate / deactivate buttons
+    let actionHtml = "";
+    if (isIdle || s.status === "error") {
+      actionHtml = `<button id="guidanceActivate" class="guidance-btn guidance-btn-activate" ${this.apps.length === 0 ? "disabled" : ""}>Activate</button>`;
+    } else if (isActivating) {
+      actionHtml = `<button class="guidance-btn guidance-btn-pending" disabled>Activating...</button>`;
+    } else if (isActive) {
+      actionHtml = `<button id="guidanceDeactivate" class="guidance-btn guidance-btn-deactivate">Deactivate</button>`;
+    }
+
+    // Gesture trigger pills (only when active)
+    let gesturesHtml = "";
+    const activeApp = this.apps.find((a) => a.id === s.appId);
+    const gestures = activeApp?.config?.gestures ?? s.config?.gestures ?? [];
+    if (isActive && gestures.length > 0) {
+      const pills = gestures
+        .map(
+          (g) =>
+            `<button class="guidance-pill" data-gesture="${esc(g)}">${esc(g)}</button>`
+        )
+        .join("");
+      gesturesHtml = `<div class="guidance-gestures">${pills}</div>`;
+    }
+
+    // App info line
+    let infoHtml = "";
+    if (s.config?.model) {
+      infoHtml = `<div class="guidance-info">Model: ${esc(s.config.model)}</div>`;
+    }
+
+    return `
+      <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
+      ${gesturesHtml}
+      ${infoHtml}
+    `;
+  }
+
+  private renderEventLogInner(): string {
+    if (this.events.length === 0) {
+      return `<div class="guidance-hint">No guidance events</div>`;
+    }
+    return this.events
+      .map((e) => {
+        const color = EVENT_COLORS[e.type] || "#fff";
+        const label = EVENT_LABELS[e.type] || "???";
+        const confidence = Math.round(e.confidence * 100);
+        const time = new Date(e.timestampMs).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+        const stepMeta =
+          e.metadata?.stepNumber != null
+            ? ` <span class="guidance-step-num">#${e.metadata.stepNumber}</span>`
+            : "";
+        const severityMeta = e.metadata?.severity
+          ? ` <span class="guidance-severity guidance-severity-${e.metadata.severity}">${e.metadata.severity}</span>`
+          : "";
+        const objectMeta = e.metadata?.objectLabel
+          ? ` <span class="guidance-object">${esc(e.metadata.objectLabel)}</span>`
+          : "";
+
+        return `<div class="guidance-event" style="border-left-color:${color}">
+          <div class="guidance-event-header">
+            <span class="guidance-event-type" style="color:${color}">${label}</span>
+            <span class="guidance-event-confidence">${confidence}%</span>
+            <span class="guidance-event-time">${time}</span>
+          </div>
+          <div class="guidance-event-body">${esc(e.content)}${stepMeta}${severityMeta}${objectMeta}</div>
+        </div>`;
+      })
+      .join("");
+  }
+
+  private renderTelemetryInner(): string {
+    const t = this.telemetry;
+    const uptime = formatUptime(t.uptimeMs);
+    return `
+      <div class="guidance-telemetry-row">
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${t.triggers}</span><span class="guidance-tstat-label">Triggers</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${t.guidanceEvents}</span><span class="guidance-tstat-label">Events</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${Math.round(t.avgLatencyMs)}</span><span class="guidance-tstat-label">Avg ms</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${t.lastLatencyMs != null ? Math.round(t.lastLatencyMs) : "--"}</span><span class="guidance-tstat-label">Last ms</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${t.queueDepth}</span><span class="guidance-tstat-label">Queue</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${uptime}</span><span class="guidance-tstat-label">Uptime</span></span>
+      </div>
+    `;
+  }
+
+  // --- Event binding ---
+
+  private bindEvents(): void {
+    const toggle = document.getElementById("guidanceToggle");
+    if (toggle) {
+      toggle.addEventListener("click", () => this.toggle());
+    }
+
+    const activate = document.getElementById("guidanceActivate");
+    if (activate) {
+      activate.addEventListener("click", () => this.handleActivate());
+    }
+
+    const deactivate = document.getElementById("guidanceDeactivate");
+    if (deactivate) {
+      deactivate.addEventListener("click", () => this.handleDeactivate());
+    }
+
+    // Gesture pills (delegated)
+    const log = document.getElementById("guidanceLog");
+    if (log) {
+      log.addEventListener("click", (e) => {
+        const target = (e.target as HTMLElement).closest("[data-gesture]");
+        if (target) {
+          this.handleGestureTrigger(
+            (target as HTMLElement).dataset.gesture!
+          );
+        }
+      });
+    }
+
+    // Gesture pills in control section too
+    const control = document.getElementById("guidanceControl");
+    if (control) {
+      control.addEventListener("click", (e) => {
+        const target = (e.target as HTMLElement).closest("[data-gesture]");
+        if (target) {
+          this.handleGestureTrigger(
+            (target as HTMLElement).dataset.gesture!
+          );
+        }
+      });
+    }
+  }
+
+  private handleActivate(): void {
+    const select = document.getElementById(
+      "guidanceAppSelect"
+    ) as HTMLSelectElement | null;
+    const appId = select?.value ?? this.apps[0]?.id;
+    if (!appId) return;
+    this.sendFn({ type: "activate_app", appId });
+  }
+
+  private handleDeactivate(): void {
+    this.sendFn({ type: "deactivate_app" });
+  }
+
+  private handleGestureTrigger(gesture: string): void {
+    this.sendFn({ type: "trigger_gesture", gesture });
+  }
+}
+
+// --- Utilities ---
+
+function esc(str: string): string {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function formatUptime(ms: number): string {
+  if (ms <= 0) return "--";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}

@@ -1,6 +1,6 @@
 # com.mwdat-ios -- Product Requirements Documents
 
-**Last Updated:** 2026-04-10
+**Last Updated:** 2026-04-15
 
 ---
 
@@ -31,64 +31,75 @@ PRD-008+ all need this           Apps import SDK, not               Same concept
 
 ### Layer 1 Gap: Bidirectional Audio
 
-Audio is currently one-directional. The relay can tap audio out but cannot push audio back to the iOS client. Viewers can hear the operator but cannot talk back.
+Audio transport is now bidirectional. The relay can push audio to the iOS client and forward viewer microphone audio to the publisher. What remains is the AI/TTS audio source that generates content for the transport.
 
 ```
-CURRENT (one-way):
+CURRENT (bidirectional transport):
   iOS ──FRAU──> Relay ──FRAU──> Browser viewers
                  │
-                 └──/tap/audio──> (read-only tap for AI workers / transcription)
+                 ├──/tap/audio──> (read-only tap for AI workers / transcription)
+                 │
+                 └── POST /session/<id>/audio-in ──FRAU──> iOS AudioPlaybackStage
+                     (server pushes FRAU codecType 3 to publisher + fans out to viewers)
 
-  iOS local TTS: AVSpeechSynthesizer → PCM → AudioEventBus → FRAU → Relay
-  (device-generated only, nothing comes back from the server)
+  Viewer push-to-talk:
+  Browser viewer ──FRAU (codecType 3)──> Relay ──FRAU──> iOS client ──HFP──> Glasses speakers
 
-MISSING (relay → iOS):
-  Relay ──FRAU──> iOS client
+BUILT:
+  - POST /session/<id>/audio-in endpoint accepts FRAU codecType 3
+  - Relay forwards audio-in FRAU to publisher WebSocket
+  - Relay fans out audio-in FRAU to viewers too
+  - iOS AudioPlaybackStage receives FRAU from RelayStage onReceivedAudio, decodes, plays via AVAudioEngine
+  - Viewer push-to-talk: browser captures mic → FRAU codecType 3 → viewer WS → relay → publisher
 
-  This enables:
-  - Server-side TTS / AI speech → played on operator's phone speaker or glasses
-  - Remote expert voice → played on operator's device
-  - AI guidance audio responses → same content stream
-
-MISSING (viewer → iOS):
-  Browser viewer ──FRAU──> Relay ──FRAU──> iOS client ──HFP──> Glasses speakers
-
-  This enables:
-  - Remote expert talks to operator through glasses speakers
-  - Viewer voice guidance / coaching
-  - Multi-party voice communication
+STILL MISSING (audio sources, not transport):
+  - Multi-viewer audio mixing (currently individual streams forwarded, not mixed)
+  - Server-side TTS service that generates FRAU and posts to /audio-in (path exists, no TTS service)
+  - AI guidance audio output (same as TTS -- path exists, no AI worker wired to generate audio)
 ```
 
-**All return audio must use the same FRAU content stream** -- not separate channels. The iOS client already knows how to decode FRAU. New codecTypes make sources distinguishable within the same protocol.
+**All return audio uses the same FRAU content stream** -- not separate channels. The iOS client already knows how to decode FRAU. codecType 3 is used for all relay-inbound audio.
 
-**What needs building:**
-| Component | What | Where | codecType |
-|-----------|------|-------|-----------|
-| `AudioSinkStage` | Receives FRAU frames from relay WebSocket, publishes to AudioEventBus, plays via AVAudioEngine | iOS (PRD-001) | 3, 4 |
-| Relay audio push | Server sends FRAU frames to publisher's WebSocket (currently only receives from publisher) | Relay (PRD-002) | 3, 4 |
-| FRAU codecType 3 | `relay-inbound` -- server-originated audio (TTS, AI guidance) | Wire protocol | 3 |
-| FRAU codecType 3 (viewer mic) | Browser viewer microphone audio sent as `relay-inbound` | Wire protocol | 3 |
-| Viewer mic capture | `navigator.mediaDevices.getUserMedia()` → PCM 16-bit → FRAU binary (codecType 3) → viewer WebSocket | Browser (PRD-005) | 3 |
-| Relay viewer audio forward | Receive binary FRAU from viewer WebSocket, forward to publisher's WebSocket | Relay (PRD-002) | 4 |
-| HFP output routing | AVAudioEngine plays received PCM through glasses speakers via `.allowBluetooth` | iOS (PRD-001) | 3, 4 |
+**What's built vs. what needs building:**
+| Component | Status | What | Where | codecType |
+|-----------|--------|------|-------|-----------|
+| `AudioPlaybackStage` | BUILT | Receives FRAU frames from relay WebSocket, publishes to AudioEventBus, plays via AVAudioEngine | iOS (PRD-001) | 3 |
+| Relay audio push | BUILT | `POST /session/<id>/audio-in` accepts FRAU; relay forwards to publisher WebSocket | Relay (PRD-002) | 3 |
+| Relay audio fan-out | BUILT | audio-in FRAU also forwarded to session viewers | Relay (PRD-002) | 3 |
+| FRAU codecType 3 (relay-inbound) | BUILT | `relay-inbound` -- server-originated audio | Wire protocol | 3 |
+| Viewer mic capture | BUILT | `navigator.mediaDevices.getUserMedia()` -> PCM 16-bit -> FRAU binary (codecType 3) -> viewer WebSocket | Browser (PRD-005) | 3 |
+| Relay viewer audio forward | BUILT | Receive binary FRAU from viewer WebSocket, forward to publisher's WebSocket | Relay (PRD-002) | 3 |
+| Multi-viewer audio mixing | MISSING | Mix multiple simultaneous viewer PCM streams server-side before forwarding | Relay (PRD-002) | 3 |
+| Server-side TTS service | MISSING | TTS engine generates FRAU, posts to /audio-in endpoint | Relay / AI Worker | 3 |
+| AI guidance audio source | MISSING | AI worker generates audio guidance FRAU, posts to /audio-in endpoint | AI Worker (PRD-008) | 3 |
 
-**Audio flow for viewer → glasses:**
+**Audio flow for viewer -> glasses (BUILT):**
 ```
 1. Viewer clicks "Push to Talk" (or toggle) in browser
 2. navigator.mediaDevices.getUserMedia({ audio: true })
-3. MediaStream → ScriptProcessorNode / AudioWorklet → PCM Int16 16kHz
+3. MediaStream -> ScriptProcessorNode / AudioWorklet -> PCM Int16 16kHz
 4. Wrap PCM in FRAU binary: [FRAU][codecType=3][seq][16000][1][16][timestamp][PCM]
 5. Send binary over existing viewer WebSocket
-6. Relay receives binary from viewer WebSocket (new: currently viewers only send JSON)
+6. Relay receives binary from viewer WebSocket
 7. Relay forwards FRAU frame to publisher's WebSocket
-8. iOS RelayStage receive loop detects FRAU magic → onReceivedAudio callback
-9. AudioSinkStage decodes PCM, plays via AVAudioEngine output node
+8. iOS RelayStage receive loop detects FRAU magic -> onReceivedAudio callback
+9. AudioPlaybackStage decodes PCM, plays via AVAudioEngine output node
 10. AVAudioSession with .allowBluetooth routes to glasses speakers via HFP
 ```
 
-**Multi-viewer audio mixing:** When multiple viewers talk simultaneously, the relay must mix PCM streams before forwarding to publisher (server-side summation with clipping protection). Alternatively, forward individual streams and let the iOS client mix (simpler relay, more iOS work).
+**Audio flow for server -> glasses (TRANSPORT BUILT, SOURCE MISSING):**
+```
+1. TTS or AI worker generates PCM audio
+2. Wrap PCM in FRAU binary: [FRAU][codecType=3][seq][sampleRate][1][16][timestamp][PCM]
+3. POST /session/<id>/audio-in with FRAU binary body
+4. Relay forwards FRAU to publisher WebSocket + fans out to viewers
+5. iOS AudioPlaybackStage receives and plays
+-- Steps 3-5 are built; steps 1-2 have no service generating the audio yet
+```
 
-**Why it's Layer 1:** Without bidirectional audio, every Layer 2 primitive (guidance, comms, alerts) is blocked. The relay can see and hear the operator, but cannot talk back.
+**Multi-viewer audio mixing:** When multiple viewers talk simultaneously, the relay currently forwards individual streams (not mixed). Server-side PCM summation with clipping protection is still needed.
+
+**Why it's Layer 1:** Without bidirectional audio, every Layer 2 primitive (guidance, comms, alerts) is blocked. The transport is now built -- what's missing is the AI/TTS audio source that generates content to send through the transport.
 
 ### Layer 1.5 Gap: Developer API
 
@@ -155,7 +166,7 @@ docs/prds/
 │   └── PRD-012-developer-api.md                TypeScript SDK, Swift SDK, Browser SDK
 └── goals/                                      Layer 2+3: what to build once infra works
     ├── PRD-006-enterprise-platform.md          Enterprise vision (Phase 10, no architecture)
-    ├── PRD-008-ai-guidance-loop.md             Not written
+    ├── PRD-008-ai-guidance-loop.md             Draft
     ├── PRD-009-two-way-comms.md                Not written
     ├── PRD-010-task-state-engine.md            Not written
     └── PRD-011-alert-system.md                 Not written
@@ -186,7 +197,7 @@ docs/prds/
 
 | PRD | Title | What it enables | Status |
 |-----|-------|-----------------|--------|
-| PRD-008 | AI Guidance Loop | Camera sees -> AI reasons -> operator hears guidance | Not Written |
+| PRD-008 | AI Guidance Loop | Camera sees -> AI reasons -> operator hears guidance | Draft |
 | PRD-009 | Two-Way Comms | Remote expert sees feed, talks back to operator | Not Written |
 | PRD-010 | Task State Engine | Procedure tracking, current step, what's next | Not Written |
 | PRD-011 | Alert System | Wrong part, safety violation, restricted zone | Not Written |
@@ -316,7 +327,7 @@ Both protocols are stable and shared across all PRDs:
 | 0 | Built-in mic | Phone microphone | 48kHz | iOS → Relay | Active |
 | 1 | Glasses HFP mic | Ray-Ban Meta via Bluetooth HFP | 16kHz | iOS → Relay | Active |
 | 2 | TTS playback | AVSpeechSynthesizer.write() PCM | 22050Hz | iOS → Relay | Reserved (see PRD-001 P1-7) |
-| 3 | Relay inbound | Server-originated audio (TTS, AI guidance) | TBD | Relay → iOS | Not built |
+| 3 | Relay inbound | Server-originated audio (TTS, AI guidance, viewer mic) | 16kHz | Relay → iOS | Built (audio-in endpoint + AudioPlaybackStage). Server pushes via POST /session/<id>/audio-in; iOS receives via RelayStage onReceivedAudio -> AudioPlaybackStage |
 | 4 | _unused_ | _collapsed into codecType 3_ | — | — | — |
 
 ## Infrastructure

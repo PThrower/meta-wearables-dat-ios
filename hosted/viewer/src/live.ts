@@ -1,11 +1,13 @@
 /**
- * Live player controls — open/close live stream, quality, audio resume
+ * Live player controls — open/close live stream, quality, audio resume, AI guidance
  */
 
 import { RelayPlayer } from "./player/relay-player.js";
+import { GuidancePanel } from "./guidance.js";
 import { requireAuth, getToken } from "./auth.js";
 
 let player: RelayPlayer | null = null;
+let guidancePanel: GuidancePanel | null = null;
 const meterFill = document.getElementById("audio-meter-fill")!;
 
 export function getPlayer(): RelayPlayer | null { return player; }
@@ -59,6 +61,21 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     },
   });
 
+  // Wire guidance panel
+  const guidanceContainer = document.getElementById("guidancePanel")!;
+  if (guidancePanel) {
+    // Re-render into the same container if it already exists
+    guidancePanel = null;
+  }
+  guidancePanel = new GuidancePanel(guidanceContainer, (msg) => {
+    if (player) player.sendJson(msg);
+  });
+  guidancePanel.loadApps();
+
+  player.onJsonMessage = (msg) => {
+    if (guidancePanel) guidancePanel.handleMessage(msg);
+  };
+
   document.getElementById("gallery")!.classList.add("hidden");
   document.getElementById("livePlayer")!.classList.add("active");
   // Pass token separately — RelayPlayer includes it in the hello message
@@ -71,6 +88,7 @@ export function closeLive(): void {
   document.getElementById("unmute")!.classList.remove("show");
   document.getElementById("gallery")!.classList.remove("hidden");
   if (player) { player.destroy(); player = null; }
+  guidancePanel = null;
 }
 
 export function setQuality(preset: string): void {

@@ -22,6 +22,7 @@
  *   /session/<id>/shares     - List share tokens (GET)
  *   /session/<id>/access     - Update access level/ACL (PATCH)
  *   /session/<id>/audio-in   - Push audio to publisher (POST)
+ *   /session/<id>/guidance   - AI guidance history, status, telemetry (GET)
  *   /latest/video.mp4        - Redirect to most recent session's mp4 export
  *   /latest/export           - JSON metadata for most recent session
  *   /stats                   - JSON stats (platform-wide + per-session)
@@ -43,6 +44,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry } from "./app-registry.js";
+import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 // Auth disabled — all endpoints are open access
 import {
   getSessionExportMeta,
@@ -100,6 +102,13 @@ const controlEventBus = new ControlEventBus();
 // --- App Registry ---
 
 const appRegistry = new AppRegistry();
+
+// --- Guidance Orchestrator ---
+// AI guidance routing: subscribes to ControlEventBus, manages per-session app state,
+// broadcasts GuidanceEvent objects to session viewers.
+
+const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
+orchestrator.start();
 
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)
@@ -397,6 +406,18 @@ const server = Bun.serve<WsData>({
       return Response.json(appRegistry.listApps());
     }
 
+    // --- Guidance History ---
+
+    const guidanceMatch = url.pathname.match(/^\/session\/([^/]+)\/guidance$/);
+    if (guidanceMatch) {
+      const gSessionId = guidanceMatch[1];
+      return Response.json({
+        history: orchestrator.getEventHistory(gSessionId),
+        status: orchestrator.getStatus(gSessionId),
+        telemetry: orchestrator.getTelemetry(gSessionId),
+      });
+    }
+
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
@@ -474,6 +495,13 @@ const server = Bun.serve<WsData>({
           ws.close(4003, result.slice(6));
           return;
         }
+        // Subscribe viewer to guidance events for this session
+        const unsubGuidance = orchestrator.subscribeViewer(sessionId, (msg: any) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(msg));
+          }
+        });
+        ws.data.guidanceUnsub = unsubGuidance;
       }
     },
     async message(ws, message) {
@@ -537,6 +565,11 @@ const server = Bun.serve<WsData>({
                 timestampMs: cmd.timestampMs || Date.now(),
               });
               console.log(`[relay] Gesture: ${cmd.gesture} confidence=${cmd.confidence} session=${sessionId}`);
+              // Check if gesture resolves to an app and activate via orchestrator
+              const gesturePipeline = appRegistry.resolveByGesture(cmd.gesture);
+              if (gesturePipeline) {
+                orchestrator.activateApp(sessionId, gesturePipeline.appId).catch(() => {});
+              }
             } else if (cmd.type === "activate_app") {
               // Activate an app for this session
               const appId = cmd.appId as string;
@@ -547,6 +580,8 @@ const server = Bun.serve<WsData>({
                 console.log(`[relay] App activated: ${appId} binding=${pipeline.primitiveId} session=${sessionId}`);
                 // Confirm to publisher
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
+                // Notify orchestrator
+                orchestrator.activateApp(sessionId, appId).catch(() => {});
               } else {
                 console.warn(`[relay] App activation failed: ${appId} not found`);
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
@@ -557,6 +592,8 @@ const server = Bun.serve<WsData>({
               session.appPipeline = null;
               console.log(`[relay] App deactivated: ${prevApp} session=${sessionId}`);
               ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
+              // Notify orchestrator
+              orchestrator.deactivateApp(sessionId).catch(() => {});
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
@@ -612,6 +649,46 @@ const server = Bun.serve<WsData>({
                   label: QUALITY_PRESETS[newQuality].label,
                 }));
               }
+            } else if (cmd.type === "activate_app" && cmd.appId) {
+              // Viewer requests app activation
+              const appId = cmd.appId as string;
+              const pipeline = appRegistry.resolvePipeline(appId);
+              if (pipeline) {
+                session.activeAppId = appId;
+                session.appPipeline = pipeline;
+                console.log(`[relay] Viewer activated app: ${appId} session=${sessionId}`);
+                ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
+                orchestrator.activateApp(sessionId, appId).catch(() => {});
+              } else {
+                ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+              }
+            } else if (cmd.type === "deactivate_app") {
+              // Viewer requests app deactivation
+              const prevApp = session.activeAppId;
+              session.activeAppId = null;
+              session.appPipeline = null;
+              console.log(`[relay] Viewer deactivated app: ${prevApp} session=${sessionId}`);
+              ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
+              orchestrator.deactivateApp(sessionId).catch(() => {});
+            } else if (cmd.type === "trigger_gesture" && cmd.gesture) {
+              // Viewer triggers a gesture (testing/debugging)
+              controlEventBus.publish({
+                type: "gesture",
+                gesture: cmd.gesture,
+                confidence: cmd.confidence ?? 1.0,
+                timestampMs: Date.now(),
+              });
+              console.log(`[relay] Viewer gesture: ${cmd.gesture} session=${sessionId}`);
+              const viewerPipeline = appRegistry.resolveByGesture(cmd.gesture);
+              if (viewerPipeline) {
+                orchestrator.activateApp(sessionId, viewerPipeline.appId).catch(() => {});
+              }
+            } else if (cmd.type === "ai_telemetry") {
+              // Viewer requests telemetry
+              ws.send(JSON.stringify({
+                type: "ai_telemetry",
+                telemetry: orchestrator.getTelemetry(sessionId),
+              }));
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }
         } else {
@@ -657,6 +734,10 @@ const server = Bun.serve<WsData>({
         if (viewerId) {
           registry.removeViewer(sessionId, viewerId);
         }
+        // Clean up guidance subscription
+        if (ws.data.guidanceUnsub) {
+          ws.data.guidanceUnsub();
+        }
       }
     },
   },
@@ -674,6 +755,7 @@ function shutdown() {
   console.log("[relay] Shutting down...");
   clearInterval(staleCleanupTimer);
   sessionStore.stopBackgroundTimers();
+  orchestrator.stop();
   // Finish all active recorders
   for (const entry of registry.listActive()) {
     const s = registry.get(entry.id);

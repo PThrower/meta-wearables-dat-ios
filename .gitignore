@@ -36,7 +36,7 @@ hosted/packages/relay-protocol/dist/
 hosted/packages/relay-protocol/node_modules/
 /sessions
 .wrangler
-
+hosted/scripts
 # Playwright
 test-results/
 

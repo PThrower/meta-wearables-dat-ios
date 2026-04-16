@@ -3,7 +3,7 @@
 **Product:** com.mwdat-ios / CameraAccess
 **Owner:** @ebowwa
 **Status:** P0 Complete
-**Last Updated:** 2026-04-10
+**Last Updated:** 2026-04-15
 **Depends On:** Meta DAT SDK 0.5.x, PRD-002 (Relay Platform)
 
 ---
@@ -83,9 +83,10 @@ The `CameraAccess` sample app extends Meta's reference sample with:
 | P1-5 | Device battery level display | Show glasses battery in pre-stream and stream views |
 | P1-6 | Production app target (separate from sample) | Xcode target `CaringMind` with own bundle ID, entitlements, and App Store config; CameraAccess remains as dev reference |
 | P1-7 | AudioPlaybackStage via AVAudioEngine (active development) | write() produces PCM, player node routes to glasses speaker, same PCM published to AudioEventBus; codecType 2 enabled; see plan `streamed-dreaming-panda.md` |
-| P1-8 | Bidirectional audio: receive FRAU from relay (AudioSinkStage) | New `AudioSinkStage` receives FRAU frames (codecType 3 = relay inbound, covers both server-originated audio and viewer mic) from relay WebSocket, decodes PCM, plays via AVAudioEngine; published to AudioEventBus alongside local audio sources; same content stream as outbound FRAU |
+| P1-8 | Bidirectional audio: receive FRAU from relay (AudioPlaybackStage) | `AudioPlaybackStage` now exists and receives FRAU from server; RelayStage receive loop detects FRAU magic bytes from server; `onReceivedAudio` callback dispatches to AudioPlaybackStage; the `audio-in` endpoint on the relay pushes FRAU to publisher |
 | P1-11 | HFP output routing for inbound audio | AVAudioSession configured with `.playAndRecord` + `.allowBluetooth` routes received PCM (codecType 3) through glasses speakers via HFP; viewer voice and AI/TTS both play on glasses when connected |
 | P1-9 | Telemetry reporting to relay (see PRD-014) | `RelayStage` sends structured telemetry JSON every 5s over WebSocket: FPS, jitter, frame count, drops, encoding latency, TTFF, errors, connection state, sdkVersion |
+| P1-12 | ControlEventBus integration for gesture/activation events | Relay server now has a `ControlEventBus` that receives gesture JSON from the publisher and publishes to subscribers (see PRD-002 P1-3, PRD-008); RelayStage forwards gesture/app-activation messages as JSON control frames; server-side subscribers (AI workers, viewer overlays) consume these events |
 | P1-10 | `sdkVersion` in publisher hello | `sendHello()` includes `"sdkVersion": "0.5.0"` (DAT SDK version from Package.swift dependency); relay stores on Publisher and exposes in stats/export |
 
 ### P2 -- Could Have (Backlog)
