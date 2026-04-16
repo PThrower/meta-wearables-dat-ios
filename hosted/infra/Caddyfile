@@ -1,17 +1,4 @@
 relay.simulationapi.com {
-    # WebSocket routes go directly to relay server (no gateway hop)
-    handle /publish {
-        reverse_proxy localhost:8080
-    }
-    handle /view {
-        reverse_proxy localhost:8080
-    }
-    handle /tap/* {
-        reverse_proxy localhost:8080
-    }
-
-    # Everything else goes to the auth gateway (static files + API proxy)
-    handle {
-        reverse_proxy localhost:3000
-    }
+    # All traffic goes through the gateway (HTTP + WebSocket proxy)
+    reverse_proxy localhost:3000
 }

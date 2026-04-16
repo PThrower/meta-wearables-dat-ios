@@ -50,12 +50,9 @@ export interface WsData {
   clientIp: string;
   sessionId: string;    // session this connection belongs to
   viewerId?: string;
-  userId?: string;      // Google sub (user ID) from verified token
-  email?: string;       // Google email from verified token
+  userId?: string;
+  email?: string;
   unsub?: () => void;   // Audio tap unsubscribe callback
-  shareToken?: string;  // share token for link-access sessions
-  authPending?: boolean; // true if auth deferred to hello message
-  authTimeout?: ReturnType<typeof setTimeout>; // 10s timeout for deferred auth
 }
 
 // --- Publisher ---

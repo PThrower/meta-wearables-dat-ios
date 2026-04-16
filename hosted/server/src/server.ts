@@ -36,14 +36,14 @@ import { join } from "node:path";
 import os from "node:os";
 import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
-import type { WsData, QualityPreset, SessionRole, AccessLevel, AclEntry } from "./types.js";
+import type { WsData, QualityPreset, AccessLevel, AclEntry } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
 import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry } from "./app-registry.js";
-import { verifyToken, extractToken, extractShareToken, getAuthenticatedUser, extractTrustedUser } from "./auth.js";
+// Auth disabled — all endpoints are open access
 import {
   getSessionExportMeta,
   getSessionThumbnail,
@@ -53,14 +53,7 @@ import {
   ExportError,
   type GallerySession,
 } from "./session-export.js";
-import {
-  resolvePermission,
-  hasRole,
-  canSeeInGallery,
-  createShareToken,
-  revokeShareToken,
-  listShareTokens,
-} from "./permissions.js";
+// Auth disabled — permissions module not needed
 import { SessionStore } from "./session-store.js";
 
 // --- Auto-detect WiFi IP ---
@@ -156,125 +149,8 @@ async function findLatestSessionId(): Promise<string | null> {
   return latestId;
 }
 
-/** Find the latest session visible to a specific user. Returns 404-safe null when user can't see any session. */
-async function findLatestSessionIdForUser(userId?: string, userEmail?: string): Promise<string | null> {
-  const sessionIds = await sessionStore.getSessionIds();
-  if (sessionIds.length === 0) return null;
-
-  let latestId: string | null = null;
-  let latestTime = 0;
-  for (const id of sessionIds) {
-    const meta = await sessionStore.getMeta(id);
-    if (!meta) continue;
-    if (!canSeeInGallery(
-      { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
-      userId,
-      userEmail,
-    )) continue;
-    const t = new Date(meta.startedAt || 0).getTime();
-    if (t > latestTime) { latestTime = t; latestId = id; }
-  }
-  return latestId;
-}
-
-/** Filter session IDs to only those visible to a given user */
-async function filterSessionIdsByVisibility(
-  ids: string[],
-  userId?: string,
-  userEmail?: string,
-): Promise<string[]> {
-  const visible: string[] = [];
-  for (const id of ids) {
-    const meta = await sessionStore.getMeta(id);
-    if (!meta) continue;
-    if (canSeeInGallery(
-      { accessLevel: meta.accessLevel, acl: meta.acl, ownerId: meta.ownerId, ownerEmail: meta.ownerEmail },
-      userId,
-      userEmail,
-    )) {
-      visible.push(id);
-    }
-  }
-  return visible;
-}
-
-// --- Auth config injection into viewer HTML ---
-
-// OAuth disabled — const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const NO_AUTH_FLAG = process.env.RELAY_NO_AUTH === "1";
-const REQUIRE_PUBLISHER_AUTH = process.env.RELAY_REQUIRE_PUBLISHER_AUTH === "1";
 const VIEWER_GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const VIEWER_BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
-
-// --- Auth helper for session access ---
-
-interface SessionMetaFromR2 {
-  accessLevel?: AccessLevel;
-  acl?: AclEntry[];
-  ownerId?: string;
-  ownerEmail?: string;
-}
-
-async function getSessionMetaFromR2(sessionId: string): Promise<SessionMetaFromR2 | null> {
-  return sessionStore.getMeta(sessionId);
-}
-
-type AuthResult = { user: { sub: string; email: string }; role: SessionRole | "public" | "none" } | Response;
-
-/**
- * Require session access at a minimum role level.
- * Checks live session first, then falls back to R2 meta.json.
- * Returns user+role on success, or a Response (401/403) on failure.
- */
-async function requireSessionAccess(
-  sessionId: string,
-  req: Request,
-  url: URL,
-  minimumRole: SessionRole | "public",
-): Promise<AuthResult> {
-  // No-auth mode: skip all permission checks — everything is public
-  if (NO_AUTH_FLAG) {
-    return { user: { sub: "", email: "" }, role: "owner" };
-  }
-
-  // Use gateway trusted headers first, fall back to JWT for direct/WS connections
-  const user = await getAuthenticatedUser(req, url);
-  const shareTok = extractShareToken(url) ?? undefined;
-
-  // Check live session first
-  const liveSession = registry.get(sessionId);
-  if (liveSession) {
-    const perm = await resolvePermission(
-      { ownerId: liveSession.ownerId, accessLevel: liveSession.accessLevel, acl: liveSession.acl },
-      user?.sub,
-      shareTok,
-      store,
-      sessionId,
-    );
-    if (!perm.allowed || !hasRole(perm.role, minimumRole as SessionRole)) {
-      return Response.json({ error: "Forbidden" }, { status: 403 });
-    }
-    return { user: user || { sub: "", email: "" }, role: perm.role };
-  }
-
-  // Fall back to R2 meta.json for recorded sessions
-  const meta = await getSessionMetaFromR2(sessionId);
-  if (!meta) {
-    return Response.json({ error: "Session not found" }, { status: 404 });
-  }
-
-  const perm = await resolvePermission(
-    { ownerId: meta.ownerId, accessLevel: meta.accessLevel || "public", acl: meta.acl || [] },
-    user?.sub,
-    shareTok,
-    store,
-    sessionId,
-  );
-  if (!perm.allowed || !hasRole(perm.role, minimumRole as SessionRole)) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
-  return { user: user || { sub: "", email: "" }, role: perm.role };
-}
 
 // --- Server ---
 
@@ -288,13 +164,7 @@ const server = Bun.serve<WsData>({
     // --- Latest session (auth-gated, user-scoped) ---
 
     if (url.pathname === "/latest/video.mp4") {
-      const user = await getAuthenticatedUser(req, url);
-      if (!user && !NO_AUTH_FLAG) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const latestId = NO_AUTH_FLAG
-        ? await findLatestSessionId()
-        : await findLatestSessionIdForUser(user?.sub, user?.email);
+      const latestId = await findLatestSessionId();
       if (!latestId) {
         return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
@@ -304,13 +174,7 @@ const server = Bun.serve<WsData>({
     }
 
     if (url.pathname === "/latest/export") {
-      const user = await getAuthenticatedUser(req, url);
-      if (!user && !NO_AUTH_FLAG) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const latestId = NO_AUTH_FLAG
-        ? await findLatestSessionId()
-        : await findLatestSessionIdForUser(user?.sub, user?.email);
+      const latestId = await findLatestSessionId();
       if (!latestId) {
         return Response.json({ error: "No recorded sessions" }, { status: 404 });
       }
@@ -321,10 +185,6 @@ const server = Bun.serve<WsData>({
     // --- Stats ---
 
     if (url.pathname === "/stats") {
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
       const s = await registry.stats(wifiIp, PORT, serverStartTime, store);
       return Response.json({ ...s, audioTaps: audioTapBus.tapCount() });
     }
@@ -332,39 +192,17 @@ const server = Bun.serve<WsData>({
     // --- Gallery API ---
 
     if (url.pathname === "/gallery/api") {
-      const user = await getAuthenticatedUser(req, url);
-      // If gateway sent trusted headers, trust them; otherwise check for direct token
-      const trustedUser = extractTrustedUser(req);
-      if (!trustedUser && !user && !NO_AUTH_FLAG) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const resolvedUser = trustedUser || user;
-      // Legacy sessions have ownerEmail but no ownerId — can't enforce per-user
-      // visibility until R2 data is backfilled with proper ownerId sub IDs.
       const showAll = true;
-      const userId = resolvedUser?.sub;
-      console.log(`[gallery] userId=${userId} email=${resolvedUser?.email} showAll=${showAll}`);
-      const recorded = await sessionStore.galleryCached(userId, resolvedUser?.email, showAll, () => new Set(registry.listActive().map(s => s.id)));
+      const userId: string | undefined = undefined;
+      console.log(`[gallery] showAll=${showAll}`);
+      const recorded = await sessionStore.galleryCached(userId, undefined, showAll, () => new Set(registry.listActive().map(s => s.id)));
       console.log(`[gallery] recorded=${recorded.length}`);
 
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
       const r2Ids = new Set(recorded.map(s => s.sessionId));
       const liveEntries = registry.listActive()
         .filter(s => !r2Ids.has(s.id))
-        .filter(s => showAll || canSeeInGallery(
-          { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
-          userId,
-          resolvedUser?.email,
-        ))
         .map(s => {
-          // Determine viewer role for this live session
-          let viewerRole: "owner" | "editor" | "viewer" | "public" | "none" = "none";
-
-          if (userId && s.ownerId === userId) viewerRole = "owner";
-          else if (userId && s.acl.find((e: AclEntry) => e.userId === userId)?.role === "editor") viewerRole = "editor";
-          else if (userId && s.acl.find((e: AclEntry) => e.userId === userId)) viewerRole = "viewer";
-          else if (s.accessLevel === "public") viewerRole = "public";
-
           return {
             sessionId: s.id,
             live: true,
@@ -382,47 +220,24 @@ const server = Bun.serve<WsData>({
             videoUrl: `/session/${s.id}/video.mp4?audio`,
             accessLevel: s.accessLevel as AccessLevel,
             acl: s.acl as AclEntry[],
-            viewerRole,
           };
         });
 
       return Response.json([...liveEntries, ...recorded], {
-        headers: { "Cache-Control": userId ? "private, max-age=30" : "public, max-age=30" },
+        headers: { "Cache-Control": "public, max-age=30" },
       });
     }
 
     // --- Live Sessions (active relay sessions) ---
 
     if (url.pathname === "/sessions") {
-      const user = await getAuthenticatedUser(req, url);
-      if (!user && !NO_AUTH_FLAG) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-
       const active = registry.listActive();
-      const showAll = NO_AUTH_FLAG;
 
-      // Filter active sessions by visibility
-      const visibleActive = showAll ? active : active.filter(s =>
-        canSeeInGallery(
-          { accessLevel: s.accessLevel, acl: s.acl, ownerId: s.ownerId, ownerEmail: s.ownerEmail },
-          user!.sub,
-          user!.email,
-        ),
-      );
-
-      // Use cached session list instead of scanning all R2 keys
       const historicalSessionIds = await sessionStore.getSessionIds();
 
-      // Filter historical sessions by ownership
-      const visibleHistorical = showAll ? historicalSessionIds : await filterSessionIdsByVisibility(
-        historicalSessionIds, user!.sub, user!.email,
-      );
-
-      // Combine: active sessions (with live metadata) + historical (id only)
-      const activeIds = new Set(visibleActive.map(s => s.id));
+      const activeIds = new Set(active.map(s => s.id));
       const result = [
-        ...visibleActive.map(s => ({
+        ...active.map(s => ({
           id: s.id,
           live: true,
           publisherConnected: s.publisherConnected,
@@ -430,7 +245,7 @@ const server = Bun.serve<WsData>({
           metadata: s.metadata,
           uptimeMs: s.uptimeMs,
         })),
-        ...visibleHistorical
+        ...historicalSessionIds
           .filter(id => !activeIds.has(id))
           .map(id => ({ id, live: false })),
       ];
@@ -439,107 +254,16 @@ const server = Bun.serve<WsData>({
 
     // --- Share token management: POST /session/{id}/share ---
 
-    const shareCreateMatch = url.pathname.match(/^\/session\/([^/]+)\/share$/);
-    if (shareCreateMatch && req.method === "POST") {
-      const sessionId = shareCreateMatch[1];
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
-      if (authResult instanceof Response) return authResult;
-
-      try {
-        const body = await req.json() as { expiresAt?: string };
-        const expiresAt = body.expiresAt || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-        const shareToken = await createShareToken(sessionId, user.sub, expiresAt, store);
-        return Response.json(shareToken, { status: 201 });
-      } catch {
-        return Response.json({ error: "Invalid request body" }, { status: 400 });
-      }
-    }
-
-    // --- Revoke share token: DELETE /session/{id}/share/{token} ---
-
-    const shareRevokeMatch = url.pathname.match(/^\/session\/([^/]+)\/share\/(shr_[^/]+)$/);
-    if (shareRevokeMatch && req.method === "DELETE") {
-      const sessionId = shareRevokeMatch[1];
-      const tokenStr = shareRevokeMatch[2];
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-      const authResult = await requireSessionAccess(sessionId, req, url, "owner");
-      if (authResult instanceof Response) return authResult;
-
-      const revoked = await revokeShareToken(sessionId, tokenStr, store);
-      if (!revoked) return Response.json({ error: "Token not found" }, { status: 404 });
-      return Response.json({ ok: true });
-    }
-
-    // --- List share tokens: GET /session/{id}/shares ---
-
-    const shareListMatch = url.pathname.match(/^\/session\/([^/]+)\/shares$/);
-    if (shareListMatch && req.method === "GET") {
-      const sessionId = shareListMatch[1];
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
-      if (authResult instanceof Response) return authResult;
-
-      const tokens = await listShareTokens(sessionId, store);
-      return Response.json(tokens);
-    }
-
-    // --- Update access level/ACL: PATCH /session/{id}/access ---
-
-    const accessMatch = url.pathname.match(/^\/session\/([^/]+)\/access$/);
-    if (accessMatch && req.method === "PATCH") {
-      const sessionId = accessMatch[1];
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
-      const authResult = await requireSessionAccess(sessionId, req, url, "owner");
-      if (authResult instanceof Response) return authResult;
-
-      try {
-        const body = await req.json() as { accessLevel?: AccessLevel; acl?: AclEntry[] };
-
-        // Update live session if active
-        const liveSession = registry.get(sessionId);
-        if (liveSession) {
-          if (body.accessLevel) {
-            liveSession.accessLevel = body.accessLevel;
-            liveSession.metadata.accessLevel = body.accessLevel;
-          }
-          if (body.acl) {
-            liveSession.acl = body.acl;
-            liveSession.metadata.acl = body.acl;
-          }
-          // Sync to recorder
-          if (liveSession.recorder) {
-            if (body.accessLevel) liveSession.recorder.accessLevel = body.accessLevel;
-            if (body.acl) liveSession.recorder.acl = body.acl;
-          }
-        }
-
-        // Update R2 meta.json
-        await sessionStore.patchMeta(sessionId, { accessLevel: body.accessLevel, acl: body.acl });
-
-        sessionStore.invalidateGalleryCache();
-        sessionStore.invalidateSessionListCache();
-        return Response.json({ ok: true });
-      } catch {
-        return Response.json({ error: "Invalid request body" }, { status: 400 });
-      }
-    }
+    // --- Share token management: removed (auth disabled) ---
+    // --- Revoke share token: removed (auth disabled) ---
+    // --- List share tokens: removed (auth disabled) ---
+    // --- Update access level/ACL: removed (auth disabled) ---
 
     // --- Push audio to publisher: POST /session/<id>/audio-in ---
 
     const audioInMatch = url.pathname.match(/^\/session\/([^/]+)\/audio-in$/);
     if (audioInMatch && req.method === "POST") {
       const sessionId = audioInMatch[1];
-      const authResult = await requireSessionAccess(sessionId, req, url, "editor");
-      if (authResult instanceof Response) return authResult;
 
       const buf = await req.arrayBuffer();
       if (buf.byteLength < 29) return Response.json({ error: "Payload too small" }, { status: 400 });
@@ -568,9 +292,6 @@ const server = Bun.serve<WsData>({
     const thumbMatch = url.pathname.match(/^\/session\/([^/]+)\/thumbnail$/);
     if (thumbMatch) {
       const sessionId = thumbMatch[1];
-      // Auth gate: require at least viewer role (public sessions allowed without auth)
-      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
-      if (authResult instanceof Response) return authResult;
 
       try {
         const jpeg = await getSessionThumbnail(sessionId, store);
@@ -592,10 +313,6 @@ const server = Bun.serve<WsData>({
     const mp4Match = url.pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
     if (mp4Match) {
       const sessionId = mp4Match[1];
-      // Auth gate: require at least viewer role
-      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
-      if (authResult instanceof Response) return authResult;
-
       const includeAudio = url.searchParams.has("audio");
       try {
         // Serve from R2 cache if available — proxy through server to avoid
@@ -635,10 +352,6 @@ const server = Bun.serve<WsData>({
     const exportMetaMatch = url.pathname.match(/^\/session\/([^/]+)\/export$/);
     if (exportMetaMatch) {
       const sessionId = exportMetaMatch[1];
-      // Auth gate: require at least viewer role
-      const authResult = await requireSessionAccess(sessionId, req, url, "viewer");
-      if (authResult instanceof Response) return authResult;
-
       const meta = await getSessionExportMeta(sessionId, store);
       return Response.json(meta);
     }
@@ -648,9 +361,6 @@ const server = Bun.serve<WsData>({
     const videoMatch = url.pathname.match(/^\/session\/([^/]+)\/video\/(.+)$/);
     if (videoMatch) {
       const [, id, seg] = videoMatch;
-      const authResult = await requireSessionAccess(id, req, url, "viewer");
-      if (authResult instanceof Response) return authResult;
-
       const key = `sessions/${id}/video/${seg}`;
       try {
         const signed = await sessionStore.signedUrl(key, 3600);
@@ -663,9 +373,6 @@ const server = Bun.serve<WsData>({
     const audioMatch = url.pathname.match(/^\/session\/([^/]+)\/audio\/(.+)$/);
     if (audioMatch) {
       const [, id, chunk] = audioMatch;
-      const authResult = await requireSessionAccess(id, req, url, "viewer");
-      if (authResult instanceof Response) return authResult;
-
       const key = `sessions/${id}/audio/${chunk}`;
       try {
         const signed = await sessionStore.signedUrl(key, 3600);
@@ -679,8 +386,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/api/config") {
       return Response.json({
-        // googleClientId: GOOGLE_CLIENT_ID, // OAuth disabled
-        noAuth: NO_AUTH_FLAG,
+        noAuth: true,
         version: { gitCommit: VIEWER_GIT_COMMIT, buildVersion: VIEWER_BUILD_VERSION },
       });
     }
@@ -694,15 +400,11 @@ const server = Bun.serve<WsData>({
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
-      const user = await getAuthenticatedUser(req, url);
-      if (!user) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
       const sessionId = url.searchParams.get("session") || "default";
       const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
         || req.headers.get("x-real-ip")
         || "unknown";
-      server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId, userId: user.sub, email: user.email } });
+      server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId, userId: undefined, email: undefined } });
       return new Response(null, { status: 204 });
     }
 
@@ -727,40 +429,13 @@ const server = Bun.serve<WsData>({
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("x-real-ip")
       || "unknown";
-    const shareTok = extractShareToken(url);
 
-    // Auth: accept token from query param (backward compat) or trusted headers, or defer to hello message
-    const trustedUser = extractTrustedUser(req);
-    const token = extractToken(req, url);
-    const user = trustedUser || (token ? await verifyToken(token) : null);
-    // If no token in URL, upgrade will succeed but viewer/publisher auth is deferred
-    // to the hello message handler which sends the token
-    if (!user && !NO_AUTH_FLAG) {
-      // Allow upgrade without token — auth will be verified on hello message
-      server.upgrade(req, { data: { role, clientIp, sessionId, userId: undefined, email: undefined, shareToken: shareTok || undefined, authPending: true } });
-      return new Response(null, { status: 204 });
-    }
-
-    server.upgrade(req, { data: { role, clientIp, sessionId, userId: user?.sub, email: user?.email, shareToken: shareTok || undefined, authPending: false } });
+    server.upgrade(req, { data: { role, clientIp, sessionId, userId: undefined, email: undefined } });
     return new Response(null, { status: 204 });
   },
   websocket: {
     async open(ws) {
-      const { role, clientIp, sessionId, authPending } = ws.data;
-
-      // If auth is deferred to hello message, don't register yet — start auth timeout
-      if (authPending) {
-        console.log(`[relay] ${role} connected (auth pending) session=${sessionId}`);
-        // Close connection if no hello received within 10 seconds
-        const authTimeout = setTimeout(() => {
-          if (ws.data.authPending) {
-            console.log(`[relay] ${role} auth timeout session=${sessionId}`);
-            try { ws.close(4001, "auth timeout"); } catch {}
-          }
-        }, 10_000);
-        ws.data = { ...ws.data, authTimeout };
-        return;
-      }
+      const { role, clientIp, sessionId } = ws.data;
 
       if (role === "audio-tap") {
         const unsub = audioTapBus.onFrame((frame) => {
@@ -794,7 +469,7 @@ const server = Bun.serve<WsData>({
           return;
         }
       } else {
-        const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, ws.data.shareToken);
+        const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, undefined);
         if (result.startsWith("error:")) {
           ws.close(4003, result.slice(6));
           return;
@@ -802,101 +477,7 @@ const server = Bun.serve<WsData>({
       }
     },
     async message(ws, message) {
-      const { role, sessionId, authPending } = ws.data;
-
-      // Handle deferred auth: verify token sent in hello message
-      if (authPending && typeof message === "string") {
-        try {
-          const cmd = JSON.parse(message);
-          if (cmd.type === "hello") {
-            // Clear auth timeout
-            if (ws.data.authTimeout) { clearTimeout(ws.data.authTimeout); ws.data.authTimeout = undefined; }
-            const token = cmd.token || "";
-            const shareTok = cmd.shareToken || ws.data.shareToken;
-            const user = await verifyToken(token);
-
-            // Require auth for all roles; publishers exempted until RELAY_REQUIRE_PUBLISHER_AUTH=1
-            if (!user && !(role === "publish" && !REQUIRE_PUBLISHER_AUTH)) {
-              ws.close(4001, "auth failed");
-              return;
-            }
-
-            ws.data.userId = user?.sub;
-            ws.data.email = user?.email;
-            ws.data.shareToken = shareTok || undefined;
-            ws.data.authPending = false;
-
-            // Now register the connection
-            if (role === "publish") {
-              const err = await registry.claimPublisher(sessionId, ws, ws.data.clientIp, user?.sub, user?.email);
-              if (err) {
-                ws.close(err === "session owned by another user" ? 4003 : 4001, err);
-                return;
-              }
-              // Process hello fields
-              const session = registry.get(sessionId);
-              if (session?.publisher) {
-                const MAX_FIELD_LEN = 256;
-                const strField = (v: unknown): string | null => {
-                  if (typeof v !== "string") return null;
-                  const trimmed = v.slice(0, MAX_FIELD_LEN);
-                  return trimmed || null;
-                };
-                session.publisher.deviceId = strField(cmd.deviceId);
-                session.publisher.deviceName = strField(cmd.deviceName);
-                session.publisher.wearableId = strField(cmd.wearableId);
-                session.publisher.wearableType = strField(cmd.wearableType);
-                session.publisher.deviceModel = strField(cmd.deviceModel);
-                session.publisher.systemVersion = strField(cmd.systemVersion);
-                session.publisher.appVersion = strField(cmd.appVersion);
-                session.publisher.buildNumber = strField(cmd.buildNumber);
-                session.metadata.deviceName = strField(cmd.deviceName);
-                session.metadata.deviceModel = strField(cmd.deviceModel);
-                session.metadata.deviceId = strField(cmd.deviceId);
-                session.metadata.systemVersion = strField(cmd.systemVersion);
-                session.metadata.wearableType = strField(cmd.wearableType);
-                console.log(`[relay] Publisher hello: device=${cmd.deviceName || "?"} wearable=${cmd.wearableType || "none"} ip=${ws.data.clientIp} session=${sessionId}`);
-                if (session.recorder) {
-                  session.recorder.deviceInfo = {
-                    deviceId: cmd.deviceId || null,
-                    deviceName: cmd.deviceName || null,
-                    wearableId: cmd.wearableId || null,
-                    wearableType: cmd.wearableType || null,
-                    deviceModel: cmd.deviceModel || null,
-                    systemVersion: cmd.systemVersion || null,
-                  };
-                  session.recorder.accessLevel = session.accessLevel;
-                  session.recorder.acl = session.acl;
-                  session.recorder.ownerId = session.ownerId;
-                  session.recorder.ownerEmail = session.ownerEmail;
-                }
-              }
-            } else if (role === "view") {
-              const result = await registry.addViewer(sessionId, ws, ws.data.clientIp, user?.sub, user?.email, shareTok);
-              if (result.startsWith("error:")) {
-                ws.close(4003, result.slice(6));
-                return;
-              }
-              // Store viewer version info
-              const viewerId = ws.data.viewerId;
-              if (viewerId) {
-                const found = registry.findViewerSession(viewerId);
-                if (found) {
-                  found.viewer.gitCommit = cmd.gitCommit || null;
-                  found.viewer.buildVersion = cmd.buildVersion || null;
-                }
-              }
-            }
-            return;
-          }
-        } catch {
-          ws.close(4001, "invalid hello");
-          return;
-        }
-        // Any non-hello message before auth is rejected
-        ws.close(4001, "auth required");
-        return;
-      }
+      const { role, sessionId } = ws.data;
 
       const session = registry.get(sessionId);
       if (!session) return;

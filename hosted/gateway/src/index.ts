@@ -1,20 +1,15 @@
 /**
  * caringmind-gateway
  *
- * Auth gateway that sits between Caddy (TLS terminator) and the relay server.
+ * Gateway that sits between Caddy (TLS terminator) and the relay server.
  * Responsibilities:
  *   1. Serve the viewer SPA (static files from hosted/viewer/dist/)
- *   2. Verify Google JWT tokens on protected HTTP routes
- *   3. Inject trusted headers (X-User-Id, X-User-Email) for the relay server
- *   4. Proxy HTTP API requests to the relay server on localhost:8080
- *
- * WebSocket connections (/publish, /view, /tap/audio) are routed directly to
- * the relay server by Caddy — the relay server handles WS auth via deferred
- * hello messages. Future iteration will add WS proxying through the gateway.
+ *   2. Proxy HTTP API requests to the relay server on localhost:8080
+ *   3. Proxy WebSocket connections to the relay server
  */
 
 import { join, extname } from "node:path";
-import { verifyToken, extractToken, extractShareToken, mintSessionToken, verifySessionToken, shouldRefreshSession, revokeToken } from "./auth.js";
+import { verifyToken, extractToken, mintSessionToken, verifySessionToken, revokeToken } from "./auth.js";
 import { proxyRequest } from "./proxy.js";
 import type { AuthUser } from "./types.js";
 
@@ -23,8 +18,6 @@ import type { AuthUser } from "./types.js";
 const PORT = parseInt(process.env.GATEWAY_PORT || "3000");
 const RELAY_PORT = process.env.RELAY_PORT || "8080";
 const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../viewer/dist");
-// OAuth disabled — const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-// No login mechanism available — default to no-auth mode
 const NO_AUTH = process.env.GATEWAY_NO_AUTH !== "0";
 const GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
@@ -52,8 +45,8 @@ const MIME_TYPES: Record<string, string> = {
 
 // --- Static file serving ---
 
-function serveStatic(filePath: string): Response | null {
-  const fullPath = join(VIEWER_DIST, filePath);
+function serveStatic(baseDir: string, filePath: string): Response | null {
+  const fullPath = join(baseDir, filePath);
   const file = Bun.file(fullPath);
   if (file.size === 0) return null;
 
@@ -67,21 +60,11 @@ function serveStatic(filePath: string): Response | null {
   });
 }
 
-// --- Auth helpers ---
+// --- WS bridge data ---
 
-async function requireAuth(req: Request, url: URL): Promise<{ user: AuthUser } | Response> {
-  const token = extractToken(req, url);
-  const user = await verifyToken(token);
-  if (!user) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  return { user };
-}
-
-async function optionalAuth(req: Request, url: URL): Promise<AuthUser | null> {
-  const token = extractToken(req, url);
-  if (!token) return null;
-  return verifyToken(token);
+interface WsBridgeData {
+  targetUrl: string;
+  upstream: WebSocket | null;
 }
 
 // --- Route handler (exported for testing) ---
@@ -94,72 +77,13 @@ export function createFetchHandler(config?: {
   buildVersion?: string;
 }) {
   const _noAuth = config?.noAuth ?? NO_AUTH;
-  // OAuth disabled — const _clientId = config?.googleClientId ?? GOOGLE_CLIENT_ID;
   const _gitCommit = config?.gitCommit ?? GIT_COMMIT;
   const _buildVersion = config?.buildVersion ?? BUILD_VERSION;
   const _viewerDist = config?.viewerDist ?? VIEWER_DIST;
 
-  // Closure over config so tests can override
-  const _verifyToken = (token: string | null | undefined) => {
-    if (_noAuth) return Promise.resolve({ sub: "dev", email: "dev@localhost" } as AuthUser);
-    return verifyToken(token);
-  };
-
-  // Static file serving (closure over _viewerDist)
-  function _serveStatic(filePath: string): Response | null {
-    const fullPath = join(_viewerDist, filePath);
-    const file = Bun.file(fullPath);
-    if (file.size === 0) return null;
-
-    const ext = extname(fullPath);
-    const contentType = MIME_TYPES[ext] || "application/octet-stream";
-    return new Response(file, {
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
-      },
-    });
-  }
-
-  async function _requireAuth(req: Request, url: URL): Promise<{ user: AuthUser } | Response> {
-    const token = extractToken(req, url);
-    const user = await _verifyToken(token);
-    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
-    return { user };
-  }
-
-  async function _optionalAuth(req: Request, url: URL): Promise<AuthUser | null> {
-    const token = extractToken(req, url);
-    if (!token) {
-      if (_noAuth) return { sub: "dev", email: "dev@localhost" } as AuthUser;
-      return null;
-    }
-    return _verifyToken(token);
-  }
-
-  return async function fetch(req: Request): Promise<Response> {
+  return async function fetch(req: Request, server: any): Promise<Response> {
     const url = new URL(req.url, `http://${req.headers.get("host") || "localhost"}`);
     const { pathname } = url;
-
-    // --- Auth: exchange Google JWT for session token (DISABLED) ---
-    // OAuth disabled — exchange endpoint commented out
-    // if (pathname === "/api/auth/exchange" && req.method === "POST") {
-    //   try {
-    //     const body = await req.json() as { credential?: string };
-    //     const credential = body.credential;
-    //     if (!credential) return Response.json({ error: "Missing credential" }, { status: 400 });
-    //
-    //     // Verify the Google JWT via google-auth-library
-    //     const user = await verifyToken(credential);
-    //     if (!user) return Response.json({ error: "Invalid credential" }, { status: 401 });
-    //
-    //     // Mint a long-lived session token
-    //     const token = mintSessionToken(user.sub, user.email);
-    //     return Response.json({ token, user: { sub: user.sub, email: user.email } });
-    //   } catch {
-    //     return Response.json({ error: "Invalid request" }, { status: 400 });
-    //   }
-    // }
 
     // --- Auth: refresh session token ---
 
@@ -167,7 +91,6 @@ export function createFetchHandler(config?: {
       const token = extractToken(req, url);
       if (!token) return Response.json({ error: "Missing token" }, { status: 401 });
 
-      // Only refresh valid (not expired) session tokens
       const user = verifySessionToken(token);
       if (!user) return Response.json({ error: "Invalid or expired session" }, { status: 401 });
 
@@ -187,7 +110,6 @@ export function createFetchHandler(config?: {
 
     if (pathname === "/api/config") {
       return Response.json({
-        // googleClientId: _clientId, // OAuth disabled
         noAuth: _noAuth,
         version: { gitCommit: _gitCommit, buildVersion: _buildVersion },
       });
@@ -196,167 +118,144 @@ export function createFetchHandler(config?: {
     // --- Static files: landing page at root ---
 
     if (pathname === "/" || pathname === "/index.html") {
-      const resp = _serveStatic("landing.html") || _serveStatic("index.html");
+      const resp = serveStatic(_viewerDist, "landing.html") || serveStatic(_viewerDist, "index.html");
       if (resp) return resp;
     }
 
     // --- Static files: assets with hash ---
 
     if (pathname.startsWith("/assets/")) {
-      const resp = _serveStatic(pathname.slice(1));
+      const resp = serveStatic(_viewerDist, pathname.slice(1));
       if (resp) return resp;
     }
 
     // --- Gallery SPA entry ---
 
     if (pathname === "/gallery" || pathname === "/gallery/") {
-      const resp = _serveStatic("index.html");
+      const resp = serveStatic(_viewerDist, "index.html");
       if (resp) return resp;
     }
 
     // --- Gallery API ---
 
     if (pathname === "/gallery/api") {
-      const token = extractToken(req, url);
-      const user = token
-        ? await _verifyToken(token)
-        : (_noAuth ? await _verifyToken(null) : null);
-      if (token && !user && !_noAuth) {
-        return Response.json({ error: "token expired" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
     }
 
     // --- Stats ---
 
     if (pathname === "/stats") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
+      return proxyRequest(req, pathname);
     }
 
     // --- Sessions ---
 
     if (pathname === "/sessions") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
+      return proxyRequest(req, pathname);
     }
 
     // --- Apps registry ---
-    // Intentionally public: iOS client needs app discovery before login.
 
     if (pathname === "/apps") {
       return proxyRequest(req, pathname);
     }
 
-    // --- Latest session (auth required) ---
+    // --- Latest session ---
 
     if (pathname.startsWith("/latest/")) {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
+      return proxyRequest(req, pathname);
     }
 
     // --- Session sub-routes ---
 
-    const shareCreateMatch = pathname.match(/^\/session\/([^/]+)\/share$/);
-    if (shareCreateMatch && req.method === "POST") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
-    }
-
-    const shareRevokeMatch = pathname.match(/^\/session\/([^/]+)\/share\/(shr_[^/]+)$/);
-    if (shareRevokeMatch && req.method === "DELETE") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
-    }
-
-    const shareListMatch = pathname.match(/^\/session\/([^/]+)\/shares$/);
-    if (shareListMatch && req.method === "GET") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
-    }
-
-    const accessMatch = pathname.match(/^\/session\/([^/]+)\/access$/);
-    if (accessMatch && req.method === "PATCH") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
-    }
-
     const audioInMatch = pathname.match(/^\/session\/([^/]+)\/audio-in$/);
     if (audioInMatch && req.method === "POST") {
-      const authResult = await _requireAuth(req, url);
-      if (authResult instanceof Response) return authResult;
-      return proxyRequest(req, pathname, authResult.user);
+      return proxyRequest(req, pathname);
     }
 
-    // Session thumbnail
     const thumbMatch = pathname.match(/^\/session\/([^/]+)\/thumbnail$/);
     if (thumbMatch) {
-      const shareTok = extractShareToken(url);
-      const user = await _optionalAuth(req, url);
-      if (!user && !shareTok && !_noAuth) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
     }
 
-    // Session video export
     const mp4Match = pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
     if (mp4Match) {
-      const shareTok = extractShareToken(url);
-      const user = await _optionalAuth(req, url);
-      if (!user && !shareTok && !_noAuth) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
     }
 
-    // Session export metadata
     const exportMatch = pathname.match(/^\/session\/([^/]+)\/export$/);
     if (exportMatch) {
-      const shareTok = extractShareToken(url);
-      const user = await _optionalAuth(req, url);
-      if (!user && !shareTok && !_noAuth) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
     }
 
-    // S3 retrieval (share token OR user auth required)
     const videoSegMatch = pathname.match(/^\/session\/([^/]+)\/video\/(.+)$/);
     if (videoSegMatch) {
-      const shareTok = extractShareToken(url);
-      const user = await _optionalAuth(req, url);
-      if (!user && !shareTok && !_noAuth) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
     }
 
     const audioSegMatch = pathname.match(/^\/session\/([^/]+)\/audio\/(.+)$/);
     if (audioSegMatch) {
-      const shareTok = extractShareToken(url);
-      const user = await _optionalAuth(req, url);
-      if (!user && !shareTok && !_noAuth) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return proxyRequest(req, pathname, user || undefined);
+      return proxyRequest(req, pathname);
+    }
+
+    // --- WebSocket proxy to relay server ---
+
+    if (pathname === "/publish" || pathname === "/view" || pathname === "/tap/audio") {
+      const targetUrl = `ws://127.0.0.1:${RELAY_PORT}${pathname}${url.search}`;
+      server.upgrade(req, { data: { targetUrl } satisfies WsBridgeData });
+      return new Response(null, { status: 204 });
     }
 
     // --- SPA fallback ---
 
-    const staticResp = _serveStatic("index.html");
+    const staticResp = serveStatic(_viewerDist, "index.html");
     if (staticResp) return staticResp;
 
     return Response.json({ error: "Not found" }, { status: 404 });
   };
 }
+
+// --- WebSocket handler: bridges client ↔ relay server ---
+
+export const wsHandler = {
+  open(ws: any) {
+    const { targetUrl } = ws.data as WsBridgeData;
+    const upstream = new WebSocket(targetUrl);
+
+    upstream.addEventListener("open", () => {
+      ws.data.upstream = upstream;
+      console.log(`[gateway:ws] bridge open → ${targetUrl}`);
+    });
+
+    upstream.addEventListener("message", (ev) => {
+      try { ws.send(ev.data); } catch {}
+    });
+
+    upstream.addEventListener("close", (ev) => {
+      try { ws.close(ev.code, ev.reason); } catch {}
+    });
+
+    upstream.addEventListener("error", () => {
+      try { ws.close(1011, "upstream error"); } catch {}
+    });
+
+    ws.data.upstream = upstream;
+  },
+
+  message(ws: any, message: string | ArrayBuffer) {
+    const { upstream } = ws.data as WsBridgeData;
+    if (upstream && upstream.readyState === WebSocket.OPEN) {
+      upstream.send(message);
+    }
+  },
+
+  close(ws: any, code: number, reason: string) {
+    const { upstream } = ws.data as WsBridgeData;
+    if (upstream) {
+      try { upstream.close(code, reason); } catch {}
+    }
+  },
+};
 
 // --- Start server when run directly ---
 
@@ -367,10 +266,11 @@ if (import.meta.main) {
     hostname: "0.0.0.0",
     port: PORT,
     fetch: handler,
+    websocket: wsHandler,
   });
 
   console.log(`[gateway] Auth gateway on 0.0.0.0:${PORT}`);
-  console.log(`[gateway] Proxying HTTP API to 127.0.0.1:${RELAY_PORT}`);
+  console.log(`[gateway] Proxying HTTP + WS to 127.0.0.1:${RELAY_PORT}`);
   console.log(`[gateway] Viewer dist: ${VIEWER_DIST}`);
   console.log(`[gateway] No-auth mode: ${NO_AUTH}`);
 }

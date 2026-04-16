@@ -5,12 +5,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // WebSocket routes go directly to relay server (no gateway hop)
-      "/publish": { target: "http://localhost:8080", ws: true },
-      "/view":    { target: "http://localhost:8080", ws: true },
-      "/tap":     { target: "http://localhost:8080", ws: true },
+      // All routes go through the gateway (port 3000)
+      // Gateway proxies HTTP to relay server and handles WebSocket upgrade
+      "/publish": { target: "http://localhost:3000", ws: true },
+      "/view":    { target: "http://localhost:3000", ws: true },
+      "/tap":     { target: "http://localhost:3000", ws: true },
 
-      // HTTP API routes go through auth gateway (matches Caddy routing)
       "/sessions":   "http://localhost:3000",
       "/gallery/api":  "http://localhost:3000",
       "/gallery":  "http://localhost:3000",
