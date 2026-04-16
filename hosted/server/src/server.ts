@@ -105,9 +105,52 @@ const appRegistry = new AppRegistry();
 
 // --- Guidance Orchestrator ---
 // AI guidance routing: subscribes to ControlEventBus, manages per-session app state,
-// broadcasts GuidanceEvent objects to session viewers.
+// broadcasts GuidanceEvent objects to session viewers. Uses AIService providers
+// (Gemini Live, etc.) for real multimodal inference.
 
 const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
+
+// Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
+// push through the relay's audio-in path (fan-out to publisher + viewers).
+orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
+  if (pcm.length === 0) return;
+
+  // Build FRAU frame: codecType=3 (relay-inbound), 16kHz, mono, 16-bit
+  const seq = BigInt(Date.now());
+  const timestampMs = BigInt(Date.now());
+  const headerSize = 29;
+  const frame = new Uint8Array(headerSize + pcm.length);
+  const view = new DataView(frame.buffer);
+
+  // Magic "FRAU"
+  view.setUint8(0, 0x46); view.setUint8(1, 0x52);
+  view.setUint8(2, 0x41); view.setUint8(3, 0x55);
+  // codecType = 3 (relay-inbound)
+  view.setUint8(4, 3);
+  // Sequence (u64 LE)
+  view.setBigUint64(5, seq, true);
+  // Sample rate 16000 (u32 LE)
+  view.setUint32(13, 16000, true);
+  // Channels 1 (u16 LE)
+  view.setUint16(17, 1, true);
+  // Bits per sample 16 (u16 LE)
+  view.setUint16(19, 16, true);
+  // Timestamp ms (u64 LE)
+  view.setBigUint64(21, timestampMs, true);
+  // PCM payload
+  frame.set(pcm, headerSize);
+
+  // Fan out to viewers
+  registry.fanoutAudio(sessionId, frame, 3, 16000);
+
+  // Push to publisher for local playback (glasses speakers via HFP)
+  registry.sendToPublisher(sessionId, frame);
+
+  // Record
+  const session = registry.get(sessionId);
+  session?.recorder?.appendAudio(frame);
+});
+
 orchestrator.start();
 
 // --- WASM Loading ---
@@ -570,6 +613,10 @@ const server = Bun.serve<WsData>({
               if (gesturePipeline) {
                 orchestrator.activateApp(sessionId, gesturePipeline.appId).catch(() => {});
               }
+              // Forward gesture as text trigger to active AI service
+              if (session.activeAppId) {
+                orchestrator.sendTrigger(sessionId, `[Gesture detected: ${cmd.gesture}, confidence: ${cmd.confidence ?? 1.0}]`);
+              }
             } else if (cmd.type === "activate_app") {
               // Activate an app for this session
               const appId = cmd.appId as string;
@@ -608,12 +655,24 @@ const server = Bun.serve<WsData>({
             registry.fanoutAudio(sessionId, buf, audioHdr?.codecType ?? 0, audioHdr?.sampleRate ?? 0);
             session.recorder?.appendAudio(buf);
             audioTapBus.publish(buf);
+
+            // Forward PCM payload to AI service (if active)
+            if (audioHdr && session.activeAppId) {
+              const pcmPayload = buf.slice(29);
+              orchestrator.sendAudio(sessionId, pcmPayload);
+            }
           } else if (isVideoFrame(buf)) {
             // Video frame (FRLY)
             session.publisher.frameCount++;
             session.publisher.totalBytes += buf.length;
             registry.fanout(sessionId, buf);
             session.recorder?.appendVideo(buf);
+
+            // Forward JPEG payload to AI service (if active, rate-limited by service)
+            if (session.activeAppId) {
+              const jpegPayload = buf.slice(29);
+              orchestrator.sendVideoFrame(sessionId, jpegPayload);
+            }
           }
         }
       } else if (role === "view") {

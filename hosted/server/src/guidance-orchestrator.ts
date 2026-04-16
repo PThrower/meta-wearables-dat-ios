@@ -1,23 +1,26 @@
 /**
- * GuidanceOrchestrator — AI Guidance event routing and state management
+ * GuidanceOrchestrator -- AI Guidance event routing and state management
  *
  * Core of PRD-008. Subscribes to ControlEventBus, resolves apps via
  * AppRegistry, manages per-session activation state, and broadcasts
  * GuidanceEvent objects to session viewers.
  *
- * The TTS/AI model integration is STUBBED. When an app is activated,
- * a test GuidanceEvent is emitted. The orchestrator:
- * 1. Tracks activation state per session
- * 2. Routes events to the right subscribers
- * 3. Provides telemetry/status
- * 4. Has a clean interface for wiring real AI/TTS later
+ * Uses AIService provider (e.g., GeminiLiveService) for real AI inference.
+ * When an app is activated, the orchestrator:
+ * 1. Creates an AIService instance via the provider factory
+ * 2. Connects to the AI provider with the app's system prompt + voice
+ * 3. Forwards frames and audio from the relay session
+ * 4. Receives spoken guidance audio + text from the AI
+ * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
 import type { ControlEvent, AppConfig, AppPipeline } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
-import type { TTSService } from "./tts-service.js";
-import { StubTTSService } from "./tts-service.js";
+import type { AIService, AIServiceCallbacks } from "./ai-service.js";
+import { createAIService } from "./ai-service.js";
+// Import to register the gemini provider
+import "./gemini-live-service.js";
 
 // --- Types ---
 
@@ -60,21 +63,35 @@ export interface AITelemetry {
   uptimeMs: number;
 }
 
+/** Callback for pushing audio back to the relay's /audio-in path */
+export type AudioPushFn = (sessionId: string, pcm: Uint8Array) => void;
+
 // --- Constants ---
 
 const MAX_EVENT_HISTORY = 100;
+
+// --- Per-session AI state ---
+
+interface SessionAIState {
+  service: AIService;
+  appId: string;
+  lastAudioAt: number;
+}
 
 // --- Orchestrator ---
 
 export class GuidanceOrchestrator {
   private controlBus: ControlEventBus;
   private appRegistry: AppRegistry;
-  private tts: TTSService;
 
   private status = new Map<string, AIStatus>();
   private telemetry = new Map<string, AITelemetry>();
   private eventHistory = new Map<string, GuidanceEvent[]>();
   private subscribers = new Map<string, Set<(msg: any) => void>>();
+  private aiState = new Map<string, SessionAIState>();
+
+  /** Callback to push AI audio response to relay's audio-in path */
+  private audioPushFn: AudioPushFn | null = null;
 
   private startedAt: number = 0;
   private unsubControlBus: (() => void) | null = null;
@@ -83,10 +100,14 @@ export class GuidanceOrchestrator {
   private latencySum = new Map<string, number>();
   private latencyCount = new Map<string, number>();
 
-  constructor(controlBus: ControlEventBus, appRegistry: AppRegistry, tts?: TTSService) {
+  constructor(controlBus: ControlEventBus, appRegistry: AppRegistry) {
     this.controlBus = controlBus;
     this.appRegistry = appRegistry;
-    this.tts = tts ?? new StubTTSService();
+  }
+
+  /** Set the callback for pushing AI audio back to the relay session */
+  setAudioPushFn(fn: AudioPushFn): void {
+    this.audioPushFn = fn;
   }
 
   // --- Public API ---
@@ -104,6 +125,9 @@ export class GuidanceOrchestrator {
 
   /** Activate an app for a session (from viewer or publisher gesture). */
   async activateApp(sessionId: string, appId: string): Promise<void> {
+    // Disconnect existing AI service for this session if any
+    this.disconnectAI(sessionId);
+
     const pipeline = this.appRegistry.resolvePipeline(appId);
     const app = this.appRegistry.getApp(appId);
     if (!pipeline || !app) {
@@ -129,50 +153,125 @@ export class GuidanceOrchestrator {
     });
     this.broadcastStatus(sessionId);
 
-    // STUB: Emit a test guidance event to confirm activation
-    const now = Date.now();
-    const testEvent: GuidanceEvent = {
-      type: "guidance.acknowledgment",
-      content: `App "${app.name}" activated. AI guidance is ready.`,
-      confidence: 1.0,
-      source: appId,
-      trigger: "activate_app",
-      timestampMs: now,
-      metadata: {
-        severity: "info",
+    // Resolve the AI provider from the primitive binding
+    // Default to gemini-live if no explicit provider hint
+    const provider = this.resolveProvider(pipeline.primitiveId);
+    const service = createAIService(provider);
+
+    if (!service) {
+      console.error(`[orchestrator] No AI provider "${provider}" registered`);
+      this.setStatus(sessionId, {
+        appId,
+        status: "error",
+        config: app.config,
+        activatedAt: this.getStatus(sessionId).activatedAt,
+        triggerCount: this.getStatus(sessionId).triggerCount,
+        lastResponseMs: undefined,
+      });
+      this.broadcastStatus(sessionId);
+      return;
+    }
+
+    const state: SessionAIState = {
+      service,
+      appId,
+      lastAudioAt: 0,
+    };
+    this.aiState.set(sessionId, state);
+
+    // Wire AI service callbacks
+    const callbacks: AIServiceCallbacks = {
+      onAudio: (pcm) => {
+        this.handleAIAudio(sessionId, pcm);
+      },
+      onText: (text) => {
+        this.handleAIText(sessionId, appId, text);
+      },
+      onStatusChange: (aiStatus) => {
+        this.handleAIStatusChange(sessionId, appId, aiStatus);
+      },
+      onUsage: (usage) => {
+        // Could track token usage per session in telemetry
+        console.log(`[orchestrator] Token usage: prompt=${usage.promptTokens} response=${usage.responseTokens} session=${sessionId}`);
+      },
+      onError: (error) => {
+        console.error(`[orchestrator] AI error: ${error.message} session=${sessionId}`);
+        this.emitGuidanceEvent(sessionId, {
+          type: "guidance.alert",
+          content: `AI error: ${error.message}`,
+          confidence: 1.0,
+          source: appId,
+          trigger: "ai_error",
+          timestampMs: Date.now(),
+          metadata: { severity: "warning" },
+        });
       },
     };
 
-    // Track latency
-    const latency = Date.now() - now;
-    this.addLatency(sessionId, latency);
-
-    // Transition to active
-    this.setStatus(sessionId, {
-      appId,
-      status: "active",
-      config: app.config,
-      activatedAt: this.getStatus(sessionId).activatedAt,
-      triggerCount: this.getStatus(sessionId).triggerCount,
-      lastResponseMs: latency,
-    });
-
-    this.emitGuidanceEvent(sessionId, testEvent);
-    this.broadcastStatus(sessionId);
-
-    // STUB: TTS synthesis (returns silence for now)
-    // Real implementation would synthesize the text, wrap as FRAU codecType 3,
-    // and post to /audio-in endpoint.
     try {
-      await this.tts.synthesize(testEvent.content, { voice: app.config.voice });
-    } catch {
-      // TTS failure is non-critical for activation
+      await service.connect(
+        {
+          model: app.config.model ?? "gemini-2.0-flash-live-001",
+          systemPrompt: app.systemPrompt,
+          voice: app.config.voice,
+          visionFps: app.config.visionFps,
+          extra: app.config,
+        },
+        callbacks,
+      );
+
+      // Successfully connected
+      this.setStatus(sessionId, {
+        appId,
+        status: "active",
+        config: app.config,
+        activatedAt: this.getStatus(sessionId).activatedAt,
+        triggerCount: this.getStatus(sessionId).triggerCount,
+        lastResponseMs: Date.now() - (this.getStatus(sessionId).activatedAt ?? Date.now()),
+      });
+      this.addLatency(sessionId, this.getStatus(sessionId).lastResponseMs ?? 0);
+
+      this.emitGuidanceEvent(sessionId, {
+        type: "guidance.acknowledgment",
+        content: `App "${app.name}" activated. AI guidance is live.`,
+        confidence: 1.0,
+        source: appId,
+        trigger: "activate_app",
+        timestampMs: Date.now(),
+        metadata: { severity: "info" },
+      });
+      this.broadcastStatus(sessionId);
+
+      console.log(`[orchestrator] App activated: ${appId} provider=${provider} model=${app.config.model} session=${sessionId}`);
+    } catch (err) {
+      console.error(`[orchestrator] AI connect failed:`, err);
+      this.aiState.delete(sessionId);
+      this.setStatus(sessionId, {
+        appId,
+        status: "error",
+        config: app.config,
+        activatedAt: this.getStatus(sessionId).activatedAt,
+        triggerCount: this.getStatus(sessionId).triggerCount,
+        lastResponseMs: undefined,
+      });
+      this.broadcastStatus(sessionId);
+
+      this.emitGuidanceEvent(sessionId, {
+        type: "guidance.alert",
+        content: `Failed to activate AI: ${err instanceof Error ? err.message : String(err)}`,
+        confidence: 1.0,
+        source: appId,
+        trigger: "activate_app_error",
+        timestampMs: Date.now(),
+        metadata: { severity: "critical" },
+      });
     }
   }
 
   /** Deactivate current app for a session. */
   async deactivateApp(sessionId: string): Promise<void> {
     const current = this.getStatus(sessionId);
+    this.disconnectAI(sessionId);
     this.setStatus(sessionId, {
       appId: null,
       status: "idle",
@@ -196,7 +295,31 @@ export class GuidanceOrchestrator {
     }
   }
 
-  /** Get current AI status for a session. */
+  // --- Frame / audio forwarding ---
+
+  /** Forward a JPEG frame from the relay to the active AI service for this session */
+  sendVideoFrame(sessionId: string, jpeg: Uint8Array): void {
+    const state = this.aiState.get(sessionId);
+    if (!state || state.service.status !== "connected") return;
+    state.service.sendVideoFrame(jpeg);
+  }
+
+  /** Forward PCM audio from the relay to the active AI service for this session */
+  sendAudio(sessionId: string, pcm: Uint8Array): void {
+    const state = this.aiState.get(sessionId);
+    if (!state || state.service.status !== "connected") return;
+    state.service.sendAudio(pcm);
+  }
+
+  /** Send a text trigger (e.g., gesture description) to the active AI service */
+  sendTrigger(sessionId: string, text: string): void {
+    const state = this.aiState.get(sessionId);
+    if (!state || state.service.status !== "connected") return;
+    state.service.sendText(text);
+  }
+
+  // --- Status / telemetry ---
+
   getStatus(sessionId: string): AIStatus {
     return this.status.get(sessionId) ?? {
       appId: null,
@@ -205,7 +328,6 @@ export class GuidanceOrchestrator {
     };
   }
 
-  /** Get telemetry for a session. */
   getTelemetry(sessionId: string): AITelemetry {
     return this.telemetry.get(sessionId) ?? {
       triggers: 0,
@@ -217,35 +339,130 @@ export class GuidanceOrchestrator {
     };
   }
 
-  /** Get event history for a session (last 100 events). */
   getEventHistory(sessionId: string): GuidanceEvent[] {
     return this.eventHistory.get(sessionId) ?? [];
   }
 
-  /** Start the orchestrator — subscribe to ControlEventBus. */
+  // --- Lifecycle ---
+
   start(): void {
     this.startedAt = Date.now();
     this.unsubControlBus = this.controlBus.onEvent((event) => {
-      // We need to know which session this event came from.
-      // The ControlEventBus currently doesn't carry sessionId.
-      // For gesture events, we handle this in server.ts by calling
-      // activateApp directly with the known sessionId.
-      // Here we handle only events that don't need session routing.
       console.log(`[orchestrator] Received control event: type=${event.type}`);
     });
     console.log("[orchestrator] Started");
   }
 
-  /** Stop the orchestrator. */
   stop(): void {
     if (this.unsubControlBus) {
       this.unsubControlBus();
       this.unsubControlBus = null;
     }
+    // Disconnect all AI services
+    for (const [sessionId] of this.aiState) {
+      this.disconnectAI(sessionId);
+    }
     console.log("[orchestrator] Stopped");
   }
 
   // --- Private ---
+
+  private resolveProvider(primitiveId: string): string {
+    // Map primitive IDs to AI provider names
+    if (primitiveId.includes("gemini")) return "gemini-live";
+    if (primitiveId.includes("openai")) return "openai";
+    // Default to gemini-live
+    return "gemini-live";
+  }
+
+  private disconnectAI(sessionId: string): void {
+    const state = this.aiState.get(sessionId);
+    if (state) {
+      try {
+        state.service.disconnect();
+      } catch {}
+      this.aiState.delete(sessionId);
+    }
+  }
+
+  private handleAIAudio(sessionId: string, pcm: Uint8Array): void {
+    const state = this.aiState.get(sessionId);
+    if (!state) return;
+
+    state.lastAudioAt = Date.now();
+    const t = this.getOrCreateTelemetry(sessionId);
+    t.triggers++;
+
+    // Push audio to relay's audio-in path (which fans out to publisher + viewers)
+    if (this.audioPushFn && pcm.length > 0) {
+      this.audioPushFn(sessionId, pcm);
+    }
+
+    this.broadcastTelemetry(sessionId);
+  }
+
+  private handleAIText(sessionId: string, appId: string, text: string): void {
+    // Classify the text into a guidance event type
+    const eventType = this.classifyText(text);
+    this.emitGuidanceEvent(sessionId, {
+      type: eventType,
+      content: text,
+      confidence: 0.9,
+      source: appId,
+      trigger: "ai_response",
+      timestampMs: Date.now(),
+    });
+
+    const t = this.getOrCreateTelemetry(sessionId);
+    t.triggers++;
+    this.addLatency(sessionId, 0);
+    this.broadcastTelemetry(sessionId);
+  }
+
+  private handleAIStatusChange(sessionId: string, appId: string, aiStatus: string): void {
+    const current = this.getStatus(sessionId);
+    if (current.appId !== appId) return; // stale
+
+    if (aiStatus === "error") {
+      this.setStatus(sessionId, {
+        ...current,
+        status: "error",
+      });
+    } else if (aiStatus === "disconnected" && current.status === "active") {
+      this.setStatus(sessionId, {
+        ...current,
+        status: "error",
+      });
+      this.emitGuidanceEvent(sessionId, {
+        type: "guidance.alert",
+        content: "AI service disconnected unexpectedly.",
+        confidence: 1.0,
+        source: appId,
+        trigger: "ai_disconnect",
+        timestampMs: Date.now(),
+        metadata: { severity: "warning" },
+      });
+    }
+    this.broadcastStatus(sessionId);
+  }
+
+  /** Simple heuristic to classify AI text responses into guidance event types */
+  private classifyText(text: string): GuidanceEventType {
+    const lower = text.toLowerCase();
+    if (lower.includes("warning") || lower.includes("danger") || lower.includes("stop") || lower.includes("hazard")) {
+      return "guidance.alert";
+    }
+    if (lower.includes("correction") || lower.includes("wrong") || lower.includes("instead") || lower.includes("not quite")) {
+      return "guidance.correction";
+    }
+    if (lower.includes("step") || lower.includes("next") || lower.includes("then") || lower.includes("now")) {
+      return "guidance.step";
+    }
+    if (lower.includes("this is") || lower.includes("that is") || lower.includes("i see") || lower.includes("recognized")) {
+      return "guidance.identification";
+    }
+    return "guidance.step";
+  }
 
   private setStatus(sessionId: string, s: AIStatus): void {
     this.status.set(sessionId, s);
@@ -281,7 +498,6 @@ export class GuidanceOrchestrator {
   }
 
   private emitGuidanceEvent(sessionId: string, event: GuidanceEvent): void {
-    // Append to history (cap at MAX_EVENT_HISTORY)
     let history = this.eventHistory.get(sessionId);
     if (!history) {
       history = [];
@@ -292,11 +508,9 @@ export class GuidanceOrchestrator {
     }
     history.push(event);
 
-    // Update telemetry
     const t = this.getOrCreateTelemetry(sessionId);
     t.guidanceEvents++;
 
-    // Broadcast to subscribers
     const subs = this.subscribers.get(sessionId);
     if (subs) {
       const msg = { type: "guidance_event", event };
