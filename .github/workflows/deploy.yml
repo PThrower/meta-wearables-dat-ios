@@ -63,11 +63,11 @@ jobs:
               echo "relay-protocol rebuilt"
             fi
 
-            echo ">>> Building viewer"
-            cd /root/relay-server/hosted/viewer
+            echo ">>> Building web platform"
+            cd /root/relay-server/hosted/web-platform
             /root/.bun/bin/bun install
             /root/.bun/bin/bun x vite build
-            echo "viewer rebuilt"
+            echo "web-platform rebuilt"
 
             echo ">>> Installing server deps"
             cd /root/relay-server/hosted/server

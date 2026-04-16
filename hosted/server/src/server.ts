@@ -2,7 +2,7 @@
  * caringmind-frame-relay
  *
  * Bun WebSocket relay server (pure API — no HTML serving).
- * Viewer SPA is served by Caddy from hosted/viewer/dist.
+ * Web platform SPA is served by the gateway from hosted/web-platform/dist.
  *
  * 1. Accepts multiple publishers (iOS apps) on separate sessions
  * 2. Fans out frames to per-session browser viewers in real-time

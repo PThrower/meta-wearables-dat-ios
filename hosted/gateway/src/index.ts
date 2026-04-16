@@ -3,7 +3,7 @@
  *
  * Gateway that sits between Caddy (TLS terminator) and the relay server.
  * Responsibilities:
- *   1. Serve the viewer SPA (static files from hosted/viewer/dist/)
+ *   1. Serve the web platform SPA (static files from hosted/web-platform/dist/)
  *   2. Proxy HTTP API requests to the relay server on localhost:8080
  *   3. Proxy WebSocket connections to the relay server
  */
@@ -18,7 +18,7 @@ import type { AuthUser } from "./types.js";
 const gatewayStartTime = Date.now();
 const PORT = parseInt(process.env.GATEWAY_PORT || "3000");
 const RELAY_PORT = process.env.RELAY_PORT || "8080";
-const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../viewer/dist");
+const VIEWER_DIST = process.env.VIEWER_DIST || join(import.meta.dir, "../../web-platform/dist");
 const NO_AUTH = process.env.GATEWAY_NO_AUTH !== "0";
 const GIT_COMMIT = process.env.GIT_COMMIT?.slice(0, 7) ?? "dev";
 const BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
@@ -284,6 +284,6 @@ if (import.meta.main) {
 
   console.log(`[gateway] Auth gateway on 0.0.0.0:${PORT}`);
   console.log(`[gateway] Proxying HTTP + WS to 127.0.0.1:${RELAY_PORT}`);
-  console.log(`[gateway] Viewer dist: ${VIEWER_DIST}`);
+  console.log(`[gateway] Web platform dist: ${VIEWER_DIST}`);
   console.log(`[gateway] No-auth mode: ${NO_AUTH}`);
 }

@@ -12,7 +12,7 @@ Environment=BUN_INSTALL=/root/.bun
 Environment=PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=GATEWAY_PORT=3000
 Environment=RELAY_TRUST_HEADERS=1
-Environment=VIEWER_DIST=/root/relay-server/hosted/viewer/dist
+Environment=VIEWER_DIST=/root/relay-server/hosted/web-platform/dist
 ExecStart=/root/.bun/bin/bun run src/index.ts
 Restart=always
 RestartSec=5
