@@ -151,22 +151,24 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
   return {
     server: {
       uptimeMs: serverUptimeMs,
-      wasmLoaded: src.wasmLoaded(),
       gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
       buildVersion: process.env.BUILD_VERSION ?? "dev",
       ip: wifiIp,
       port,
       memoryUsageMb: Math.round(process.memoryUsage().rss / 1048576 * 100) / 100,
-      sessions: {
-        active: src.sessions.size,
-        started: src.sessionsStarted,
+      relay: {
+        wasmLoaded: src.wasmLoaded(),
+        sessions: {
+          active: src.sessions.size,
+          started: src.sessionsStarted,
+        },
+        connections: {
+          publishers: activePublisherCount,
+          viewers: src.totalViewers(),
+          total: activePublisherCount + src.totalViewers(),
+        },
+        hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
       },
-      connections: {
-        publishers: activePublisherCount,
-        viewers: src.totalViewers(),
-        total: activePublisherCount + src.totalViewers(),
-      },
-      hosted: await probeHostedServices({ store: src.store, serverStartTime, wasmLoaded: src.wasmLoaded() }),
     },
     aggregate: {
       viewers: {
