@@ -1,30 +1,18 @@
 /**
  * auth.ts — Token verification for the gateway
  *
- * Supports two token types:
- *   1. Session tokens (HMAC-SHA256 signed JWT, minted by this gateway)
- *   2. Google ID tokens — DISABLED (OAuth commented out)
- *
+ * Session tokens only: HMAC-SHA256 signed JWTs minted by this gateway.
  * Token sources: query param, Authorization header, cookie.
  *
  * Dev mode: Set GATEWAY_NO_AUTH=1 to bypass all auth checks (returns dev@localhost).
  */
 
 import { createHmac } from "node:crypto";
-// OAuth disabled — Google Sign-In removed
-// import { OAuth2Client } from "google-auth-library";
 import type { AuthUser } from "./types.js";
 
-// OAuth disabled
-// const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-// No login mechanism — default to no-auth (set GATEWAY_NO_AUTH=0 to enforce)
 const NO_AUTH = process.env.GATEWAY_NO_AUTH !== "0";
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-me-in-production";
 const SESSION_TTL_SEC = 7 * 24 * 60 * 60; // 7 days
-const REFRESH_THRESHOLD_SEC = 24 * 60 * 60; // refresh if < 24h remaining
-
-// OAuth disabled
-// const oauthClient = new OAuth2Client(CLIENT_ID);
 
 // --- Revocation list (in-memory, lost on restart) ---
 // Maps jti → expiry timestamp so we can prune expired entries
@@ -96,25 +84,11 @@ export function verifySessionToken(token: string): AuthUser | null {
   }
 }
 
-export function shouldRefreshSession(token: string): boolean {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return false;
-    const data = JSON.parse(b64urlDecode(parts[1]));
-    if (!data.exp) return false;
-    const remaining = data.exp - Math.floor(Date.now() / 1000);
-    return remaining > 0 && remaining < REFRESH_THRESHOLD_SEC;
-  } catch {
-    return false;
-  }
-}
-
 // --- Token verification ---
 
 /**
  * Verify a token and return the user identity.
- * Session tokens only (HMAC). Google JWT path disabled.
- * In dev mode, returns a synthetic dev user.
+ * Session tokens only (HMAC). In dev mode, returns a synthetic dev user.
  */
 export async function verifyToken(token: string | null | undefined): Promise<AuthUser | null> {
   if (NO_AUTH) return { sub: "dev", email: "dev@localhost" };
@@ -123,20 +97,6 @@ export async function verifyToken(token: string | null | undefined): Promise<Aut
   // Session token (HMAC-SHA256, no network call)
   const sessionUser = verifySessionToken(token);
   if (sessionUser) return sessionUser;
-
-  // OAuth disabled — Google JWT verification removed
-  // try {
-  //   const ticket = await oauthClient.verifyIdToken({
-  //     idToken: token,
-  //     audience: CLIENT_ID,
-  //   });
-  //   const payload = ticket.getPayload();
-  //   if (!payload?.sub || !payload?.email) return null;
-  //   return { sub: payload.sub, email: payload.email };
-  // } catch (err) {
-  //   console.warn("[gateway:auth] token verify failed:", (err as Error).message?.slice(0, 120));
-  //   return null;
-  // }
 
   return null;
 }
@@ -163,12 +123,4 @@ export function extractToken(req: Request, url: URL): string | null {
   if (match) return match[1];
 
   return null;
-}
-
-/**
- * Extract a share token from the URL query string.
- * Checks: ?share=<token>
- */
-export function extractShareToken(url: URL): string | null {
-  return url.searchParams.get("share");
 }

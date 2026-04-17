@@ -10,9 +10,7 @@
   },
   "keywords": ["gateway", "auth", "proxy", "caringmind"],
   "license": "MIT",
-  "dependencies": {
-    "google-auth-library": "^9.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/bun": "^1.3.11"
   }
