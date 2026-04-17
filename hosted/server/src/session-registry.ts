@@ -10,7 +10,7 @@ import type { ServerWebSocket } from "bun";
 import type { ObjectStore } from "@ebowwa/object-store";
 import type { WsData, Publisher, Viewer, Session, SessionMetadata, AccessLevel, AclEntry } from "./types.js";
 import { SessionRecorder } from "./session-recorder.js";
-import { QUALITY_PRESETS, DEFAULT_QUALITY } from "./types.js";
+import { DEFAULT_QUALITY, createTokenBucket, bucketTryConsume } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
 import { resolvePermission } from "./permissions.js";
 import { computeStats, type StatsSource } from "./stats.js";
@@ -252,6 +252,7 @@ export class SessionRegistry {
       clientIp,
       gitCommit: null,
       buildVersion: null,
+      bucket: createTokenBucket(DEFAULT_QUALITY),
     });
     session.lastActivityAt = Date.now();
 
@@ -323,9 +324,7 @@ export class SessionRegistry {
       try {
         if (viewer.ws.readyState !== WebSocket.OPEN) continue;
 
-        const preset = QUALITY_PRESETS[viewer.quality];
-        const elapsed = viewer.lastSentAt > 0 ? now - viewer.lastSentAt : preset.minIntervalMs;
-        if (elapsed < preset.minIntervalMs) {
+        if (!bucketTryConsume(viewer.bucket)) {
           viewer.throttledCount++;
           continue;
         }

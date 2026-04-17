@@ -40,7 +40,7 @@ import os from "node:os";
 import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
 import type { WsData, QualityPreset, AccessLevel, AclEntry } from "./types.js";
-import { QUALITY_PRESETS } from "./types.js";
+import { QUALITY_PRESETS, createTokenBucket } from "./types.js";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, isAudioFrame, isVideoFrame, parseAudioHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
 import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -783,6 +783,7 @@ const server = Bun.serve<WsData>({
               if (found) {
                 const newQuality = cmd.quality as QualityPreset;
                 found.viewer.quality = newQuality;
+                found.viewer.bucket = createTokenBucket(newQuality);
                 console.log(`[relay] Viewer ${viewerId.slice(0, 8)} quality: ${newQuality} (${QUALITY_PRESETS[newQuality].maxFps} FPS)`);
                 ws.send(JSON.stringify({
                   type: "quality",

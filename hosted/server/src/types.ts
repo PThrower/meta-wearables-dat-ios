@@ -9,6 +9,42 @@ import type { FrameTiming as FrameTimingType, QualityPreset as QualityPresetType
 import type { AppPipeline } from "./app-types.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "@ebowwa/relay-protocol";
 
+// --- Token Bucket Rate Limiter ---
+
+export interface TokenBucket {
+  tokens: number;        // current token count (fractional)
+  maxBurst: number;      // bucket capacity (burst allowance)
+  refillRate: number;    // tokens per millisecond
+  lastRefill: number;    // timestamp of last refill (Date.now())
+}
+
+/** Create a token bucket for a given quality preset */
+export function createTokenBucket(quality: QualityPreset): TokenBucket {
+  const preset = QUALITY_PRESETS[quality];
+  const maxFps = preset.maxFps;
+  // Allow bursting 2 extra frames worth, minimum burst of 2
+  const maxBurst = Math.max(2, Math.ceil(maxFps * 0.1));
+  return {
+    tokens: maxBurst,
+    maxBurst,
+    refillRate: maxFps / 1000, // tokens per ms
+    lastRefill: Date.now(),
+  };
+}
+
+/** Try to consume one token. Returns true if allowed. */
+export function bucketTryConsume(bucket: TokenBucket): boolean {
+  const now = Date.now();
+  const elapsed = now - bucket.lastRefill;
+  bucket.lastRefill = now;
+  bucket.tokens = Math.min(bucket.maxBurst, bucket.tokens + elapsed * bucket.refillRate);
+  if (bucket.tokens >= 1) {
+    bucket.tokens -= 1;
+    return true;
+  }
+  return false;
+}
+
 // --- Protocol types from shared package ---
 
 export type FrameTiming = FrameTimingType;
@@ -95,6 +131,7 @@ export interface Viewer {
   clientIp: string;
   gitCommit: string | null;
   buildVersion: string | null;
+  bucket: TokenBucket;
 }
 
 // --- Session (multi-session support) ---
