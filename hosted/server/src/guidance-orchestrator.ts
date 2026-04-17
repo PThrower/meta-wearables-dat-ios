@@ -373,6 +373,16 @@ export class GuidanceOrchestrator {
     return [...ids];
   }
 
+  /** Remove all state for an expired session. */
+  cleanup(sessionId: string): void {
+    this.status.delete(sessionId);
+    this.telemetry.delete(sessionId);
+    this.eventHistory.delete(sessionId);
+    this.subscribers.delete(sessionId);
+    this.latencySum.delete(sessionId);
+    this.latencyCount.delete(sessionId);
+  }
+
   // --- Lifecycle ---
 
   start(): void {

@@ -33,8 +33,15 @@ export class SessionRegistry {
   private framesThrottledWasm = 0;
   private framesThrottledQuality = 0;
 
+  private onSessionDestroy?: (id: string) => void;
+
   constructor(store: ObjectStore) {
     this.store = store;
+  }
+
+  /** Set callback invoked when a session is destroyed (for orchestrator cleanup) */
+  setOnSessionDestroy(fn: (id: string) => void) {
+    this.onSessionDestroy = fn;
   }
 
   /** Expose read-only view for stats computation */
@@ -110,8 +117,13 @@ export class SessionRegistry {
     return this.sessions.get(id);
   }
 
-  /** Resolve session id from URL, defaulting to "default" */
-  resolveSessionId(url: URL): string {
+  /** For publishers: auto-generate UUID if no session specified */
+  resolvePublisherSessionId(url: URL): string {
+    return url.searchParams.get("session") || crypto.randomUUID();
+  }
+
+  /** For viewers/taps: default to "default" session for backward compat */
+  resolveViewerSessionId(url: URL): string {
     return url.searchParams.get("session") || DEFAULT_SESSION_ID;
   }
 
@@ -423,6 +435,7 @@ export class SessionRegistry {
         if (idleMs > SESSION_EXPIRY_MS) {
           console.log(`[registry] Session expired: ${sessionId} (idle ${Math.round(idleMs / 1000)}s)`);
           this.sessions.delete(sessionId);
+          this.onSessionDestroy?.(sessionId);
         }
       }
     }

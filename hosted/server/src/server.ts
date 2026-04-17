@@ -113,6 +113,9 @@ const appRegistry = new AppRegistry();
 
 const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
 
+// Clean up orchestrator state when sessions expire
+registry.setOnSessionDestroy((id: string) => orchestrator.cleanup(id));
+
 // Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
 // push through the relay's audio-in path (fan-out to publisher + viewers).
 orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
@@ -550,7 +553,9 @@ const server = Bun.serve<WsData>({
     }
 
     const role = isPublish ? "publish" : "view";
-    const sessionId = registry.resolveSessionId(url);
+    const sessionId = isPublish
+      ? registry.resolvePublisherSessionId(url)
+      : registry.resolveViewerSessionId(url);
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("x-real-ip")
       || "unknown";
@@ -631,6 +636,8 @@ const server = Bun.serve<WsData>({
           ws.close(err === "session owned by another user" ? 4003 : 4001, err);
           return;
         }
+        // Tell the publisher what session it's on
+        ws.send(JSON.stringify({ type: "session_assigned", sessionId }));
       } else {
         const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, undefined);
         if (result.startsWith("error:")) {

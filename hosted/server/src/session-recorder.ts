@@ -13,6 +13,8 @@ import type { ObjectStore } from "@ebowwa/object-store";
 import { HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
+const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
+const MAX_MANIFEST_ENTRIES = 1000; // cap manifest growth
 
 interface VideoSegmentMeta {
   index: number;
@@ -246,6 +248,9 @@ export class SessionRecorder {
       lastTimestampMs: lastTs,
       bytes: data.length,
     });
+    if (this.videoManifest.length > MAX_MANIFEST_ENTRIES) {
+      this.videoManifest = this.videoManifest.slice(-Math.floor(MAX_MANIFEST_ENTRIES / 2));
+    }
 
     const key = `sessions/${this.sessionId}/video/seg-${this.segIndex.toString().padStart(4, "0")}.mjpeg`;
     this.store.put(key, data).then(() => {
@@ -261,6 +266,10 @@ export class SessionRecorder {
     }).catch(err => {
       console.error(`[recorder] video write failed, buffering for retry:`, err.message);
       this.failedVideoParts.push(data);
+      if (this.failedVideoParts.length > MAX_FAILED_PARTS) {
+        console.warn(`[recorder] Dropping oldest failed video part (${this.failedVideoParts[0].length} bytes)`);
+        this.failedVideoParts.shift();
+      }
     });
   }
 
@@ -286,11 +295,18 @@ export class SessionRecorder {
       totalSamples,
       bytes: data.length,
     });
+    if (this.audioManifest.length > MAX_MANIFEST_ENTRIES) {
+      this.audioManifest = this.audioManifest.slice(-Math.floor(MAX_MANIFEST_ENTRIES / 2));
+    }
 
     const key = `sessions/${this.sessionId}/audio/chunk-${this.chunkIndex.toString().padStart(4, "0")}.pcm`;
     this.store.put(key, data).catch(err => {
       console.error(`[recorder] audio write failed, buffering for retry:`, err.message);
       this.failedAudioParts.push(data);
+      if (this.failedAudioParts.length > MAX_FAILED_PARTS) {
+        console.warn(`[recorder] Dropping oldest failed audio part (${this.failedAudioParts[0].length} bytes)`);
+        this.failedAudioParts.shift();
+      }
     });
   }
 
