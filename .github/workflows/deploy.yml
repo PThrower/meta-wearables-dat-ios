@@ -19,7 +19,7 @@ jobs:
           host: relay.simulationapi.com
           username: root
           key: ${{ secrets.VPS_SSH_KEY }}
-          command_timeout: 5m
+          command_timeout: 8m
           script: |
             set -euo pipefail
 
@@ -81,11 +81,17 @@ jobs:
             echo ">>> Syncing infra configs"
             cp /root/relay-server/hosted/infra/caringmind-relay.service /etc/systemd/system/
             cp /root/relay-server/hosted/infra/caringmind-gateway.service /etc/systemd/system/
-            cp /root/relay-server/hosted/infra/Caddyfile /etc/caddy/
             systemctl daemon-reload
 
-            echo ">>> Restarting Caddy"
-            systemctl reload caddy || systemctl restart caddy
+            echo ">>> Checking Caddy config"
+            if ! diff -q /root/relay-server/hosted/infra/Caddyfile /etc/caddy/Caddyfile >/dev/null 2>&1; then
+              echo "Caddyfile changed — restarting Caddy"
+              cp /root/relay-server/hosted/infra/Caddyfile /etc/caddy/
+              systemctl restart caddy
+              sleep 3
+            else
+              echo "Caddyfile unchanged — skipping Caddy restart"
+            fi
 
             echo ">>> Stopping relay service and freeing port"
             systemctl stop caringmind-relay.service || true
