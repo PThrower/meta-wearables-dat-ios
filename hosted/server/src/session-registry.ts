@@ -304,10 +304,15 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
+    // Always touch lastReceivedAt so stale detection works even if header parse fails
+    if (session.publisher) {
+      session.publisher.timing.lastReceivedAt = Date.now();
+    }
+
     const header = parseHeader(data);
     if (!header) return;
 
-    // Always update publisher stats — even with zero viewers
+    // Update detailed publisher stats — even with zero viewers
     if (session.publisher) {
       updateTiming(session.publisher.timing, header.sequence, header.timestampMs);
       session.publisher.lastHeader = { width: header.width, height: header.height, quality: header.quality };
@@ -400,10 +405,14 @@ export class SessionRegistry {
 
     for (const [sessionId, session] of this.sessions) {
       // Check publisher staleness
-      if (session.publisher && session.publisher.timing.lastReceivedAt > 0) {
-        const stale = now - session.publisher.timing.lastReceivedAt;
+      if (session.publisher) {
+        const staleFromFrame = session.publisher.timing.lastReceivedAt > 0
+          ? now - session.publisher.timing.lastReceivedAt
+          : Infinity;
+        const connectedMs = now - session.publisher.connected;
+        const stale = Math.min(staleFromFrame, connectedMs);
         if (stale > PUBLISHER_TIMEOUT_MS) {
-          console.log(`[registry] Publisher ${session.publisher.id.slice(0, 8)} stale (${Math.round(stale / 1000)}s) in session=${sessionId}, evicting`);
+          console.log(`[registry] Publisher ${session.publisher.id.slice(0, 8)} stale (${Math.round(stale / 1000)}s, frames=${session.publisher.frameCount}) in session=${sessionId}, evicting`);
           this.totalDroppedFrames += session.publisher.timing.droppedFrames;
           try { session.publisher.ws.close(4002, "publisher stale"); } catch {}
           session.publisher = null;
