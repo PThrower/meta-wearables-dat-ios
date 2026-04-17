@@ -722,6 +722,16 @@ header {
   font-size: 9px;
   letter-spacing: 0.5px;
 }
+.guidance-tts-badge {
+  font-size: 8px;
+  font-weight: 600;
+  background: rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+  letter-spacing: 0.3px;
+}
 .guidance-event-confidence {
   font-size: 9px;
   color: rgba(255,255,255,0.4);

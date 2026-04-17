@@ -377,14 +377,29 @@ class StreamSessionViewModel: ObservableObject {
       // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
       // Wire control message callback so ViewModel stays in sync with server state
       await relayStage.setOnControlMessage { [weak self] msg in
-        guard msg["type"] as? String == "app_status" else { return }
-        let status = msg["status"] as? String
-        let appId = msg["appId"] as? String
-        Task { @MainActor [weak self] in
-          if status == "active" {
-            self?.activeAppId = appId
-          } else if status == "inactive" || status == "error" {
-            self?.activeAppId = nil
+        let msgType = msg["type"] as? String
+
+        // App status updates
+        if msgType == "app_status" {
+          let status = msg["status"] as? String
+          let appId = msg["appId"] as? String
+          Task { @MainActor [weak self] in
+            if status == "active" {
+              self?.activeAppId = appId
+              // Auto-start TTS when an AI app activates
+              await self?.audioPlaybackStage.start()
+            } else if status == "inactive" || status == "error" {
+              self?.activeAppId = nil
+              await self?.audioPlaybackStage.stop()
+            }
+          }
+        }
+
+        // Guidance text from server AI — trigger client-side TTS
+        if msgType == "guidance_text",
+           let text = msg["text"] as? String, !text.isEmpty {
+          Task { [weak self] in
+            await self?.audioPlaybackStage.speakGuidance(text)
           }
         }
       }

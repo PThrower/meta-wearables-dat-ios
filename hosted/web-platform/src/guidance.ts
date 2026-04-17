@@ -315,9 +315,12 @@ export class GuidancePanel {
           ? ` <span class="guidance-object">${esc(e.metadata.objectLabel)}</span>`
           : "";
 
+        // TTS indicator for tool-call events (not transcripts)
+        const ttsIcon = e.trigger === "ai_tool_call" ? ` <span class="guidance-tts-badge" title="Spoken via TTS">TTS</span>` : "";
+
         return `<div class="guidance-event" style="border-left-color:${color}">
           <div class="guidance-event-header">
-            <span class="guidance-event-type" style="color:${color}">${label}</span>
+            <span class="guidance-event-type" style="color:${color}">${label}</span>${ttsIcon}
             <span class="guidance-event-confidence">${confidence}%</span>
             <span class="guidance-event-time">${time}</span>
           </div>

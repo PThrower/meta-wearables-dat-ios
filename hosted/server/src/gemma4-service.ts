@@ -77,7 +77,7 @@ export class Gemma4Service implements AIService {
   private frameBuffer: Uint8Array[] = [];
   private readonly maxFrames = 3;
 
-  // Conversation history (bounded)
+  // Conversation history (bounded) — text only, no images
   private history: GeminiContent[] = [];
   private readonly maxHistoryTurns = 10;
 
@@ -199,15 +199,21 @@ export class Gemma4Service implements AIService {
 
     userParts.push({ text: prompt });
 
-    // Append to conversation history
-    this.history.push({ role: "user", parts: userParts });
+    // Append text-only user message to history (keep images out of history to avoid token bloat)
+    this.history.push({ role: "user", parts: [{ text: prompt }] });
     while (this.history.length > this.maxHistoryTurns * 2) {
       this.history.shift();
     }
 
+    // Build contents: history (text) + current frames
+    const contentsWithFrames: GeminiContent[] = [
+      ...this.history.slice(0, -1), // previous turns (text only)
+      { role: "user", parts: userParts }, // latest turn with frames
+    ];
+
     // Build request body
     const requestBody: GeminiGenerateRequest = {
-      contents: this.history,
+      contents: contentsWithFrames,
       generationConfig: {
         ...(this.config.temperature != null ? { temperature: this.config.temperature } : {}),
       },
@@ -324,6 +330,8 @@ export class Gemma4Service implements AIService {
       this.callbacks.onError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       this.isAnalyzing = false;
+      // Clear frame buffer after each analysis to avoid stale frames
+      this.frameBuffer = [];
     }
   }
 }
