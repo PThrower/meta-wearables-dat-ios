@@ -49,6 +49,14 @@ export class RelayPlayer {
   private readonly AIMD_MIN_FPS = 1;
   private readonly AIMD_MAX_FPS = 30;
 
+  // Sliding window bandwidth estimate
+  private bwWindowBytes: number[] = [];     // bytes per 1s slot
+  private bwWindowStart = 0;               // start of current slot (Date.now)
+  private bwBytesInSlot = 0;               // bytes accumulated in current slot
+  private bwEstimate = Infinity;           // estimated bytes/sec (smoothed)
+  private readonly BW_WINDOW_SLOTS = 5;    // 5-second sliding window
+  private readonly BW_LOW_THRESHOLD = 200_000;  // 200 KB/s — below this, reduce FPS
+
   // Reconnect
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
@@ -334,6 +342,12 @@ export class RelayPlayer {
     this.currentFps = 0;
     this.droppedFrames = 0;
     this.lastSequence = 0;
+    this.backpressureFps = this.AIMD_MAX_FPS;
+    this.lastBackpressureTime = 0;
+    this.bwWindowBytes = [];
+    this.bwWindowStart = 0;
+    this.bwBytesInSlot = 0;
+    this.bwEstimate = Infinity;
     this.audioChunkCount = 0;
     this.videoClockBase = null;
     this.ringWritePos = 0;
@@ -348,6 +362,41 @@ export class RelayPlayer {
       try { this.workletNode.port.postMessage({ type: "reset" }); } catch {}
     }
     this.pendingSamples = [];
+  }
+
+  /** Track bytes received in 1-second slots for sliding window bandwidth estimate */
+  private _trackBandwidth(bytes: number): void {
+    const now = Date.now();
+    // Initialize window start on first frame
+    if (this.bwWindowStart === 0) {
+      this.bwWindowStart = now;
+      this.bwBytesInSlot = 0;
+    }
+    // Roll over completed 1-second slots
+    const elapsed = now - this.bwWindowStart;
+    if (elapsed >= 1000) {
+      const completedSlots = Math.floor(elapsed / 1000);
+      this.bwWindowBytes.push(this.bwBytesInSlot);
+      // Keep only the last N slots
+      while (this.bwWindowBytes.length > this.BW_WINDOW_SLOTS) {
+        this.bwWindowBytes.shift();
+      }
+      // Zero-fill any gaps (connection was idle)
+      for (let i = 1; i < completedSlots; i++) {
+        this.bwWindowBytes.push(0);
+        if (this.bwWindowBytes.length > this.BW_WINDOW_SLOTS) {
+          this.bwWindowBytes.shift();
+        }
+      }
+      this.bwBytesInSlot = 0;
+      this.bwWindowStart = now - (elapsed % 1000);
+      // Update smoothed estimate
+      if (this.bwWindowBytes.length > 0) {
+        const sum = this.bwWindowBytes.reduce((a, b) => a + b, 0);
+        this.bwEstimate = sum / this.bwWindowBytes.length;
+      }
+    }
+    this.bwBytesInSlot += bytes;
   }
 
   private _cleanupAudio(): void {
@@ -428,6 +477,9 @@ export class RelayPlayer {
     const actualPayload = buf.length - HEADER_SIZE;
     if (payloadLength > actualPayload) return;
 
+    // Sliding window bandwidth estimate: accumulate bytes in 1s slots
+    this._trackBandwidth(buf.length);
+
     // Update video clock
     if (this.audioCtx && timestampMs > 0) {
       this.videoClockBase = {
@@ -453,12 +505,25 @@ export class RelayPlayer {
       }
     }
 
-    // AIMD additive increase: probe upward when no drops for a while
+    // AIMD additive increase: probe upward when no drops for a while AND bandwidth is healthy
     const nowMs = Date.now();
+    const bandwidthOk = this.bwEstimate >= this.BW_LOW_THRESHOLD;
     if (nowMs - this.lastBackpressureTime > this.AIMD_INCREASE_INTERVAL_MS
-        && this.backpressureFps < this.AIMD_MAX_FPS) {
+        && this.backpressureFps < this.AIMD_MAX_FPS
+        && bandwidthOk) {
       this.backpressureFps = Math.min(this.AIMD_MAX_FPS, this.backpressureFps + this.AIMD_INCREASE_FPS);
       this.sendBackpressure(this.backpressureFps);
+    }
+
+    // Bandwidth-aware backpressure: if bandwidth drops below threshold, reduce FPS
+    if (!bandwidthOk && this.bwEstimate < Infinity
+        && nowMs - this.lastBackpressureTime > this.AIMD_INCREASE_INTERVAL_MS) {
+      const bwFps = Math.max(this.AIMD_MIN_FPS,
+        Math.floor(this.bwEstimate / 20_000));  // ~20KB per frame at 30fps
+      if (bwFps < this.backpressureFps) {
+        this.backpressureFps = bwFps;
+        this.sendBackpressure(this.backpressureFps);
+      }
     }
     this.lastSequence = sequence;
 
