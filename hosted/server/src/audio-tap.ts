@@ -18,6 +18,7 @@
 import { parseAudioHeader } from "./protocol.js";
 
 export interface AudioFrame {
+  sessionId?: string;
   codecType: number;
   sequence: number;
   sampleRate: number;
@@ -99,9 +100,10 @@ export class AudioTapBus {
     }
   }
 
-  publish(rawFrame: Uint8Array) {
+  publish(rawFrame: Uint8Array, sessionId?: string) {
     const audioFrame = this.parseFRAU(rawFrame);
     if (!audioFrame) return; // not a valid FRAU frame, skip
+    audioFrame.sessionId = sessionId;
 
     // Dispatch to async iterable subscribers
     for (const tap of this.taps.values()) {

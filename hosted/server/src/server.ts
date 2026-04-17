@@ -551,6 +551,8 @@ const server = Bun.serve<WsData>({
       if (role === "audio-tap") {
         const unsub = audioTapBus.onFrame((frame) => {
           if (ws.readyState !== WebSocket.OPEN) { unsub(); return; }
+          // Filter by session if specified
+          if (sessionId && frame.sessionId && frame.sessionId !== sessionId) return;
           // Send binary FRAU v1 frame (raw PCM) instead of base64 JSON for efficiency
           const frauFrame = buildAudioFrame(frame.codecType, frame.sequence, frame.sampleRate, frame.channels, frame.bitsPerSample, frame.timestampMs, new Uint8Array(frame.pcm));
           ws.send(frauFrame);
@@ -735,7 +737,7 @@ const server = Bun.serve<WsData>({
             const audioHdr = parseAudioHeader(buf);
             registry.fanoutAudio(sessionId, buf, audioHdr?.codecType ?? 0, audioHdr?.sampleRate ?? 0);
             session.recorder?.appendAudio(buf);
-            audioTapBus.publish(buf);
+            audioTapBus.publish(buf, sessionId);
 
             // Forward PCM payload to AI service (if active)
             if (audioHdr && session.activeAppId) {
@@ -836,10 +838,12 @@ const server = Bun.serve<WsData>({
                 telemetry: orchestrator.getTelemetry(sessionId),
               }));
             } else if (isBackpressureMessage(cmd)) {
-              // Viewer -> Server -> Publisher: relay backpressure signal
-              console.log(`[relay] Backpressure from viewer: targetFps=${cmd.targetFps} session=${sessionId}`);
-              if (session.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
-                session.publisher.ws.send(JSON.stringify(cmd));
+              // Viewer -> Server -> Publisher: relay backpressure signal (clamp to 1-60 fps)
+              const clampedFps = Math.max(1, Math.min(60, cmd.targetFps));
+              console.log(`[relay] Backpressure from viewer: targetFps=${clampedFps} session=${sessionId}`);
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "backpressure", targetFps: clampedFps }));
               }
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }
@@ -847,13 +851,7 @@ const server = Bun.serve<WsData>({
           // Binary frame from viewer — forward FRAU audio to publisher
           const buf = message as Uint8Array;
           if (isAudioFrame(buf)) {
-            const viewerId = ws.data.viewerId;
-            if (viewerId) {
-              const found = registry.findViewerSession(viewerId);
-              if (found && found.session.publisher) {
-                found.session.publisher.ws.send(buf);
-              }
-            }
+            registry.sendToPublisher(sessionId, buf);
           }
         }
       }
