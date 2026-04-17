@@ -1,9 +1,11 @@
 /**
  * Test helpers — frame builders for FRLY (video) and FRAU (audio) wire protocols.
  *
- * FRLY: [4B "FRLY"][8B seq][4B width][4B height][1B quality][8B timestamp_ms][JPEG payload]
- * FRAU: [4B "FRAU"][1B codec][8B seq][4B sampleRate][2B channels][2B bitsPerSample][8B timestamp_ms][PCM payload]
+ * Delegates to @ebowwa/relay-protocol buildVideoFrame/buildAudioFrame which
+ * produce v1 frames with 36-byte headers (version byte, payloadLength, CRC16).
  */
+
+import { buildVideoFrame, buildAudioFrame } from "@ebowwa/relay-protocol";
 
 // Minimal JPEG: SOI (FF D8) + APP0 marker + EOI (FF D9)
 // Real enough for the recorder to store and the exporter to parse.
@@ -31,32 +33,7 @@ export function buildFRLYFrame(opts: {
     jpegPayload = MINIMAL_JPEG,
   } = opts;
 
-  const headerSize = 29;
-  const buf = new Uint8Array(headerSize + jpegPayload.length);
-  const view = new DataView(buf.buffer);
-
-  // Magic "FRLY"
-  buf[0] = 0x46; buf[1] = 0x52; buf[2] = 0x4c; buf[3] = 0x59;
-
-  // Sequence (8 bytes LE, offset 4)
-  view.setBigUint64(4, BigInt(sequence), true);
-
-  // Width (4 bytes LE, offset 12)
-  view.setUint32(12, width, true);
-
-  // Height (4 bytes LE, offset 16)
-  view.setUint32(16, height, true);
-
-  // Quality (1 byte, offset 20)
-  buf[20] = quality;
-
-  // Timestamp ms (8 bytes LE, offset 21)
-  view.setBigUint64(21, BigInt(timestampMs), true);
-
-  // JPEG payload after header
-  buf.set(jpegPayload, headerSize);
-
-  return buf;
+  return buildVideoFrame(sequence, width, height, quality, timestampMs, jpegPayload);
 }
 
 export function buildFRAUFrame(opts: {
@@ -78,35 +55,7 @@ export function buildFRAUFrame(opts: {
     pcmPayload = new Uint8Array(1024), // 512 samples * 2 bytes
   } = opts;
 
-  const headerSize = 29;
-  const buf = new Uint8Array(headerSize + pcmPayload.length);
-  const view = new DataView(buf.buffer);
-
-  // Magic "FRAU"
-  buf[0] = 0x46; buf[1] = 0x52; buf[2] = 0x41; buf[3] = 0x55;
-
-  // Codec type (1 byte, offset 4)
-  buf[4] = codecType;
-
-  // Sequence (8 bytes LE, offset 5)
-  view.setBigUint64(5, BigInt(sequence), true);
-
-  // Sample rate (4 bytes LE, offset 13)
-  view.setUint32(13, sampleRate, true);
-
-  // Channels (2 bytes LE, offset 17)
-  view.setUint16(17, channels, true);
-
-  // Bits per sample (2 bytes LE, offset 19)
-  view.setUint16(19, bitsPerSample, true);
-
-  // Timestamp ms (8 bytes LE, offset 21)
-  view.setBigUint64(21, BigInt(timestampMs), true);
-
-  // PCM payload after header
-  buf.set(pcmPayload, headerSize);
-
-  return buf;
+  return buildAudioFrame(codecType, sequence, sampleRate, channels, bitsPerSample, timestampMs, pcmPayload);
 }
 
 /** In-memory ObjectStore mock for testing */

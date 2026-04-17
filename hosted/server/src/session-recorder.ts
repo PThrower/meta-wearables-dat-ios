@@ -10,7 +10,7 @@
  */
 
 import type { ObjectStore } from "@ebowwa/object-store";
-import { HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
+import { HEADER_SIZE, AUDIO_HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
@@ -206,7 +206,7 @@ export class SessionRecorder {
     // (unless resuming — audio can flow alongside existing video)
     if (!this._active && !this.resumedFromExisting) return;
     if (this.resumedFromExisting) this.ensureResumed();
-    const pcm = frame.length > 29 ? frame.subarray(29) : frame;
+    const pcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
     this.audioParts.push(Buffer.from(pcm));
 
     // Extract FRAU header metadata for sample rate / channels

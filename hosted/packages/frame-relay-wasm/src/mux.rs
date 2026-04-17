@@ -2,10 +2,14 @@
 //!
 //! Classifies incoming binary frames by magic bytes (FRLY vs FRAU)
 //! and provides batch frame splitting for stream parsing.
+//!
+//! Both FRLY v1 and FRAU v1 use 36-byte headers.
 
 use wasm_bindgen::prelude::*;
 
+use crate::audio::FRAU_HEADER_SIZE;
 use crate::audio::FRAU_MAGIC;
+use crate::video::FRLY_HEADER_SIZE;
 use crate::video::FRLY_MAGIC;
 
 /// Frame kind constants returned by `classify_frame`.
@@ -33,7 +37,7 @@ pub fn classify_frame(buf: &[u8]) -> u8 {
 
 /// Validate a binary frame's header integrity.
 ///
-/// Checks magic bytes and minimum header size.
+/// Checks magic bytes and minimum header size (36 bytes for v1).
 /// Returns `true` if the frame header is well-formed.
 #[wasm_bindgen]
 pub fn validate_frame(buf: &[u8]) -> bool {
@@ -41,8 +45,8 @@ pub fn validate_frame(buf: &[u8]) -> bool {
         return false;
     }
     match &buf[0..4] {
-        m if m == FRLY_MAGIC => buf.len() >= 29,
-        m if m == FRAU_MAGIC => buf.len() >= 29,
+        m if m == FRLY_MAGIC => buf.len() >= FRLY_HEADER_SIZE,
+        m if m == FRAU_MAGIC => buf.len() >= FRAU_HEADER_SIZE,
         _ => false,
     }
 }

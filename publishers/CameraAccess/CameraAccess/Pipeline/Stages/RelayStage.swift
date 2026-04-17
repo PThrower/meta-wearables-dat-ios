@@ -112,10 +112,15 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Set by StreamSessionViewModel before connecting.
     var onControlMessage: (@Sendable ([String: Any]) -> Void)?
 
+    // Server backpressure state
+    private var serverTargetFps: Double?
+    private var lastRelayTime: ContinuousClock.Instant?
+
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
     private var framesDropped: UInt64 = 0
+    private var framesDroppedByBackpressure: UInt64 = 0
     private var isEncoding = false
 
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.6) {
@@ -203,6 +208,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         session = nil
         delegate = nil
         isConnected = false
+        serverTargetFps = nil
+        lastRelayTime = nil
         NSLog("[RelayStage] Disconnected")
     }
 
@@ -220,6 +227,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         sequenceNumber = 0
         framesSent = 0
         framesFailed = 0
+        framesDropped = 0
+        framesDroppedByBackpressure = 0
+        serverTargetFps = nil
+        lastRelayTime = nil
     }
 
     func stop() async {
@@ -244,8 +255,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                             // Handle backpressure messages from the server
                             if json["type"] as? String == "backpressure",
-                               let targetFps = json["targetFps"] {
+                               let targetFps = json["targetFps"] as? Double {
                                 NSLog("[RelayStage] Backpressure from server: targetFps=\(targetFps)")
+                                await self.handleBackpressure(targetFps: targetFps)
                             }
                             if let handler = await self.onControlMessage {
                                 handler(json)
@@ -302,6 +314,22 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         }
     }
 
+    // MARK: - Server Backpressure
+
+    /// Apply server-requested FPS throttle and acknowledge back.
+    private func handleBackpressure(targetFps: Double) {
+        serverTargetFps = targetFps
+        lastRelayTime = nil // Reset gate so next frame goes through immediately
+
+        // Send ack back to server
+        let ack: [String: Any] = [
+            "type": "backpressure-ack",
+            "targetFps": targetFps,
+        ]
+        sendJson(ack)
+        NSLog("[RelayStage] Backpressure applied: serverTargetFps=\(targetFps), ack sent")
+    }
+
     // MARK: - Frame Relay
 
     private func relayFrame(_ packet: FramePacket) {
@@ -313,6 +341,30 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             NSLog("[RelayStage] Socket not running (state=\(state)), marking disconnected")
             isConnected = false
             return
+        }
+
+        // Server backpressure: skip frame if elapsed time is less than the
+        // minimum interval dictated by the server's target FPS.  This works
+        // alongside (not against) the pipeline's ThrottledStage — the pipeline
+        // may be configured for 30 FPS but the server can dynamically request
+        // a lower rate based on its own load.
+        if let target = serverTargetFps, target > 0 {
+            let now = ContinuousClock.Instant.now
+            if let last = lastRelayTime {
+                let minimumInterval = 1.0 / target
+                let elapsed = now - last
+                let elapsedSeconds = Double(elapsed.components.seconds)
+                    + Double(elapsed.components.attoseconds) / 1e18
+                if elapsedSeconds < minimumInterval {
+                    framesDroppedByBackpressure += 1
+                    framesDropped += 1
+                    if framesDroppedByBackpressure % 100 == 1 {
+                        NSLog("[RelayStage] Frame dropped (server backpressure): \(framesDroppedByBackpressure) total, targetFps=\(target)")
+                    }
+                    return
+                }
+            }
+            lastRelayTime = now
         }
 
         // Backpressure: drop frame if previous encode is still in progress

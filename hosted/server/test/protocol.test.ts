@@ -20,12 +20,12 @@ import { buildFRLYFrame, buildFRAUFrame } from "./helpers.js";
 // --- Constants ---
 
 describe("protocol constants", () => {
-  test("HEADER_SIZE is 29 (FRLY)", () => {
-    expect(HEADER_SIZE).toBe(29);
+  test("HEADER_SIZE is 36 (FRLY v1)", () => {
+    expect(HEADER_SIZE).toBe(36);
   });
 
-  test("AUDIO_HEADER_SIZE is 29 (FRAU)", () => {
-    expect(AUDIO_HEADER_SIZE).toBe(29);
+  test("AUDIO_HEADER_SIZE is 36 (FRAU v1)", () => {
+    expect(AUDIO_HEADER_SIZE).toBe(36);
   });
 
   test("FRLY magic bytes spell FRLY", () => {

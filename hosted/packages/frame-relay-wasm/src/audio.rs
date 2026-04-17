@@ -1,19 +1,25 @@
-//! FRAU audio frame codec + streaming resampler
+//! FRAU v1 audio frame codec + streaming resampler
 //!
-//! Wire layout:
-//!   [0:4]   magic "FRAU"
-//!   [4]     codecType  (u8)  -- 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound
-//!   [5:13]  sequence   (u64 LE)
-//!   [13:17] sampleRate (u32 LE)
-//!   [17:19] channels   (u16 LE)
-//!   [19:21] bitsPerSample (u16 LE)
-//!   [21:29] timestamp  (u64 LE, ms)
-//!   [29:]   PCM payload (i16 LE interleaved)
+//! Wire layout (36 bytes):
+//!   [0:4]   magic "FRAU" (0x46, 0x52, 0x41, 0x55)
+//!   [4]     version    (u8) = 1
+//!   [5:9]   payloadLength (u32 LE)
+//!   [9]     codecType  (u8) -- 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound
+//!   [10:18] sequence   (u64 LE)
+//!   [18:22] sampleRate (u32 LE)
+//!   [22:24] channels   (u16 LE)
+//!   [24:26] bitsPerSample (u16 LE)
+//!   [26:34] timestamp  (u64 LE, ms)
+//!   [34:36] header_crc16 (u16 LE) — CRC-16/CCITT-FALSE over bytes [0..33]
+//!   [36:]   PCM payload (i16 LE interleaved)
 
 use wasm_bindgen::prelude::*;
 
+use crate::crc16_ccitt_false;
+
 pub const FRAU_MAGIC: &[u8; 4] = b"FRAU";
-pub const FRAU_HEADER_SIZE: usize = 29;
+pub const FRAU_VERSION: u8 = 1;
+pub const FRAU_HEADER_SIZE: usize = 36;
 
 // --- Codec type constants (match relay-protocol) ---
 
@@ -24,10 +30,12 @@ pub const CODEC_RELAY_INBOUND: u8 = 3;
 
 // --- Header ---
 
-/// Audio frame metadata parsed from a FRAU binary header.
+/// Audio frame metadata parsed from a FRAU v1 binary header.
 #[wasm_bindgen]
 #[derive(Clone, Debug)]
 pub struct AudioHeader {
+    pub version: u8,
+    pub payload_length: u32,
     pub codec_type: u8,
     pub sequence: u64,
     pub sample_rate: u32,
@@ -46,7 +54,7 @@ pub fn is_audio_frame(buf: &[u8]) -> bool {
 
 // --- Encode ---
 
-/// Encode a complete FRAU frame (29-byte header + PCM payload).
+/// Encode a complete FRAU v1 frame (36-byte header + PCM payload).
 #[wasm_bindgen]
 pub fn encode_audio_frame(
     codec_type: u8,
@@ -59,41 +67,73 @@ pub fn encode_audio_frame(
 ) -> Vec<u8> {
     let mut buf = Vec::with_capacity(FRAU_HEADER_SIZE + pcm.len());
     buf.extend_from_slice(FRAU_MAGIC);
+    buf.push(FRAU_VERSION);
+    buf.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
     buf.push(codec_type);
     buf.extend_from_slice(&sequence.to_le_bytes());
     buf.extend_from_slice(&sample_rate.to_le_bytes());
     buf.extend_from_slice(&channels.to_le_bytes());
     buf.extend_from_slice(&bits_per_sample.to_le_bytes());
     buf.extend_from_slice(&timestamp_ms.to_le_bytes());
+    // CRC-16 over bytes [0..34]
+    let crc = crc16_ccitt_false(&buf[0..34]);
+    buf.extend_from_slice(&crc.to_le_bytes());
     buf.extend_from_slice(pcm);
     buf
 }
 
 // --- Decode ---
 
-/// Decode a FRAU header from a binary buffer.
+/// Decode a FRAU v1 header from a binary buffer.
+///
+/// Returns `None` if the buffer is too short, magic bytes don't match,
+/// or the CRC-16 check fails.
 #[wasm_bindgen]
 pub fn decode_audio_header(buf: &[u8]) -> Option<AudioHeader> {
     if buf.len() < FRAU_HEADER_SIZE || &buf[0..4] != FRAU_MAGIC {
         return None;
     }
+    // Verify CRC-16 over bytes [0..34]
+    let expected_crc = u16::from_le_bytes(buf[34..36].try_into().ok()?);
+    let computed_crc = crc16_ccitt_false(&buf[0..34]);
+    if expected_crc != computed_crc {
+        return None;
+    }
     Some(AudioHeader {
-        codec_type: buf[4],
-        sequence: u64::from_le_bytes(buf[5..13].try_into().ok()?),
-        sample_rate: u32::from_le_bytes(buf[13..17].try_into().ok()?),
-        channels: u16::from_le_bytes(buf[17..19].try_into().ok()?),
-        bits_per_sample: u16::from_le_bytes(buf[19..21].try_into().ok()?),
-        timestamp_ms: u64::from_le_bytes(buf[21..29].try_into().ok()?),
+        version: buf[4],
+        payload_length: u32::from_le_bytes(buf[5..9].try_into().ok()?),
+        codec_type: buf[9],
+        sequence: u64::from_le_bytes(buf[10..18].try_into().ok()?),
+        sample_rate: u32::from_le_bytes(buf[18..22].try_into().ok()?),
+        channels: u16::from_le_bytes(buf[22..24].try_into().ok()?),
+        bits_per_sample: u16::from_le_bytes(buf[24..26].try_into().ok()?),
+        timestamp_ms: u64::from_le_bytes(buf[26..34].try_into().ok()?),
     })
 }
 
-/// Extract the PCM payload bytes from a FRAU frame (skips 29-byte header).
+/// Extract the PCM payload bytes from a FRAU v1 frame (skips 36-byte header).
 #[wasm_bindgen]
 pub fn extract_audio_payload(buf: &[u8]) -> Vec<u8> {
     if buf.len() <= FRAU_HEADER_SIZE {
         return vec![];
     }
     buf[FRAU_HEADER_SIZE..].to_vec()
+}
+
+/// Verify the CRC-16 of a FRAU v1 frame header.
+///
+/// Returns `true` if the header CRC-16 matches the computed value.
+#[wasm_bindgen]
+pub fn verify_audio_crc(buf: &[u8]) -> bool {
+    if buf.len() < FRAU_HEADER_SIZE || &buf[0..4] != FRAU_MAGIC {
+        return false;
+    }
+    let crc_bytes: [u8; 2] = match buf[34..36].try_into() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let expected_crc = u16::from_le_bytes(crc_bytes);
+    crc16_ccitt_false(&buf[0..34]) == expected_crc
 }
 
 // --- Streaming Audio Resampler ---
