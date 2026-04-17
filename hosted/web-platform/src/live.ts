@@ -9,6 +9,24 @@ import { requireAuth, getToken } from "./auth.js";
 let player: RelayPlayer | null = null;
 let guidancePanel: GuidancePanel | null = null;
 const meterFill = document.getElementById("audio-meter-fill")!;
+const pubPill = document.getElementById("p-publisher")!;
+const aiPill = document.getElementById("p-ai")!;
+
+// --- Toast notifications ---
+function showToast(message: string, kind: "info" | "warn" | "error" = "info"): void {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  const el = document.createElement("div");
+  el.className = `toast toast-${kind}`;
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+function setPill(el: HTMLElement, text: string, cls: string): void {
+  el.textContent = text;
+  el.className = `status-pill ${cls}`;
+}
 
 export function getPlayer(): RelayPlayer | null { return player; }
 
@@ -44,6 +62,8 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   document.getElementById("p-audio")!.textContent = "OFF";
   meterFill.style.width = "0%";
   document.getElementById("unmute")!.classList.remove("show");
+  setPill(pubPill, "PUB WAIT", "status-off");
+  setPill(aiPill, "AI OFF", "status-off");
 
   player = new RelayPlayer({
     canvas: document.getElementById("liveCanvas") as HTMLCanvasElement,
@@ -74,6 +94,35 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
 
   player.onJsonMessage = (msg) => {
     if (guidancePanel) guidancePanel.handleMessage(msg);
+
+    // Publisher status
+    if (msg.type === "publisher_status") {
+      const s = (msg as { status: string }).status;
+      if (s === "live") {
+        setPill(pubPill, "PUB LIVE", "status-live");
+        showToast("Publisher connected", "info");
+      } else if (s === "dropped") {
+        setPill(pubPill, "PUB DROP", "status-error");
+        showToast("Publisher disconnected", "warn");
+      }
+    }
+
+    // AI status
+    if (msg.type === "ai_status") {
+      const s = (msg as { status: { status: string } }).status?.status;
+      if (s === "active" || s === "connected") {
+        setPill(aiPill, "AI ON", "status-active");
+      } else if (s === "error") {
+        setPill(aiPill, "AI ERR", "status-error");
+        showToast("AI service error", "error");
+      } else if (s === "rate_limited") {
+        setPill(aiPill, "AI RATE", "status-warn");
+      } else if (s === "activating") {
+        setPill(aiPill, "AI ...", "status-warn");
+      } else {
+        setPill(aiPill, "AI OFF", "status-off");
+      }
+    }
   };
 
   document.getElementById("gallery")!.classList.add("hidden");

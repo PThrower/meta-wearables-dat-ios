@@ -204,6 +204,17 @@ const VIEWER_BUILD_VERSION = process.env.BUILD_VERSION ?? "dev";
 
 // --- Server ---
 
+/** Broadcast a JSON message to all viewers in a session */
+function broadcastToViewers(session: Session | undefined, msg: object): void {
+  if (!session) return;
+  const data = JSON.stringify(msg);
+  for (const viewer of session.viewers.values()) {
+    if (viewer.ws.readyState === WebSocket.OPEN) {
+      try { viewer.ws.send(data); } catch { /* skip */ }
+    }
+  }
+}
+
 const server = Bun.serve<WsData>({
   hostname: process.env.RELAY_TRUST_HEADERS === "1" ? "127.0.0.1" : "0.0.0.0",
   port: PORT,
@@ -620,6 +631,8 @@ const server = Bun.serve<WsData>({
         }
         // Tell the publisher what session it's on
         ws.send(JSON.stringify({ type: "session_assigned", sessionId }));
+        // Notify viewers that publisher is live
+        broadcastToViewers(session, { type: "publisher_status", status: "live" });
       } else {
         const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, undefined);
         if (result.startsWith("error:")) {
@@ -892,6 +905,8 @@ const server = Bun.serve<WsData>({
         if (session?.activeAppId) {
           orchestrator.deactivateApp(sessionId).catch(() => {});
         }
+        // Notify viewers that publisher dropped
+        broadcastToViewers(session, { type: "publisher_status", status: "dropped" });
         await registry.releasePublisher(sessionId);
         try {
           const meta = await sessionStore.getMeta(sessionId);
