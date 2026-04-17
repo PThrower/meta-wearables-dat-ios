@@ -112,14 +112,17 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Set by StreamSessionViewModel before connecting.
     var onControlMessage: (@Sendable ([String: Any]) -> Void)?
 
-    // Server backpressure state
-    private var serverTargetFps: Double?
+    // Frame pacing — time-based throttle using config.targetFPS
     private var lastRelayTime: ContinuousClock.Instant?
+
+    // Server backpressure state (overrides local targetFPS when set)
+    private var serverTargetFps: Double?
 
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
     private var framesDropped: UInt64 = 0
+    private var framesDroppedByPacing: UInt64 = 0
     private var framesDroppedByBackpressure: UInt64 = 0
     private var isEncoding = false
 
@@ -228,6 +231,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         framesSent = 0
         framesFailed = 0
         framesDropped = 0
+        framesDroppedByPacing = 0
         framesDroppedByBackpressure = 0
         serverTargetFps = nil
         lastRelayTime = nil
@@ -319,7 +323,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Apply server-requested FPS throttle and acknowledge back.
     private func handleBackpressure(targetFps: Double) {
         serverTargetFps = targetFps
-        lastRelayTime = nil // Reset gate so next frame goes through immediately
+        lastRelayTime = nil // Reset gate so next frame uses new rate immediately
 
         // Send ack back to server
         let ack: [String: Any] = [
@@ -332,6 +336,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Frame Relay
 
+    /// Effective FPS: server backpressure overrides local config when set.
+    private var effectiveTargetFps: Double {
+        if let server = serverTargetFps, server > 0 { return server }
+        return config.targetFPS > 0 ? Double(config.targetFPS) : 30.0
+    }
+
     private func relayFrame(_ packet: FramePacket) {
         guard isConnected, let webSocketTask else { return }
 
@@ -343,36 +353,28 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             return
         }
 
-        // Server backpressure: skip frame if elapsed time is less than the
-        // minimum interval dictated by the server's target FPS.  This works
-        // alongside (not against) the pipeline's ThrottledStage — the pipeline
-        // may be configured for 30 FPS but the server can dynamically request
-        // a lower rate based on its own load.
-        if let target = serverTargetFps, target > 0 {
-            let now = ContinuousClock.Instant.now
-            if let last = lastRelayTime {
-                let minimumInterval = 1.0 / target
-                let elapsed = now - last
-                let elapsedSeconds = Double(elapsed.components.seconds)
-                    + Double(elapsed.components.attoseconds) / 1e18
-                if elapsedSeconds < minimumInterval {
-                    framesDroppedByBackpressure += 1
-                    framesDropped += 1
-                    if framesDroppedByBackpressure % 100 == 1 {
-                        NSLog("[RelayStage] Frame dropped (server backpressure): \(framesDroppedByBackpressure) total, targetFps=\(target)")
-                    }
-                    return
+        // Time-based frame pacing: enforce minimum interval between frames.
+        // This produces evenly-spaced output regardless of encode duration variance.
+        let now = ContinuousClock.Instant.now
+        if let last = lastRelayTime {
+            let minInterval = 1.0 / effectiveTargetFps
+            let elapsed = now - last
+            let elapsedSeconds = Double(elapsed.components.seconds)
+                + Double(elapsed.components.attoseconds) / 1e18
+            if elapsedSeconds < minInterval {
+                framesDroppedByPacing += 1
+                framesDropped += 1
+                if framesDroppedByPacing % 500 == 1 {
+                    NSLog("[RelayStage] Frame dropped (pacing): \(framesDroppedByPacing) total, effectiveFps=\(effectiveTargetFps), elapsed=\(String(format: "%.1f", elapsedSeconds * 1000))ms < \(String(format: "%.1f", minInterval * 1000))ms")
                 }
+                return
             }
-            lastRelayTime = now
         }
+        lastRelayTime = now
 
-        // Backpressure: drop frame if previous encode is still in progress
+        // Guard against overlapping encodes (should be rare with time-based pacing)
         guard !isEncoding else {
             framesDropped += 1
-            if framesDropped % 100 == 1 {
-                NSLog("[RelayStage] Frame dropped (encoding busy): \(framesDropped) total")
-            }
             return
         }
         isEncoding = true
