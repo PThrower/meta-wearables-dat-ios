@@ -33,6 +33,10 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     private let speechRate: Float = 0.5
     private let language: String = "en-US"
 
+    // Reusable synthesizer — creating a new one each call resets audio routing.
+    // Lazily created on @MainActor where it's used.
+    @MainActor private var synth: AVSpeechSynthesizer?
+
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
     }
@@ -55,6 +59,10 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isPlaying else { return }
         isPlaying = false
+        await Task { @MainActor [weak self] in
+            self?.synth?.stopSpeaking(at: .immediate)
+            self?.synth = nil
+        }.value
         NSLog("[AudioPlayback] Stopped")
     }
 
@@ -67,14 +75,19 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
         NSLog("[AudioPlayback] speakGuidance: \"\(text.prefix(80))\"")
 
-        // Route TTS to Bluetooth glasses if available
-        Self.routeToGlasses()
-
         let rate = self.speechRate
         let language = self.language
 
         let result: (pcm: Data, sampleRate: UInt32, channels: UInt16)? = await Task { @MainActor in
-            let synth = AVSpeechSynthesizer()
+            // Route to glasses HFP BEFORE speaking — must be on @MainActor
+            // for iOS 17+ AVAudioSession strict concurrency.
+            Self.routeToGlasses()
+
+            // Reuse synthesizer to avoid route reset from new instances
+            if self.synth == nil {
+                self.synth = AVSpeechSynthesizer()
+            }
+            let synth = self.synth!
 
             // Stop any current speech before starting new
             if synth.isSpeaking {

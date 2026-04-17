@@ -828,6 +828,15 @@ class StreamSessionViewModel: ObservableObject {
       do {
         try engine.start()
         NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz")
+
+        // Re-apply HFP output routing — engine.start() can reset the audio route
+        // to the phone speaker. Force output back to glasses if HFP is available.
+        let session = AVAudioSession.sharedInstance()
+        let btInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP })
+        if let bt = btInput {
+          try session.setPreferredInput(bt)
+          NSLog("[StreamSession] Inbound engine: re-routed output to HFP (\(bt.portName))")
+        }
       } catch {
         NSLog("[StreamSession] Audio engine start failed: \(error)")
         return
