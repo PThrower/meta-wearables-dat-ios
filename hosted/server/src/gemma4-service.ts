@@ -330,8 +330,6 @@ export class Gemma4Service implements AIService {
       this.callbacks.onError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       this.isAnalyzing = false;
-      // Clear frame buffer after each analysis to avoid stale frames
-      this.frameBuffer = [];
     }
   }
 }
