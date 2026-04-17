@@ -499,11 +499,12 @@ export class GuidanceOrchestrator {
       const reason = context?.closeReason ?? "";
 
       // --- Fatal: auth failures only ---
-      // 1007 = policy violation (bad API key, auth failure)
-      const isFatal = code === 1007 || /invalid api key|not valid|unauthorized/i.test(reason);
+      // 1007 = policy violation -- but Gemini also uses it for bad request args,
+      // so only treat as fatal when the reason explicitly mentions auth/key issues.
+      const isAuthFatal = /invalid api key|not valid|unauthorized|forbidden|permission denied/i.test(reason);
 
-      if (isFatal) {
-        console.error(`[orchestrator] AI fatal disconnect: code=${code} reason="${reason}" — NOT reconnecting session=${sessionId}`);
+      if (isAuthFatal) {
+        console.error(`[orchestrator] AI auth fatal: code=${code} reason="${reason}" — NOT reconnecting session=${sessionId}`);
         this.setStatus(sessionId, {
           ...current,
           status: "error",
@@ -512,10 +513,35 @@ export class GuidanceOrchestrator {
         });
         this.emitGuidanceEvent(sessionId, {
           type: "guidance.alert",
-          content: `AI disconnected: ${reason || `code ${code}`}. Check API key.`,
+          content: `AI auth failed: ${reason || `code ${code}`}. Check API key.`,
           confidence: 1.0,
           source: appId,
           trigger: "ai_fatal_error",
+          timestampMs: Date.now(),
+          metadata: { severity: "critical" },
+        });
+        this.broadcastStatus(sessionId);
+        this.disconnectAI(sessionId);
+        return;
+      }
+
+      // --- Config error: bad model name, invalid argument, etc. (non-retryable, better message) ---
+      const isConfigError = code === 1007 || /invalid argument|not found|not supported/i.test(reason);
+
+      if (isConfigError) {
+        console.error(`[orchestrator] AI config error: code=${code} reason="${reason}" — NOT reconnecting session=${sessionId}`);
+        this.setStatus(sessionId, {
+          ...current,
+          status: "error",
+          retryInSec: undefined,
+          retryAttempt: undefined,
+        });
+        this.emitGuidanceEvent(sessionId, {
+          type: "guidance.alert",
+          content: `AI config error: ${reason || `code ${code}`}. Check model name and app config.`,
+          confidence: 1.0,
+          source: appId,
+          trigger: "ai_config_error",
           timestampMs: Date.now(),
           metadata: { severity: "critical" },
         });
