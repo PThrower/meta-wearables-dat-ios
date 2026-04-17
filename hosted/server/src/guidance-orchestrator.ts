@@ -48,11 +48,15 @@ export interface GuidanceEvent {
 
 export interface AIStatus {
   appId: string | null;
-  status: "idle" | "activating" | "active" | "error";
+  status: "idle" | "activating" | "active" | "error" | "rate_limited";
   config?: AppConfig;
   activatedAt?: number;
   triggerCount: number;
   lastResponseMs?: number;
+  /** Seconds until next rate-limit retry attempt */
+  retryInSec?: number;
+  /** Current retry attempt number (1-based) */
+  retryAttempt?: number;
 }
 
 export interface AITelemetry {
@@ -464,29 +468,32 @@ export class GuidanceOrchestrator {
       this.setStatus(sessionId, {
         ...current,
         status: "error",
+        retryInSec: undefined,
+        retryAttempt: undefined,
       });
       this.broadcastStatus(sessionId);
       return;
     }
 
-    if (aiStatus === "disconnected" && current.status === "active") {
+    if (aiStatus === "disconnected" && (current.status === "active" || current.status === "rate_limited")) {
       const code = context?.closeCode ?? 0;
       const reason = context?.closeReason ?? "";
 
-      // Fatal close codes — do not reconnect
+      // --- Fatal: auth failures only ---
       // 1007 = policy violation (bad API key, auth failure)
-      // 1008 = policy violation (quota exceeded, terms of service)
-      const isFatal = code === 1007 || code === 1008 || /invalid|not valid|quota|exceeded/i.test(reason);
+      const isFatal = code === 1007 || /invalid api key|not valid|unauthorized/i.test(reason);
 
       if (isFatal) {
         console.error(`[orchestrator] AI fatal disconnect: code=${code} reason="${reason}" — NOT reconnecting session=${sessionId}`);
         this.setStatus(sessionId, {
           ...current,
           status: "error",
+          retryInSec: undefined,
+          retryAttempt: undefined,
         });
         this.emitGuidanceEvent(sessionId, {
           type: "guidance.alert",
-          content: `AI disconnected: ${reason || `code ${code}`}. Check API key and quota.`,
+          content: `AI disconnected: ${reason || `code ${code}`}. Check API key.`,
           confidence: 1.0,
           source: appId,
           trigger: "ai_fatal_error",
@@ -498,7 +505,13 @@ export class GuidanceOrchestrator {
         return;
       }
 
-      // Recoverable disconnect (e.g., session deadline) — reconnect with backoff
+      // --- Rate-limit: transient quota exhaustion ---
+      if (context?.rateLimited) {
+        this.handleRateLimitDisconnect(sessionId, appId, code, reason);
+        return;
+      }
+
+      // --- Transient: everything else (network blip, session deadline) ---
       const state = this.aiState.get(sessionId);
       const retries = state ? state.consecutiveReconnects : 0;
       const maxRetries = 10;
@@ -508,6 +521,8 @@ export class GuidanceOrchestrator {
         this.setStatus(sessionId, {
           ...current,
           status: "error",
+          retryInSec: undefined,
+          retryAttempt: undefined,
         });
         this.emitGuidanceEvent(sessionId, {
           type: "guidance.alert",
@@ -528,29 +543,95 @@ export class GuidanceOrchestrator {
     }
   }
 
+  /** Handle a rate-limit disconnect with longer backoff (5s * 3^n, cap 120s, max 15 retries). */
+  private handleRateLimitDisconnect(sessionId: string, appId: string, code: number, reason: string): void {
+    const state = this.aiState.get(sessionId);
+    if (!state) return;
+
+    const maxRateLimitRetries = 15;
+    const attempt = state.consecutiveReconnects + 1;
+
+    if (attempt > maxRateLimitRetries) {
+      console.error(`[orchestrator] Rate-limit retry limit (${maxRateLimitRetries}) reached — stopping session=${sessionId}`);
+      this.setStatus(sessionId, {
+        ...this.getStatus(sessionId),
+        status: "error",
+        retryInSec: undefined,
+        retryAttempt: undefined,
+      });
+      this.emitGuidanceEvent(sessionId, {
+        type: "guidance.alert",
+        content: `AI rate-limited for too long (${maxRateLimitRetries} retries). Deactivating.`,
+        confidence: 1.0,
+        source: appId,
+        trigger: "ai_rate_limit_exhausted",
+        timestampMs: Date.now(),
+        metadata: { severity: "critical" },
+      });
+      this.broadcastStatus(sessionId);
+      this.disconnectAI(sessionId);
+      return;
+    }
+
+    // Exponential backoff: 5s * 3^(attempt-1), capped at 120s
+    const delaySec = Math.min(5 * Math.pow(3, attempt - 1), 120);
+    const delayMs = delaySec * 1000;
+
+    console.warn(`[orchestrator] AI rate-limited (attempt ${attempt}/${maxRateLimitRetries}), retry in ${delaySec}s session=${sessionId} code=${code} reason="${reason}"`);
+
+    this.emitGuidanceEvent(sessionId, {
+      type: "guidance.alert",
+      content: `Rate limited — retrying in ${delaySec}s (attempt ${attempt}/${maxRateLimitRetries})`,
+      confidence: 1.0,
+      source: appId,
+      trigger: "ai_rate_limited",
+      timestampMs: Date.now(),
+      metadata: { severity: "warning" },
+    });
+
+    this.scheduleReconnectWithDelay(sessionId, appId, delayMs, attempt, "rate_limited");
+  }
+
+  /** Schedule a reconnect after `delayMs` milliseconds. Shared by transient and rate-limit paths. */
+  private scheduleReconnectWithDelay(sessionId: string, appId: string, delayMs: number, attempt: number, interimStatus: "rate_limited" | "activating"): void {
+    const state = this.aiState.get(sessionId);
+    if (!state) return;
+
+    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+
+    state.consecutiveReconnects = attempt;
+
+    const delaySec = Math.round(delayMs / 1000);
+    this.setStatus(sessionId, {
+      ...this.getStatus(sessionId),
+      status: interimStatus,
+      retryInSec: delaySec,
+      retryAttempt: attempt,
+    });
+    this.broadcastStatus(sessionId);
+
+    state.reconnectTimer = setTimeout(() => {
+      const current = this.getStatus(sessionId);
+      if (current.appId === appId) {
+        console.log(`[orchestrator] Auto-reconnecting session=${sessionId} (attempt ${attempt})`);
+        this.activateApp(sessionId, appId).catch((err) => {
+          console.error(`[orchestrator] Auto-reconnect failed: ${err}`);
+          // activateApp already handles failure; scheduleReconnect will be called again via handleAIStatusChange
+        });
+      }
+    }, delayMs);
+  }
+
   private scheduleReconnect(sessionId: string, appId: string): void {
     const state = this.aiState.get(sessionId);
     if (!state) return;
 
-    // Clear any existing timer
-    if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-
-    state.consecutiveReconnects++;
+    const attempt = state.consecutiveReconnects + 1;
     // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
-    const delay = Math.min(1000 * Math.pow(2, state.consecutiveReconnects - 1), 30_000);
+    const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 30_000);
 
-    console.log(`[orchestrator] Reconnecting in ${delay / 1000}s (attempt ${state.consecutiveReconnects}) session=${sessionId} app=${appId}`);
-    state.reconnectTimer = setTimeout(() => {
-      // Only reconnect if still the active app
-      const current = this.getStatus(sessionId);
-      if (current.appId === appId) {
-        console.log(`[orchestrator] Auto-reconnecting session=${sessionId}`);
-        this.activateApp(sessionId, appId).catch((err) => {
-          console.error(`[orchestrator] Auto-reconnect failed: ${err}`);
-          this.scheduleReconnect(sessionId, appId);
-        });
-      }
-    }, delay);
+    console.log(`[orchestrator] Reconnecting in ${delayMs / 1000}s (attempt ${attempt}) session=${sessionId} app=${appId}`);
+    this.scheduleReconnectWithDelay(sessionId, appId, delayMs, attempt, "activating");
   }
 
   /** Simple heuristic to classify AI text responses into guidance event types */

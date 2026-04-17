@@ -75,6 +75,19 @@ interface GeminiServerMessage {
     responseTokenCount?: number;
     totalTokenCount?: number;
   };
+  /** Gemini server-side graceful shutdown signal */
+  goAway?: { timeLeft?: number; reason?: string };
+}
+
+// --- Rate-limit detection ---
+
+const RATE_LIMIT_PATTERNS = /resource_exhausted|rate.?limit|too many requests|quota.*exceeded/i;
+
+/** Returns true when the WebSocket close indicates a transient rate-limit. */
+function isRateLimitClose(code: number, reason: string): boolean {
+  // HTTP 429 mapped into WS close codes (some proxies use 4000+ custom codes)
+  if (code === 429) return true;
+  return RATE_LIMIT_PATTERNS.test(reason);
 }
 
 // --- Resampler ---
@@ -273,6 +286,11 @@ export class GeminiLiveService implements AIService {
             }
           }
 
+          // GoAway -- server signals impending shutdown (e.g. rate limit, maintenance)
+          if (msg.goAway) {
+            console.warn(`[gemini-live] GoAway received: reason=${msg.goAway.reason ?? "unknown"} timeLeft=${msg.goAway.timeLeft ?? "?"}s`);
+          }
+
           // Tool calls (e.g. emit_guidance_event)
           if (msg.toolCall?.functionCalls) {
             for (const fc of msg.toolCall.functionCalls) {
@@ -309,12 +327,14 @@ export class GeminiLiveService implements AIService {
 
         this.ws.addEventListener("close", (event) => {
           clearTimeout(connectTimeout);
-          console.log(`[gemini-live] Closed: code=${event.code} reason=${event.reason}`);
+          const rateLimited = isRateLimitClose(event.code, event.reason);
+          console.log(`[gemini-live] Closed: code=${event.code} reason=${event.reason} rateLimited=${rateLimited}`);
           if (this._status !== "error") {
             this._status = "disconnected";
             callbacks.onStatusChange("disconnected", {
               closeCode: event.code,
               closeReason: event.reason,
+              rateLimited,
             });
           }
         });

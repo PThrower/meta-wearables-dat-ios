@@ -29,7 +29,7 @@ export interface GuidanceEvent {
 
 export interface AIStatus {
   appId: string | null;
-  status: "idle" | "activating" | "active" | "error";
+  status: "idle" | "activating" | "active" | "error" | "rate_limited";
   config?: {
     model?: string;
     voice?: string;
@@ -39,6 +39,8 @@ export interface AIStatus {
   activatedAt?: number;
   triggerCount: number;
   lastResponseMs?: number;
+  retryInSec?: number;
+  retryAttempt?: number;
 }
 
 export interface AITelemetry {
@@ -65,6 +67,7 @@ const STATUS_COLORS: Record<AIStatus["status"], string> = {
   activating: "#facc15",
   active: "#4ade80",
   error: "#f87171",
+  rate_limited: "#fb923c",
 };
 
 const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
@@ -229,6 +232,10 @@ export class GuidancePanel {
     let actionHtml = "";
     if (isIdle || s.status === "error") {
       actionHtml = `<button id="guidanceActivate" class="guidance-btn guidance-btn-activate" ${this.apps.length === 0 ? "disabled" : ""}>Activate</button>`;
+    } else if (s.status === "rate_limited") {
+      const retryIn = s.retryInSec ?? "?";
+      const attempt = s.retryAttempt ?? "?";
+      actionHtml = `<button class="guidance-btn guidance-btn-pending" disabled style="background:#fb923c">Rate limited -- retry in ${retryIn}s (${attempt})</button>`;
     } else if (isActivating) {
       actionHtml = `<button class="guidance-btn guidance-btn-pending" disabled>Activating...</button>`;
     } else if (isActive) {

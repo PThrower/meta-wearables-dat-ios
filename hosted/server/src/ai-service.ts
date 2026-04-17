@@ -53,6 +53,8 @@ export interface AIServiceStatusContext {
   closeCode?: number;
   /** Human-readable close reason from the provider */
   closeReason?: string;
+  /** True when the provider closed due to a rate-limit / quota exhaustion (transient, retryable) */
+  rateLimited?: boolean;
 }
 
 // --- Interface ---
