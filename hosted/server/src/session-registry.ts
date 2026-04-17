@@ -279,6 +279,12 @@ export class SessionRegistry {
     session.viewers.delete(viewerId);
     session.lastActivityAt = Date.now();
     console.log(`[registry] Viewer disconnected: ${viewerId.slice(0, 8)} session=${sessionId} (${session.viewers.size} remaining)`);
+
+    // Garbage collect phantom sessions: no publisher (ever), no viewers left
+    if (session.viewers.size === 0 && session.publisher === null && !session.metadata.deviceName) {
+      this.sessions.delete(sessionId);
+      console.log(`[registry] Phantom session garbage collected: ${sessionId}`);
+    }
   }
 
   /** Find which session a viewer belongs to by viewerId */

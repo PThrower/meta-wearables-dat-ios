@@ -249,7 +249,7 @@ const server = Bun.serve<WsData>({
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
       const r2Ids = new Set(recorded.map(s => s.sessionId));
       const liveEntries = registry.listActive()
-        .filter(s => !r2Ids.has(s.id))
+        .filter(s => (s.publisherConnected || s.metadata.deviceName) && !r2Ids.has(s.id))
         .map(s => {
           return {
             sessionId: s.id,
@@ -279,7 +279,8 @@ const server = Bun.serve<WsData>({
     // --- Live Sessions (active relay sessions) ---
 
     if (url.pathname === "/sessions") {
-      const active = registry.listActive();
+      // Only show sessions that have (or had) a publisher — skip phantom sessions
+      const active = registry.listActive().filter(s => s.publisherConnected || s.metadata.deviceName);
 
       const historicalSessionIds = await sessionStore.getSessionIds();
 
