@@ -170,7 +170,7 @@ export class Gemma4Service implements AIService {
     if (this.analysisTimer) clearInterval(this.analysisTimer);
     this.analysisTimer = setInterval(() => {
       if (this._status === "connected" && this.frameBuffer.length > 0 && !this.isAnalyzing) {
-        this.analyze("Continue analyzing the scene. Report changes or notable observations. Use emit_guidance_event for anything important.");
+        this.analyze("Continue analyzing the scene. Call BOTH annotate_scene (for detected objects) AND emit_guidance_event (for voice narration). Always use both tools together.");
       }
     }, this.analysisIntervalMs);
   }
