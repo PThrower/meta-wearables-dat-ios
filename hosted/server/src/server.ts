@@ -149,6 +149,20 @@ orchestrator.setGuidanceTextPushFn((sessionId: string, text: string) => {
   }
 });
 
+// Bbox annotation recording: when AI detects objects, write to annotations.jsonl
+orchestrator.setBboxAnnotationFn((sessionId: string, annotation) => {
+  const session = registry.get(sessionId);
+  session?.recorder?.appendBboxAnnotation(annotation);
+});
+
+// Push full guidance events (with bounding boxes) to publisher for iOS overlay
+orchestrator.setGuidanceEventPushFn((sessionId: string, event) => {
+  const session = registry.get(sessionId);
+  if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+    session.publisher.ws.send(JSON.stringify({ type: "guidance_event", event }));
+  }
+});
+
 orchestrator.start();
 
 // --- WASM Loading ---

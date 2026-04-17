@@ -92,6 +92,14 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   });
   guidancePanel.loadApps();
 
+  // Wire bbox overlay callbacks: guidance panel -> relay player overlay canvas
+  guidancePanel.setBboxCallback((boxes) => {
+    if (player) player.setBoundingBoxes(boxes ?? []);
+  });
+  guidancePanel.setOverlayToggleCallback((show) => {
+    if (player) player.setShowOverlays(show);
+  });
+
   player.onJsonMessage = (msg) => {
     if (guidancePanel) guidancePanel.handleMessage(msg);
 

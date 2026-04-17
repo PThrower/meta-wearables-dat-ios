@@ -16,6 +16,16 @@ const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
 const MAX_MANIFEST_ENTRIES = 1000; // cap manifest growth
 
+export interface BboxAnnotation {
+  timestampMs: number;
+  sessionId: string;
+  objects: Array<{
+    y1: number; x1: number; y2: number; x2: number;
+    label: string;
+    confidence: number;
+  }>;
+}
+
 interface VideoSegmentMeta {
   index: number;
   frameCount: number;
@@ -217,6 +227,15 @@ export class SessionRecorder {
       // PCM 16-bit LE: 2 bytes per sample per channel
       this.chunkSampleCount += Math.floor(pcm.length / (this.chunkChannels * 2));
     }
+  }
+
+  /** Append a bounding box annotation to the annotations JSONL sidecar file */
+  appendBboxAnnotation(annotation: BboxAnnotation): void {
+    const line = JSON.stringify(annotation) + "\n";
+    const key = `sessions/${this.sessionId}/annotations.jsonl`;
+    this.store.put(key, Buffer.from(line)).catch(err =>
+      console.error(`[recorder] bbox annotation write failed for ${this.sessionId.slice(0, 8)}:`, err.message)
+    );
   }
 
   private tick() {

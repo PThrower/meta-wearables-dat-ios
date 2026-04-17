@@ -87,6 +87,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var isTapConnected: Bool = false
   @Published var activeAppId: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
+  @Published var boundingBoxes: [BoundingBox] = []
+  @Published var showBboxOverlay: Bool = true
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
       // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
@@ -402,6 +404,28 @@ class StreamSessionViewModel: ObservableObject {
             await self?.audioPlaybackStage.speakGuidance(text)
           }
         }
+
+        // Bounding box annotations from AI
+        if msgType == "guidance_event",
+           let evt = msg["event"] as? [String: Any],
+           (evt["type"] as? String) == "guidance.bbox",
+           let boxes = evt["boundingBoxes"] as? [[String: Any]] {
+          let bboxes = boxes.compactMap { box -> BoundingBox? in
+            guard let y1 = box["y1"] as? Double,
+                  let x1 = box["x1"] as? Double,
+                  let y2 = box["y2"] as? Double,
+                  let x2 = box["x2"] as? Double else { return nil }
+            return BoundingBox(
+              x1: x1 / 1024.0, y1: y1 / 1024.0,
+              x2: x2 / 1024.0, y2: y2 / 1024.0,
+              label: box["label"] as? String ?? "object",
+              confidence: box["confidence"] as? Double ?? 0.8
+            )
+          }
+          Task { @MainActor [weak self] in
+            self?.boundingBoxes = bboxes
+          }
+        }
       }
 
       await relayStage.setOnReceivedAudio { [weak self] data in
@@ -490,6 +514,7 @@ class StreamSessionViewModel: ObservableObject {
     await relayStage.disconnect()
     isRelaying = false
     activeAppId = nil
+    boundingBoxes = []
     NSLog("[StreamSession] Relay disconnected")
   }
 

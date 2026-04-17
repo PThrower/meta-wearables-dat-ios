@@ -67,6 +67,9 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
         NSLog("[AudioPlayback] speakGuidance: \"\(text.prefix(80))\"")
 
+        // Route TTS to Bluetooth glasses if available
+        Self.routeToGlasses()
+
         let rate = self.speechRate
         let language = self.language
 
@@ -178,6 +181,39 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     }
 
     // MARK: - Audio Route Probing
+
+    /// Try to route audio output to Bluetooth HFP glasses.
+    /// AVSpeechSynthesizer doesn't automatically use the HFP output,
+    /// so we explicitly set the preferred input to the Bluetooth port
+    /// which forces output through the glasses speaker.
+    nonisolated static func routeToGlasses() {
+        let session = AVAudioSession.sharedInstance()
+
+        // Log current route
+        let route = session.currentRoute
+        let outputs = route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
+        NSLog("[AudioPlayback] Current outputs before route: \(outputs)")
+
+        // If already on Bluetooth HFP, nothing to do
+        if route.outputs.contains(where: { $0.portType == .bluetoothHFP }) {
+            NSLog("[AudioPlayback] Already on Bluetooth HFP output")
+            return
+        }
+
+        // Find a Bluetooth HFP input and set it as preferred — this forces
+        // the output to route through the same Bluetooth device's HFP speaker
+        let btInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP })
+        if let bt = btInput {
+            do {
+                try session.setPreferredInput(bt)
+                NSLog("[AudioPlayback] Routed to Bluetooth HFP: \(bt.portName)")
+            } catch {
+                NSLog("[AudioPlayback] Failed to set preferred input: \(error)")
+            }
+        } else {
+            NSLog("[AudioPlayback] No Bluetooth HFP input found — TTS will use phone speaker")
+        }
+    }
 
     nonisolated static func logAudioRoutes() {
         let session = AVAudioSession.sharedInstance()

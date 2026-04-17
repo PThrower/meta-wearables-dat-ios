@@ -14,7 +14,8 @@ export interface GuidanceEvent {
     | "guidance.correction"
     | "guidance.identification"
     | "guidance.acknowledgment"
-    | "guidance.transcript";
+    | "guidance.transcript"
+    | "guidance.bbox";
   content: string;
   confidence: number;
   source: string;
@@ -25,6 +26,10 @@ export interface GuidanceEvent {
     severity?: "info" | "warning" | "critical";
     objectLabel?: string;
   };
+  boundingBoxes?: Array<{
+    y1: number; x1: number; y2: number; x2: number;
+    label: string; confidence: number;
+  }>;
 }
 
 export interface AIStatus {
@@ -77,6 +82,7 @@ const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.identification": "#4ade80",
   "guidance.acknowledgment": "rgba(255,255,255,0.45)",
   "guidance.transcript": "rgba(255,255,255,0.15)",
+  "guidance.bbox": "#a78bfa",
 };
 
 const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
@@ -86,6 +92,7 @@ const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
   "guidance.identification": "ID",
   "guidance.acknowledgment": "ACK",
   "guidance.transcript": "",
+  "guidance.bbox": "BBOX",
 };
 
 export class GuidancePanel {
@@ -109,6 +116,9 @@ export class GuidancePanel {
   private collapsed = true;
   private appsLoaded = false;
   private visionFps = 0.5;
+  private showOverlays = true;
+  private onBboxEvent: ((boxes: GuidanceEvent["boundingBoxes"]) => void) | null = null;
+  private onOverlayToggle: ((show: boolean) => void) | null = null;
 
   constructor(container: HTMLElement, sendFn: (msg: object) => void) {
     this.container = container;
@@ -150,6 +160,10 @@ export class GuidancePanel {
         if (this.events.length > MAX_EVENTS) {
           this.events = this.events.slice(-MAX_EVENTS);
         }
+        // Forward bbox events to relay player overlay
+        if (evt.type === "guidance.bbox" && evt.boundingBoxes && this.onBboxEvent) {
+          this.onBboxEvent(evt.boundingBoxes);
+        }
         this.renderEventLog();
       }
     } else if (msg.type === "ai_telemetry") {
@@ -164,6 +178,16 @@ export class GuidancePanel {
   toggle(): void {
     this.collapsed = !this.collapsed;
     this.container.classList.toggle("collapsed", this.collapsed);
+  }
+
+  /** Set callback to forward bbox events to the relay player overlay */
+  setBboxCallback(fn: (boxes: GuidanceEvent["boundingBoxes"]) => void): void {
+    this.onBboxEvent = fn;
+  }
+
+  /** Set callback to toggle overlay visibility */
+  setOverlayToggleCallback(fn: (show: boolean) => void): void {
+    this.onOverlayToggle = fn;
   }
 
   // --- Rendering ---
@@ -273,10 +297,20 @@ export class GuidancePanel {
       </div>`;
     }
 
+    // Overlay toggle (only when active)
+    let overlayHtml = "";
+    if (isActive) {
+      overlayHtml = `<div class="guidance-fps-row">
+        <span class="guidance-fps-label">Overlays</span>
+        <button id="guidanceOverlayToggle" class="guidance-pill" style="margin-left:auto">${this.showOverlays ? "ON" : "OFF"}</button>
+      </div>`;
+    }
+
     return `
       <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
       ${gesturesHtml}
       ${fpsHtml}
+      ${overlayHtml}
       ${infoHtml}
     `;
   }
@@ -317,6 +351,21 @@ export class GuidancePanel {
 
         // TTS indicator for tool-call events (not transcripts)
         const ttsIcon = e.trigger === "ai_tool_call" ? ` <span class="guidance-tts-badge" title="Spoken via TTS">TTS</span>` : "";
+
+        // BBOX event: show object count and labels
+        if (e.type === "guidance.bbox" && e.boundingBoxes) {
+          const objectTags = e.boundingBoxes
+            .map((b) => `<span class="guidance-object">${esc(b.label)} ${Math.round(b.confidence * 100)}%</span>`)
+            .join(" ");
+          return `<div class="guidance-event" style="border-left-color:${color}">
+            <div class="guidance-event-header">
+              <span class="guidance-event-type" style="color:${color}">${label}</span>
+              <span class="guidance-event-confidence">${confidence}%</span>
+              <span class="guidance-event-time">${time}</span>
+            </div>
+            <div class="guidance-event-body">${esc(e.content)} ${objectTags}</div>
+          </div>`;
+        }
 
         return `<div class="guidance-event" style="border-left-color:${color}">
           <div class="guidance-event-header">
@@ -394,6 +443,12 @@ export class GuidancePanel {
     if (fpsSlider) {
       fpsSlider.addEventListener("input", () => this.handleFpsChange(parseFloat(fpsSlider.value)));
     }
+
+    // Overlay toggle
+    const overlayToggle = document.getElementById("guidanceOverlayToggle");
+    if (overlayToggle) {
+      overlayToggle.addEventListener("click", () => this.handleOverlayToggle());
+    }
   }
 
   private handleActivate(): void {
@@ -417,6 +472,12 @@ export class GuidancePanel {
     this.visionFps = fps;
     this.sendFn({ type: "set_vision_fps", fps });
     this.updateFpsDisplay();
+  }
+
+  private handleOverlayToggle(): void {
+    this.showOverlays = !this.showOverlays;
+    if (this.onOverlayToggle) this.onOverlayToggle(this.showOverlays);
+    this.renderControlSection();
   }
 
   private updateFpsDisplay(): void {

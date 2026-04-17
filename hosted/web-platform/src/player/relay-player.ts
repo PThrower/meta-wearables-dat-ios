@@ -97,6 +97,15 @@ export class RelayPlayer {
   // Guidance panel JSON message callback
   onJsonMessage: ((msg: Record<string, unknown>) => void) | null = null;
 
+  // Bounding box overlay
+  private overlayCanvas: HTMLCanvasElement | null = null;
+  private overlayCtx: CanvasRenderingContext2D | null = null;
+  private latestBoundingBoxes: Array<{ y1: number; x1: number; y2: number; x2: number; label: string; confidence: number }> = [];
+  private showOverlays = true;
+  private bboxTimeout: ReturnType<typeof setTimeout> | null = null;
+  private lastVideoWidth = 0;
+  private lastVideoHeight = 0;
+
   constructor(options: RelayPlayerOptions) {
     this.canvas = options.canvas;
     this.ctx = this.canvas ? this.canvas.getContext("2d") : null;
@@ -115,6 +124,78 @@ export class RelayPlayer {
       onAuthRequired: options.onAuthRequired ?? (() => {}),
     };
     this.lastFpsTime = performance.now();
+
+    // Init overlay canvas (sibling of liveCanvas in DOM)
+    const sibling = this.canvas?.nextElementSibling;
+    if (sibling instanceof HTMLCanvasElement && sibling.id === "overlayCanvas") {
+      this.overlayCanvas = sibling;
+      this.overlayCtx = sibling.getContext("2d");
+    }
+  }
+
+  /** Update bounding boxes from a guidance.bbox event */
+  setBoundingBoxes(boxes: Array<{ y1: number; x1: number; y2: number; x2: number; label: string; confidence: number }>): void {
+    this.latestBoundingBoxes = boxes;
+    this.drawBoundingBoxes();
+
+    // Clear boxes after 2x the analysis interval if no new bbox event arrives
+    if (this.bboxTimeout) clearTimeout(this.bboxTimeout);
+    this.bboxTimeout = setTimeout(() => {
+      this.latestBoundingBoxes = [];
+      this.drawBoundingBoxes();
+    }, 10_000);
+  }
+
+  /** Toggle overlay visibility */
+  setShowOverlays(show: boolean): void {
+    this.showOverlays = show;
+    this.drawBoundingBoxes();
+  }
+
+  /** Draw current bounding boxes on the overlay canvas */
+  private drawBoundingBoxes(): void {
+    if (!this.overlayCanvas || !this.overlayCtx) return;
+
+    const ctx = this.overlayCtx;
+    const w = this.lastVideoWidth || this.overlayCanvas.width;
+    const h = this.lastVideoHeight || this.overlayCanvas.height;
+
+    if (this.overlayCanvas.width !== w || this.overlayCanvas.height !== h) {
+      this.overlayCanvas.width = w;
+      this.overlayCanvas.height = h;
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    if (!this.showOverlays || this.latestBoundingBoxes.length === 0) return;
+
+    // Color palette for different labels
+    const colors = ["#4ade80", "#60a5fa", "#facc15", "#f87171", "#a78bfa", "#fb923c", "#2dd4bf", "#e879f9"];
+
+    for (let i = 0; i < this.latestBoundingBoxes.length; i++) {
+      const box = this.latestBoundingBoxes[i];
+      // Convert from 1024-normalized to pixel coordinates
+      const px = (box.x1 / 1024) * w;
+      const py = (box.y1 / 1024) * h;
+      const pw = ((box.x2 - box.x1) / 1024) * w;
+      const ph = ((box.y2 - box.y1) / 1024) * h;
+
+      const color = colors[i % colors.length];
+
+      // Draw box
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, pw, ph);
+
+      // Draw label above box
+      const label = `${box.label} ${Math.round(box.confidence * 100)}%`;
+      ctx.font = "bold 11px 'SF Mono', monospace";
+      const textWidth = ctx.measureText(label).width;
+      ctx.fillStyle = color;
+      ctx.fillRect(px, py - 16, textWidth + 8, 16);
+      ctx.fillStyle = "#000";
+      ctx.fillText(label, px + 4, py - 4);
+    }
   }
 
   // --- Connection ---
@@ -357,6 +438,12 @@ export class RelayPlayer {
     this.audioResumed = false;
     this._firstFrameLocalTime = 0;
     this._firstFrameSenderTime = 0;
+    this.latestBoundingBoxes = [];
+    this.lastVideoWidth = 0;
+    this.lastVideoHeight = 0;
+    if (this.overlayCtx && this.overlayCanvas) {
+      this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
+    }
     this.cb.onAudioLevel(0);
     if (this.workletNode) {
       try { this.workletNode.port.postMessage({ type: "reset" }); } catch {}
@@ -540,6 +627,11 @@ export class RelayPlayer {
       }
       this.ctx.drawImage(img, 0, 0);
       URL.revokeObjectURL(url);
+
+      // Update overlay dimensions and redraw bounding boxes
+      this.lastVideoWidth = width;
+      this.lastVideoHeight = height;
+      this.drawBoundingBoxes();
     };
     img.src = url;
 

@@ -39,6 +39,12 @@ struct StreamView: View {
             .aspectRatio(contentMode: .fill)
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
+          // Bounding box overlay from AI annotations
+          BoundingBoxOverlayView(
+            boxes: viewModel.boundingBoxes,
+            showOverlay: viewModel.showBboxOverlay
+          )
+          .frame(width: geometry.size.width, height: geometry.size.height)
         }
         .edgesIgnoringSafeArea(.all)
       } else {

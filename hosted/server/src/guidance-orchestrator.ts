@@ -31,7 +31,17 @@ export type GuidanceEventType =
   | "guidance.correction"
   | "guidance.identification"
   | "guidance.acknowledgment"
-  | "guidance.transcript";
+  | "guidance.transcript"
+  | "guidance.bbox";
+
+export interface BoundingBox {
+  y1: number;
+  x1: number;
+  y2: number;
+  x2: number;
+  label: string;
+  confidence: number;
+}
 
 export interface GuidanceEvent {
   type: GuidanceEventType;
@@ -45,6 +55,7 @@ export interface GuidanceEvent {
     severity?: "info" | "warning" | "critical";
     objectLabel?: string;
   };
+  boundingBoxes?: BoundingBox[];
 }
 
 export interface AIStatus {
@@ -74,6 +85,12 @@ export type AudioPushFn = (sessionId: string, pcm: Uint8Array) => void;
 
 /** Callback for pushing guidance text to the publisher for client-side TTS */
 export type GuidanceTextPushFn = (sessionId: string, text: string) => void;
+
+/** Callback for recording bbox annotations to session JSONL */
+export type BboxAnnotationFn = (sessionId: string, annotation: import("./session-recorder.js").BboxAnnotation) => void;
+
+/** Callback for pushing full guidance events to publisher WebSocket */
+export type GuidanceEventPushFn = (sessionId: string, event: GuidanceEvent) => void;
 
 // --- Constants ---
 
@@ -107,6 +124,12 @@ export class GuidanceOrchestrator {
   /** Callback to push guidance text to publisher for client-side TTS */
   private guidanceTextPushFn: GuidanceTextPushFn | null = null;
 
+  /** Callback to record bbox annotations to session JSONL */
+  private bboxAnnotationFn: BboxAnnotationFn | null = null;
+
+  /** Callback to push full guidance events (with bounding boxes) to publisher WebSocket */
+  private guidanceEventPushFn: GuidanceEventPushFn | null = null;
+
   private startedAt: number = 0;
   private unsubControlBus: (() => void) | null = null;
 
@@ -127,6 +150,16 @@ export class GuidanceOrchestrator {
   /** Set the callback for pushing guidance text to the publisher (client-side TTS) */
   setGuidanceTextPushFn(fn: GuidanceTextPushFn): void {
     this.guidanceTextPushFn = fn;
+  }
+
+  /** Set the callback for recording bbox annotations to session JSONL */
+  setBboxAnnotationFn(fn: BboxAnnotationFn): void {
+    this.bboxAnnotationFn = fn;
+  }
+
+  /** Set the callback for pushing full guidance events to publisher WebSocket */
+  setGuidanceEventPushFn(fn: GuidanceEventPushFn): void {
+    this.guidanceEventPushFn = fn;
   }
 
   // --- Public API ---
@@ -491,6 +524,55 @@ export class GuidanceOrchestrator {
       // Push guidance text to publisher for client-side TTS
       if (this.guidanceTextPushFn && content) {
         this.guidanceTextPushFn(sessionId, content);
+      }
+
+      const t = this.getOrCreateTelemetry(sessionId);
+      t.guidanceEvents++;
+      this.broadcastTelemetry(sessionId);
+    } else if (toolCall.name === "annotate_scene") {
+      const objects = (toolCall.args.objects as Array<{ box_2d: number[]; label: string; confidence?: number }>) ?? [];
+      if (objects.length === 0) return;
+
+      const boundingBoxes: BoundingBox[] = objects.map((o) => ({
+        y1: o.box_2d[0] ?? 0,
+        x1: o.box_2d[1] ?? 0,
+        y2: o.box_2d[2] ?? 0,
+        x2: o.box_2d[3] ?? 0,
+        label: o.label,
+        confidence: o.confidence ?? 0.8,
+      }));
+
+      const labels = [...new Set(boundingBoxes.map((b) => b.label))].join(", ");
+      this.emitGuidanceEvent(sessionId, {
+        type: "guidance.bbox",
+        content: `Detected ${objects.length} object${objects.length > 1 ? "s" : ""}: ${labels}`,
+        confidence: 0.9,
+        source: appId,
+        trigger: "ai_tool_call",
+        timestampMs: Date.now(),
+        boundingBoxes,
+      });
+
+      // Record bbox annotation to session JSONL
+      if (this.bboxAnnotationFn) {
+        this.bboxAnnotationFn(sessionId, {
+          timestampMs: Date.now(),
+          sessionId,
+          objects: boundingBoxes,
+        });
+      }
+
+      // Push full event to publisher WebSocket (for iOS client bounding box overlay)
+      if (this.guidanceEventPushFn) {
+        this.guidanceEventPushFn(sessionId, {
+          type: "guidance.bbox",
+          content: `Detected ${objects.length} object${objects.length > 1 ? "s" : ""}: ${labels}`,
+          confidence: 0.9,
+          source: appId,
+          trigger: "ai_tool_call",
+          timestampMs: Date.now(),
+          boundingBoxes,
+        });
       }
 
       const t = this.getOrCreateTelemetry(sessionId);

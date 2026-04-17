@@ -257,6 +257,39 @@ export class Gemma4Service implements AIService {
               required: ["eventType", "content"],
             },
           },
+          {
+            name: "annotate_scene",
+            description: "Detect and localize objects with bounding boxes. Call on every frame that has visible objects to provide spatial awareness.",
+            parameters: {
+              type: "object",
+              properties: {
+                objects: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      box_2d: {
+                        type: "array",
+                        items: { type: "number" },
+                        description: "[y1, x1, y2, x2] normalized to 1024x1024 grid",
+                      },
+                      label: {
+                        type: "string",
+                        description: "Object label / class name",
+                      },
+                      confidence: {
+                        type: "number",
+                        description: "Detection confidence 0-1",
+                      },
+                    },
+                    required: ["box_2d", "label"],
+                  },
+                  description: "Array of detected objects with bounding boxes",
+                },
+              },
+              required: ["objects"],
+            },
+          },
         ],
       },
     ];
