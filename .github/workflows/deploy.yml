@@ -28,6 +28,7 @@ jobs:
             echo ">>> Pulling latest"
             cd /root/relay-server
             git checkout -- hosted/server/pkg/ 2>/dev/null || true
+            git clean -fd hosted/web-platform/dist/ 2>/dev/null || true
             git pull origin feat/stream-registry
 
             echo ">>> Updating version env vars"
