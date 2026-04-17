@@ -26,6 +26,8 @@
  *   /latest/video.mp4        - Redirect to most recent session's mp4 export
  *   /latest/export           - JSON metadata for most recent session
  *   /stats                   - JSON stats (platform-wide + per-session)
+ *   /telemetry/ai            - JSON AI telemetry (aggregate or per-session with ?session=<id>)
+ *   /telemetry/ai/log        - WebSocket, live AI guidance event log (optional ?session=<id>)
  *
  * Backward compatible: omitting ?session= routes to "default" session.
  *
@@ -472,6 +474,54 @@ const server = Bun.serve<WsData>({
       });
     }
 
+    // --- AI Telemetry ---
+
+    if (url.pathname === "/telemetry/ai") {
+      const sessionId = url.searchParams.get("session");
+
+      if (sessionId) {
+        // Per-session AI telemetry
+        return Response.json({
+          sessionId,
+          status: orchestrator.getStatus(sessionId),
+          telemetry: orchestrator.getTelemetry(sessionId),
+          eventHistory: orchestrator.getEventHistory(sessionId),
+        });
+      }
+
+      // Aggregate across all sessions
+      const sessionIds = orchestrator.listSessions();
+      const sessions: Record<string, any> = {};
+      let totalTriggers = 0;
+      let totalGuidanceEvents = 0;
+
+      for (const id of sessionIds) {
+        const s = orchestrator.getStatus(id);
+        const t = orchestrator.getTelemetry(id);
+        const h = orchestrator.getEventHistory(id);
+        sessions[id] = { status: s, telemetry: t, eventCount: h.length };
+        totalTriggers += t.triggers;
+        totalGuidanceEvents += t.guidanceEvents;
+      }
+
+      return Response.json({
+        aggregate: {
+          sessions: sessionIds.length,
+          totalTriggers,
+          totalGuidanceEvents,
+        },
+        sessions,
+      });
+    }
+
+    // --- AI Telemetry Live Log WebSocket: /telemetry/ai/log ---
+
+    if (url.pathname === "/telemetry/ai/log") {
+      const sessionId = url.searchParams.get("session") || undefined;
+      server.upgrade(req, { data: { role: "ai-log", clientIp: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown", sessionId: sessionId ?? "all", userId: undefined, email: undefined } });
+      return new Response(null, { status: 204 });
+    }
+
     // --- Audio tap WebSocket: /tap/audio?session=<id> ---
 
     if (url.pathname === "/tap/audio") {
@@ -534,6 +584,44 @@ const server = Bun.serve<WsData>({
         });
         ws.data = { ...ws.data, unsub };
         console.log(`[relay] Audio tap connected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
+        return;
+      }
+
+      if (role === "ai-log") {
+        // Subscribe to guidance events for all sessions (or a specific one)
+        const filterSession = sessionId === "all" ? undefined : sessionId;
+        const send = (msg: any) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+        };
+
+        // Subscribe to existing sessions and track subscriptions for cleanup
+        const unsubs: (() => void)[] = [];
+
+        // If specific session, subscribe to that one
+        if (filterSession) {
+          const unsub = orchestrator.subscribeViewer(filterSession, send);
+          unsubs.push(unsub);
+          // Send initial state
+          send({ type: "ai_status", status: orchestrator.getStatus(filterSession) });
+          send({ type: "ai_telemetry", telemetry: orchestrator.getTelemetry(filterSession) });
+          for (const evt of orchestrator.getEventHistory(filterSession)) {
+            send({ type: "guidance_event", event: evt });
+          }
+        } else {
+          // Subscribe to all known sessions
+          for (const id of orchestrator.listSessions()) {
+            const unsub = orchestrator.subscribeViewer(id, send);
+            unsubs.push(unsub);
+            send({ type: "ai_status", status: orchestrator.getStatus(id), sessionId: id });
+            send({ type: "ai_telemetry", telemetry: orchestrator.getTelemetry(id), sessionId: id });
+            for (const evt of orchestrator.getEventHistory(id)) {
+              send({ type: "guidance_event", event: evt, sessionId: id });
+            }
+          }
+        }
+
+        ws.data = { ...ws.data, aiLogUnsubs: unsubs };
+        console.log(`[relay] AI telemetry log connected: session=${filterSession ?? "all"}`);
         return;
       }
 
@@ -792,6 +880,14 @@ const server = Bun.serve<WsData>({
       if (role === "audio-tap") {
         if (ws.data.unsub) ws.data.unsub();
         console.log(`[relay] Audio tap disconnected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
+        return;
+      }
+
+      if (role === "ai-log") {
+        if (ws.data.aiLogUnsubs) {
+          for (const unsub of ws.data.aiLogUnsubs) unsub();
+        }
+        console.log(`[relay] AI telemetry log disconnected: session=${sessionId ?? "all"}`);
         return;
       }
 

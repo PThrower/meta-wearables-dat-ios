@@ -9,9 +9,8 @@
  */
 
 import { join, extname } from "node:path";
-import { verifyToken, extractToken, mintSessionToken, verifySessionToken, revokeToken } from "./auth.js";
+import { extractToken, mintSessionToken, verifySessionToken, revokeToken } from "./auth.js";
 import { proxyRequest } from "./proxy.js";
-import type { AuthUser } from "./types.js";
 
 // --- Config ---
 
@@ -72,7 +71,6 @@ interface WsBridgeData {
 
 export function createFetchHandler(config?: {
   noAuth?: boolean;
-  googleClientId?: string;
   viewerDist?: string;
   gitCommit?: string;
   buildVersion?: string;
@@ -149,6 +147,13 @@ export function createFetchHandler(config?: {
       if (resp) return resp;
     }
 
+    // --- AI Telemetry dashboard ---
+
+    if (pathname === "/telemetry" || pathname === "/telemetry/") {
+      const resp = serveStatic(_viewerDist, "telemetry.html");
+      if (resp) return resp;
+    }
+
     // --- Gallery API ---
 
     if (pathname === "/gallery/api") {
@@ -170,6 +175,12 @@ export function createFetchHandler(config?: {
     // --- Apps registry ---
 
     if (pathname === "/apps") {
+      return proxyRequest(req, pathname);
+    }
+
+    // --- AI Telemetry ---
+
+    if (pathname === "/telemetry/ai") {
       return proxyRequest(req, pathname);
     }
 
@@ -213,7 +224,7 @@ export function createFetchHandler(config?: {
 
     // --- WebSocket proxy to relay server ---
 
-    if (pathname === "/publish" || pathname === "/view" || pathname === "/tap/audio") {
+    if (pathname === "/publish" || pathname === "/view" || pathname === "/tap/audio" || pathname === "/telemetry/ai/log") {
       const targetUrl = `ws://127.0.0.1:${RELAY_PORT}${pathname}${url.search}`;
       server.upgrade(req, { data: { targetUrl } satisfies WsBridgeData });
       return new Response(null, { status: 204 });

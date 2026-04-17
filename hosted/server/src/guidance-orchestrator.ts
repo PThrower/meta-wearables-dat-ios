@@ -364,6 +364,15 @@ export class GuidanceOrchestrator {
     return this.eventHistory.get(sessionId) ?? [];
   }
 
+  /** List all session IDs that have any AI state (status, telemetry, or events). */
+  listSessions(): string[] {
+    const ids = new Set<string>();
+    for (const id of this.status.keys()) ids.add(id);
+    for (const id of this.telemetry.keys()) ids.add(id);
+    for (const id of this.eventHistory.keys()) ids.add(id);
+    return [...ids];
+  }
+
   // --- Lifecycle ---
 
   start(): void {

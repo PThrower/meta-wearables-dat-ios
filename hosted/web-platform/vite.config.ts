@@ -18,6 +18,7 @@ export default defineConfig({
       "/stats":    "http://localhost:3000",
       "/latest":   "http://localhost:3000",
       "/api":      "http://localhost:3000",
+      "/telemetry": "http://localhost:3000",
     },
   },
   build: {
@@ -27,6 +28,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, "index.html"),
         landing: resolve(__dirname, "landing.html"),
+        telemetry: resolve(__dirname, "telemetry.html"),
       },
       external: ["three"],
     },

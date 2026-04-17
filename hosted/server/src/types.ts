@@ -54,6 +54,7 @@ export interface WsData {
   email?: string;
   unsub?: () => void;   // Audio tap unsubscribe callback
   guidanceUnsub?: () => void; // Guidance orchestrator unsubscribe callback
+  aiLogUnsubs?: (() => void)[]; // AI telemetry log unsubscribe callbacks
 }
 
 // --- Publisher ---
