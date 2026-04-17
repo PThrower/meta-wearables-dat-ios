@@ -6,6 +6,11 @@
       "output": { "format": "pcm-audio" }
     },
     {
+      "id": "s2s-gemma4-rest",
+      "input": { "format": "jpeg-image" },
+      "output": { "format": "text" }
+    },
+    {
       "id": "hand-pose",
       "input": { "format": "jpeg-image" },
       "output": { "format": "gesture-event" }
@@ -24,6 +29,20 @@
         "voice": "Kore",
         "visionFps": 0.5,
         "gestures": ["thumbs_up", "thumbs_down", "open_palm", "pointing"]
+      }
+    },
+    {
+      "id": "visual-intelligence",
+      "name": "Visual Intelligence",
+      "description": "AI-powered visual analysis and guidance using Gemma 4",
+      "icon": "eye",
+      "binding": "s2s-gemma4-rest",
+      "systemPrompt": "You are a visual intelligence assistant for someone wearing smart glasses with a camera. Analyze the camera feed and provide helpful guidance.\n\nRules:\n- You receive JPEG frames periodically. Describe what you see concisely.\n- Use emit_guidance_event for anything the user should hear spoken aloud: obstacle warnings, object identification, text/sign reading, navigation cues, and hazard alerts.\n- Your text output is your internal analysis shown in the viewer panel. The spoken guidance comes ONLY from emit_guidance_event tool calls.\n- Keep guidance messages short and actionable (one sentence).\n- Prioritize safety: hazards, obstacles, and warnings always take precedence.\n- If nothing notable changed since the last analysis, respond briefly or skip the guidance event.\n- Identify objects, read signs/text, describe scene changes, and note environmental conditions.",
+      "config": {
+        "model": "gemma-4-26b-a4b-it",
+        "visionFps": 0.2,
+        "temperature": 0.4,
+        "analysisIntervalSec": 5
       }
     }
   ]

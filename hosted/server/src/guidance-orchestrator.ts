@@ -19,8 +19,9 @@ import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
 import { createAIService } from "./ai-service.js";
-// Import to register the gemini provider
+// Import to register the AI providers
 import "./gemini-live-service.js";
+import "./gemma4-service.js";
 
 // --- Types ---
 
@@ -71,6 +72,9 @@ export interface AITelemetry {
 /** Callback for pushing audio back to the relay's /audio-in path */
 export type AudioPushFn = (sessionId: string, pcm: Uint8Array) => void;
 
+/** Callback for pushing guidance text to the publisher for client-side TTS */
+export type GuidanceTextPushFn = (sessionId: string, text: string) => void;
+
 // --- Constants ---
 
 const MAX_EVENT_HISTORY = 100;
@@ -100,6 +104,9 @@ export class GuidanceOrchestrator {
   /** Callback to push AI audio response to relay's audio-in path */
   private audioPushFn: AudioPushFn | null = null;
 
+  /** Callback to push guidance text to publisher for client-side TTS */
+  private guidanceTextPushFn: GuidanceTextPushFn | null = null;
+
   private startedAt: number = 0;
   private unsubControlBus: (() => void) | null = null;
 
@@ -115,6 +122,11 @@ export class GuidanceOrchestrator {
   /** Set the callback for pushing AI audio back to the relay session */
   setAudioPushFn(fn: AudioPushFn): void {
     this.audioPushFn = fn;
+  }
+
+  /** Set the callback for pushing guidance text to the publisher (client-side TTS) */
+  setGuidanceTextPushFn(fn: GuidanceTextPushFn): void {
+    this.guidanceTextPushFn = fn;
   }
 
   // --- Public API ---
@@ -409,6 +421,8 @@ export class GuidanceOrchestrator {
 
   private resolveProvider(primitiveId: string): string {
     // Map primitive IDs to AI provider names
+    // Order matters: "gemma" before "gemini" to avoid false match
+    if (primitiveId.includes("gemma")) return "gemma4";
     if (primitiveId.includes("gemini")) return "gemini-live";
     if (primitiveId.includes("openai")) return "openai";
     // Default to gemini-live
@@ -461,9 +475,10 @@ export class GuidanceOrchestrator {
   private handleToolCall(sessionId: string, appId: string, toolCall: { name: string; args: Record<string, unknown> }): void {
     if (toolCall.name === "emit_guidance_event") {
       const eventType = `guidance.${toolCall.args.eventType ?? "step"}` as GuidanceEventType;
+      const content = (toolCall.args.content as string) ?? "";
       this.emitGuidanceEvent(sessionId, {
         type: eventType,
-        content: (toolCall.args.content as string) ?? "",
+        content,
         confidence: (toolCall.args.confidence as number) ?? 0.9,
         source: appId,
         trigger: "ai_tool_call",
@@ -472,6 +487,11 @@ export class GuidanceOrchestrator {
           severity: (toolCall.args.severity as "info" | "warning" | "critical") ?? "info",
         },
       });
+
+      // Push guidance text to publisher for client-side TTS
+      if (this.guidanceTextPushFn && content) {
+        this.guidanceTextPushFn(sessionId, content);
+      }
 
       const t = this.getOrCreateTelemetry(sessionId);
       t.guidanceEvents++;
