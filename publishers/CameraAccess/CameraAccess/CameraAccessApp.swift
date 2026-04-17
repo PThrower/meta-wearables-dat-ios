@@ -110,8 +110,13 @@ struct CameraAccessApp: App {
     WindowGroup {
       // Main app view with access to the shared Wearables SDK instance
       // The Wearables.shared singleton provides the core DAT API
-      MainAppView(wearables: Wearables.shared, viewModel: wearablesViewModel, telemetryService: telemetryService)
-        // Show error alerts for view model failures
+      #if DEBUG
+      MainAppView(
+          wearables: Wearables.shared,
+          viewModel: wearablesViewModel,
+          telemetryService: telemetryService,
+          mockDeviceViewModel: debugMenuViewModel.mockDeviceKitViewModel
+        )
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {
             wearablesViewModel.dismissError()
@@ -119,14 +124,20 @@ struct CameraAccessApp: App {
         } message: {
           Text(wearablesViewModel.errorMessage)
         }
-        #if DEBUG
-      .sheet(isPresented: $debugMenuViewModel.showDebugMenu) {
-        MockDeviceKitView(viewModel: debugMenuViewModel.mockDeviceKitViewModel)
-      }
-      .overlay {
-        DebugMenuView(debugMenuViewModel: debugMenuViewModel)
-      }
-        #endif
+      #else
+      MainAppView(
+          wearables: Wearables.shared,
+          viewModel: wearablesViewModel,
+          telemetryService: telemetryService
+        )
+        .alert("Error", isPresented: $wearablesViewModel.showError) {
+          Button("OK") {
+            wearablesViewModel.dismissError()
+          }
+        } message: {
+          Text(wearablesViewModel.errorMessage)
+        }
+      #endif
 
       // Registration view handles the flow for connecting to the glasses via Meta AI
       RegistrationView(viewModel: wearablesViewModel)

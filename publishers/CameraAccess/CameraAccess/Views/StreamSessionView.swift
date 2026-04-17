@@ -14,6 +14,10 @@
 import MWDATCore
 import SwiftUI
 
+#if DEBUG
+import MWDATMockDevice
+#endif
+
 struct StreamSessionView: View {
   let wearables: WearablesInterface
   @ObservedObject private var wearablesViewModel: WearablesViewModel
@@ -22,21 +26,37 @@ struct StreamSessionView: View {
   @State private var orientation: UIInterfaceOrientation?
   @Environment(\.scenePhase) private var scenePhase
 
+  #if DEBUG
+  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
+
+  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, mockDeviceVM: MockDeviceKitView.ViewModel) {
+    self.wearables = wearables
+    self.wearablesViewModel = wearablesVM
+    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
+    self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
+    self._mockDeviceVM = ObservedObject(wrappedValue: mockDeviceVM)
+  }
+  #else
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService) {
     self.wearables = wearables
     self.wearablesViewModel = wearablesVM
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
     self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
   }
+  #endif
 
   var body: some View {
     ZStack {
       if viewModel.isStreaming {
         // Full-screen video view with streaming controls
-        StreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
+        StreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService)
       } else {
         // Pre-streaming setup view with permissions and start button
-        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel)
+        #if DEBUG
+        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService, mockDeviceVM: mockDeviceVM)
+        #else
+        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService)
+        #endif
       }
     }
     .alert("Error", isPresented: $viewModel.showError) {
@@ -46,16 +66,6 @@ struct StreamSessionView: View {
     } message: {
       Text(viewModel.errorMessage)
     }
-    #if DEBUG
-    .overlay(alignment: .topTrailing) {
-      TelemetryHUDView(telemetry: telemetryService)
-        .padding(8)
-    }
-    .overlay(alignment: .bottomLeading) {
-      DebugPanel(viewModel: viewModel, wearablesVM: wearablesViewModel)
-        .padding(8)
-    }
-    #endif
     .onAppear {
       if viewModel.isStreaming {
         OrientationLock.shared.unlock()

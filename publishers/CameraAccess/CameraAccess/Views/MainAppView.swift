@@ -17,20 +17,48 @@
 import MWDATCore
 import SwiftUI
 
+#if DEBUG
+import MWDATMockDevice
+#endif
+
 struct MainAppView: View {
   let wearables: WearablesInterface
   @ObservedObject private var viewModel: WearablesViewModel
   @ObservedObject private var telemetryService: TelemetryService
 
+  #if DEBUG
+  @ObservedObject var mockDeviceViewModel: MockDeviceKitView.ViewModel
+
+  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, mockDeviceViewModel: MockDeviceKitView.ViewModel) {
+    self.wearables = wearables
+    self.viewModel = viewModel
+    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
+    self._mockDeviceViewModel = ObservedObject(wrappedValue: mockDeviceViewModel)
+  }
+  #else
   init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService) {
     self.wearables = wearables
     self.viewModel = viewModel
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
   }
+  #endif
 
   var body: some View {
     if viewModel.registrationState == .registered || viewModel.hasMockDevice {
-      StreamSessionView(wearables: wearables, wearablesVM: viewModel, telemetryService: telemetryService)
+      #if DEBUG
+      StreamSessionView(
+        wearables: wearables,
+        wearablesVM: viewModel,
+        telemetryService: telemetryService,
+        mockDeviceVM: mockDeviceViewModel
+      )
+      #else
+      StreamSessionView(
+        wearables: wearables,
+        wearablesVM: viewModel,
+        telemetryService: telemetryService
+      )
+      #endif
     } else {
       // User not registered - show registration/onboarding flow
       HomeScreenView(viewModel: viewModel)

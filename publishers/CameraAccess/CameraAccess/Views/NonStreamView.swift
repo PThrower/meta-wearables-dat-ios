@@ -17,28 +17,34 @@ import MWDATCamera
 import MWDATCore
 import SwiftUI
 
+#if DEBUG
+import MWDATMockDevice
+#endif
+
 struct NonStreamView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  @ObservedObject var telemetryService: TelemetryService
+  #if DEBUG
+  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
+  #endif
   @State private var sheetHeight: CGFloat = 300
+  @State private var showSettings = false
 
   var body: some View {
     ZStack {
-      Color.black.edgesIgnoringSafeArea(.all)
+      Color(UIColor.systemGroupedBackground).edgesIgnoringSafeArea(.all)
 
       VStack {
         HStack {
           Spacer()
-          Menu {
-            Button("Disconnect", role: .destructive) {
-              wearablesVM.disconnectGlasses()
-            }
-            .disabled(wearablesVM.registrationState != .registered)
+          Button {
+            showSettings = true
           } label: {
             Image(systemName: "gearshape")
               .resizable()
               .aspectRatio(contentMode: .fit)
-              .foregroundColor(.white)
+              .foregroundColor(.primary)
               .frame(width: 24, height: 24)
           }
         }
@@ -49,81 +55,51 @@ struct NonStreamView: View {
           Image(.cameraAccessIcon)
             .resizable()
             .renderingMode(.template)
-            .foregroundColor(.white)
+            .foregroundColor(.primary)
             .aspectRatio(contentMode: .fit)
             .frame(width: 120)
 
           Text("Stream Your Glasses Camera")
             .font(.system(size: 20, weight: .semibold))
-            .foregroundColor(.white)
+            .foregroundColor(.primary)
 
           Text("Tap the Start streaming button to stream video from your glasses or use the camera button to take a photo from your glasses.")
             .font(.system(size: 15))
             .multilineTextAlignment(.center)
-            .foregroundColor(.white)
+            .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
 
         Spacer()
 
-        // Device picker - show when multiple devices available
-        if wearablesVM.devices.count > 1 {
-          DevicePickerSection(
-            viewModel: viewModel,
-            wearablesVM: wearablesVM
-          )
-          .padding(.horizontal, 24)
-          .padding(.bottom, 8)
-        }
-
-        // Stream config
-        StreamConfigSection(viewModel: viewModel)
-          .padding(.horizontal, 24)
-          .padding(.bottom, 8)
-
-        // TTS playback toggle
-        HStack {
-          Image(systemName: "speaker.wave.2")
-            .foregroundColor(.white.opacity(0.7))
-            .frame(width: 20)
-
-          VStack(alignment: .leading, spacing: 2) {
-            Text("TTS Playback")
-              .font(.system(size: 14, weight: .medium))
-              .foregroundColor(.white)
-            Text("Play \"hello world\" through glasses speaker")
-              .font(.system(size: 11))
-              .foregroundColor(.white.opacity(0.5))
-          }
-
-          Spacer()
-
-          Toggle("", isOn: $viewModel.isTTSPlaybackEnabled)
-            .labelsHidden()
-            .tint(.blue)
-            .onChange(of: viewModel.isTTSPlaybackEnabled) { enabled in
-              Task {
-                if enabled {
-                  await viewModel.startTTSPlayback()
-                } else {
-                  await viewModel.stopTTSPlayback()
-                }
-              }
-            }
-        }
+        // Device picker - always show (includes mock device controls in debug)
+        #if DEBUG
+        DevicePickerSection(
+          viewModel: viewModel,
+          wearablesVM: wearablesVM,
+          mockDeviceVM: mockDeviceVM
+        )
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
+        #else
+        DevicePickerSection(
+          viewModel: viewModel,
+          wearablesVM: wearablesVM
+        )
+        .padding(.horizontal, 24)
+        .padding(.bottom, 8)
+        #endif
 
         HStack(spacing: 8) {
           Image(systemName: "hourglass")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .foregroundColor(.white.opacity(0.7))
+            .foregroundColor(.secondary)
             .frame(width: 16, height: 16)
 
           Text("Waiting for an active device")
             .font(.system(size: 14))
-            .foregroundColor(.white.opacity(0.7))
+            .foregroundColor(.secondary)
         }
         .padding(.bottom, 12)
         .opacity(viewModel.hasActiveDevice ? 0 : 1)
@@ -139,6 +115,9 @@ struct NonStreamView: View {
         }
       }
       .padding(.all, 24)
+    }
+    .sheet(isPresented: $showSettings) {
+      SettingsView(mode: .preStream, viewModel: viewModel, wearablesVM: wearablesVM, telemetryService: telemetryService)
     }
     .sheet(isPresented: $wearablesVM.showGettingStartedSheet) {
       if #available(iOS 16.0, *) {
@@ -157,34 +136,36 @@ struct NonStreamView: View {
 struct DevicePickerSection: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  #if DEBUG
+  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
+  #endif
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("SELECT DEVICE")
         .font(.system(size: 11, weight: .bold, design: .monospaced))
-        .foregroundColor(.white.opacity(0.5))
+        .foregroundColor(.secondary)
 
       ForEach(wearablesVM.devices, id: \.self) { deviceId in
         let info = wearablesVM.deviceInfos[deviceId]
         let isSelected = viewModel.selectedDeviceId == deviceId
-        let isAuto = viewModel.selectedDeviceId == nil
 
         Button {
           viewModel.selectDevice(deviceId)
         } label: {
           HStack(spacing: 10) {
             Image(systemName: deviceIcon(for: info?.type))
-              .foregroundColor(.white)
+              .foregroundColor(.primary)
               .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
               Text(info?.name ?? deviceId)
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(.primary)
               HStack(spacing: 6) {
                 Text(info?.type.displayName ?? "Unknown")
                   .font(.system(size: 11))
-                  .foregroundColor(.white.opacity(0.5))
+                  .foregroundColor(.secondary)
                 linkStateBadge(info?.linkState)
               }
             }
@@ -198,7 +179,7 @@ struct DevicePickerSection: View {
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 8)
-          .background(isSelected ? Color.white.opacity(0.15) : Color.white.opacity(0.05))
+          .background(isSelected ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
           .cornerRadius(8)
         }
       }
@@ -209,12 +190,12 @@ struct DevicePickerSection: View {
       } label: {
         HStack(spacing: 10) {
           Image(systemName: "wand.and.stars")
-            .foregroundColor(.white.opacity(0.7))
+            .foregroundColor(.secondary)
             .frame(width: 20)
 
           Text("Auto-select")
             .font(.system(size: 14))
-            .foregroundColor(.white.opacity(0.7))
+            .foregroundColor(.secondary)
 
           Spacer()
 
@@ -225,9 +206,81 @@ struct DevicePickerSection: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(viewModel.selectedDeviceId == nil ? Color.white.opacity(0.15) : Color.white.opacity(0.05))
+        .background(viewModel.selectedDeviceId == nil ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(8)
       }
+
+      #if DEBUG
+      Divider()
+
+      // Mock device controls
+      HStack(spacing: 10) {
+        Image(systemName: "ladybug.fill")
+          .foregroundColor(.yellow)
+          .frame(width: 20)
+
+        Text("Mock Device")
+          .font(.system(size: 14))
+          .foregroundColor(.yellow.opacity(0.8))
+
+        Spacer()
+
+        if mockDeviceVM.cardViewModels.isEmpty {
+          Button {
+            mockDeviceVM.pairRaybanMeta()
+          } label: {
+            HStack(spacing: 4) {
+              Image(systemName: "plus")
+                .font(.system(size: 10, weight: .bold))
+              Text("Pair")
+                .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(.black)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.yellow)
+            .cornerRadius(6)
+          }
+        } else {
+          Menu {
+            ForEach(Array(mockDeviceVM.cardViewModels.enumerated()), id: \.offset) { _, cardVM in
+              Button {
+                mockDeviceVM.unpairDevice(cardVM.device)
+              } label: {
+                Label("Unpair \(cardVM.deviceName)", systemImage: "xmark.circle")
+              }
+            }
+
+            if mockDeviceVM.cardViewModels.count < 3 {
+              Divider()
+              Button {
+                mockDeviceVM.pairRaybanMeta()
+              } label: {
+                Label("Pair Another", systemImage: "plus.circle")
+              }
+            }
+          } label: {
+            HStack(spacing: 4) {
+              Text("\(mockDeviceVM.cardViewModels.count)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+              Text("paired")
+                .font(.system(size: 11))
+              Image(systemName: "ellipsis.circle")
+                .font(.system(size: 11))
+            }
+            .foregroundColor(.yellow)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.yellow.opacity(0.15))
+            .cornerRadius(6)
+          }
+        }
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 8)
+      .background(Color(UIColor.secondarySystemGroupedBackground))
+      .cornerRadius(8)
+      #endif
     }
   }
 
@@ -254,7 +307,7 @@ struct DevicePickerSection: View {
   private func linkStateColorLabel(_ state: LinkState?) -> (Color, String) {
     switch state {
     case .connected: return (.green, "CONNECTED")
-    case .connecting: return (.yellow, "CONNECTING")
+    case .connecting: return (.orange, "CONNECTING")
     case .disconnected: return (.red, "DISCONNECTED")
     case nil: return (.gray, "UNKNOWN")
     }
@@ -270,13 +323,13 @@ struct StreamConfigSection: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("STREAM SETTINGS")
         .font(.system(size: 11, weight: .bold, design: .monospaced))
-        .foregroundColor(.white.opacity(0.5))
+        .foregroundColor(.secondary)
 
       // Resolution picker
       HStack(spacing: 6) {
         Text("Resolution")
           .font(.system(size: 13))
-          .foregroundColor(.white.opacity(0.7))
+          .foregroundColor(.secondary)
           .frame(width: 80, alignment: .leading)
 
         ForEach(StreamingResolution.allCases, id: \.self) { res in
@@ -285,10 +338,10 @@ struct StreamConfigSection: View {
           } label: {
             Text(resLabel(res))
               .font(.system(size: 12, weight: viewModel.selectedResolution == res ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedResolution == res ? .white : .white.opacity(0.5))
+              .foregroundColor(viewModel.selectedResolution == res ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedResolution == res ? Color.blue.opacity(0.8) : Color.white.opacity(0.08))
+              .background(viewModel.selectedResolution == res ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
@@ -298,7 +351,7 @@ struct StreamConfigSection: View {
       HStack(spacing: 6) {
         Text("Frame Rate")
           .font(.system(size: 13))
-          .foregroundColor(.white.opacity(0.7))
+          .foregroundColor(.secondary)
           .frame(width: 80, alignment: .leading)
 
         ForEach([UInt(24), 30, 60], id: \.self) { fps in
@@ -307,10 +360,10 @@ struct StreamConfigSection: View {
           } label: {
             Text("\(fps) fps")
               .font(.system(size: 12, weight: viewModel.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedFrameRate == fps ? .white : .white.opacity(0.5))
+              .foregroundColor(viewModel.selectedFrameRate == fps ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedFrameRate == fps ? Color.blue.opacity(0.8) : Color.white.opacity(0.08))
+              .background(viewModel.selectedFrameRate == fps ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
@@ -319,7 +372,7 @@ struct StreamConfigSection: View {
       // Current config summary
       Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} RAW codec")
         .font(.system(size: 10, design: .monospaced))
-        .foregroundColor(.white.opacity(0.3))
+        .foregroundColor(.secondary)
         .padding(.top, 2)
     }
   }

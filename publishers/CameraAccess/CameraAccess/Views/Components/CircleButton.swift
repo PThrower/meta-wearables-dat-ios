@@ -33,9 +33,9 @@ struct CircleButton: View {
           .font(.system(size: 16))
       }
     }
-    .foregroundColor(.black)
+    .foregroundColor(.white)
     .frame(width: 56, height: 56)
-    .background(.white)
+    .background(.ultraThinMaterial)
     .clipShape(Circle())
   }
 }
