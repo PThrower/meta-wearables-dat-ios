@@ -301,17 +301,19 @@ export class SessionRegistry {
   /** Fan out a video frame to all viewers in a session */
   fanout(sessionId: string, data: Uint8Array) {
     const session = this.sessions.get(sessionId);
-    if (!session || session.viewers.size === 0) return;
+    if (!session) return;
 
     const header = parseHeader(data);
     if (!header) return;
 
-    // Update publisher timing
+    // Always update publisher stats — even with zero viewers
     if (session.publisher) {
       updateTiming(session.publisher.timing, header.sequence, header.timestampMs);
       session.publisher.lastHeader = { width: header.width, height: header.height, quality: header.quality };
       session.metadata.resolution = { width: header.width, height: header.height };
     }
+
+    if (session.viewers.size === 0) return;
 
     this.totalFramesRelayed++;
 

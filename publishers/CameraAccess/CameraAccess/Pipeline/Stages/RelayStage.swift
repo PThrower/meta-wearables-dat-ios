@@ -123,7 +123,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private var framesDroppedByBackpressure: UInt64 = 0
     private var isEncoding = false
 
-    init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.6) {
+    init(config: FrameStageConfig = FrameStageConfig(targetFPS: 30), jpegQuality: CGFloat = 0.5) {
         self.config = config
         self.jpegQuality = jpegQuality
     }
