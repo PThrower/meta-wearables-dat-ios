@@ -9,13 +9,27 @@ export {
   FRAU_MAGIC,
   HEADER_SIZE,
   AUDIO_HEADER_SIZE,
+  PROTOCOL_VERSION,
+  CRC_OFFSET,
+  HEADER_BEFORE_CRC,
   isVideoFrame,
   isAudioFrame,
+  isKnownCodecType,
   parseVideoHeader,
   parseAudioHeader,
+  buildVideoFrame,
+  buildAudioFrame,
+  crc16,
   freshTiming,
   updateTiming,
   formatTiming,
+  isBackpressureMessage,
+  isBackpressureAckMessage,
+} from "@ebowwa/relay-protocol";
+
+export type {
+  BackpressureMessage,
+  BackpressureAckMessage,
 } from "@ebowwa/relay-protocol";
 
 // Backward compat: server code uses parseHeader

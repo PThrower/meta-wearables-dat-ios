@@ -1,6 +1,6 @@
 {
   "name": "@ebowwa/relay-protocol",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared wire protocol constants, types, and parsers for caringmind-frame-relay",
   "type": "module",
   "main": "./dist/index.js",

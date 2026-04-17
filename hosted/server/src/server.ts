@@ -41,7 +41,7 @@ import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
 import type { WsData, QualityPreset, AccessLevel, AclEntry } from "./types.js";
 import { QUALITY_PRESETS } from "./types.js";
-import { isAudioFrame, isVideoFrame, parseAudioHeader } from "./protocol.js";
+import { HEADER_SIZE, AUDIO_HEADER_SIZE, isAudioFrame, isVideoFrame, parseAudioHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
 import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
@@ -123,30 +123,10 @@ orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
 
   console.log(`[relay] AI audio push: ${pcm.length} bytes session=${sessionId}`);
 
-  // Build FRAU frame: codecType=3 (relay-inbound), 16kHz, mono, 16-bit
-  const seq = BigInt(Date.now());
-  const timestampMs = BigInt(Date.now());
-  const headerSize = 29;
-  const frame = new Uint8Array(headerSize + pcm.length);
-  const view = new DataView(frame.buffer);
-
-  // Magic "FRAU"
-  view.setUint8(0, 0x46); view.setUint8(1, 0x52);
-  view.setUint8(2, 0x41); view.setUint8(3, 0x55);
-  // codecType = 3 (relay-inbound)
-  view.setUint8(4, 3);
-  // Sequence (u64 LE)
-  view.setBigUint64(5, seq, true);
-  // Sample rate 16000 (u32 LE)
-  view.setUint32(13, 16000, true);
-  // Channels 1 (u16 LE)
-  view.setUint16(17, 1, true);
-  // Bits per sample 16 (u16 LE)
-  view.setUint16(19, 16, true);
-  // Timestamp ms (u64 LE)
-  view.setBigUint64(21, timestampMs, true);
-  // PCM payload
-  frame.set(pcm, headerSize);
+  // Build FRAU v1 frame: codecType=3 (relay-inbound), 16kHz, mono, 16-bit
+  const seq = Date.now();
+  const timestampMs = Date.now();
+  const frame = buildAudioFrame(3, seq, 16000, 1, 16, timestampMs, pcm);
 
   // Fan out to viewers
   registry.fanoutAudio(sessionId, frame, 3, 16000);
@@ -334,7 +314,7 @@ const server = Bun.serve<WsData>({
       const sessionId = audioInMatch[1];
 
       const buf = await req.arrayBuffer();
-      if (buf.byteLength < 29) return Response.json({ error: "Payload too small" }, { status: 400 });
+      if (buf.byteLength < AUDIO_HEADER_SIZE) return Response.json({ error: "Payload too small" }, { status: 400 });
 
       const data = new Uint8Array(buf);
       if (!isAudioFrame(data)) return Response.json({ error: "Not a FRAU frame" }, { status: 400 });
@@ -570,22 +550,9 @@ const server = Bun.serve<WsData>({
       if (role === "audio-tap") {
         const unsub = audioTapBus.onFrame((frame) => {
           if (ws.readyState !== WebSocket.OPEN) { unsub(); return; }
-          // Send binary FRAU frame (raw PCM) instead of base64 JSON for efficiency
-          // Reconstruct the original binary frame from the parsed AudioFrame
-          const pcmLen = frame.pcm.length;
-          const buf = new ArrayBuffer(29 + pcmLen);
-          const view = new DataView(buf);
-          // Magic "FRAU"
-          view.setUint8(0, 0x46); view.setUint8(1, 0x52);
-          view.setUint8(2, 0x41); view.setUint8(3, 0x55);
-          view.setUint8(4, frame.codecType);
-          view.setBigUint64(5, BigInt(frame.sequence), true);
-          view.setUint32(13, frame.sampleRate, true);
-          view.setUint16(17, frame.channels, true);
-          view.setUint16(19, frame.bitsPerSample, true);
-          view.setBigUint64(21, BigInt(frame.timestampMs), true);
-          new Uint8Array(buf, 29).set(frame.pcm);
-          ws.send(new Uint8Array(buf));
+          // Send binary FRAU v1 frame (raw PCM) instead of base64 JSON for efficiency
+          const frauFrame = buildAudioFrame(frame.codecType, frame.sequence, frame.sampleRate, frame.channels, frame.bitsPerSample, frame.timestampMs, new Uint8Array(frame.pcm));
+          ws.send(frauFrame);
         });
         ws.data = { ...ws.data, unsub };
         console.log(`[relay] Audio tap connected: session=${sessionId} taps=${audioTapBus.tapCount()}`);
@@ -751,6 +718,9 @@ const server = Bun.serve<WsData>({
               const fps = Math.max(0.1, Math.min(cmd.fps, 5));
               orchestrator.setVisionFps(sessionId, fps);
               ws.send(JSON.stringify({ type: "vision_fps", fps }));
+            } else if (isBackpressureAckMessage(cmd)) {
+              // Publisher acknowledges backpressure adjustment
+              console.log(`[relay] Backpressure ack from publisher: targetFps=${cmd.targetFps} session=${sessionId}`);
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
@@ -768,7 +738,7 @@ const server = Bun.serve<WsData>({
 
             // Forward PCM payload to AI service (if active)
             if (audioHdr && session.activeAppId) {
-              const pcmPayload = buf.slice(29);
+              const pcmPayload = buf.slice(AUDIO_HEADER_SIZE);
               orchestrator.sendAudio(sessionId, pcmPayload);
             }
           } else if (isVideoFrame(buf)) {
@@ -780,7 +750,7 @@ const server = Bun.serve<WsData>({
 
             // Forward JPEG payload to AI service (if active, rate-limited by service)
             if (session.activeAppId) {
-              const jpegPayload = buf.slice(29);
+              const jpegPayload = buf.slice(HEADER_SIZE);
               orchestrator.sendVideoFrame(sessionId, jpegPayload);
             }
           }
@@ -864,6 +834,12 @@ const server = Bun.serve<WsData>({
                 type: "ai_telemetry",
                 telemetry: orchestrator.getTelemetry(sessionId),
               }));
+            } else if (isBackpressureMessage(cmd)) {
+              // Viewer -> Server -> Publisher: relay backpressure signal
+              console.log(`[relay] Backpressure from viewer: targetFps=${cmd.targetFps} session=${sessionId}`);
+              if (session.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+                session.publisher.ws.send(JSON.stringify(cmd));
+              }
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }
         } else {

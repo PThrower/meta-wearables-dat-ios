@@ -5,9 +5,10 @@
  * wraps them in the FRLY wire protocol, and sends them over
  * a WebSocket connection to the gateway (which proxies to the relay server).
  *
- * Wire protocol per frame:
- *   [4 bytes "FRLY"][8 bytes sequence][4 bytes width][4 bytes height]
- *   [1 byte quality][8 bytes timestamp_ms][JPEG payload]
+ * Wire protocol v1 per frame (36-byte header):
+ *   [4 bytes "FRLY"][1 byte version=1][4 bytes payloadLength][8 bytes sequence]
+ *   [4 bytes width][4 bytes height][1 byte quality][8 bytes timestamp_ms]
+ *   [2 bytes headerCrc16][JPEG payload]
  *
  * Includes a receive loop (required for URLSessionWebSocketTask protocol
  * handling) and ping keepalive (prevents proxy/NAT idle disconnects).
@@ -21,6 +22,26 @@ import Foundation
 import ImageIO
 import UIKit
 import UniformTypeIdentifiers
+
+// MARK: - CRC-16/CCITT-FALSE
+
+/// CRC-16/CCITT-FALSE: polynomial 0x1021, init 0xFFFF, no reflect, no final XOR.
+/// Used for header integrity in both FRLY v1 and FRAU v1 wire protocols.
+func crc16ccitt(_ data: Data, offset: Int, length: Int) -> UInt16 {
+    var crc: UInt16 = 0xFFFF
+    let end = offset + length
+    for i in offset..<end {
+        crc ^= UInt16(data[i]) << 8
+        for _ in 0..<8 {
+            if crc & 0x8000 != 0 {
+                crc = (crc << 1) ^ 0x1021
+            } else {
+                crc = crc << 1
+            }
+        }
+    }
+    return crc
+}
 
 // MARK: - WebSocket Delegate
 
@@ -221,13 +242,18 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                         NSLog("[RelayStage] Received: \(text.prefix(100))")
                         if let data = text.data(using: .utf8),
                            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            // Handle backpressure messages from the server
+                            if json["type"] as? String == "backpressure",
+                               let targetFps = json["targetFps"] {
+                                NSLog("[RelayStage] Backpressure from server: targetFps=\(targetFps)")
+                            }
                             if let handler = await self.onControlMessage {
                                 handler(json)
                             }
                         }
                     case .data(let data):
                         // Check if this is a FRAU audio frame (server → publisher)
-                        if data.count >= 29 {
+                        if data.count >= 36 {
                             let magic: [UInt8] = [0x46, 0x52, 0x41, 0x55] // "FRAU"
                             let prefix = [UInt8](data.prefix(4))
                             if prefix == magic {
@@ -332,30 +358,41 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
             let jpegData = mutableData as Data
 
-            // Build wire protocol message
-            var header = Data(capacity: 29)
+            // Build FRLY v1 wire protocol message (36-byte header)
+            var header = Data(capacity: 36)
 
-            // Magic "FRLY"
+            // [0:4] Magic "FRLY"
             header.append(contentsOf: [0x46, 0x52, 0x4C, 0x59])
 
-            // Sequence number (8 bytes LE)
+            // [4] Version = 1
+            header.append(UInt8(1))
+
+            // [5:9] Payload length (u32 LE) — JPEG data size
+            var payloadLen = UInt32(jpegData.count)
+            header.append(contentsOf: withUnsafeBytes(of: &payloadLen) { Array($0) })
+
+            // [9:17] Sequence number (u64 LE)
             var seqVar = seq
             header.append(contentsOf: withUnsafeBytes(of: &seqVar) { Array($0) })
 
-            // Width (4 bytes LE)
+            // [17:21] Width (u32 LE)
             var w = UInt32(width)
             header.append(contentsOf: withUnsafeBytes(of: &w) { Array($0) })
 
-            // Height (4 bytes LE)
+            // [21:25] Height (u32 LE)
             var h = UInt32(height)
             header.append(contentsOf: withUnsafeBytes(of: &h) { Array($0) })
 
-            // Quality (1 byte)
+            // [25] Quality (u8)
             header.append(UInt8(quality * 100))
 
-            // Timestamp ms (8 bytes LE)
+            // [26:34] Timestamp ms (u64 LE)
             var ts = UInt64(Date().timeIntervalSince1970 * 1000)
             header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
+
+            // [34:36] CRC-16/CCITT-FALSE over header bytes [0..33]
+            let crc = crc16ccitt(header, offset: 0, length: 34)
+            header.append(contentsOf: withUnsafeBytes(of: crc) { Array($0) })
 
             // Combine header + JPEG payload
             var message = header

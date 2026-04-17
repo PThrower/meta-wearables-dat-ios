@@ -4,8 +4,9 @@
  * Migrated from relay-player.js to TypeScript with shared protocol imports.
  */
 
-import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE } from "@ebowwa/relay-protocol";
+import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecType } from "@ebowwa/relay-protocol";
 import { buildFrauFrame } from "./frau-builder.js";
+import { windowedSincResample } from "./resampler.js";
 import { getConfig } from "../config.js";
 
 export interface RelayPlayerOptions {
@@ -191,6 +192,13 @@ export class RelayPlayer {
     }
   }
 
+  /** Send backpressure hint to the server when frame drops exceed thresholds. */
+  sendBackpressure(targetFps: number): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: "backpressure", targetFps }));
+    }
+  }
+
   resumeAudio(): void {
     if (this.audioCtx && this.audioCtx.state === "suspended") {
       this.audioCtx.resume().then(() => { this.audioResumed = true; });
@@ -367,14 +375,24 @@ export class RelayPlayer {
     if (buf.length < AUDIO_HEADER_SIZE) return;
 
     const view = new DataView(buf.buffer, buf.byteOffset);
-    const sampleRate = view.getUint32(13, true);
-    const channels = view.getUint16(17, true);
-    const bitsPerSample = view.getUint16(19, true);
-    const senderTimestampMs = Number(view.getBigUint64(21, true));
+
+    // v1 FRAU header fields (36 bytes total)
+    const codecType = view.getUint8(9);
+    if (!isKnownCodecType(codecType)) return;
+
+    const payloadLength = view.getUint32(5, true);
+    const sampleRate = view.getUint32(18, true);
+    const channels = view.getUint16(22, true);
+    const bitsPerSample = view.getUint16(24, true);
+    const senderTimestampMs = Number(view.getBigUint64(26, true));
 
     if (bitsPerSample !== 16) return;
 
-    const pcmBytes = buf.slice(AUDIO_HEADER_SIZE);
+    // Validate payload length against actual buffer
+    const actualPayload = buf.length - AUDIO_HEADER_SIZE;
+    if (payloadLength > actualPayload) return;
+
+    const pcmBytes = buf.slice(AUDIO_HEADER_SIZE, AUDIO_HEADER_SIZE + payloadLength);
     const pcmInt16 = new Int16Array(pcmBytes.buffer, pcmBytes.byteOffset, pcmBytes.length / 2);
 
     this._playAudioChunk(pcmInt16, sampleRate, channels, senderTimestampMs);
@@ -387,10 +405,18 @@ export class RelayPlayer {
     if (buf.length < HEADER_SIZE) return;
     if (!this.canvas || !this.ctx) return;
 
-    const sequence = Number(new DataView(buf.buffer, buf.byteOffset + 4, 8).getBigUint64(0, true));
-    const width = new DataView(buf.buffer, buf.byteOffset + 12, 4).getUint32(0, true);
-    const height = new DataView(buf.buffer, buf.byteOffset + 16, 4).getUint32(0, true);
-    const timestampMs = Number(new DataView(buf.buffer, buf.byteOffset + 21, 8).getBigUint64(0, true));
+    const view = new DataView(buf.buffer, buf.byteOffset);
+
+    // v1 FRLY header fields (36 bytes total)
+    const payloadLength = view.getUint32(5, true);
+    const sequence = Number(view.getBigUint64(9, true));
+    const width = view.getUint32(17, true);
+    const height = view.getUint32(21, true);
+    const timestampMs = Number(view.getBigUint64(26, true));
+
+    // Validate payload length against actual buffer
+    const actualPayload = buf.length - HEADER_SIZE;
+    if (payloadLength > actualPayload) return;
 
     // Update video clock
     if (this.audioCtx && timestampMs > 0) {
@@ -402,7 +428,12 @@ export class RelayPlayer {
 
     // Detect dropped frames
     if (this.lastSequence > 0 && sequence > this.lastSequence + 1) {
+      const prevDropped = this.droppedFrames;
       this.droppedFrames += sequence - this.lastSequence - 1;
+      // Send backpressure when drops cross a multiple of 50
+      if (Math.floor(this.droppedFrames / 50) > Math.floor(prevDropped / 50)) {
+        this.sendBackpressure(this.currentFps > 0 ? Math.max(1, this.currentFps - 5) : 15);
+      }
     }
     this.lastSequence = sequence;
 
@@ -522,21 +553,8 @@ export class RelayPlayer {
       monoSamples = pcmInt16;
     }
 
-    const monoLen = monoSamples.length;
     const targetRate = this.audioCtx!.sampleRate;
-    const ratio = targetRate / sampleRate;
-    const outSamples = Math.round(monoLen * ratio);
-    const floatSamples = new Float32Array(outSamples);
-
-    for (let i = 0; i < outSamples; i++) {
-      const srcPos = i / ratio;
-      const idx0 = Math.floor(srcPos);
-      const idx1 = Math.min(idx0 + 1, monoLen - 1);
-      const frac = srcPos - idx0;
-      const s0 = monoSamples[idx0] / 32768.0;
-      const s1 = monoSamples[idx1] / 32768.0;
-      floatSamples[i] = s0 + (s1 - s0) * frac;
-    }
+    const floatSamples = windowedSincResample(monoSamples, sampleRate, targetRate);
 
     // Track peak for meter
     for (let i = 0; i < floatSamples.length; i++) {
