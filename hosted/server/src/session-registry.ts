@@ -317,15 +317,6 @@ export class SessionRegistry {
 
     this.totalFramesRelayed++;
 
-    // Per-session WASM throttle (lazy init)
-    if (this.FrameRelayClass && !session.wasmThrottle) {
-      session.wasmThrottle = new this.FrameRelayClass(30);
-    }
-    if (session.wasmThrottle && !session.wasmThrottle.should_relay(BigInt(Date.now()))) {
-      this.framesThrottledWasm++;
-      return;
-    }
-
     const now = Date.now();
 
     for (const [id, viewer] of session.viewers) {
