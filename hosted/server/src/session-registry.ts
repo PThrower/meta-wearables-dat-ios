@@ -105,6 +105,7 @@ export class SessionRegistry {
         publisherClaiming: false,
         activeAppId: null,
         appPipeline: null,
+        lastFrame: null,
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);
@@ -253,6 +254,7 @@ export class SessionRegistry {
       session.recorder = null;
     }
     session.publisher = null;
+    session.lastFrame = null;  // Clear cached frame — no live source
     session.lastActivityAt = Date.now();
     console.log(`[registry] Publisher disconnected from session=${sessionId}`);
   }
@@ -338,6 +340,9 @@ export class SessionRegistry {
     const header = parseHeader(data);
     if (!header) return;
 
+    // Cache latest frame for instant viewer/AI delivery on connect
+    session.lastFrame = data;
+
     // Update detailed publisher stats — even with zero viewers
     if (session.publisher) {
       updateTiming(session.publisher.timing, header.sequence, header.timestampMs);
@@ -408,6 +413,13 @@ export class SessionRegistry {
         this.viewersRejected++;
       }
     }
+  }
+
+  // --- Last-frame cache ---
+
+  /** Get the cached last frame for a session (FRLY binary) or null */
+  getLastFrame(sessionId: string): Uint8Array | null {
+    return this.sessions.get(sessionId)?.lastFrame ?? null;
   }
 
   // --- Server-to-publisher audio push ---

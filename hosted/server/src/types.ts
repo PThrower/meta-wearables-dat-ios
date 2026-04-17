@@ -165,4 +165,5 @@ export interface Session {
   recordingId?: string;         // Stable R2 prefix — survives reconnections
   activeAppId: string | null;   // Currently active app for this session
   appPipeline: AppPipeline | null; // Runtime pipeline for active app
+  lastFrame: Uint8Array | null;  // Cached latest FRLY frame for instant viewer/AI delivery
 }

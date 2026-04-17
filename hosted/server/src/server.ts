@@ -660,6 +660,13 @@ const server = Bun.serve<WsData>({
           }
         });
         ws.data.guidanceUnsub = unsubGuidance;
+
+        // Send cached last frame so viewer sees current scene immediately
+        const cachedFrame = registry.getLastFrame(sessionId);
+        if (cachedFrame && ws.readyState === WebSocket.OPEN) {
+          ws.send(cachedFrame);
+          console.log(`[relay] Sent cached frame (${cachedFrame.length}B) to new viewer session=${sessionId}`);
+        }
       }
     },
     async message(ws, message) {
@@ -727,6 +734,12 @@ const server = Bun.serve<WsData>({
               const gesturePipeline = appRegistry.resolveByGesture(cmd.gesture);
               if (gesturePipeline) {
                 orchestrator.activateApp(sessionId, gesturePipeline.appId).catch(() => {});
+                // Send cached frame to AI for immediate context
+                const cachedFrame = registry.getLastFrame(sessionId);
+                if (cachedFrame) {
+                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                }
               }
               // Forward gesture as text trigger to active AI service
               if (session.activeAppId) {
@@ -744,6 +757,12 @@ const server = Bun.serve<WsData>({
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
                 // Notify orchestrator
                 orchestrator.activateApp(sessionId, appId).catch(() => {});
+                // Send cached frame to AI so it sees the current scene immediately
+                const cachedFrame = registry.getLastFrame(sessionId);
+                if (cachedFrame) {
+                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                }
               } else {
                 console.warn(`[relay] App activation failed: ${appId} not found`);
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
@@ -841,6 +860,12 @@ const server = Bun.serve<WsData>({
                 console.log(`[relay] Viewer activated app: ${appId} session=${sessionId}`);
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
                 orchestrator.activateApp(sessionId, appId).catch(() => {});
+                // Send cached frame to AI so it sees the current scene immediately
+                const cachedFrame = registry.getLastFrame(sessionId);
+                if (cachedFrame) {
+                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                }
               } else {
                 ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
               }
@@ -864,6 +889,12 @@ const server = Bun.serve<WsData>({
               const viewerPipeline = appRegistry.resolveByGesture(cmd.gesture);
               if (viewerPipeline) {
                 orchestrator.activateApp(sessionId, viewerPipeline.appId).catch(() => {});
+                // Send cached frame to AI for immediate context
+                const cachedFrame = registry.getLastFrame(sessionId);
+                if (cachedFrame) {
+                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                }
               }
             } else if (cmd.type === "set_vision_fps" && typeof cmd.fps === "number") {
               // Viewer updates vision FPS at runtime
