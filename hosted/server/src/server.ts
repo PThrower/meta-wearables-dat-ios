@@ -139,6 +139,16 @@ orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
   session?.recorder?.appendAudio(frame);
 });
 
+// Guidance text push: when AI emits a guidance event with content,
+// send it to the publisher as JSON for client-side TTS.
+// The publisher's RelayStage receives it and triggers AudioPlaybackStage.speakGuidance().
+orchestrator.setGuidanceTextPushFn((sessionId: string, text: string) => {
+  const session = registry.get(sessionId);
+  if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+    session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text }));
+  }
+});
+
 orchestrator.start();
 
 // --- WASM Loading ---
@@ -502,7 +512,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/telemetry/ai/log") {
       const sessionId = url.searchParams.get("session") || undefined;
-      server.upgrade(req, { data: { role: "ai-log", clientIp: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || server.requestIP(req)?.replace(/::ffff:/, "") || "unknown", sessionId: sessionId ?? "all", userId: undefined, email: undefined } });
+      server.upgrade(req, { data: { role: "ai-log", clientIp: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || server.requestIP(req)?.address.replace(/::ffff:/, "") || "unknown", sessionId: sessionId ?? "all", userId: undefined, email: undefined } });
       return new Response(null, { status: 204 });
     }
 
@@ -512,7 +522,7 @@ const server = Bun.serve<WsData>({
       const sessionId = url.searchParams.get("session") || "default";
       const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
         || req.headers.get("x-real-ip")
-        || server.requestIP(req)?.replace(/::ffff:/, "")
+        || server.requestIP(req)?.address.replace(/::ffff:/, "")
         || "unknown";
       server.upgrade(req, { data: { role: "audio-tap", clientIp, sessionId, userId: undefined, email: undefined } });
       return new Response(null, { status: 204 });
@@ -540,7 +550,7 @@ const server = Bun.serve<WsData>({
       : registry.resolveViewerSessionId(url);
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
       || req.headers.get("x-real-ip")
-      || server.requestIP(req)?.replace(/::ffff:/, "")
+      || server.requestIP(req)?.address.replace(/::ffff:/, "")
       || "unknown";
 
     server.upgrade(req, { data: { role, clientIp, sessionId, userId: undefined, email: undefined } });
