@@ -40,6 +40,15 @@ export class RelayPlayer {
   private droppedFrames = 0;
   private lastSequence = 0;
 
+  // AIMD backpressure state (TCP-style congestion control)
+  private backpressureFps = 30;          // Current AIMD target (starts at max)
+  private lastBackpressureTime = 0;      // Timestamp of last backpressure send
+  private readonly AIMD_DECREASE_FACTOR = 0.5;   // Multiplicative decrease: halve on drops
+  private readonly AIMD_INCREASE_FPS = 1;         // Additive increase: +1 fps per interval
+  private readonly AIMD_INCREASE_INTERVAL_MS = 3000; // Probe upward every 3s
+  private readonly AIMD_MIN_FPS = 1;
+  private readonly AIMD_MAX_FPS = 30;
+
   // Reconnect
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
@@ -192,10 +201,11 @@ export class RelayPlayer {
     }
   }
 
-  /** Send backpressure hint to the server when frame drops exceed thresholds. */
+  /** Send backpressure hint to the server (AIMD target). */
   sendBackpressure(targetFps: number): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: "backpressure", targetFps }));
+      this.lastBackpressureTime = Date.now();
     }
   }
 
@@ -426,14 +436,29 @@ export class RelayPlayer {
       };
     }
 
-    // Detect dropped frames
+    // Detect dropped frames — AIMD multiplicative decrease on drops
     if (this.lastSequence > 0 && sequence > this.lastSequence + 1) {
-      const prevDropped = this.droppedFrames;
-      this.droppedFrames += sequence - this.lastSequence - 1;
-      // Send backpressure when drops cross a multiple of 50
-      if (Math.floor(this.droppedFrames / 50) > Math.floor(prevDropped / 50)) {
-        this.sendBackpressure(this.currentFps > 0 ? Math.max(1, this.currentFps - 5) : 15);
+      const dropped = sequence - this.lastSequence - 1;
+      this.droppedFrames += dropped;
+      this.cb.onDropped(this.droppedFrames);
+
+      // Multiplicative decrease: halve the target FPS on frame drops
+      const prevBp = this.backpressureFps;
+      this.backpressureFps = Math.max(
+        this.AIMD_MIN_FPS,
+        Math.floor(this.backpressureFps * this.AIMD_DECREASE_FACTOR)
+      );
+      if (this.backpressureFps < prevBp) {
+        this.sendBackpressure(this.backpressureFps);
       }
+    }
+
+    // AIMD additive increase: probe upward when no drops for a while
+    const nowMs = Date.now();
+    if (nowMs - this.lastBackpressureTime > this.AIMD_INCREASE_INTERVAL_MS
+        && this.backpressureFps < this.AIMD_MAX_FPS) {
+      this.backpressureFps = Math.min(this.AIMD_MAX_FPS, this.backpressureFps + this.AIMD_INCREASE_FPS);
+      this.sendBackpressure(this.backpressureFps);
     }
     this.lastSequence = sequence;
 

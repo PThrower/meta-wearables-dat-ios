@@ -101,7 +101,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     var currentURL: String? { lastConnectedURL }
 
     // JPEG encoding — CIContext for YUV->RGB, CGImageDestination for JPEG (no UIKit)
-    private let jpegQuality: CGFloat
+    private var adaptiveQuality: CGFloat       // Adjusted by encode time feedback
+    private let minQuality: CGFloat = 0.2
+    private let maxQuality: CGFloat = 0.8
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
     /// Callback to dispatch received FRAU audio to the AudioEventBus.
@@ -118,6 +120,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     // Server backpressure state (overrides local targetFPS when set)
     private var serverTargetFps: Double?
 
+    // EMA encode time tracking (adaptive FPS)
+    // Smoothing factor α — higher = more responsive to recent samples.
+    // α=0.3 means ~3 samples to converge on a new encode time regime.
+    private let encodeTimeAlpha: Double = 0.3
+    private var encodeTimeEmaMs: Double?   // nil until first sample
+
     // Stats
     private var framesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
@@ -128,7 +136,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.5) {
         self.config = config
-        self.jpegQuality = jpegQuality
+        self.adaptiveQuality = jpegQuality
     }
 
     // MARK: - Connection
@@ -235,6 +243,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         framesDroppedByBackpressure = 0
         serverTargetFps = nil
         lastRelayTime = nil
+        encodeTimeEmaMs = nil
+        adaptiveQuality = 0.5  // Reset to default
     }
 
     func stop() async {
@@ -336,10 +346,22 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Frame Relay
 
-    /// Effective FPS: server backpressure overrides local config when set.
+    /// Effective FPS: the lesser of configured target, server backpressure, and hardware cap.
+    /// Hardware cap is derived from EMA encode time: if encode averages 100ms, real max is ~10fps.
     private var effectiveTargetFps: Double {
+        // Server backpressure always wins
         if let server = serverTargetFps, server > 0 { return server }
-        return config.targetFPS > 0 ? Double(config.targetFPS) : 30.0
+
+        let configured = config.targetFPS > 0 ? Double(config.targetFPS) : 30.0
+
+        // EMA-based hardware cap: fps ≤ 1000 / encodeTime
+        // Add 10% headroom so we don't saturate the encoder at exactly capacity.
+        if let ema = encodeTimeEmaMs, ema > 0 {
+            let hardwareCap = 1000.0 / (ema * 1.1)
+            return min(configured, hardwareCap)
+        }
+
+        return configured
     }
 
     private func relayFrame(_ packet: FramePacket) {
@@ -379,7 +401,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // Increment sequence first (on actor), then do heavy encoding off-actor
         sequenceNumber += 1
         let seq = sequenceNumber
-        let quality = jpegQuality
+        let quality = adaptiveQuality
         let ciCtx = ciContext
 
         // Capture websocket reference for off-actor use
@@ -388,6 +410,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // Detach the expensive JPEG encoding + send so actor returns immediately
         Task.detached { [weak self] in
             defer { Task { [weak self] in await self?.clearEncodingFlag() } }
+
+            let encodeStart = ContinuousClock.Instant.now
 
             // Step 1: CVPixelBuffer -> CIImage -> CGImage (CIContext handles YUV->RGB)
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
@@ -406,6 +430,14 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             let jpegOptions: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
             CGImageDestinationAddImage(destination, cgImage, jpegOptions as CFDictionary)
             guard CGImageDestinationFinalize(destination) else { return }
+
+            let encodeEnd = ContinuousClock.Instant.now
+            let encodeDuration = encodeEnd - encodeStart
+            let encodeMs = Double(encodeDuration.components.seconds) * 1000.0
+                + Double(encodeDuration.components.attoseconds) / 1e15
+
+            // Update EMA on actor
+            Task { [weak self] in await self?.updateEncodeTime(encodeMs) }
 
             let jpegData = mutableData as Data
 
@@ -466,8 +498,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func onSendSuccess() {
         framesSent += 1
-        if framesSent % 100 == 1 {
-            NSLog("[RelayStage] Frames sent: \(framesSent)")
+        if framesSent % 50 == 1 {
+            NSLog("[RelayStage] Frames sent: \(framesSent), encodeEma=\(String(format: "%.1f", encodeTimeEmaMs ?? 0))ms, adaptiveFps=\(String(format: "%.1f", effectiveTargetFps))")
         }
     }
 
@@ -526,6 +558,41 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         isEncoding = false
     }
 
+    /// Update EMA encode time and adapt JPEG quality toward target FPS.
+    /// If encode is slower than the frame budget, reduce quality to speed up.
+    /// If encode is faster than needed, increase quality for sharper frames.
+    private func updateEncodeTime(_ encodeMs: Double) {
+        let previous: Double
+        if let ema = encodeTimeEmaMs {
+            previous = ema
+            encodeTimeEmaMs = encodeTimeAlpha * encodeMs + (1 - encodeTimeAlpha) * ema
+        } else {
+            previous = encodeMs
+            encodeTimeEmaMs = encodeMs  // First sample: initialize
+        }
+        let ema = encodeTimeEmaMs!
+
+        // Frame budget in ms — how long we can afford per encode to hit target FPS
+        let targetFps = effectiveTargetFps
+        let frameBudgetMs = (targetFps > 0) ? 1000.0 / targetFps : 100.0
+
+        // Adapt quality: multiplicative decrease if over budget, additive increase if under
+        let oldQuality = adaptiveQuality
+        if ema > frameBudgetMs * 1.2 {
+            // Encode too slow — reduce quality to speed up
+            adaptiveQuality = max(minQuality, adaptiveQuality * 0.95)
+        } else if ema < frameBudgetMs * 0.8 {
+            // Encode fast enough — reclaim quality
+            adaptiveQuality = min(maxQuality, adaptiveQuality * 1.02)
+        }
+
+        // Log quality changes and periodic EMA updates
+        let hardwareCap = 1000.0 / (ema * 1.1)
+        if abs(adaptiveQuality - oldQuality) > 0.01 {
+            NSLog("[RelayStage] Quality adapt: \(String(format: "%.2f", oldQuality))→\(String(format: "%.2f", adaptiveQuality)), encode=\(String(format: "%.1f", ema))ms, budget=\(String(format: "%.1f", frameBudgetMs))ms, hwCap=\(String(format: "%.1f", hardwareCap))fps")
+        }
+    }
+
     // MARK: - Reconnection
 
     /// Internal reconnection with exponential backoff (same pattern as AudioTapClient).
@@ -565,27 +632,35 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     /// Send device identity to relay server as JSON after WebSocket opens.
     /// The server stores this on the Publisher object and exposes it via /stats.
-    // THREADING REVIEW: [SAFE] UIDevice.current calls are inside Task { @MainActor in }.
+    // THREADING REVIEW: [SAFE] Actor-isolated values (wsTask, wearableId, wearableType)
+    // are captured BEFORE the @MainActor hop — no async gaps where disconnect() could nil them.
+    // UIDevice.current calls happen inside Task { @MainActor in }.
     // hardwareModelIdentifier() reads utsname — no UIKit dependency, safe from any context.
     private func sendHello() {
+        // Capture all actor-isolated state BEFORE leaving the actor.
+        // This eliminates the race where disconnect() nils webSocketTask
+        // during an async hop back to the actor.
         guard let wsTask = webSocketTask else { return }
+        let capturedWearableId = wearableId
+        let capturedWearableType = wearableType
 
         // UIDevice.current is @MainActor-isolated in iOS 17+.
-        // Dispatch to main to read device info, then send from here.
+        // Dispatch to main to read device info, then send using captured wsTask.
+        // No await back to self — the captured references are all we need.
         Task { @MainActor in
             let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
             let deviceName = UIDevice.current.name
             let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
             let systemVersion = UIDevice.current.systemVersion
 
-            var hello: [String: String] = [
+            let hello: [String: String] = [
                 "type": "hello",
                 "deviceId": deviceId,
                 "deviceName": deviceName,
                 "deviceModel": hardwareModel,
                 "systemVersion": systemVersion,
-                "wearableId": await self.wearableId ?? "",
-                "wearableType": await self.wearableType ?? "",
+                "wearableId": capturedWearableId ?? "",
+                "wearableType": capturedWearableType ?? "",
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
             ]
@@ -593,18 +668,15 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
                   let str = String(data: data, encoding: .utf8) else { return }
 
-            await self.sendHelloString(str, deviceName: deviceName, hardwareModel: hardwareModel)
-        }
-    }
-
-    private func sendHelloString(_ str: String, deviceName: String, hardwareModel: String) {
-        guard let wsTask = webSocketTask else { return }
-        let wt = wearableType ?? "none"
-        wsTask.send(.string(str)) { error in
-            if let error {
-                NSLog("[RelayStage] Hello send error: \(error)")
-            } else {
-                NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(hardwareModel) wearable=\(wt)")
+            // Send using the captured wsTask — no actor hop needed.
+            // wsTask.send() is nonisolated on URLSessionWebSocketTask, safe from MainActor.
+            // If disconnect() already cancelled the task, the completion reports an error.
+            wsTask.send(.string(str)) { error in
+                if let error {
+                    NSLog("[RelayStage] Hello send error: \(error)")
+                } else {
+                    NSLog("[RelayStage] Sent hello: device=\(deviceName) model=\(hardwareModel) wearable=\(capturedWearableType ?? "none")")
+                }
             }
         }
     }
