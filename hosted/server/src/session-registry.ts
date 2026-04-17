@@ -138,8 +138,19 @@ export class SessionRegistry {
       return "session owned by another user";
     }
 
-    if (session.publisher && session.publisher.ws.readyState === WebSocket.OPEN) {
-      return "publisher already connected";
+    // Force-takeover: evict zombie publisher (ws not OPEN) instead of rejecting
+    if (session.publisher) {
+      if (session.publisher.ws.readyState === WebSocket.OPEN) {
+        return "publisher already connected";
+      }
+      console.log(`[registry] Evicting zombie publisher ${session.publisher.id.slice(0, 8)} (ws state=${session.publisher.ws.readyState}) in session=${sessionId}`);
+      this.totalDroppedFrames += session.publisher.timing.droppedFrames;
+      try { session.publisher.ws.close(4002, "publisher replaced"); } catch {}
+      if (session.recorder) {
+        try { await session.recorder.finish(); } catch { /* non-critical */ }
+        session.recorder = null;
+      }
+      session.publisher = null;
     }
 
     // Mutex: prevent concurrent publisher claims
@@ -157,6 +168,21 @@ export class SessionRegistry {
     // Track reconnects — session already existed with a disconnected publisher
     if (session.publisher === null && this.sessions.has(sessionId) && session.createdAt < Date.now() - 1000) {
       this.publisherReconnects++;
+    }
+
+    // Evict this publisher from any OTHER session it may still be registered in
+    for (const [otherId, otherSession] of this.sessions) {
+      if (otherId === sessionId) continue;
+      if (otherSession.publisher && otherSession.publisher.ws === ws) {
+        console.log(`[registry] Publisher reconnected — evicting from old session=${otherId}`);
+        this.totalDroppedFrames += otherSession.publisher.timing.droppedFrames;
+        otherSession.publisher = null;
+        if (otherSession.recorder) {
+          otherSession.recorder.finish().catch(() => {});
+          otherSession.recorder = null;
+        }
+        otherSession.lastActivityAt = Date.now();
+      }
     }
 
     this.sessionsStarted++;
@@ -406,6 +432,20 @@ export class SessionRegistry {
     for (const [sessionId, session] of this.sessions) {
       // Check publisher staleness
       if (session.publisher) {
+        // Immediate eviction: ws is no longer OPEN (closed/closing without close handler firing)
+        if (session.publisher.ws.readyState !== WebSocket.OPEN) {
+          console.log(`[registry] Publisher ${session.publisher.id.slice(0, 8)} ws not OPEN (state=${session.publisher.ws.readyState}) in session=${sessionId}, evicting`);
+          this.totalDroppedFrames += session.publisher.timing.droppedFrames;
+          try { session.publisher.ws.close(4002, "publisher dead ws"); } catch {}
+          session.publisher = null;
+          if (session.recorder) {
+            session.recorder.finish().catch(() => {});
+            session.recorder = null;
+          }
+          session.lastActivityAt = Date.now();
+          continue;
+        }
+
         const staleFromFrame = session.publisher.timing.lastReceivedAt > 0
           ? now - session.publisher.timing.lastReceivedAt
           : Infinity;
@@ -420,6 +460,7 @@ export class SessionRegistry {
             session.recorder.finish().catch(() => {});
             session.recorder = null;
           }
+          session.lastActivityAt = Date.now();
         }
       }
 

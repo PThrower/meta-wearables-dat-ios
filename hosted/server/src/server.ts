@@ -887,8 +887,12 @@ const server = Bun.serve<WsData>({
       }
 
       if (role === "publish") {
+        // Deactivate AI app before releasing publisher
+        const session = registry.get(sessionId);
+        if (session?.activeAppId) {
+          orchestrator.deactivateApp(sessionId).catch(() => {});
+        }
         await registry.releasePublisher(sessionId);
-        // Update gallery index incrementally and generate thumbnail
         try {
           const meta = await sessionStore.getMeta(sessionId);
           if (meta) {
