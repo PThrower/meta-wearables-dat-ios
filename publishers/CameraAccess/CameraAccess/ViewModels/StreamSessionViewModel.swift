@@ -15,6 +15,7 @@
 //
 
 import AVFoundation
+import MediaPlayer
 import MWDATCamera
 import MWDATCore
 import Photos
@@ -141,6 +142,7 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundAudioEngine: AVAudioEngine?
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
+  private var lastNowPlayingKey: String?
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -616,7 +618,7 @@ class StreamSessionViewModel: ObservableObject {
   private func pushTelemetry() async {
     guard isRelaying, let snap = telemetryService?.snapshot else { return }
     let relayStats = await relayStage.getStats()
-    let payload: [String: Any] = [
+    var payload: [String: Any] = [
       "type": "publisher_telemetry",
       "frame": [
         "fps": snap.frame.effectiveFPS,
@@ -634,6 +636,32 @@ class StreamSessionViewModel: ObservableObject {
         "recent": snap.errors.recentErrors.map { $0.errorDescription },
       ],
     ]
+
+    // Now Playing info (no permissions required)
+    let npInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+    if let npInfo, let title = npInfo[MPMediaItemPropertyTitle] as? String, !title.isEmpty {
+      let artist = (npInfo[MPMediaItemPropertyArtist] as? String) ?? ""
+      let album = (npInfo[MPMediaItemPropertyAlbumTitle] as? String) ?? ""
+      var np: [String: Any] = [
+        "title": title,
+        "artist": artist,
+        "album": album,
+      ]
+      // Only include artwork when track changes (avoid ~10KB base64 payload every 2s)
+      let key = "\(title)|\(artist)"
+      if key != lastNowPlayingKey {
+        lastNowPlayingKey = key
+        if let artwork = npInfo[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork,
+           let img = artwork.image(at: CGSize(width: 64, height: 64)),
+           let jpeg = img.jpegData(compressionQuality: 0.6) {
+          np["artwork"] = "data:image/jpeg;base64," + jpeg.base64EncodedString()
+        }
+      }
+      payload["nowPlaying"] = np
+    } else {
+      lastNowPlayingKey = nil
+    }
+
     await relayStage.sendJson(payload)
   }
 
