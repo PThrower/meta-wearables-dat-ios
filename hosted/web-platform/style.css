@@ -432,6 +432,39 @@ header {
   border-color: rgba(255, 85, 85, 0.3);
   color: #ff5555;
 }
+.audio-slider {
+  flex: 1;
+  height: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+}
+.audio-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0ff;
+  cursor: pointer;
+}
+.audio-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0ff;
+  border: none;
+  cursor: pointer;
+}
+.slider-val {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+  min-width: 32px;
+  text-align: right;
+  font-family: monospace;
+}
 .speak-input {
   flex: 1;
   background: rgba(0, 0, 0, 0.3);

@@ -451,6 +451,52 @@ class StreamSessionViewModel: ObservableObject {
           }
         }
 
+        // Audio gain control from viewer
+        if msgType == "set_audio_gain",
+           let codecType = msg["codecType"] as? Int,
+           let gainDb = msg["gainDb"] as? Double {
+          Task { [weak self] in
+            await self?.audioRelayStage.setGain(codecType: UInt8(codecType), gainDb: Float(gainDb))
+          }
+        }
+
+        // Noise gate control from viewer
+        if msgType == "set_noise_gate",
+           let codecType = msg["codecType"] as? Int,
+           let threshold = msg["threshold"] as? Double {
+          Task { [weak self] in
+            await self?.audioRelayStage.setNoiseGate(codecType: UInt8(codecType), threshold: Float(threshold))
+          }
+        }
+
+        // Noise suppression toggle from viewer
+        if msgType == "set_noise_suppression",
+           let codecType = msg["codecType"] as? Int,
+           let enabled = msg["enabled"] as? Bool {
+          Task { [weak self] in
+            await self?.audioRelayStage.setNoiseSuppression(codecType: UInt8(codecType), enabled: enabled)
+          }
+        }
+
+        // Audio mix control from viewer
+        if msgType == "set_audio_mix",
+           let enabled = msg["enabled"] as? Bool {
+          let weightPhone = msg["weightPhone"] as? Double ?? 0.5
+          let weightGlasses = msg["weightGlasses"] as? Double ?? 0.5
+          Task { [weak self] in
+            await self?.audioRelayStage.setMixEnabled(enabled, weightPhone: Float(weightPhone), weightGlasses: Float(weightGlasses))
+          }
+        }
+
+        // Audio config query from viewer
+        if msgType == "get_audio_config" {
+          Task { [weak self] in
+            guard let self else { return }
+            let config = await self.audioRelayStage.getCurrentConfig()
+            await self.relayStage.sendJson(config.toDictionary())
+          }
+        }
+
         // Remote photo capture from viewer
         if msgType == "capture_photo" {
           Task { @MainActor [weak self] in

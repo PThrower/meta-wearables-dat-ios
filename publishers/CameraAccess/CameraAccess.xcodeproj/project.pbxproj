@@ -52,6 +52,7 @@
 		PIPEDECO01 /* AudioPacket.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO02 /* AudioPacket.swift */; };
 		PIPEDECO03 /* AudioTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO04 /* AudioTransport.swift */; };
 		PIPEDECO05 /* AudioEventBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO06 /* AudioEventBus.swift */; };
+		F47A0D21CEA44E2FB838F81B /* AudioProcessingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */; };
 		PIPEDECO07 /* AudioRelayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO08 /* AudioRelayStage.swift */; };
 		PIPEMSRC01 /* AudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEMSRC02 /* AudioSource.swift */; };
 		PIPETAPC01 /* AudioTapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPETAPC02 /* AudioTapClient.swift */; };
@@ -136,6 +137,7 @@
 		PIPEDECO02 /* AudioPacket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPacket.swift; sourceTree = "<group>"; };
 		PIPEDECO04 /* AudioTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTransport.swift; sourceTree = "<group>"; };
 		PIPEDECO06 /* AudioEventBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEventBus.swift; sourceTree = "<group>"; };
+		60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioProcessingConfig.swift; sourceTree = "<group>"; };
 		PIPEDECO08 /* AudioRelayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRelayStage.swift; sourceTree = "<group>"; };
 		PIPEMSRC02 /* AudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSource.swift; sourceTree = "<group>"; };
 		PIPETAPC02 /* AudioTapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTapClient.swift; sourceTree = "<group>"; };
@@ -295,6 +297,7 @@
 				PIPEDECO02 /* AudioPacket.swift */,
 				PIPEDECO04 /* AudioTransport.swift */,
 				PIPEDECO06 /* AudioEventBus.swift */,
+				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
 				PIPEREMF02 /* RemoteAudioFrame.swift */,
 			);
@@ -529,6 +532,7 @@
 				PIPEDECO01 /* AudioPacket.swift in Sources */,
 				PIPEDECO03 /* AudioTransport.swift in Sources */,
 				PIPEDECO05 /* AudioEventBus.swift in Sources */,
+				F47A0D21CEA44E2FB838F81B /* AudioProcessingConfig.swift in Sources */,
 				PIPEDECO07 /* AudioRelayStage.swift in Sources */,
 				PIPEMSRC01 /* AudioSource.swift in Sources */,
 				PIPETAPC01 /* AudioTapClient.swift in Sources */,

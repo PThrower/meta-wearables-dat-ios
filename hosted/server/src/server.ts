@@ -838,6 +838,9 @@ const server = Bun.serve<WsData>({
               // Publisher acknowledges audio mode change — broadcast to all viewers
               console.log(`[relay] Audio mode changed by publisher: mode=${cmd.mode} session=${sessionId}`);
               broadcastToViewers(session, { type: "audio_mode_changed", mode: cmd.mode });
+            } else if (cmd.type === "audio_config") {
+              // Publisher responds with current audio config — broadcast to all viewers
+              broadcastToViewers(session, cmd);
             } else if (cmd.type === "photo_captured") {
               broadcastToViewers(session, { type: "photo_captured" });
             } else if (cmd.type === "recording_changed") {
@@ -996,6 +999,36 @@ const server = Bun.serve<WsData>({
                 if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
                   publisherWs.send(JSON.stringify({ type: "set_audio_mode", mode }));
                 }
+              }
+            } else if (cmd.type === "set_audio_gain") {
+              // Viewer -> Server -> Publisher: per-source gain control
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "set_audio_gain", codecType: cmd.codecType, gainDb: cmd.gainDb }));
+              }
+            } else if (cmd.type === "set_noise_gate") {
+              // Viewer -> Server -> Publisher: per-source noise gate
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "set_noise_gate", codecType: cmd.codecType, threshold: cmd.threshold }));
+              }
+            } else if (cmd.type === "set_noise_suppression") {
+              // Viewer -> Server -> Publisher: per-source noise suppression toggle
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "set_noise_suppression", codecType: cmd.codecType, enabled: cmd.enabled }));
+              }
+            } else if (cmd.type === "set_audio_mix") {
+              // Viewer -> Server -> Publisher: audio mix control
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "set_audio_mix", enabled: cmd.enabled, weightPhone: cmd.weightPhone, weightGlasses: cmd.weightGlasses }));
+              }
+            } else if (cmd.type === "get_audio_config") {
+              // Viewer -> Server -> Publisher: request current audio config
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "get_audio_config" }));
               }
             } else if (cmd.type === "capture_photo") {
               const publisherWs = session.publisher?.ws;
