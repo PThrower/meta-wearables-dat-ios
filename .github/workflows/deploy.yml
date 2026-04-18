@@ -97,13 +97,19 @@ jobs:
             echo ">>> Stopping relay service and freeing port"
             systemctl stop caringmind-relay.service || true
             fuser -k 8080/tcp 2>/dev/null || true
-            sleep 1
+            sleep 2
+            # Verify port is free
+            if fuser 8080/tcp 2>/dev/null; then
+              echo "WARN: port 8080 still in use, force killing"
+              fuser -k -9 8080/tcp 2>/dev/null || true
+              sleep 2
+            fi
 
             echo ">>> Starting relay service"
             systemctl start caringmind-relay.service
 
             echo ">>> Waiting for relay startup"
-            sleep 2
+            sleep 3
 
             echo ">>> Restarting gateway service"
             systemctl restart caringmind-gateway.service
@@ -112,7 +118,16 @@ jobs:
             sleep 2
 
             echo ">>> Health check (relay)"
-            RELAY_HEALTH=$(curl -s http://localhost:8080/health)
+            for i in 1 2 3 4 5; do
+              RELAY_HEALTH=$(curl -sf http://localhost:8080/health 2>/dev/null) && break
+              if [ "$i" = "5" ]; then
+                echo "FAIL: relay health check failed after 5 attempts"
+                journalctl -u caringmind-relay.service -n 20 --no-pager
+                exit 1
+              fi
+              echo "attempt $i: relay not ready, retrying in 2s..."
+              sleep 2
+            done
             echo "Relay: $RELAY_HEALTH"
             WASM_LOADED=$(echo "$RELAY_HEALTH" | grep -o '"wasmLoaded":[a-z]*' | head -1)
             echo "WASM status: $WASM_LOADED"
