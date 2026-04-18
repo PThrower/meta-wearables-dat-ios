@@ -32,6 +32,8 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
 
     // Stats for telemetry
     private(set) var framesSuppressed: UInt64 = 0
+    private var framesSent: UInt64 = 0
+    private var lastLogTime: Date = .distantPast
 
     // FRAU v1 header: magic(4) + version(1) + payloadLength(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) + crc16(2) = 36
     static let frauHeaderSize = 36
@@ -112,7 +114,10 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
     // MARK: - AudioTransport
 
     func sendAudio(_ packet: AudioPacket) async {
-        guard let relayStage else { return }
+        guard let relayStage else {
+            NSLog("[AudioRelayStage] WARNING: sendAudio called but relayStage is nil")
+            return
+        }
 
         // Only process codecType 0 (phone mic) and 1 (glasses HFP mic)
         // codecType 2 (TTS) and 3 (relay inbound) pass through unmodified
@@ -157,6 +162,14 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
                                       sequenceNumber: packet.sequenceNumber,
                                       timestampMs: packet.timestampMs)
         await relayStage.sendRawData(message)
+        framesSent += 1
+
+        // Diagnostic: log every 2 seconds
+        let now = Date()
+        if now.timeIntervalSince(lastLogTime) >= 2.0 {
+            lastLogTime = now
+            NSLog("[AudioRelayStage] sent=\(framesSent) suppressed=\(framesSuppressed) ct=\(ct) pcmSize=\(processedData.count) msgSize=\(message.count)")
+        }
     }
 
     // MARK: - Audio Processing (pure static functions)
