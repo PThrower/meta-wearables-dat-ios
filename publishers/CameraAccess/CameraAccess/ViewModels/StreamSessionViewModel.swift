@@ -480,7 +480,7 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  /// Transition from standby to active — start camera + audio + telemetry.
+  /// Transition from standby to active — start camera, wait for BT link, then audio + telemetry.
   /// Called when start_stream is received while in standby.
   private func activateFromStandby() async {
     guard relayMode == .standby else { return }
@@ -491,10 +491,19 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
+    // Phase 1: Start camera session (establishes BT link to glasses)
     await startSession()
     relayMode = .active
 
-    // Wire inbound audio handler
+    // Phase 2: Wait for DAT SDK BT video link to stabilize before touching audio.
+    // Starting audio (especially HFP/Bluetooth mic) while the SDK's BT handshake
+    // is in progress tears down the video link. Wait until frames are flowing.
+    let linkEstablished = await waitForStreamReady(timeoutMs: 10_000)
+    if !linkEstablished {
+      NSLog("[StreamSession] Stream failed to establish within timeout — starting audio anyway")
+    }
+
+    // Phase 3: Wire inbound audio handler and start audio/telemetry
     await relayStage.setOnReceivedAudio { [weak self] data in
       guard data.count >= 29 else { return }
       let sampleRate = UInt32(data[13])
@@ -510,7 +519,6 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    // Start audio, telemetry, and tap client
     await startRelayAudioAndTelemetry()
 
     // Send link state
@@ -521,6 +529,19 @@ class StreamSessionViewModel: ObservableObject {
     default: linkState = "unknown"
     }
     await relayStage.sendJson(["type": "link_state_changed", "state": linkState])
+  }
+
+  /// Wait for the DAT SDK stream to be ready (first frame received or streaming state).
+  /// Returns true if the stream established, false if timed out.
+  private func waitForStreamReady(timeoutMs: Int64) async -> Bool {
+    let deadline = ContinuousClock.Instant.now + Duration.milliseconds(timeoutMs)
+    while ContinuousClock.Instant.now < deadline {
+      if hasReceivedFirstFrame || streamingStatus == .streaming {
+        return true
+      }
+      try? await Task.sleep(nanoseconds: 200_000_000) // 200ms poll
+    }
+    return false
   }
 
   /// Transition from active back to standby — stop camera/audio but keep WebSocket.
