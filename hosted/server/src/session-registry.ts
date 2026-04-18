@@ -109,6 +109,7 @@ export class SessionRegistry {
         activeAppId: null,
         appPipeline: null,
         lastFrame: null,
+        linkState: "unknown",
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);

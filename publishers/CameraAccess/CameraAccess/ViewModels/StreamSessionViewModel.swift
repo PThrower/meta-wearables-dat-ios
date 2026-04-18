@@ -520,6 +520,15 @@ class StreamSessionViewModel: ObservableObject {
       try await relayStage.connect(to: url)
       isRelaying = true
       NSLog("[StreamSession] Relay connected to \(url)")
+
+      // Send initial link state to viewers (session may already be .streaming)
+      let linkState: String
+      switch streamSession.state {
+      case .streaming: linkState = "connected"
+      case .waitingForDevice: linkState = "disconnected"
+      default: linkState = "unknown"
+      }
+      await relayStage.sendJson(["type": "link_state_changed", "state": linkState])
     } catch {
       errorMessage = "Relay failed: \(error.localizedDescription)"
       showError = true
@@ -941,6 +950,23 @@ class StreamSessionViewModel: ObservableObject {
 
   private func updateStatusFromState(_ state: StreamSessionState) {
     NSLog("[StreamSession] State: \(String(describing: state)) | device=\(selectedDeviceId ?? "auto")")
+
+    // Relay BT link state to viewers
+    if isRelaying {
+      let linkState: String
+      switch state {
+      case .streaming:
+        linkState = "connected"
+      case .waitingForDevice:
+        linkState = "disconnected"
+      case .stopped:
+        linkState = "disconnected"
+      case .starting, .stopping, .paused:
+        linkState = "unknown"
+      }
+      Task { await relayStage.sendJson(["type": "link_state_changed", "state": linkState]) }
+    }
+
     switch state {
     case .stopped:
       currentVideoFrame = nil

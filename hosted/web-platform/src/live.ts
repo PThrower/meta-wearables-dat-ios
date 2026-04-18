@@ -373,6 +373,16 @@ function handleSessionInfo(msg: Record<string, unknown>): void {
   const buildEl = document.getElementById("si-build");
   if (appEl) appEl.textContent = appVer ?? "--";
   if (buildEl) buildEl.textContent = buildNum ?? "--";
+
+  // Link state from session snapshot
+  const ls = msg.linkState as string | undefined;
+  if (ls) {
+    const el = document.getElementById("t-link-state");
+    if (el) {
+      el.textContent = ls;
+      el.style.color = ls === "connected" ? "#50fa7b" : "#ff5555";
+    }
+  }
 }
 
 function updateUptime(): void {

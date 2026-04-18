@@ -230,7 +230,7 @@ function broadcastToViewers(session: Session | undefined, msg: object): void {
 }
 
 /** Build session_info payload for viewer info strip */
-function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any }) {
+function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any; linkState?: string }) {
   return {
     deviceName: session.metadata.deviceName || null,
     deviceModel: session.metadata.deviceModel || null,
@@ -240,6 +240,7 @@ function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; reco
     buildNumber: session.metadata.buildNumber || null,
     viewerCount: session.viewers.size,
     recording: !!session.recorder?.getStats?.()?.active,
+    linkState: session.linkState || null,
     sessionAge: Date.now() - session.createdAt,
     connectedAt: session.createdAt,
   };
@@ -828,7 +829,8 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "publisher_telemetry") {
               broadcastToViewers(session, { type: "publisher_telemetry", ...cmd });
             } else if (cmd.type === "link_state_changed") {
-              broadcastToViewers(session, { type: "link_state_changed", state: cmd.state });
+              session.linkState = cmd.state as string || "unknown";
+              broadcastToViewers(session, { type: "link_state_changed", state: session.linkState });
             } else if (cmd.type === "publisher_error") {
               broadcastToViewers(session, { type: "publisher_error", error: cmd.error, state: cmd.state });
             } else if (cmd.type === "spoken_text") {
