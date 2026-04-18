@@ -65,7 +65,7 @@ class AudioTapClientTests: XCTestCase {
             pcmBase64: base64
         )
 
-        let packet = frame.toAudioPacket()
+        let packet = try XCTUnwrap(frame.toAudioPacket())
 
         XCTAssertEqual(packet.codecType, 1)
         XCTAssertEqual(packet.sequenceNumber, 7)
@@ -89,7 +89,7 @@ class AudioTapClientTests: XCTestCase {
             pcmBase64: pcmData.base64EncodedString()
         )
 
-        let packet = frame.toAudioPacket()
+        let packet = try XCTUnwrap(frame.toAudioPacket())
         XCTAssertEqual(packet.sampleRate, 8000, "HFP narrowband = 8kHz")
         XCTAssertEqual(packet.pcmData.count, 2048)
     }
@@ -107,7 +107,7 @@ class AudioTapClientTests: XCTestCase {
             pcmBase64: pcmData.base64EncodedString()
         )
 
-        let packet = frame.toAudioPacket()
+        let packet = try XCTUnwrap(frame.toAudioPacket())
         XCTAssertEqual(packet.sampleRate, 16000, "HFP wideband = 16kHz")
     }
 
@@ -182,11 +182,11 @@ class AudioTapClientTests: XCTestCase {
 
         // Read from the event bus
         let received: AudioPacket? = await withUnsafeContinuation { continuation in
-            let task = Task {
+            let task = Task<AudioPacket?, Never> {
                 for await packet in stream {
                     return packet
                 }
-                return nil as AudioPacket?
+                return nil
             }
             Task {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)

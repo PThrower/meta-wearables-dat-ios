@@ -144,6 +144,9 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
   private var lastNowPlayingKey: String?
+  private var cachedNowPlaying: [String: String]? = nil
+  private var npDebugTrace: String = ""
+  private var nowPlayingPollTask: Task<Void, Never>? = nil
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -588,12 +591,18 @@ class StreamSessionViewModel: ObservableObject {
         await self.pushTelemetry()
       }
     }
+
+    // Start Now Playing background poll (runs off main thread to avoid semaphore deadlock)
+    startNowPlayingPoll()
   }
 
   func stopRelay() async {
     // Cancel telemetry push timer
     telemetryPushTimer?.cancel()
     telemetryPushTimer = nil
+
+    // Stop Now Playing poll
+    stopNowPlayingPoll()
 
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
@@ -638,8 +647,9 @@ class StreamSessionViewModel: ObservableObject {
       ],
     ]
 
-    // Now Playing — direct MediaRemote call (reads ALL sources: browsers, Music, Spotify, etc.)
-    payload["nowPlaying"] = Self.readNowPlaying() as Any
+    // Now Playing — read from background-polled cache (avoids main-thread deadlock)
+    payload["nowPlaying"] = cachedNowPlaying as Any
+    payload["npDebug"] = npDebugTrace
 
     await relayStage.sendJson(payload)
   }
@@ -1082,55 +1092,48 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  // MARK: - Now Playing (MediaRemote)
+  // MARK: - Now Playing (background-polling)
 
-  /// Read system-wide Now Playing info via MediaRemote private framework.
-  /// Captures ALL media sources: Apple Music, Spotify, Safari, Brave, YouTube, etc.
-  /// Returns nil when nothing is playing.
-  nonisolated private static func readNowPlaying() -> [String: String]? {
-    // 1. Try MediaRemote (system-wide, all apps)
-    if let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY) {
-      typealias GetInfoFn = @convention(c) (DispatchQueue, @escaping (NSDictionary?) -> Void) -> Void
-      if let sym = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") {
-        let fn = unsafeBitCast(sym, to: GetInfoFn.self)
-        let sem = DispatchSemaphore(value: 0)
-        var result: NSDictionary?
-        fn(DispatchQueue.global()) { info in
-          result = info
-          sem.signal()
+  /// NOTE: iOS 18 blocks MediaRemote private framework for third-party apps (returns nil).
+  /// Only MPMusicPlayerController (Apple Music) works as a public API.
+  /// Browser/Spotify/etc. Now Playing info is not accessible on stock iOS.
+
+  private func startNowPlayingPoll() {
+    stopNowPlayingPoll()
+    cachedNowPlaying = nil
+    npDebugTrace = "init"
+    nowPlayingPollTask = Task { [weak self] in
+      while !Task.isCancelled {
+        let (result, debug) = Self.readNowPlaying()
+        await MainActor.run {
+          self?.cachedNowPlaying = result
+          self?.npDebugTrace = debug
         }
-        if sem.wait(timeout: .now() + 1) == .success, let info = result as? [String: Any] {
-          NSLog("[NowPlaying] MediaRemote keys: %@", Array(info.keys.map { String(describing: $0) }))
-          if let title = info["kMRMediaRemoteNowPlayingInfoTitle"] as? String, !title.isEmpty {
-            let artist = (info["kMRMediaRemoteNowPlayingInfoArtist"] as? String) ?? ""
-            let album = (info["kMRMediaRemoteNowPlayingInfoAlbum"] as? String) ?? ""
-            NSLog("[NowPlaying] MR hit: title=%@ artist=%@", title, artist)
-            return ["title": title, "artist": artist, "album": album]
-          }
-          NSLog("[NowPlaying] MR returned dict but no title key")
-        } else {
-          NSLog("[NowPlaying] MR semaphore timeout or nil result")
-        }
-      } else {
-        NSLog("[NowPlaying] dlsym MRMediaRemoteGetNowPlayingInfo failed")
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
       }
-    } else {
-      NSLog("[NowPlaying] dlopen MediaRemote failed")
     }
+  }
 
-    // 2. Fallback: MPMusicPlayerController (Apple Music only)
+  private func stopNowPlayingPoll() {
+    nowPlayingPollTask?.cancel()
+    nowPlayingPollTask = nil
+    cachedNowPlaying = nil
+    npDebugTrace = "stopped"
+  }
+
+  nonisolated private static func readNowPlaying() -> ([String: String]?, String) {
+    // MPMusicPlayerController — Apple Music only (only public API that works)
     let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem
     if let title = item?.title, !title.isEmpty {
-      NSLog("[NowPlaying] Apple Music fallback: title=%@", title)
-      return [
+      let result: [String: String] = [
         "title": title,
         "artist": item?.artist ?? "",
         "album": item?.albumTitle ?? "",
       ]
+      NSLog("[NowPlaying] Apple Music: title=%@ artist=%@", title, item?.artist ?? "")
+      return (result, "apple_music")
     }
-
-    NSLog("[NowPlaying] no playing media detected")
-    return nil
+    return (nil, "none")
   }
 }
 
