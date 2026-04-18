@@ -20,6 +20,7 @@ import MWDATCamera
 import MWDATCore
 import Photos
 import SwiftUI
+import UIKit
 
 enum StreamingStatus {
   case streaming
@@ -143,6 +144,8 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
   private var lastNowPlayingKey: String?
+  private var mediaRemoteHandle: UnsafeMutableRawPointer?
+  private var cachedNowPlaying: [String: Any]?
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -197,6 +200,32 @@ class StreamSessionViewModel: ObservableObject {
     setupSessionListeners()
     attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
+
+    // Subscribe to system-wide Now Playing via MediaRemote private framework.
+    // This captures ALL media sources — Apple Music, Spotify, Safari, Brave, etc.
+    // MPNowPlayingInfoCenter only returns info for your own app's media.
+    mediaRemoteHandle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
+    if let mrHandle = mediaRemoteHandle {
+      typealias SubscribeFn = @convention(c) (DispatchQueue) -> Void
+      if let sym = dlsym(mrHandle, "MRMediaRemoteRegisterForNowPlayingNotifications") {
+        unsafeBitCast(sym, to: SubscribeFn.self)(DispatchQueue.main)
+      }
+      NotificationCenter.default.addObserver(
+        forName: NSNotification.Name("kMRMediaRemoteNowPlayingInfoDidChangeNotification"),
+        object: nil, queue: .main
+      ) { [weak self] _ in
+        MainActor.assumeIsolated {
+          guard let self, let handle = self.mediaRemoteHandle else { return }
+          typealias GetInfoFn = @convention(c) (DispatchQueue, @escaping ([String: Any]) -> Void) -> Void
+          guard let sym = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") else { return }
+          unsafeBitCast(sym, to: GetInfoFn.self)(DispatchQueue.main) { [weak self] info in
+            MainActor.assumeIsolated {
+              self?.cachedNowPlaying = info
+            }
+          }
+        }
+      }
+    }
 
     // Monitor device availability and capture wearable identity for auto-select
     deviceMonitorTask = Task { @MainActor [weak self] in
@@ -637,23 +666,13 @@ class StreamSessionViewModel: ObservableObject {
       ],
     ]
 
-    // Now Playing info (no permissions required)
-    // Try MPNowPlayingInfoCenter first (works with .mixWithOthers for any app),
-    // fall back to MPMusicPlayerController for Apple Music.
-    var npInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
-    if npInfo == nil || (npInfo?[MPMediaItemPropertyTitle] as? String ?? "").isEmpty {
-      npInfo = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem.flatMap { item in
-        var info = [String: Any]()
-        if let t = item.title { info[MPMediaItemPropertyTitle] = t }
-        if let a = item.artist { info[MPMediaItemPropertyArtist] = a }
-        if let b = item.albumTitle { info[MPMediaItemPropertyAlbumTitle] = b }
-        if let art = item.artwork { info[MPMediaItemPropertyArtwork] = art }
-        return info.isEmpty ? nil : info
-      }
-    }
-    if let npInfo, let title = npInfo[MPMediaItemPropertyTitle] as? String, !title.isEmpty {
-      let artist = (npInfo[MPMediaItemPropertyArtist] as? String) ?? ""
-      let album = (npInfo[MPMediaItemPropertyAlbumTitle] as? String) ?? ""
+    // Now Playing — read from MediaRemote cache (captured via notification).
+    // MediaRemote reads ALL media sources: Apple Music, Spotify, Safari, Brave, etc.
+    // Keys use "kMRMediaRemoteNowPlayingInfo*" prefix from private framework.
+    if let mr = cachedNowPlaying,
+       let title = mr["kMRMediaRemoteNowPlayingInfoTitle"] as? String, !title.isEmpty {
+      let artist = (mr["kMRMediaRemoteNowPlayingInfoArtist"] as? String) ?? ""
+      let album = (mr["kMRMediaRemoteNowPlayingInfoAlbum"] as? String) ?? ""
       var np: [String: Any] = [
         "title": title,
         "artist": artist,
@@ -663,9 +682,10 @@ class StreamSessionViewModel: ObservableObject {
       let key = "\(title)|\(artist)"
       if key != lastNowPlayingKey {
         lastNowPlayingKey = key
-        if let artwork = npInfo[MPMediaItemPropertyArtwork] as? MPMediaItemArtwork,
-           let img = artwork.image(at: CGSize(width: 64, height: 64)),
-           let jpeg = img.jpegData(compressionQuality: 0.6) {
+        if let artData = mr["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data,
+           let img = UIImage(data: artData),
+           let resized = img.resize(to: CGSize(width: 64, height: 64)),
+           let jpeg = resized.jpegData(compressionQuality: 0.6) {
           np["artwork"] = "data:image/jpeg;base64," + jpeg.base64EncodedString()
         }
       }
@@ -1112,6 +1132,16 @@ class StreamSessionViewModel: ObservableObject {
       return "Device is overheating. Streaming has been paused to protect the device."
     @unknown default:
       return "An unknown streaming error occurred."
+    }
+  }
+}
+
+// MARK: - UIImage resize helper
+
+private extension UIImage {
+  func resize(to size: CGSize) -> UIImage? {
+    UIGraphicsImageRenderer(size: size).image { _ in
+      draw(in: CGRect(origin: .zero, size: size))
     }
   }
 }
