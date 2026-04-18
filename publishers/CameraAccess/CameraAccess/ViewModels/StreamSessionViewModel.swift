@@ -20,7 +20,6 @@ import MWDATCamera
 import MWDATCore
 import Photos
 import SwiftUI
-import UIKit
 
 enum StreamingStatus {
   case streaming
@@ -143,10 +142,6 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundAudioEngine: AVAudioEngine?
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
-  private var lastNowPlayingKey: String?
-  private var cachedNowPlaying: [String: String]? = nil
-  private var npDebugTrace: String = ""
-  private var nowPlayingPollTask: Task<Void, Never>? = nil
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -593,16 +588,12 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     // Start Now Playing background poll (runs off main thread to avoid semaphore deadlock)
-    startNowPlayingPoll()
   }
 
   func stopRelay() async {
     // Cancel telemetry push timer
     telemetryPushTimer?.cancel()
     telemetryPushTimer = nil
-
-    // Stop Now Playing poll
-    stopNowPlayingPoll()
 
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
@@ -647,9 +638,8 @@ class StreamSessionViewModel: ObservableObject {
       ],
     ]
 
-    // Now Playing — read from background-polled cache (avoids main-thread deadlock)
-    payload["nowPlaying"] = cachedNowPlaying as Any
-    payload["npDebug"] = npDebugTrace
+    // Now Playing removed — iOS 18 blocks MediaRemote for third-party apps
+    // (see NowPlayingTests, NowPlayingLowLevelTests for proof)
 
     await relayStage.sendJson(payload)
   }
@@ -1092,57 +1082,4 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  // MARK: - Now Playing (background-polling)
-
-  /// NOTE: iOS 18 blocks MediaRemote private framework for third-party apps (returns nil).
-  /// Only MPMusicPlayerController (Apple Music) works as a public API.
-  /// Browser/Spotify/etc. Now Playing info is not accessible on stock iOS.
-
-  private func startNowPlayingPoll() {
-    stopNowPlayingPoll()
-    cachedNowPlaying = nil
-    npDebugTrace = "init"
-    nowPlayingPollTask = Task { [weak self] in
-      while !Task.isCancelled {
-        let (result, debug) = Self.readNowPlaying()
-        await MainActor.run {
-          self?.cachedNowPlaying = result
-          self?.npDebugTrace = debug
-        }
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-      }
-    }
-  }
-
-  private func stopNowPlayingPoll() {
-    nowPlayingPollTask?.cancel()
-    nowPlayingPollTask = nil
-    cachedNowPlaying = nil
-    npDebugTrace = "stopped"
-  }
-
-  nonisolated private static func readNowPlaying() -> ([String: String]?, String) {
-    // MPMusicPlayerController — Apple Music only (only public API that works)
-    let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem
-    if let title = item?.title, !title.isEmpty {
-      let result: [String: String] = [
-        "title": title,
-        "artist": item?.artist ?? "",
-        "album": item?.albumTitle ?? "",
-      ]
-      NSLog("[NowPlaying] Apple Music: title=%@ artist=%@", title, item?.artist ?? "")
-      return (result, "apple_music")
-    }
-    return (nil, "none")
-  }
-}
-
-// MARK: - UIImage resize helper
-
-private extension UIImage {
-  func resize(to size: CGSize) -> UIImage? {
-    UIGraphicsImageRenderer(size: size).image { _ in
-      draw(in: CGRect(origin: .zero, size: size))
-    }
-  }
 }

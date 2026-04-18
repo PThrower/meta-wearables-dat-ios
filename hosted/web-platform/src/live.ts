@@ -272,29 +272,6 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
         const el = document.getElementById("t-errors");
         if (el) el.textContent = String(errors.total ?? 0);
       }
-      // Now Playing
-      const np = (msg as Record<string, unknown>).nowPlaying as { title: string; artist?: string; album?: string; artwork?: string } | undefined;
-      const npRow = document.getElementById("si-now-playing-row");
-      const npArt = document.getElementById("si-now-playing-art") as HTMLImageElement | null;
-      const npText = document.getElementById("si-now-playing");
-      if (npRow && npText) {
-        if (np?.title) {
-          const parts = [np.title];
-          if (np.artist) parts.push(np.artist);
-          npText.textContent = parts.join(" — ");
-          npRow.classList.remove("hidden");
-          if (npArt && np.artwork) {
-            npArt.src = np.artwork;
-            npArt.style.display = "block";
-          } else if (npArt) {
-            npArt.style.display = "none";
-          }
-        } else {
-          npText.textContent = "--";
-          npRow.classList.add("hidden");
-          if (npArt) npArt.style.display = "none";
-        }
-      }
     }
 
     // BT link state changed
