@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-2QADcC5n.js"></script>
+  <script type="module" crossorigin src="/assets/main-CxrDMDrf.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-BIOhaTWt.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-BUY0nSxU.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -129,6 +129,16 @@
             <div class="info-row">
               <span class="info-label">Level</span>
               <span class="info-value" style="flex:1"><span id="audio-meter"><span id="audio-meter-fill"></span></span></span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Mic</span>
+              <span class="info-value" style="flex:1">
+                <div class="mic-selector" id="micSelector">
+                  <button class="mic-btn active" data-mode="phone">Phone</button>
+                  <button class="mic-btn" data-mode="glasses">Glasses</button>
+                  <button class="mic-btn" data-mode="all">All</button>
+                </div>
+              </span>
             </div>
           </div>
         </div>

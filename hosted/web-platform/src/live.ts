@@ -34,6 +34,21 @@ infoPanelToggle.addEventListener("click", () => {
   infoPanelToggle.classList.toggle("active");
 });
 
+// Mic selector buttons
+const micSelector = document.getElementById("micSelector")!;
+function setMicActive(mode: string): void {
+  micSelector.querySelectorAll(".mic-btn").forEach((btn) => {
+    btn.classList.toggle("active", (btn as HTMLElement).dataset.mode === mode);
+  });
+}
+micSelector.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest(".mic-btn") as HTMLElement | null;
+  if (!btn?.dataset.mode) return;
+  if (btn.classList.contains("active")) return;
+  if (!player) return;
+  player.sendJson({ type: "set_audio_mode", mode: btn.dataset.mode });
+});
+
 let uptimeInterval: ReturnType<typeof setInterval> | null = null;
 let sessionConnectedAt = 0;
 
@@ -85,6 +100,7 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   document.getElementById("p-latency")!.textContent = "--";
   document.getElementById("p-drop")!.textContent = "--";
   document.getElementById("p-audio")!.textContent = "OFF";
+  setMicActive("phone");
   meterFill.style.width = "0%";
   document.getElementById("unmute")!.classList.remove("show");
   setPill(pubPill, "PUB WAIT", "status-off");
@@ -179,6 +195,12 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       } else {
         setPill(aiPill, "AI OFF", "status-off");
       }
+    }
+
+    // Audio mode changed (from publisher via server)
+    if (msg.type === "audio_mode_changed") {
+      const mode = (msg as { mode: string }).mode;
+      setMicActive(mode);
     }
   };
 
@@ -277,6 +299,7 @@ export function closeLive(): void {
   infoPanel.classList.remove("open");
   infoPanelToggle.classList.remove("active");
   siStrip.classList.add("hidden");
+  setMicActive("phone");
   if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
   sessionConnectedAt = 0;
   if (player) { player.destroy(); player = null; }

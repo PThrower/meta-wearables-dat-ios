@@ -806,6 +806,10 @@ const server = Bun.serve<WsData>({
             } else if (isBackpressureAckMessage(cmd)) {
               // Publisher acknowledges backpressure adjustment
               console.log(`[relay] Backpressure ack from publisher: targetFps=${cmd.targetFps} session=${sessionId}`);
+            } else if (cmd.type === "audio_mode_changed") {
+              // Publisher acknowledges audio mode change — broadcast to all viewers
+              console.log(`[relay] Audio mode changed by publisher: mode=${cmd.mode} session=${sessionId}`);
+              broadcastToViewers(session, { type: "audio_mode_changed", mode: cmd.mode });
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
@@ -939,6 +943,16 @@ const server = Bun.serve<WsData>({
               const publisherWs = session.publisher?.ws;
               if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
                 publisherWs.send(JSON.stringify({ type: "backpressure", targetFps: clampedFps }));
+              }
+            } else if (cmd.type === "set_audio_mode") {
+              // Viewer -> Server -> Publisher: relay mic switching command
+              const mode = cmd.mode as string;
+              if (["phone", "glasses", "all"].includes(mode)) {
+                console.log(`[relay] Audio mode change from viewer: mode=${mode} session=${sessionId}`);
+                const publisherWs = session.publisher?.ws;
+                if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                  publisherWs.send(JSON.stringify({ type: "set_audio_mode", mode }));
+                }
               }
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }

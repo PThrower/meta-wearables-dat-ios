@@ -426,6 +426,13 @@ class StreamSessionViewModel: ObservableObject {
             self?.boundingBoxes = bboxes
           }
         }
+
+        // Audio mode change from viewer
+        if msgType == "set_audio_mode", let mode = msg["mode"] as? String {
+          Task { @MainActor [weak self] in
+            await self?.switchAudioMode(mode)
+          }
+        }
       }
 
       await relayStage.setOnReceivedAudio { [weak self] data in
@@ -531,6 +538,44 @@ class StreamSessionViewModel: ObservableObject {
     let _ = activeAppId
     activeAppId = nil
     Task { await relayStage.sendJson(["type": "deactivate_app"]) }
+  }
+
+  // MARK: - Remote Audio Mode Switching
+
+  /// Switch audio input mode from viewer. Safe during streaming — only
+  /// starts/stops AudioStage instances without touching AVAudioSession routing.
+  func switchAudioMode(_ mode: String) async {
+    guard isRelaying else { return }
+
+    // Stop all audio stages
+    await audioStage.stop()
+    await glassesAudioStage.stop()
+
+    // Start the requested stages
+    switch mode {
+    case "phone":
+      audioInputMode = .builtInMic
+      await audioStage.start()
+      NSLog("[StreamSession] Audio mode switched: phone mic")
+    case "glasses":
+      audioInputMode = .glassesMic
+      await glassesAudioStage.start()
+      NSLog("[StreamSession] Audio mode switched: glasses mic")
+    case "all":
+      audioInputMode = .all
+      await audioStage.start()
+      await glassesAudioStage.start()
+      NSLog("[StreamSession] Audio mode switched: all mics")
+    default:
+      // Unknown mode — restart phone mic as fallback
+      audioInputMode = .builtInMic
+      await audioStage.start()
+      NSLog("[StreamSession] Unknown audio mode '\(mode)' — fell back to phone mic")
+      return
+    }
+
+    // Acknowledge back to server so all viewers update their UI
+    await relayStage.sendJson(["type": "audio_mode_changed", "mode": mode])
   }
 
   // MARK: - Microphone Permission
