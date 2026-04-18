@@ -144,8 +144,6 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
   private var lastNowPlayingKey: String?
-  private var mediaRemoteHandle: UnsafeMutableRawPointer?
-  private var cachedNowPlaying: [String: Any]?
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -200,32 +198,6 @@ class StreamSessionViewModel: ObservableObject {
     setupSessionListeners()
     attachPipeline()
     telemetryService?.attachToStreamSession(streamSession)
-
-    // Subscribe to system-wide Now Playing via MediaRemote private framework.
-    // This captures ALL media sources — Apple Music, Spotify, Safari, Brave, etc.
-    // MPNowPlayingInfoCenter only returns info for your own app's media.
-    mediaRemoteHandle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY)
-    if let mrHandle = mediaRemoteHandle {
-      typealias SubscribeFn = @convention(c) (DispatchQueue) -> Void
-      if let sym = dlsym(mrHandle, "MRMediaRemoteRegisterForNowPlayingNotifications") {
-        unsafeBitCast(sym, to: SubscribeFn.self)(DispatchQueue.main)
-      }
-      NotificationCenter.default.addObserver(
-        forName: NSNotification.Name("kMRMediaRemoteNowPlayingInfoDidChangeNotification"),
-        object: nil, queue: .main
-      ) { [weak self] _ in
-        MainActor.assumeIsolated {
-          guard let self, let handle = self.mediaRemoteHandle else { return }
-          typealias GetInfoFn = @convention(c) (DispatchQueue, @escaping ([String: Any]) -> Void) -> Void
-          guard let sym = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") else { return }
-          unsafeBitCast(sym, to: GetInfoFn.self)(DispatchQueue.main) { [weak self] info in
-            MainActor.assumeIsolated {
-              self?.cachedNowPlaying = info
-            }
-          }
-        }
-      }
-    }
 
     // Monitor device availability and capture wearable identity for auto-select
     deviceMonitorTask = Task { @MainActor [weak self] in
@@ -666,33 +638,8 @@ class StreamSessionViewModel: ObservableObject {
       ],
     ]
 
-    // Now Playing — read from MediaRemote cache (captured via notification).
-    // MediaRemote reads ALL media sources: Apple Music, Spotify, Safari, Brave, etc.
-    // Keys use "kMRMediaRemoteNowPlayingInfo*" prefix from private framework.
-    if let mr = cachedNowPlaying,
-       let title = mr["kMRMediaRemoteNowPlayingInfoTitle"] as? String, !title.isEmpty {
-      let artist = (mr["kMRMediaRemoteNowPlayingInfoArtist"] as? String) ?? ""
-      let album = (mr["kMRMediaRemoteNowPlayingInfoAlbum"] as? String) ?? ""
-      var np: [String: Any] = [
-        "title": title,
-        "artist": artist,
-        "album": album,
-      ]
-      // Only include artwork when track changes (avoid ~10KB base64 payload every 2s)
-      let key = "\(title)|\(artist)"
-      if key != lastNowPlayingKey {
-        lastNowPlayingKey = key
-        if let artData = mr["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data,
-           let img = UIImage(data: artData),
-           let resized = img.resize(to: CGSize(width: 64, height: 64)),
-           let jpeg = resized.jpegData(compressionQuality: 0.6) {
-          np["artwork"] = "data:image/jpeg;base64," + jpeg.base64EncodedString()
-        }
-      }
-      payload["nowPlaying"] = np
-    } else {
-      lastNowPlayingKey = nil
-    }
+    // Now Playing — direct MediaRemote call (reads ALL sources: browsers, Music, Spotify, etc.)
+    payload["nowPlaying"] = Self.readNowPlaying() as Any
 
     await relayStage.sendJson(payload)
   }
@@ -1133,6 +1080,57 @@ class StreamSessionViewModel: ObservableObject {
     @unknown default:
       return "An unknown streaming error occurred."
     }
+  }
+
+  // MARK: - Now Playing (MediaRemote)
+
+  /// Read system-wide Now Playing info via MediaRemote private framework.
+  /// Captures ALL media sources: Apple Music, Spotify, Safari, Brave, YouTube, etc.
+  /// Returns nil when nothing is playing.
+  nonisolated private static func readNowPlaying() -> [String: String]? {
+    // 1. Try MediaRemote (system-wide, all apps)
+    if let handle = dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_LAZY) {
+      typealias GetInfoFn = @convention(c) (DispatchQueue, @escaping (NSDictionary?) -> Void) -> Void
+      if let sym = dlsym(handle, "MRMediaRemoteGetNowPlayingInfo") {
+        let fn = unsafeBitCast(sym, to: GetInfoFn.self)
+        let sem = DispatchSemaphore(value: 0)
+        var result: NSDictionary?
+        fn(DispatchQueue.global()) { info in
+          result = info
+          sem.signal()
+        }
+        if sem.wait(timeout: .now() + 1) == .success, let info = result as? [String: Any] {
+          NSLog("[NowPlaying] MediaRemote keys: %@", Array(info.keys.map { String(describing: $0) }))
+          if let title = info["kMRMediaRemoteNowPlayingInfoTitle"] as? String, !title.isEmpty {
+            let artist = (info["kMRMediaRemoteNowPlayingInfoArtist"] as? String) ?? ""
+            let album = (info["kMRMediaRemoteNowPlayingInfoAlbum"] as? String) ?? ""
+            NSLog("[NowPlaying] MR hit: title=%@ artist=%@", title, artist)
+            return ["title": title, "artist": artist, "album": album]
+          }
+          NSLog("[NowPlaying] MR returned dict but no title key")
+        } else {
+          NSLog("[NowPlaying] MR semaphore timeout or nil result")
+        }
+      } else {
+        NSLog("[NowPlaying] dlsym MRMediaRemoteGetNowPlayingInfo failed")
+      }
+    } else {
+      NSLog("[NowPlaying] dlopen MediaRemote failed")
+    }
+
+    // 2. Fallback: MPMusicPlayerController (Apple Music only)
+    let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem
+    if let title = item?.title, !title.isEmpty {
+      NSLog("[NowPlaying] Apple Music fallback: title=%@", title)
+      return [
+        "title": title,
+        "artist": item?.artist ?? "",
+        "album": item?.albumTitle ?? "",
+      ]
+    }
+
+    NSLog("[NowPlaying] no playing media detected")
+    return nil
   }
 }
 
