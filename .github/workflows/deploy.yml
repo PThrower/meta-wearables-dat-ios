@@ -1,4 +1,11 @@
 name: Deploy to VPS
+# TODO: iOS CI/CD workflow for TestFlight builds
+#   - Separate workflow triggered on tag push or manual dispatch
+#   - Query App Store Connect API for latest build number, auto-increment
+#   - Build + archive with xcodebuild, upload to TestFlight via altool/notarytool
+#   - Requires: ASC_API_KEY, ASC_ISSUER_ID, ASC_KEY_ID secrets
+#   - Apple's "latest test build number" becomes source of truth instead of git rev-list
+#   - Current git-based auto-versioning (git tag + commit count) works for local dev installs
 
 on:
   push:
