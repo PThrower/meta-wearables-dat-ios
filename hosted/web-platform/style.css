@@ -272,112 +272,30 @@ header {
 }
 #livePlayer.active { display: flex; }
 
-/* Header: single compact row with three zones */
-.player-header {
+/* Minimal top bar */
+.player-topbar {
   flex-shrink: 0;
-  background: rgba(0,0,0,0.85);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(0,0,0,0.7);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
   backdrop-filter: blur(8px);
+  z-index: 20;
 }
-.player-row-primary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  gap: 12px;
-  min-height: 36px;
+.topbar-left, .topbar-right {
+  display: flex; align-items: center; gap: 4px;
 }
-
-/* Left zone: back + session context */
-.player-left {
-  display: flex; align-items: center; gap: 10px;
-  min-width: 0; flex-shrink: 1;
-  overflow: hidden;
+.topbar-center {
+  display: flex; align-items: center; gap: 6px;
 }
-.back-btn {
-  font-family: inherit; font-size: 14px; line-height: 1;
-  background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7);
-  border: 1px solid rgba(255,255,255,0.12);
-  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+.topbar-btn {
+  background: none; border: none; color: rgba(255,255,255,0.5);
+  cursor: pointer; padding: 6px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
   transition: all 0.15s ease;
 }
-.back-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
-
-/* Session info inline (replaces old strip) */
-.session-info-inline {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 10px; color: rgba(255,255,255,0.3);
-  white-space: nowrap; overflow: hidden;
-  min-width: 0;
-}
-.session-info-inline.hidden { display: none; }
-.session-info-inline .si-item {
-  padding: 0;
-}
-.session-info-inline .si-item:not(:last-child)::after {
-  content: "·"; margin-left: 8px; color: rgba(255,255,255,0.15);
-}
-.si-rec {
-  color: #ef4444; font-weight: 700; letter-spacing: 0.5px;
-  display: inline-flex; align-items: center; gap: 3px;
-  font-size: 9px;
-}
-.si-rec::before {
-  content: ""; display: inline-block;
-  width: 5px; height: 5px; border-radius: 50%;
-  background: #ef4444;
-  animation: rec-pulse 1.2s ease-in-out infinite;
-}
-.si-rec.hidden { display: none; }
-
-/* Center zone: stats */
-.player-center {
-  display: flex; align-items: center; gap: 10px;
-  flex-shrink: 0;
-}
-.stat {
-  display: flex; align-items: center; gap: 3px;
-  font-size: 11px; color: rgba(255,255,255,0.5);
-}
-.stat-label {
-  font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: rgba(255,255,255,0.3);
-}
-.stat-val {
-  font-weight: 600; color: #4ade80;
-}
-.stat-secondary .val {
-  font-size: 9px; color: rgba(255,255,255,0.25); font-weight: 500;
-}
-
-/* Audio dot indicator */
-.audio-dot {
-  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-  background: rgba(255,255,255,0.15); flex-shrink: 0;
-  transition: background 0.3s ease;
-}
-.audio-dot.active { background: #0ff; box-shadow: 0 0 4px rgba(0,255,255,0.4); }
-
-.audio-val {
-  font-size: 10px; color: rgba(255,255,255,0.5); font-weight: 500;
-}
-#audio-meter {
-  display: inline-block; width: 40px; height: 4px;
-  background: rgba(255,255,255,0.1); border-radius: 2px;
-  vertical-align: middle; margin-left: 3px; overflow: hidden;
-}
-#audio-meter-fill {
-  height: 100%; width: 0%; background: #0ff; border-radius: 2px;
-  transition: width 0.05s linear;
-}
-
-/* Right zone: status pills + controls */
-.player-right {
-  display: flex; align-items: center; gap: 6px;
-  flex-shrink: 0;
-}
+.topbar-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+#infoPanelToggle.active { color: #60a5fa; background: rgba(96,165,250,0.1); }
 
 /* Status pills */
 .status-pill {
@@ -385,12 +303,11 @@ header {
   padding: 2px 8px; border-radius: 4px; white-space: nowrap;
 }
 .status-live { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
-.status-off { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.35); }
+.status-off { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.25); }
 .status-error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
 .status-warn { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
 .status-active { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
 
-/* Quality select */
 #quality-select {
   background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6);
   border: 1px solid rgba(255,255,255,0.12);
@@ -398,6 +315,84 @@ header {
   font-size: 10px; font-family: inherit;
 }
 #quality-select option { background: #1a1a1a; }
+
+/* === LEFT INFO PANEL (togglable) === */
+.info-panel {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 240px;
+  background: rgba(8,8,8,0.92);
+  border-right: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(16px);
+  z-index: 15;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  pointer-events: auto;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+.info-panel.open {
+  transform: translateX(0);
+}
+.info-panel-inner {
+  padding: 48px 14px 14px;
+}
+.info-section {
+  margin-bottom: 16px;
+}
+.info-section-title {
+  font-size: 9px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  color: rgba(255,255,255,0.2);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.info-rows {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.info-rows.hidden { display: none; }
+.info-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 3px 0;
+}
+.info-label {
+  font-size: 10px; color: rgba(255,255,255,0.35);
+}
+.info-value {
+  font-size: 10px; color: rgba(255,255,255,0.7); font-weight: 500;
+  text-align: right;
+}
+.info-highlight {
+  color: #4ade80; font-weight: 600;
+}
+
+/* Audio meter inside info panel */
+#audio-meter {
+  display: block; width: 100%; height: 4px;
+  background: rgba(255,255,255,0.08); border-radius: 2px;
+  overflow: hidden;
+}
+#audio-meter-fill {
+  height: 100%; width: 0%; background: #0ff; border-radius: 2px;
+  transition: width 0.05s linear;
+}
+
+/* REC indicator */
+.si-rec-row.hidden { display: none; }
+.si-rec {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #ef4444;
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+.si-rec-text {
+  color: #ef4444; font-weight: 600; font-size: 10px;
+}
+@keyframes rec-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 
 /* Toast notifications */
 .toast-container {

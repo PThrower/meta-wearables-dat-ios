@@ -18,13 +18,21 @@ const connSpinner = document.getElementById("connSpinner")!;
 const connStatus = document.getElementById("connStatus")!;
 const connDetail = document.getElementById("connDetail")!;
 
-// Session info strip elements
+// Info panel elements
+const infoPanel = document.getElementById("infoPanel")!;
+const infoPanelToggle = document.getElementById("infoPanelToggle")!;
 const siStrip = document.getElementById("sessionInfoStrip")!;
 const siDevice = document.getElementById("si-device")!;
 const siWearable = document.getElementById("si-wearable")!;
 const siUptime = document.getElementById("si-uptime")!;
 const siViewers = document.getElementById("si-viewers")!;
-const siRecording = document.getElementById("si-recording")!;
+const siRecRow = document.getElementById("si-rec-row")!;
+
+// Info panel toggle
+infoPanelToggle.addEventListener("click", () => {
+  infoPanel.classList.toggle("open");
+  infoPanelToggle.classList.toggle("active");
+});
 
 let uptimeInterval: ReturnType<typeof setInterval> | null = null;
 let sessionConnectedAt = 0;
@@ -77,7 +85,6 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   document.getElementById("p-latency")!.textContent = "--";
   document.getElementById("p-drop")!.textContent = "--";
   document.getElementById("p-audio")!.textContent = "OFF";
-  document.getElementById("audio-dot")!.classList.remove("active");
   meterFill.style.width = "0%";
   document.getElementById("unmute")!.classList.remove("show");
   setPill(pubPill, "PUB WAIT", "status-off");
@@ -91,8 +98,6 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     onDropped: (c) => document.getElementById("p-drop")!.textContent = String(c),
     onAudioState: (s) => {
       document.getElementById("p-audio")!.textContent = s;
-      const dot = document.getElementById("audio-dot")!;
-      dot.classList.toggle("active", s === "ON");
     },
     onAudioLevel: (pct) => meterFill.style.width = pct + "%",
     onNeedUnmute: () => document.getElementById("unmute")!.classList.add("show"),
@@ -117,7 +122,6 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     onAudioCodec: (codecType) => {
       const map: Record<number, string> = { 0: "Phone Mic", 1: "Glasses Mic", 2: "TTS", 3: "Relay In" };
       document.getElementById("p-audio")!.textContent = map[codecType] ?? `Codec ${codecType}`;
-      document.getElementById("audio-dot")!.classList.add("active");
     },
   });
 
@@ -243,7 +247,7 @@ function handleSessionInfo(msg: Record<string, unknown>): void {
   if (vc != null) siViewers.textContent = `${vc} viewer${vc !== 1 ? "s" : ""}`;
 
   const rec = msg.recording as boolean | undefined;
-  siRecording.classList.toggle("hidden", !rec);
+  siRecRow.classList.toggle("hidden", !rec);
 
   const connectedAt = msg.connectedAt as number | undefined;
   if (connectedAt && connectedAt > 0) {
@@ -270,6 +274,8 @@ export function closeLive(): void {
   document.getElementById("unmute")!.classList.remove("show");
   document.getElementById("gallery")!.classList.remove("hidden");
   connOverlay.classList.add("hidden");
+  infoPanel.classList.remove("open");
+  infoPanelToggle.classList.remove("active");
   siStrip.classList.add("hidden");
   if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
   sessionConnectedAt = 0;
