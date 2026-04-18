@@ -57,6 +57,10 @@
 		PIPEMSRC01 /* AudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEMSRC02 /* AudioSource.swift */; };
 		PIPETAPC01 /* AudioTapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPETAPC02 /* AudioTapClient.swift */; };
 		PIPEREMF01 /* RemoteAudioFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEREMF02 /* RemoteAudioFrame.swift */; };
+		PCMPCV0000002 /* PCMConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMPCV0000001 /* PCMConvert.swift */; };
+		PCMCRC0000002 /* CRC16.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMCRC0000001 /* CRC16.swift */; };
+		PCMWP00000002 /* WireProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMWP00000001 /* WireProtocol.swift */; };
+		PCMAP00000002 /* PCMAudioProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMAP00000001 /* PCMAudioProcessing.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -142,6 +146,10 @@
 		PIPEMSRC02 /* AudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSource.swift; sourceTree = "<group>"; };
 		PIPETAPC02 /* AudioTapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTapClient.swift; sourceTree = "<group>"; };
 		PIPEREMF02 /* RemoteAudioFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAudioFrame.swift; sourceTree = "<group>"; };
+		PCMPCV0000001 /* PCMConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConvert.swift; sourceTree = "<group>"; };
+		PCMCRC0000001 /* CRC16.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRC16.swift; sourceTree = "<group>"; };
+		PCMWP00000001 /* WireProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireProtocol.swift; sourceTree = "<group>"; };
+		PCMAP00000001 /* PCMAudioProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMAudioProcessing.swift; sourceTree = "<group>"; };
 		V1V1V1V1V1V1V1V1V1V1V1V1 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -300,6 +308,10 @@
 				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
 				PIPEREMF02 /* RemoteAudioFrame.swift */,
+				PCMPCV0000001 /* PCMConvert.swift */,
+				PCMCRC0000001 /* CRC16.swift */,
+				PCMWP00000001 /* WireProtocol.swift */,
+				PCMAP00000001 /* PCMAudioProcessing.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -537,6 +549,10 @@
 				PIPEMSRC01 /* AudioSource.swift in Sources */,
 				PIPETAPC01 /* AudioTapClient.swift in Sources */,
 				PIPEREMF01 /* RemoteAudioFrame.swift in Sources */,
+				PCMPCV0000002 /* PCMConvert.swift in Sources */,
+				PCMCRC0000002 /* CRC16.swift in Sources */,
+				PCMWP00000002 /* WireProtocol.swift in Sources */,
+				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

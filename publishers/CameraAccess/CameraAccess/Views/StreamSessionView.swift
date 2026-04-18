@@ -71,6 +71,8 @@ struct StreamSessionView: View {
         OrientationLock.shared.unlock()
       } else {
         OrientationLock.shared.lock(to: .portrait)
+        // Connect to relay in standby mode so viewer can remotely start stream
+        Task { await viewModel.startStandbyRelay() }
       }
     }
     .onChange(of: viewModel.isStreaming) { streaming in

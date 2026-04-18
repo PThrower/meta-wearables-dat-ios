@@ -23,25 +23,9 @@ import ImageIO
 import UIKit
 import UniformTypeIdentifiers
 
-// MARK: - CRC-16/CCITT-FALSE
+// MARK: - CRC-16 (delegated to CRC16)
 
-/// CRC-16/CCITT-FALSE: polynomial 0x1021, init 0xFFFF, no reflect, no final XOR.
-/// Used for header integrity in both FRLY v1 and FRAU v1 wire protocols.
-func crc16ccitt(_ data: Data, offset: Int, length: Int) -> UInt16 {
-    var crc: UInt16 = 0xFFFF
-    let end = offset + length
-    for i in offset..<end {
-        crc ^= UInt16(data[i]) << 8
-        for _ in 0..<8 {
-            if crc & 0x8000 != 0 {
-                crc = (crc << 1) ^ 0x1021
-            } else {
-                crc = crc << 1
-            }
-        }
-    }
-    return crc
-}
+// crc16ccitt moved to Pipeline/CRC16.swift
 
 // MARK: - WebSocket Delegate
 
@@ -279,15 +263,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                         }
                     case .data(let data):
                         // Check if this is a FRAU audio frame (server → publisher)
-                        if data.count >= 36 {
-                            let magic: [UInt8] = [0x46, 0x52, 0x41, 0x55] // "FRAU"
-                            let prefix = [UInt8](data.prefix(4))
-                            if prefix == magic {
-                                if let handler = await self.onReceivedAudio {
-                                    handler(data)
-                                }
-                            } else {
-                                NSLog("[RelayStage] Received binary: \(data.count) bytes")
+                        if WireProtocol.parseFRAU(data) != nil {
+                            if let handler = await self.onReceivedAudio {
+                                handler(data)
                             }
                         } else {
                             NSLog("[RelayStage] Received binary: \(data.count) bytes")
@@ -441,45 +419,15 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
             let jpegData = mutableData as Data
 
-            // Build FRLY v1 wire protocol message (36-byte header)
-            var header = Data(capacity: 36)
-
-            // [0:4] Magic "FRLY"
-            header.append(contentsOf: [0x46, 0x52, 0x4C, 0x59])
-
-            // [4] Version = 1
-            header.append(UInt8(1))
-
-            // [5:9] Payload length (u32 LE) — JPEG data size
-            var payloadLen = UInt32(jpegData.count)
-            header.append(contentsOf: withUnsafeBytes(of: &payloadLen) { Array($0) })
-
-            // [9:17] Sequence number (u64 LE)
-            var seqVar = seq
-            header.append(contentsOf: withUnsafeBytes(of: &seqVar) { Array($0) })
-
-            // [17:21] Width (u32 LE)
-            var w = UInt32(width)
-            header.append(contentsOf: withUnsafeBytes(of: &w) { Array($0) })
-
-            // [21:25] Height (u32 LE)
-            var h = UInt32(height)
-            header.append(contentsOf: withUnsafeBytes(of: &h) { Array($0) })
-
-            // [25] Quality (u8)
-            header.append(UInt8(quality * 100))
-
-            // [26:34] Timestamp ms (u64 LE)
-            var ts = UInt64(Date().timeIntervalSince1970 * 1000)
-            header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
-
-            // [34:36] CRC-16/CCITT-FALSE over header bytes [0..33]
-            let crc = crc16ccitt(header, offset: 0, length: 34)
-            header.append(contentsOf: withUnsafeBytes(of: crc) { Array($0) })
-
-            // Combine header + JPEG payload
-            var message = header
-            message.append(jpegData)
+            // Build FRLY v1 wire protocol message using WireProtocol builder
+            let message = WireProtocol.buildFRLY(
+                jpegData: jpegData,
+                sequenceNumber: seq,
+                width: width,
+                height: height,
+                quality: quality,
+                timestampMs: UInt64(Date().timeIntervalSince1970 * 1000)
+            )
 
             wsTask.send(.data(message)) { error in
                 if let error {

@@ -104,6 +104,19 @@ struct NonStreamView: View {
         .padding(.bottom, 12)
         .opacity(viewModel.hasActiveDevice ? 0 : 1)
 
+        // Standby relay indicator
+        if viewModel.relayMode == .standby {
+          HStack(spacing: 6) {
+            Circle()
+              .fill(Color.green)
+              .frame(width: 8, height: 8)
+            Text("Relay: Ready")
+              .font(.system(size: 12, weight: .medium, design: .monospaced))
+              .foregroundColor(.green)
+          }
+          .padding(.bottom, 8)
+        }
+
         CustomButton(
           title: "Start streaming",
           style: .primary,

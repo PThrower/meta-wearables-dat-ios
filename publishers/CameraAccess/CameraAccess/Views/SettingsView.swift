@@ -100,7 +100,7 @@ struct SettingsView: View {
           .autocapitalization(.none)
           .disableAutocorrection(true)
           .keyboardType(.URL)
-          .disabled(viewModel.isRelaying)
+          .disabled(viewModel.relayMode == .active)
       }
     }
   }
@@ -239,7 +239,7 @@ struct SettingsView: View {
       if viewModel.isRetrying {
         row("Retry", "\(viewModel.retryCount)/3")
       }
-      row("Relaying", viewModel.isRelaying ? "YES" : "NO")
+      row("Relay", viewModel.relayMode == .active ? "ACTIVE" : viewModel.relayMode == .standby ? "STANDBY" : "OFF")
       row("Recording", viewModel.isRecording ? "YES" : "NO")
       row("Tap Connected", viewModel.isTapConnected ? "YES" : "NO")
     }

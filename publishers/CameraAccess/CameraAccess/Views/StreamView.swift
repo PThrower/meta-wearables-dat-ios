@@ -263,20 +263,20 @@ struct ControlsView: View {
 
       // Relay button (starts/stops both video + audio relay)
       CircleButton(
-        icon: viewModel.isRelaying ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
+        icon: viewModel.relayMode == .active ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
         text: nil
       ) {
         Task {
-          if viewModel.isRelaying {
+          if viewModel.relayMode == .active {
             await viewModel.stopRelay()
           } else {
             await viewModel.startRelay()
           }
         }
       }
-      .foregroundColor(viewModel.isRelaying ? .green : .white)
-      .shadow(color: viewModel.isRelaying ? .green.opacity(0.5) : .clear, radius: viewModel.isRelaying ? 8 : 0)
-      .animation(.easeInOut(duration: 0.2), value: viewModel.isRelaying)
+      .foregroundColor(viewModel.relayMode == .active ? .green : viewModel.relayMode == .standby ? .orange : .white)
+      .shadow(color: viewModel.relayMode == .active ? .green.opacity(0.5) : .clear, radius: viewModel.relayMode == .active ? 8 : 0)
+      .animation(.easeInOut(duration: 0.2), value: viewModel.relayMode == .active)
       .accessibilityIdentifier("relay_button")
 
       // Photo button
@@ -286,7 +286,7 @@ struct ControlsView: View {
       .accessibilityIdentifier("capture_photo_button")
 
       // AI app toggle — only when relaying
-      if viewModel.isRelaying {
+      if viewModel.relayMode == .active {
         CircleButton(
           icon: viewModel.activeAppId != nil ? "brain.head.profile.fill" : "brain.head.profile",
           text: nil

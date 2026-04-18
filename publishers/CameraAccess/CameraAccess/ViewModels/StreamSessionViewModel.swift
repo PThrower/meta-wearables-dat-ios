@@ -27,6 +27,13 @@ enum StreamingStatus {
   case stopped
 }
 
+/// Relay connection state — tracks WebSocket lifecycle independently from streaming.
+enum RelayMode {
+  case disconnected   // WebSocket not connected
+  case standby        // WebSocket connected, no frames (ready for remote start_stream)
+  case active         // WebSocket connected, streaming frames + audio
+}
+
 /// Audio input source for the relay stream.
 /// Controls which microphone feeds get sent to the cloud relay.
 enum AudioInputMode: String, CaseIterable, Identifiable {
@@ -84,7 +91,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var isRecording: Bool = false
 
   // Relay state
-  @Published var isRelaying: Bool = false
+  @Published var relayMode: RelayMode = .disconnected
   @Published var isTapConnected: Bool = false
   @Published var activeAppId: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
@@ -292,7 +299,7 @@ class StreamSessionViewModel: ObservableObject {
         }
 
         // Forward error to relay viewers
-        if self.isRelaying {
+        if self.relayMode == .active {
           await self.relayStage.sendJson([
             "type": "publisher_error",
             "error": rawError,
@@ -360,6 +367,12 @@ class StreamSessionViewModel: ObservableObject {
   // Permission check runs on @MainActor here (safe for AVAudioSession APIs).
   // audioStage.start() no longer touches AVAudioSession — permission handled above.
   func startRelay() async {
+    // If already in standby, just activate (start audio/telemetry without reconnecting)
+    if relayMode == .standby {
+      await activateFromStandby()
+      return
+    }
+
     var url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
     // Append device identifier for stable session binding
@@ -391,164 +404,11 @@ class StreamSessionViewModel: ObservableObject {
         await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
       }
 
-      // Wire server-to-publisher FRAU audio to direct playback.
-      // Uses AVAudioEngine (not AVAudioPlayer) — works reliably with .playAndRecord.
-      // Do NOT use AudioEventBus — AudioRelayStage would echo it back to the server.
-      // Wire control message callback so ViewModel stays in sync with server state
-      await relayStage.setOnControlMessage { [weak self] msg in
-        let msgType = msg["type"] as? String
-
-        // App status updates
-        if msgType == "app_status" {
-          let status = msg["status"] as? String
-          let appId = msg["appId"] as? String
-          Task { @MainActor [weak self] in
-            if status == "active" {
-              self?.activeAppId = appId
-              // Auto-start TTS when an AI app activates
-              await self?.audioPlaybackStage.start()
-            } else if status == "inactive" || status == "error" {
-              self?.activeAppId = nil
-              await self?.audioPlaybackStage.stop()
-            }
-          }
-        }
-
-        // Guidance text from server AI — trigger client-side TTS
-        if msgType == "guidance_text",
-           let text = msg["text"] as? String, !text.isEmpty {
-          Task { [weak self] in
-            await self?.audioPlaybackStage.speakGuidance(text)
-          }
-        }
-
-        // Bounding box annotations from AI
-        if msgType == "guidance_event",
-           let evt = msg["event"] as? [String: Any],
-           (evt["type"] as? String) == "guidance.bbox",
-           let boxes = evt["boundingBoxes"] as? [[String: Any]] {
-          let bboxes = boxes.compactMap { box -> BoundingBox? in
-            guard let y1 = box["y1"] as? Double,
-                  let x1 = box["x1"] as? Double,
-                  let y2 = box["y2"] as? Double,
-                  let x2 = box["x2"] as? Double else { return nil }
-            return BoundingBox(
-              x1: x1 / 1024.0, y1: y1 / 1024.0,
-              x2: x2 / 1024.0, y2: y2 / 1024.0,
-              label: box["label"] as? String ?? "object",
-              confidence: box["confidence"] as? Double ?? 0.8
-            )
-          }
-          Task { @MainActor [weak self] in
-            self?.boundingBoxes = bboxes
-          }
-        }
-
-        // Audio mode change from viewer
-        if msgType == "set_audio_mode", let mode = msg["mode"] as? String {
-          Task { @MainActor [weak self] in
-            await self?.switchAudioMode(mode)
-          }
-        }
-
-        // Audio gain control from viewer
-        if msgType == "set_audio_gain",
-           let codecType = msg["codecType"] as? Int,
-           let gainDb = msg["gainDb"] as? Double {
-          Task { [weak self] in
-            await self?.audioRelayStage.setGain(codecType: UInt8(codecType), gainDb: Float(gainDb))
-          }
-        }
-
-        // Noise gate control from viewer
-        if msgType == "set_noise_gate",
-           let codecType = msg["codecType"] as? Int,
-           let threshold = msg["threshold"] as? Double {
-          Task { [weak self] in
-            await self?.audioRelayStage.setNoiseGate(codecType: UInt8(codecType), threshold: Float(threshold))
-          }
-        }
-
-        // Noise suppression toggle from viewer
-        if msgType == "set_noise_suppression",
-           let codecType = msg["codecType"] as? Int,
-           let enabled = msg["enabled"] as? Bool {
-          Task { [weak self] in
-            await self?.audioRelayStage.setNoiseSuppression(codecType: UInt8(codecType), enabled: enabled)
-          }
-        }
-
-        // Audio mix control from viewer
-        if msgType == "set_audio_mix",
-           let enabled = msg["enabled"] as? Bool {
-          let weightPhone = msg["weightPhone"] as? Double ?? 0.5
-          let weightGlasses = msg["weightGlasses"] as? Double ?? 0.5
-          Task { [weak self] in
-            await self?.audioRelayStage.setMixEnabled(enabled, weightPhone: Float(weightPhone), weightGlasses: Float(weightGlasses))
-          }
-        }
-
-        // Audio config query from viewer
-        if msgType == "get_audio_config" {
-          Task { [weak self] in
-            guard let self else { return }
-            let config = await self.audioRelayStage.getCurrentConfig()
-            await self.relayStage.sendJson(config.toDictionary())
-          }
-        }
-
-        // Remote photo capture from viewer
-        if msgType == "capture_photo" {
-          Task { @MainActor [weak self] in
-            self?.capturePhoto()
-            await self?.relayStage.sendJson(["type": "photo_captured"])
-          }
-        }
-
-        // Remote recording control from viewer
-        if msgType == "start_recording" {
-          Task { @MainActor [weak self] in
-            await self?.startRecording()
-            await self?.relayStage.sendJson(["type": "recording_changed", "recording": true])
-          }
-        }
-        if msgType == "stop_recording" {
-          Task { @MainActor [weak self] in
-            await self?.stopRecording()
-            await self?.relayStage.sendJson(["type": "recording_changed", "recording": false])
-          }
-        }
-
-        // Remote stream control from viewer
-        if msgType == "start_stream" {
-          Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.startSession()
-            await self.startRelay()
-            await self.relayStage.sendJson(["type": "stream_changed", "streaming": true])
-          }
-        }
-        if msgType == "stop_stream" {
-          Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.stopSession()
-            await self.relayStage.sendJson(["type": "stream_changed", "streaming": false])
-          }
-        }
-
-        // Remote TTS from viewer
-        if msgType == "speak_text", let text = msg["text"] as? String, !text.isEmpty {
-          Task { @MainActor [weak self] in
-            await self?.audioPlaybackStage.speakGuidance(text)
-            await self?.relayStage.sendJson(["type": "spoken_text", "text": text])
-          }
-        }
-      }
+      // Wire control message callback
+      await wireControlMessageHandler()
 
       await relayStage.setOnReceivedAudio { [weak self] data in
         guard data.count >= 29 else { return }
-
-        // Safe little-endian parsing
         let sampleRate = UInt32(data[13])
           | UInt32(data[14]) << 8
           | UInt32(data[15]) << 16
@@ -556,16 +416,14 @@ class StreamSessionViewModel: ObservableObject {
         let channels = UInt16(data[17]) | UInt16(data[18]) << 8
         let bitsPerSample = UInt16(data[19]) | UInt16(data[20]) << 8
         let pcmData = data.subdata(in: 29..<data.count)
-
         NSLog("[StreamSession] Server audio: \(pcmData.count) bytes, \(sampleRate)Hz, \(channels)ch, \(bitsPerSample)bit")
-
         Task { @MainActor [weak self] in
           guard let self else { return }
           self.playInboundPCM(pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
         }
       }
       try await relayStage.connect(to: url)
-      isRelaying = true
+      relayMode = .active
       NSLog("[StreamSession] Relay connected to \(url)")
 
       // Send initial link state to viewers (session may already be .streaming)
@@ -583,21 +441,281 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
-    // NOTE: Do NOT call routeAudioInput() here. Changing setPreferredInput()
-    // while the DAT SDK BT video stream is active tears down the HFP link and
-    // kills the video stream. Audio routing must happen BEFORE streaming starts.
-    // The audio session is pre-configured as .playAndRecord with .allowBluetooth
-    // in CameraAccessApp — the hardware default input is used as-is.
-    //
-    // Do NOT call setActive(true) here either — it triggers a route
-    // renegotiation that disrupts the BT video stream.
+    // Start audio, telemetry, and tap client
+    await startRelayAudioAndTelemetry()
+  }
 
-    // Auto-start audio after relay connects — permission already checked above
+  // MARK: - Standby Relay
+
+  /// Connect to relay server in standby mode — ready for remote start_stream.
+  /// Does NOT start audio, telemetry, or camera session.
+  func startStandbyRelay() async {
+    guard relayMode == .disconnected else { return }
+
+    var url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let deviceId = UIDevice.current.identifierForVendor?.uuidString {
+      let separator = url.contains("?") ? "&" : "?"
+      url += "\(separator)device=\(deviceId)"
+    }
+    guard !url.isEmpty else { return }
+
+    do {
+      let wearableId = selectedDeviceId ?? activeWearableId
+      if let wearableId {
+        let deviceTypeName: String? = selectedDeviceId != nil
+          ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
+          : activeWearableType
+        await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
+      }
+
+      await wireControlMessageHandler()
+      try await relayStage.connect(to: url)
+      relayMode = .standby
+      NSLog("[StreamSession] Standby relay connected to \(url)")
+
+      // Announce standby state to server
+      await relayStage.sendJson(["type": "standby", "status": "ready"])
+    } catch {
+      NSLog("[StreamSession] Standby relay connect failed (non-fatal): \(error)")
+    }
+  }
+
+  /// Transition from standby to active — start camera + audio + telemetry.
+  /// Called when start_stream is received while in standby.
+  private func activateFromStandby() async {
+    guard relayMode == .standby else { return }
+
+    // Check mic permission
+    guard await checkMicPermission() else {
+      await relayStage.sendJson(["type": "publisher_error", "error": "Microphone permission required", "state": "standby"])
+      return
+    }
+
+    await startSession()
+    relayMode = .active
+
+    // Wire inbound audio handler
+    await relayStage.setOnReceivedAudio { [weak self] data in
+      guard data.count >= 29 else { return }
+      let sampleRate = UInt32(data[13])
+        | UInt32(data[14]) << 8
+        | UInt32(data[15]) << 16
+        | UInt32(data[16]) << 24
+      let channels = UInt16(data[17]) | UInt16(data[18]) << 8
+      let bitsPerSample = UInt16(data[19]) | UInt16(data[20]) << 8
+      let pcmData = data.subdata(in: 29..<data.count)
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.playInboundPCM(pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
+      }
+    }
+
+    // Start audio, telemetry, and tap client
+    await startRelayAudioAndTelemetry()
+
+    // Send link state
+    let linkState: String
+    switch streamSession.state {
+    case .streaming: linkState = "connected"
+    case .waitingForDevice: linkState = "disconnected"
+    default: linkState = "unknown"
+    }
+    await relayStage.sendJson(["type": "link_state_changed", "state": linkState])
+  }
+
+  /// Transition from active back to standby — stop camera/audio but keep WebSocket.
+  private func backToStandby() async {
+    guard relayMode == .active else { return }
+
+    // Stop audio/telemetry but NOT the WebSocket
+    telemetryPushTimer?.cancel()
+    telemetryPushTimer = nil
+    await audioStage.stop()
+    await glassesAudioStage.stop()
+    stopInboundAudioEngine()
+    await audioRelayStage.detachFromEventBus(audioEventBus)
+    await audioTapClient.disconnect()
+    isTapConnected = false
+    activeAppId = nil
+    boundingBoxes = []
+
+    relayMode = .standby
+    await relayStage.sendJson(["type": "standby", "status": "ready"])
+    NSLog("[StreamSession] Relayed backed to standby mode")
+  }
+
+  // MARK: - Shared Relay Helpers
+
+  /// Wire the onControlMessage callback — shared between startRelay and startStandbyRelay.
+  private func wireControlMessageHandler() async {
+    await relayStage.setOnControlMessage { [weak self] msg in
+      let msgType = msg["type"] as? String
+
+      // App status updates
+      if msgType == "app_status" {
+        let status = msg["status"] as? String
+        let appId = msg["appId"] as? String
+        Task { @MainActor [weak self] in
+          if status == "active" {
+            self?.activeAppId = appId
+            await self?.audioPlaybackStage.start()
+          } else if status == "inactive" || status == "error" {
+            self?.activeAppId = nil
+            await self?.audioPlaybackStage.stop()
+          }
+        }
+      }
+
+      // Guidance text from server AI — trigger client-side TTS
+      if msgType == "guidance_text",
+         let text = msg["text"] as? String, !text.isEmpty {
+        Task { [weak self] in
+          await self?.audioPlaybackStage.speakGuidance(text)
+        }
+      }
+
+      // Bounding box annotations from AI
+      if msgType == "guidance_event",
+         let evt = msg["event"] as? [String: Any],
+         (evt["type"] as? String) == "guidance.bbox",
+         let boxes = evt["boundingBoxes"] as? [[String: Any]] {
+        let bboxes = boxes.compactMap { box -> BoundingBox? in
+          guard let y1 = box["y1"] as? Double,
+                let x1 = box["x1"] as? Double,
+                let y2 = box["y2"] as? Double,
+                let x2 = box["x2"] as? Double else { return nil }
+          return BoundingBox(
+            x1: x1 / 1024.0, y1: y1 / 1024.0,
+            x2: x2 / 1024.0, y2: y2 / 1024.0,
+            label: box["label"] as? String ?? "object",
+            confidence: box["confidence"] as? Double ?? 0.8
+          )
+        }
+        Task { @MainActor [weak self] in
+          self?.boundingBoxes = bboxes
+        }
+      }
+
+      // Audio mode change from viewer
+      if msgType == "set_audio_mode", let mode = msg["mode"] as? String {
+        Task { @MainActor [weak self] in
+          await self?.switchAudioMode(mode)
+        }
+      }
+
+      // Audio gain control from viewer
+      if msgType == "set_audio_gain",
+         let codecType = msg["codecType"] as? Int,
+         let gainDb = msg["gainDb"] as? Double {
+        Task { [weak self] in
+          await self?.audioRelayStage.setGain(codecType: UInt8(codecType), gainDb: Float(gainDb))
+        }
+      }
+
+      // Noise gate control from viewer
+      if msgType == "set_noise_gate",
+         let codecType = msg["codecType"] as? Int,
+         let threshold = msg["threshold"] as? Double {
+        Task { [weak self] in
+          await self?.audioRelayStage.setNoiseGate(codecType: UInt8(codecType), threshold: Float(threshold))
+        }
+      }
+
+      // Noise suppression toggle from viewer
+      if msgType == "set_noise_suppression",
+         let codecType = msg["codecType"] as? Int,
+         let enabled = msg["enabled"] as? Bool {
+        Task { [weak self] in
+          await self?.audioRelayStage.setNoiseSuppression(codecType: UInt8(codecType), enabled: enabled)
+        }
+      }
+
+      // Audio mix control from viewer
+      if msgType == "set_audio_mix",
+         let enabled = msg["enabled"] as? Bool {
+        let weightPhone = msg["weightPhone"] as? Double ?? 0.5
+        let weightGlasses = msg["weightGlasses"] as? Double ?? 0.5
+        Task { [weak self] in
+          await self?.audioRelayStage.setMixEnabled(enabled, weightPhone: Float(weightPhone), weightGlasses: Float(weightGlasses))
+        }
+      }
+
+      // Audio config query from viewer
+      if msgType == "get_audio_config" {
+        Task { [weak self] in
+          guard let self else { return }
+          let config = await self.audioRelayStage.getCurrentConfig()
+          await self.relayStage.sendJson(config.toDictionary())
+        }
+      }
+
+      // Remote photo capture from viewer
+      if msgType == "capture_photo" {
+        Task { @MainActor [weak self] in
+          self?.capturePhoto()
+          await self?.relayStage.sendJson(["type": "photo_captured"])
+        }
+      }
+
+      // Remote recording control from viewer
+      if msgType == "start_recording" {
+        Task { @MainActor [weak self] in
+          await self?.startRecording()
+          await self?.relayStage.sendJson(["type": "recording_changed", "recording": true])
+        }
+      }
+      if msgType == "stop_recording" {
+        Task { @MainActor [weak self] in
+          await self?.stopRecording()
+          await self?.relayStage.sendJson(["type": "recording_changed", "recording": false])
+        }
+      }
+
+      // Remote stream control from viewer
+      if msgType == "start_stream" {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          if self.relayMode == .standby {
+            await self.activateFromStandby()
+          } else if self.relayMode == .disconnected {
+            await self.startSession()
+            await self.startRelay()
+          }
+          await self.relayStage.sendJson(["type": "stream_changed", "streaming": true])
+        }
+      }
+      if msgType == "stop_stream" {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          if self.relayMode == .active {
+            // Stop camera, keep WebSocket in standby
+            if self.isRecording { await self.stopRecording() }
+            await self.backToStandby()
+            await self.streamSession.stop()
+            let audioSession = AVAudioSession.sharedInstance()
+            try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+          }
+          await self.relayStage.sendJson(["type": "stream_changed", "streaming": false])
+        }
+      }
+
+      // Remote TTS from viewer
+      if msgType == "speak_text", let text = msg["text"] as? String, !text.isEmpty {
+        Task { @MainActor [weak self] in
+          await self?.audioPlaybackStage.speakGuidance(text)
+          await self?.relayStage.sendJson(["type": "spoken_text", "text": text])
+        }
+      }
+    }
+  }
+
+  /// Start audio capture, telemetry push, and audio tap client.
+  /// Shared between startRelay() and activateFromStandby().
+  private func startRelayAudioAndTelemetry() async {
     // Attach relay stage to event bus before starting capture so packets flow immediately
     await audioRelayStage.attachToEventBus(audioEventBus)
 
-    // Start audio capture based on user-selected input mode.
-    // Audio routing must NOT change during active streaming (DAT SDK constraint).
+    // Start audio capture based on user-selected input mode
     switch audioInputMode {
     case .builtInMic:
       await audioStage.start()
@@ -606,14 +724,13 @@ class StreamSessionViewModel: ObservableObject {
       await glassesAudioStage.start()
       NSLog("[StreamSession] Audio relay started (glasses HFP mic only)")
     case .all:
-      // Start both stages — codecType 0 (built-in) + codecType 1 (glasses HFP)
-      // on the same AudioEventBus, relay sends both to server.
       await audioStage.start()
       await glassesAudioStage.start()
       NSLog("[StreamSession] Audio relay started (built-in + glasses HFP mic)")
     }
 
     // Start audio tap client to receive remote audio frames from the server
+    let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
     Task {
       do {
         try await audioTapClient.connect(to: url, session: nil, autoReconnect: true)
@@ -632,8 +749,6 @@ class StreamSessionViewModel: ObservableObject {
         await self.pushTelemetry()
       }
     }
-
-    // Start Now Playing background poll (runs off main thread to avoid semaphore deadlock)
   }
 
   func stopRelay() async {
@@ -654,7 +769,7 @@ class StreamSessionViewModel: ObservableObject {
     isTapConnected = false
 
     await relayStage.disconnect()
-    isRelaying = false
+    relayMode = .disconnected
     activeAppId = nil
     boundingBoxes = []
     NSLog("[StreamSession] Relay disconnected")
@@ -663,7 +778,7 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - Telemetry Push
 
   private func pushTelemetry() async {
-    guard isRelaying, let snap = telemetryService?.snapshot else { return }
+    guard relayMode == .active, let snap = telemetryService?.snapshot else { return }
     let relayStats = await relayStage.getStats()
     var payload: [String: Any] = [
       "type": "publisher_telemetry",
@@ -693,13 +808,13 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - AI App Activation
 
   func activateApp(_ appId: String) {
-    guard isRelaying else { return }
+    guard relayMode == .active else { return }
     activeAppId = appId
     Task { await relayStage.sendJson(["type": "activate_app", "appId": appId]) }
   }
 
   func deactivateApp() {
-    guard isRelaying else { return }
+    guard relayMode == .active else { return }
     let _ = activeAppId
     activeAppId = nil
     Task { await relayStage.sendJson(["type": "deactivate_app"]) }
@@ -710,7 +825,7 @@ class StreamSessionViewModel: ObservableObject {
   /// Switch audio input mode from viewer. Safe during streaming — only
   /// starts/stops AudioStage instances without touching AVAudioSession routing.
   func switchAudioMode(_ mode: String) async {
-    guard isRelaying else { return }
+    guard relayMode == .active else { return }
 
     // Stop all audio stages
     await audioStage.stop()
@@ -832,6 +947,11 @@ class StreamSessionViewModel: ObservableObject {
   func handleEnterForeground() {
     endBackgroundTask()
 
+    // Reconnect standby relay if it was disconnected during background
+    if relayMode == .disconnected && !isStreaming {
+      Task { await startStandbyRelay() }
+    }
+
     guard wasStreamingBeforeBackground else { return }
     wasStreamingBeforeBackground = false
 
@@ -846,7 +966,7 @@ class StreamSessionViewModel: ObservableObject {
 
         Task {
           // Relay was connected: reconnect it
-          if isRelaying, await relayStage.connected {
+          if relayMode == .active, await relayStage.connected {
             do {
               try await relayStage.reconnect()
               NSLog("[StreamSession] Relay reconnected on foreground recovery")
@@ -970,15 +1090,25 @@ class StreamSessionViewModel: ObservableObject {
     if isRecording {
       await stopRecording()
     }
-    if isRelaying {
-      await stopRelay()
+    if relayMode == .active {
+      // Stop audio/telemetry but keep WebSocket in standby
+      telemetryPushTimer?.cancel()
+      telemetryPushTimer = nil
+      await audioStage.stop()
+      await glassesAudioStage.stop()
+      stopInboundAudioEngine()
+      await audioRelayStage.detachFromEventBus(audioEventBus)
+      await audioTapClient.disconnect()
+      isTapConnected = false
+      activeAppId = nil
+      boundingBoxes = []
+      relayMode = .standby
+      await relayStage.sendJson(["type": "standby", "status": "ready"])
+      NSLog("[StreamSession] Stopped session, relay in standby")
     }
-    activeAppId = nil
     cancelRetry()
     await streamSession.stop()
 
-    // [SAFE] AVAudioSession.sharedInstance() called from @MainActor (this ViewModel).
-    // This is the correct isolation context — not inside an actor.
     // Notify OS to restore background music that was ducked during streaming
     let audioSession = AVAudioSession.sharedInstance()
     try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
@@ -1005,7 +1135,7 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] State: \(String(describing: state)) | device=\(selectedDeviceId ?? "auto")")
 
     // Relay BT link state to viewers
-    if isRelaying {
+    if relayMode == .active {
       let linkState: String
       switch state {
       case .streaming:

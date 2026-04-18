@@ -2,7 +2,7 @@
  * RelayPipelineTests.swift
  *
  * Integration tests for the audio/video relay pipeline using MockDeviceKit.
- * Tests the full flow: MockDevice → StreamSession → Pipeline stages → Wire protocol output.
+ * Tests the full flow: MockDevice -> StreamSession -> Pipeline stages -> Wire protocol output.
  *
  * Validates:
  * 1. MockDeviceKit produces frames that the pipeline can process
@@ -164,9 +164,9 @@ class RelayPipelineTests: XCTestCase {
     }
 
     // MARK: - FRAU Encoding from AudioRelayStage
-    // NOTE: disabled — setRelayStage now takes concrete RelayStage actor, not protocol
+    // NOTE: disabled -- setRelayStage now takes concrete RelayStage actor, not protocol
     func testFRAUEncodingFromAudioPacket() async throws {
-        throw XCTSkip("setRelayStage requires concrete RelayStage actor — mock incompatible")
+        throw XCTSkip("setRelayStage requires concrete RelayStage actor -- mock incompatible")
     }
 
     // MARK: - HFP Audio Format Handling
@@ -239,22 +239,15 @@ final class MockRelayStage: FramePipelineStage, AudioTransport {
     }
 
     func sendAudio(_ packet: AudioPacket) async {
-        // Build FRAU manually (same as AudioRelayStage.buildFRAU)
-        var header = Data(capacity: 29)
-        header.append(contentsOf: [0x46, 0x52, 0x41, 0x55])
-        header.append(packet.codecType)
-        var seq = packet.sequenceNumber
-        header.append(contentsOf: withUnsafeBytes(of: &seq) { Array($0) })
-        var sr = packet.sampleRate
-        header.append(contentsOf: withUnsafeBytes(of: &sr) { Array($0) })
-        var ch = packet.channels
-        header.append(contentsOf: withUnsafeBytes(of: &ch) { Array($0) })
-        var bps = packet.bitsPerSample
-        header.append(contentsOf: withUnsafeBytes(of: &bps) { Array($0) })
-        var ts = packet.timestampMs
-        header.append(contentsOf: withUnsafeBytes(of: &ts) { Array($0) })
-        var message = header
-        message.append(packet.pcmData)
+        let message = WireProtocol.buildFRAU(
+            pcmData: packet.pcmData,
+            codecType: packet.codecType,
+            sampleRate: packet.sampleRate,
+            channels: packet.channels,
+            bitsPerSample: packet.bitsPerSample,
+            sequenceNumber: packet.sequenceNumber,
+            timestampMs: packet.timestampMs
+        )
         lastSentData = message
         sendCount += 1
     }
@@ -262,33 +255,5 @@ final class MockRelayStage: FramePipelineStage, AudioTransport {
     func sendRawData(_ data: Data) async {
         lastSentData = data
         sendCount += 1
-    }
-}
-
-// MARK: - Byte extraction for Data (test-local)
-
-private extension Data {
-    func extractUInt16(at offset: Int) -> UInt16 {
-        var value: UInt16 = 0
-        _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
-            dest.copyBytes(from: self[offset..<(offset + 2)])
-        }
-        return value
-    }
-
-    func extractUInt32(at offset: Int) -> UInt32 {
-        var value: UInt32 = 0
-        _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
-            dest.copyBytes(from: self[offset..<(offset + 4)])
-        }
-        return value
-    }
-
-    func extractUInt64(at offset: Int) -> UInt64 {
-        var value: UInt64 = 0
-        _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
-            dest.copyBytes(from: self[offset..<(offset + 8)])
-        }
-        return value
     }
 }

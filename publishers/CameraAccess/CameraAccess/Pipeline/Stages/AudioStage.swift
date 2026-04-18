@@ -93,7 +93,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
             let pcmData: Data
             if isFloat, let floatData = buffer.floatChannelData?[0] {
-                pcmData = Self.floatToPCM16(floatData, frameCount: frameCount)
+                pcmData = PCMConvert.floatToPCM16(floatData, frameCount: frameCount)
             } else if let int16Data = buffer.int16ChannelData?[0] {
                 pcmData = Data(bytes: int16Data, count: frameCount * 2)
             } else {
@@ -214,19 +214,7 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         }
     }
 
-    // MARK: - PCM Conversion
-
-    nonisolated private static func floatToPCM16(_ floatData: UnsafePointer<Float>, frameCount: Int) -> Data {
-        var pcmData = Data(count: frameCount * 2)
-        pcmData.withUnsafeMutableBytes { rawDest in
-            guard let dest = rawDest.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
-            for i in 0..<frameCount {
-                let clamped = max(-1.0, min(1.0, floatData[i]))
-                dest[i] = Int16(clamped * 32767.0)
-            }
-        }
-        return pcmData
-    }
+    // MARK: - PCM Conversion (delegated to PCMConvert)
 
     // MARK: - AudioPacket Publishing
 

@@ -132,7 +132,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
             for (buffer, _) in collectedBuffers {
                 guard let floatData = buffer.floatChannelData?[0] else { continue }
                 let frames = Int(buffer.frameLength)
-                pcmData.append(Self.floatToPCM16(floatData, frameCount: frames))
+                pcmData.append(PCMConvert.floatToPCM16(floatData, frameCount: frames))
             }
             guard pcmData.count > 0 else { return nil }
 
@@ -180,18 +180,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         }
     }
 
-    /// Convert Float32 samples to signed 16-bit PCM (little-endian).
-    nonisolated private static func floatToPCM16(_ floatData: UnsafePointer<Float>, frameCount: Int) -> Data {
-        var pcmData = Data(count: frameCount * 2)
-        pcmData.withUnsafeMutableBytes { rawDest in
-            guard let dest = rawDest.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
-            for i in 0..<frameCount {
-                let clamped = max(-1.0, min(1.0, floatData[i]))
-                dest[i] = Int16(clamped * 32767.0)
-            }
-        }
-        return pcmData
-    }
+    // MARK: - PCM Conversion (delegated to PCMConvert)
 
     // MARK: - Audio Route Probing
 
