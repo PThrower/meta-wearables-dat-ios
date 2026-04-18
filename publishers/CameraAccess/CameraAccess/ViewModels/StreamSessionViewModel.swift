@@ -638,7 +638,19 @@ class StreamSessionViewModel: ObservableObject {
     ]
 
     // Now Playing info (no permissions required)
-    let npInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+    // Try MPNowPlayingInfoCenter first (works with .mixWithOthers for any app),
+    // fall back to MPMusicPlayerController for Apple Music.
+    var npInfo = MPNowPlayingInfoCenter.default().nowPlayingInfo
+    if npInfo == nil || (npInfo?[MPMediaItemPropertyTitle] as? String ?? "").isEmpty {
+      npInfo = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem.flatMap { item in
+        var info = [String: Any]()
+        if let t = item.title { info[MPMediaItemPropertyTitle] = t }
+        if let a = item.artist { info[MPMediaItemPropertyArtist] = a }
+        if let b = item.albumTitle { info[MPMediaItemPropertyAlbumTitle] = b }
+        if let art = item.artwork { info[MPMediaItemPropertyArtwork] = art }
+        return info.isEmpty ? nil : info
+      }
+    }
     if let npInfo, let title = npInfo[MPMediaItemPropertyTitle] as? String, !title.isEmpty {
       let artist = (npInfo[MPMediaItemPropertyArtist] as? String) ?? ""
       let album = (npInfo[MPMediaItemPropertyAlbumTitle] as? String) ?? ""
