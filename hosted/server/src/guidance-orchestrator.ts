@@ -92,6 +92,9 @@ export type BboxAnnotationFn = (sessionId: string, annotation: import("./session
 /** Callback for pushing full guidance events to publisher WebSocket */
 export type GuidanceEventPushFn = (sessionId: string, event: GuidanceEvent) => void;
 
+/** Callback for persisting guidance events to R2 JSONL */
+export type GuidancePersistFn = (sessionId: string, event: GuidanceEvent) => void;
+
 // --- Constants ---
 
 const MAX_EVENT_HISTORY = 100;
@@ -130,6 +133,9 @@ export class GuidanceOrchestrator {
   /** Callback to push full guidance events (with bounding boxes) to publisher WebSocket */
   private guidanceEventPushFn: GuidanceEventPushFn | null = null;
 
+  /** Callback to persist guidance events to R2 JSONL sidecar */
+  private guidancePersistFn: GuidancePersistFn | null = null;
+
   private startedAt: number = 0;
   private unsubControlBus: (() => void) | null = null;
 
@@ -160,6 +166,11 @@ export class GuidanceOrchestrator {
   /** Set the callback for pushing full guidance events to publisher WebSocket */
   setGuidanceEventPushFn(fn: GuidanceEventPushFn): void {
     this.guidanceEventPushFn = fn;
+  }
+
+  /** Set the callback for persisting guidance events to R2 JSONL */
+  setGuidancePersistFn(fn: GuidancePersistFn): void {
+    this.guidancePersistFn = fn;
   }
 
   // --- Public API ---
@@ -842,6 +853,11 @@ export class GuidanceOrchestrator {
       history.shift();
     }
     history.push(event);
+
+    // Persist to R2 via callback (buffered by session-recorder)
+    if (this.guidancePersistFn) {
+      this.guidancePersistFn(sessionId, event);
+    }
 
     const t = this.getOrCreateTelemetry(sessionId);
     t.guidanceEvents++;

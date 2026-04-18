@@ -67,7 +67,7 @@ export interface AppInfo {
 
 const MAX_EVENTS = 50;
 
-const SOURCE_BADGES: Record<string, string> = {
+export const SOURCE_BADGES: Record<string, string> = {
   vision: "source-vision",
   camera: "source-vision",
   gesture: "source-gesture",
@@ -80,7 +80,7 @@ const SOURCE_BADGES: Record<string, string> = {
   manual: "source-manual",
 };
 
-function sourceBadgeClass(source: string): string {
+export function sourceBadgeClass(source: string): string {
   const lower = source.toLowerCase();
   for (const [key, cls] of Object.entries(SOURCE_BADGES)) {
     if (lower.includes(key)) return cls;
@@ -96,7 +96,7 @@ const STATUS_COLORS: Record<AIStatus["status"], string> = {
   rate_limited: "#fb923c",
 };
 
-const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
+export const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.step": "#60a5fa",
   "guidance.alert": "#fb923c",
   "guidance.correction": "#facc15",
@@ -106,7 +106,7 @@ const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.bbox": "#a78bfa",
 };
 
-const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
+export const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
   "guidance.step": "STEP",
   "guidance.alert": "ALERT",
   "guidance.correction": "CORR",
@@ -538,7 +538,7 @@ export class GuidancePanel {
 
 // --- Utilities ---
 
-function esc(str: string): string {
+export function esc(str: string): string {
   const d = document.createElement("div");
   d.textContent = str;
   return d.innerHTML;

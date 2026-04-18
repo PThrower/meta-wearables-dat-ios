@@ -11,6 +11,7 @@
 
 import type { ObjectStore } from "@ebowwa/object-store";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
+import type { GuidanceEvent } from "./guidance-orchestrator.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
@@ -63,6 +64,9 @@ export class SessionRecorder {
   private _acl: Array<{ userId: string; email: string; role: string }> = [];
   private _ownerId: string | undefined;
   private _ownerEmail: string | undefined;
+
+  // Guidance event buffer for buffered JSONL write to R2
+  private guidanceEventLines: string[] = [];
 
   // Per-segment timing for accurate framerate in MP4 export
   private segFrameCount = 0;
@@ -238,9 +242,15 @@ export class SessionRecorder {
     );
   }
 
+  /** Append a guidance event to the guidance.jsonl sidecar (buffered, flushed in tick) */
+  appendGuidanceEvent(event: GuidanceEvent): void {
+    this.guidanceEventLines.push(JSON.stringify(event));
+  }
+
   private tick() {
     this.flushVideo();
     this.flushAudio();
+    this.flushGuidanceEvents();
     this.writeManifest();  // persist manifest on every flush so it survives crashes
   }
 
@@ -329,6 +339,26 @@ export class SessionRecorder {
     });
   }
 
+  /** Flush buffered guidance events to guidance.jsonl sidecar (read-merge-write) */
+  private flushGuidanceEvents(): void {
+    if (this.guidanceEventLines.length === 0) return;
+    const data = this.guidanceEventLines.join("\n") + "\n";
+    this.guidanceEventLines = [];
+    const key = `sessions/${this.sessionId}/guidance.jsonl`;
+    // Append to existing file by reading first
+    this.store.get(key).then(existing => {
+      const prev = existing ? new TextDecoder().decode(existing) : "";
+      this.store.put(key, Buffer.from(prev + data)).catch(err =>
+        console.error(`[recorder] guidance flush failed for ${this.sessionId.slice(0, 8)}:`, err.message)
+      );
+    }).catch(() => {
+      // File doesn't exist yet, just write
+      this.store.put(key, Buffer.from(data)).catch(err =>
+        console.error(`[recorder] guidance flush failed for ${this.sessionId.slice(0, 8)}:`, err.message)
+      );
+    });
+  }
+
   async finish() {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
@@ -337,6 +367,7 @@ export class SessionRecorder {
     if (this._active) {
       this.flushVideo();
       this.flushAudio();
+      this.flushGuidanceEvents();
       this.writeManifest();
       this.writeMeta(true);
       console.log(`[recorder] Session ${this.sessionId.slice(0, 8)} finished: ${this.flushedSegments} video segs, ${this.chunkIndex} audio chunks, ${(this.bytesToBucket / 1048576).toFixed(2)} MB`);

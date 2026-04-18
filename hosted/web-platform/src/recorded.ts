@@ -4,6 +4,8 @@
 
 import { authFetch, authUrl } from "./auth.js";
 import { fmtDur, fmtTime } from "./gallery/format.js";
+import type { GuidanceEvent } from "./guidance.js";
+import { EVENT_COLORS, EVENT_LABELS, sourceBadgeClass, esc } from "./guidance.js";
 
 interface SessionExport {
   sessionId: string;
@@ -67,6 +69,12 @@ export async function openRecordedPlayer(sessionId: string): Promise<void> {
     showToast("Network error loading metadata", "error");
     console.warn("[recorded] metadata fetch failed:", err);
   }
+
+  // Fetch guidance history (non-blocking — don't block video playback if it fails)
+  authFetch(`/session/${sessionId}/guidance/history`)
+    .then(res => res.ok ? res.json() : { events: [] })
+    .then(({ events }: { events: GuidanceEvent[] }) => populateGuidanceLog(events))
+    .catch(() => { /* non-critical */ });
 }
 
 /** Populate the recorded info panel from SessionExport metadata */
@@ -99,6 +107,71 @@ function populateInfoPanel(m: SessionExport): void {
   }
 }
 
+/** Render guidance events into the recorded info panel log */
+function populateGuidanceLog(events: GuidanceEvent[]): void {
+  setText("ri-guidance-count", String(events.length));
+  const container = $("recGuidanceLog");
+  if (events.length === 0) {
+    container.innerHTML = '<div class="guidance-hint">No AI guidance events</div>';
+    return;
+  }
+  container.innerHTML = events.map(renderGuidanceEvent).join("");
+}
+
+/** Render a single guidance event (mirrors live panel rendering in guidance.ts) */
+function renderGuidanceEvent(e: GuidanceEvent): string {
+  const color = EVENT_COLORS[e.type] || "#fff";
+  const label = EVENT_LABELS[e.type] || "???";
+  const time = new Date(e.timestampMs).toLocaleTimeString([], {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+
+  if (e.type === "guidance.transcript") {
+    return `<div class="guidance-event guidance-transcript">
+      <span class="guidance-transcript-time">${time}</span>
+      <span class="guidance-transcript-text">${esc(e.content)}</span>
+    </div>`;
+  }
+
+  const confidence = Math.round(e.confidence * 100);
+  const stepMeta = e.metadata?.stepNumber != null
+    ? ` <span class="guidance-step-num">#${e.metadata.stepNumber}</span>` : "";
+  const severityMeta = e.metadata?.severity
+    ? ` <span class="guidance-severity guidance-severity-${e.metadata.severity}">${e.metadata.severity}</span>` : "";
+  const objectMeta = e.metadata?.objectLabel
+    ? ` <span class="guidance-object">${esc(e.metadata.objectLabel)}</span>` : "";
+
+  const ttsIcon = e.trigger === "ai_tool_call"
+    ? ` <span class="guidance-tts-badge" title="Spoken via TTS">TTS</span>` : "";
+  const srcBadge = e.source
+    ? `<span class="guidance-source-badge ${sourceBadgeClass(e.source)}">${esc(e.source)}</span>` : "";
+  const triggerBadge = (e.trigger && e.trigger !== e.source && e.trigger !== "ai_tool_call")
+    ? `<span class="guidance-trigger-badge">${esc(e.trigger)}</span>` : "";
+
+  if (e.type === "guidance.bbox" && e.boundingBoxes) {
+    const objectTags = e.boundingBoxes
+      .map(b => `<span class="guidance-object">${esc(b.label)} ${Math.round(b.confidence * 100)}%</span>`)
+      .join(" ");
+    return `<div class="guidance-event" style="border-left-color:${color}">
+      <div class="guidance-event-header">
+        <span class="guidance-event-type" style="color:${color}">${label}</span>${srcBadge}${triggerBadge}
+        <span class="guidance-event-confidence">${confidence}%</span>
+        <span class="guidance-event-time">${time}</span>
+      </div>
+      <div class="guidance-event-body">${esc(e.content)} ${objectTags}</div>
+    </div>`;
+  }
+
+  return `<div class="guidance-event" style="border-left-color:${color}">
+    <div class="guidance-event-header">
+      <span class="guidance-event-type" style="color:${color}">${label}</span>${ttsIcon}${srcBadge}${triggerBadge}
+      <span class="guidance-event-confidence">${confidence}%</span>
+      <span class="guidance-event-time">${time}</span>
+    </div>
+    <div class="guidance-event-body">${esc(e.content)}${stepMeta}${severityMeta}${objectMeta}</div>
+  </div>`;
+}
+
 /** Close the recorded player and return to gallery */
 export function closeRecordedPlayer(): void {
   // Pause and clear video
@@ -113,6 +186,10 @@ export function closeRecordedPlayer(): void {
   // Hide overlay, show gallery
   $("recordedPlayer").classList.remove("active");
   $("gallery").classList.remove("hidden");
+
+  // Clear guidance log
+  $("recGuidanceLog").innerHTML = "";
+  setText("ri-guidance-count", "--");
 
   currentSessionId = null;
 }

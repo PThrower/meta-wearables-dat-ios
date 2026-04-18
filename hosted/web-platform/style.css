@@ -536,6 +536,19 @@ header {
 .status-recorded { background: rgba(255,180,0,0.15); color: #fb0; }
 .rec-action-hidden { display: none; }
 
+/* Guidance log inside recorded info panel */
+.rec-guidance-log {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+#recGuidanceSection .guidance-event {
+  font-size: 9px;
+  padding: 4px 6px;
+}
+
 /* === UNMUTE OVERLAY === */
 #unmute {
   position: fixed; inset: 0;

@@ -23,6 +23,7 @@
  *   /session/<id>/access     - Update access level/ACL (PATCH)
  *   /session/<id>/audio-in   - Push audio to publisher (POST)
  *   /session/<id>/guidance   - AI guidance history, status, telemetry (GET)
+ *   /session/<id>/guidance/history - Persisted guidance events from R2 (GET)
  *   /latest/video.mp4        - Redirect to most recent session's mp4 export
  *   /latest/export           - JSON metadata for most recent session
  *   /stats                   - JSON stats (platform-wide + per-session)
@@ -161,6 +162,12 @@ orchestrator.setGuidanceEventPushFn((sessionId: string, event) => {
   if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
     session.publisher.ws.send(JSON.stringify({ type: "guidance_event", event }));
   }
+});
+
+// Persist guidance events to R2 guidance.jsonl sidecar
+orchestrator.setGuidancePersistFn((sessionId: string, event) => {
+  const session = registry.get(sessionId);
+  session?.recorder?.appendGuidanceEvent(event);
 });
 
 orchestrator.start();
@@ -508,6 +515,17 @@ const server = Bun.serve<WsData>({
         status: orchestrator.getStatus(gSessionId),
         telemetry: orchestrator.getTelemetry(gSessionId),
       });
+    }
+
+    // --- Persisted Guidance History (reads from R2, works for recorded sessions) ---
+    const guidanceHistoryMatch = url.pathname.match(/^\/session\/([^/]+)\/guidance\/history$/);
+    if (guidanceHistoryMatch) {
+      const gSessionId = guidanceHistoryMatch[1];
+      const buf = await store.get(`sessions/${gSessionId}/guidance.jsonl`);
+      if (!buf) return Response.json({ events: [], count: 0 });
+      const lines = new TextDecoder().decode(buf).trim().split("\n").filter(Boolean);
+      const events = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      return Response.json({ events, count: events.length });
     }
 
     // --- AI Telemetry ---
