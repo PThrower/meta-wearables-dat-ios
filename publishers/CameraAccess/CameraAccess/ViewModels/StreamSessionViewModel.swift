@@ -359,7 +359,13 @@ class StreamSessionViewModel: ObservableObject {
   // Permission check runs on @MainActor here (safe for AVAudioSession APIs).
   // audioStage.start() no longer touches AVAudioSession — permission handled above.
   func startRelay() async {
-    let url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    var url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // Append device identifier for stable session binding
+    if let deviceId = UIDevice.current.identifierForVendor?.uuidString {
+      let separator = url.contains("?") ? "&" : "?"
+      url += "\(separator)device=\(deviceId)"
+    }
     guard !url.isEmpty else {
       errorMessage = "Enter a relay URL (e.g. ws://192.168.1.x:3000/publish)"
       showError = true

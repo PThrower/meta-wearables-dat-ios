@@ -20,6 +20,7 @@ const SESSION_EXPIRY_MS = 60_000; // expire sessions with no publisher + no view
 
 export class SessionRegistry {
   private sessions = new Map<string, Session>();
+  private deviceSessionMap = new Map<string, string>(); // deviceId → sessionId
   private store: ObjectStore;
   private FrameRelayClass: any | null = null; // WASM class constructor, not instance
 
@@ -120,14 +121,39 @@ export class SessionRegistry {
     return this.sessions.get(id);
   }
 
-  /** For publishers: auto-generate UUID if no session specified */
+  /** For publishers: resolve stable session by device identity, or explicit session param */
   resolvePublisherSessionId(url: URL): string {
-    return url.searchParams.get("session") || crypto.randomUUID();
+    // Explicit session param takes priority
+    const explicit = url.searchParams.get("session");
+    if (explicit) return explicit;
+
+    // Device-keyed: reuse existing session for this device
+    const deviceId = url.searchParams.get("device");
+    if (deviceId) {
+      const existing = this.deviceSessionMap.get(deviceId);
+      if (existing) {
+        console.log(`[registry] Device ${deviceId.slice(0, 8)} rejoining session=${existing}`);
+        return existing;
+      }
+      // New device → create stable session ID
+      const sessionId = `dev-${deviceId.slice(0, 8)}`;
+      this.deviceSessionMap.set(deviceId, sessionId);
+      console.log(`[registry] Device ${deviceId.slice(0, 8)} assigned session=${sessionId}`);
+      return sessionId;
+    }
+
+    // Fallback: no device param (legacy clients)
+    return crypto.randomUUID();
   }
 
   /** For viewers/taps: default to "default" session for backward compat */
   resolveViewerSessionId(url: URL): string {
     return url.searchParams.get("session") || DEFAULT_SESSION_ID;
+  }
+
+  /** Bind a device to a session (called when publisher hello provides deviceId) */
+  bindDeviceToSession(deviceId: string, sessionId: string): void {
+    this.deviceSessionMap.set(deviceId, sessionId);
   }
 
   // --- Publisher management ---
@@ -312,9 +338,13 @@ export class SessionRegistry {
     console.log(`[registry] Viewer disconnected: ${viewerId.slice(0, 8)} session=${sessionId} (${session.viewers.size} remaining)`);
 
     // Garbage collect phantom sessions: no publisher (ever), no viewers left
+    // Skip device-bound sessions — they should persist for reconnect
     if (session.viewers.size === 0 && session.publisher === null && !session.metadata.deviceName) {
-      this.sessions.delete(sessionId);
-      console.log(`[registry] Phantom session garbage collected: ${sessionId}`);
+      const isDeviceBound = [...this.deviceSessionMap.values()].includes(sessionId);
+      if (!isDeviceBound) {
+        this.sessions.delete(sessionId);
+        console.log(`[registry] Phantom session garbage collected: ${sessionId}`);
+      }
     }
   }
 
@@ -491,11 +521,18 @@ export class SessionRegistry {
         }
       }
 
-      // Expire sessions with no publisher AND no viewers for > 60s
+      // Expire sessions with no publisher AND no viewers
+      // Device-bound sessions get 5 min grace (expect reconnect), others 60s
       if (!session.publisher && session.viewers.size === 0) {
         const idleMs = now - session.lastActivityAt;
-        if (idleMs > SESSION_EXPIRY_MS) {
+        const isDeviceBound = [...this.deviceSessionMap.values()].includes(sessionId);
+        const expiry = isDeviceBound ? 300_000 : SESSION_EXPIRY_MS;
+        if (idleMs > expiry) {
           console.log(`[registry] Session expired: ${sessionId} (idle ${Math.round(idleMs / 1000)}s)`);
+          // Clean device map entries pointing to this session
+          for (const [devId, sessId] of this.deviceSessionMap) {
+            if (sessId === sessionId) this.deviceSessionMap.delete(devId);
+          }
           this.sessions.delete(sessionId);
           this.onSessionDestroy?.(sessionId);
         }

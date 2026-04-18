@@ -728,6 +728,11 @@ const server = Bun.serve<WsData>({
               session.metadata.appVersion = strField(cmd.appVersion);
               session.metadata.buildNumber = strField(cmd.buildNumber);
 
+              // Bind device→session so reconnects resume the same session
+              if (cmd.deviceId && typeof cmd.deviceId === "string") {
+                registry.bindDeviceToSession(cmd.deviceId, sessionId);
+              }
+
               console.log(`[relay] Publisher hello: device=${session.publisher.deviceName || "?"} wearable=${session.publisher.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
 
               // Broadcast session_info to all viewers (device info now available)
