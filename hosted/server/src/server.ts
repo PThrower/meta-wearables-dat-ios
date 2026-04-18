@@ -61,6 +61,8 @@ import {
 } from "./session-export.js";
 // Auth disabled — permissions module not needed
 import { SessionStore } from "./session-store.js";
+import { initDb, getDbRaw } from "./db/index.js";
+import { runMigrations } from "./db/migrate.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -86,6 +88,11 @@ const serverStartTime = Date.now();
 
 const store: ObjectStore = createObjectStore();
 const sessionStore = new SessionStore(store);
+
+// --- SQLite Database ---
+
+initDb();
+runMigrations(getDbRaw());
 
 // --- Session Registry ---
 
