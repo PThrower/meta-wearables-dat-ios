@@ -12,6 +12,23 @@ const meterFill = document.getElementById("audio-meter-fill")!;
 const pubPill = document.getElementById("p-publisher")!;
 const aiPill = document.getElementById("p-ai")!;
 
+// Connection overlay elements
+const connOverlay = document.getElementById("connectionOverlay")!;
+const connSpinner = document.getElementById("connSpinner")!;
+const connStatus = document.getElementById("connStatus")!;
+const connDetail = document.getElementById("connDetail")!;
+
+// Session info strip elements
+const siStrip = document.getElementById("sessionInfoStrip")!;
+const siDevice = document.getElementById("si-device")!;
+const siWearable = document.getElementById("si-wearable")!;
+const siUptime = document.getElementById("si-uptime")!;
+const siViewers = document.getElementById("si-viewers")!;
+const siRecording = document.getElementById("si-recording")!;
+
+let uptimeInterval: ReturnType<typeof setInterval> | null = null;
+let sessionConnectedAt = 0;
+
 // --- Toast notifications ---
 function showToast(message: string, kind: "info" | "warn" | "error" = "info"): void {
   const container = document.getElementById("toastContainer");
@@ -79,6 +96,23 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       closeLive();
       requireAuth();
     },
+    onConnectionState: (state) => handleConnectionState(state),
+    onStatus: (status) => handleConnectionStatus(status),
+    onBandwidth: (bytesPerSec) => {
+      const kb = Math.round(bytesPerSec / 1024);
+      const quality = bytesPerSec > 500_000 ? "good" : bytesPerSec > 200_000 ? "ok" : "low";
+      const el = document.getElementById("p-size")!;
+      el.title = `Bandwidth: ${kb} KB/s (${quality})`;
+    },
+    onBackpressureFps: (targetFps) => {
+      const el = document.getElementById("p-fps")!;
+      const current = el.textContent || "--";
+      el.title = `Delivered: ${current} / Target: ${targetFps} FPS`;
+    },
+    onAudioCodec: (codecType) => {
+      const map: Record<number, string> = { 0: "Phone Mic", 1: "Glasses Mic", 2: "TTS", 3: "Relay In" };
+      document.getElementById("p-audio")!.textContent = map[codecType] ?? `Codec ${codecType}`;
+    },
   });
 
   // Wire guidance panel
@@ -102,6 +136,11 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
 
   player.onJsonMessage = (msg) => {
     if (guidancePanel) guidancePanel.handleMessage(msg);
+
+    // Session info from server
+    if (msg.type === "session_info") {
+      handleSessionInfo(msg as Record<string, unknown>);
+    }
 
     // Publisher status
     if (msg.type === "publisher_status") {
@@ -140,10 +179,94 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   return false;
 }
 
+// --- Connection overlay handlers ---
+
+function handleConnectionState(state: string): void {
+  switch (state) {
+    case "connected":
+      connOverlay.classList.add("hidden");
+      break;
+    case "reconnecting":
+      connOverlay.classList.remove("hidden");
+      connSpinner.classList.remove("hidden");
+      connStatus.textContent = "Reconnecting...";
+      connStatus.className = "connection-status";
+      connDetail.textContent = "";
+      break;
+    case "error":
+      connOverlay.classList.remove("hidden");
+      connSpinner.classList.add("hidden");
+      connStatus.textContent = "Connection Error";
+      connStatus.className = "connection-status error";
+      break;
+    case "disconnected":
+      // Handled via reconnecting state immediately after
+      break;
+  }
+}
+
+function handleConnectionStatus(status: string): void {
+  if (status === "AUTH REQUIRED") {
+    connOverlay.classList.remove("hidden");
+    connSpinner.classList.add("hidden");
+    connStatus.textContent = "Authentication Required";
+    connStatus.className = "connection-status error";
+    connDetail.textContent = "Please sign in to access this stream.";
+  } else if (status === "ACCESS DENIED") {
+    connOverlay.classList.remove("hidden");
+    connSpinner.classList.add("hidden");
+    connStatus.textContent = "Access Denied";
+    connStatus.className = "connection-status error";
+    connDetail.textContent = "You do not have permission to view this stream.";
+  }
+}
+
+// --- Session info strip handler ---
+
+function handleSessionInfo(msg: Record<string, unknown>): void {
+  siStrip.classList.remove("hidden");
+
+  const device = [msg.deviceName, msg.deviceModel].filter(Boolean).join(" / ") as string || "Unknown Device";
+  siDevice.textContent = device;
+
+  const wt = msg.wearableType as string | undefined;
+  siWearable.textContent = wt ? wt.replace(/-/g, " ") : "";
+  siWearable.classList.toggle("hidden", !wt);
+
+  const vc = msg.viewerCount as number | undefined;
+  if (vc != null) siViewers.textContent = `${vc} viewer${vc !== 1 ? "s" : ""}`;
+
+  const rec = msg.recording as boolean | undefined;
+  siRecording.classList.toggle("hidden", !rec);
+
+  const connectedAt = msg.connectedAt as number | undefined;
+  if (connectedAt && connectedAt > 0) {
+    sessionConnectedAt = connectedAt;
+    if (!uptimeInterval) {
+      updateUptime();
+      uptimeInterval = setInterval(updateUptime, 1000);
+    }
+  }
+}
+
+function updateUptime(): void {
+  if (!sessionConnectedAt) return;
+  const elapsed = Math.floor((Date.now() - sessionConnectedAt) / 1000);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  const s = elapsed % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  siUptime.textContent = h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+}
+
 export function closeLive(): void {
   document.getElementById("livePlayer")!.classList.remove("active");
   document.getElementById("unmute")!.classList.remove("show");
   document.getElementById("gallery")!.classList.remove("hidden");
+  connOverlay.classList.add("hidden");
+  siStrip.classList.add("hidden");
+  if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
+  sessionConnectedAt = 0;
   if (player) { player.destroy(); player = null; }
   guidancePanel = null;
 }

@@ -22,6 +22,9 @@ export interface RelayPlayerOptions {
   onConnectionState?: (state: string) => void;
   onNeedUnmute?: () => void;
   onAuthRequired?: () => void;
+  onBandwidth?: (bytesPerSec: number) => void;
+  onBackpressureFps?: (targetFps: number) => void;
+  onAudioCodec?: (codecType: number, sampleRate: number) => void;
 }
 
 type Callbacks = Required<RelayPlayerOptions>;
@@ -122,6 +125,9 @@ export class RelayPlayer {
       onConnectionState: options.onConnectionState ?? (() => {}),
       onNeedUnmute: options.onNeedUnmute ?? (() => {}),
       onAuthRequired: options.onAuthRequired ?? (() => {}),
+      onBandwidth: options.onBandwidth ?? (() => {}),
+      onBackpressureFps: options.onBackpressureFps ?? (() => {}),
+      onAudioCodec: options.onAudioCodec ?? (() => {}),
     };
     this.lastFpsTime = performance.now();
 
@@ -481,6 +487,9 @@ export class RelayPlayer {
       if (this.bwWindowBytes.length > 0) {
         const sum = this.bwWindowBytes.reduce((a, b) => a + b, 0);
         this.bwEstimate = sum / this.bwWindowBytes.length;
+        if (this.bwEstimate < Infinity) {
+          this.cb.onBandwidth(this.bwEstimate);
+        }
       }
     }
     this.bwBytesInSlot += bytes;
@@ -545,6 +554,7 @@ export class RelayPlayer {
     this.audioChunkCount++;
 
     this.cb.onAudioState("ON");
+    this.cb.onAudioCodec(codecType, sampleRate);
   }
 
   private _handleVideoFrame(buf: Uint8Array): void {
@@ -589,6 +599,7 @@ export class RelayPlayer {
       );
       if (this.backpressureFps < prevBp) {
         this.sendBackpressure(this.backpressureFps);
+        this.cb.onBackpressureFps(this.backpressureFps);
       }
     }
 
@@ -600,6 +611,7 @@ export class RelayPlayer {
         && bandwidthOk) {
       this.backpressureFps = Math.min(this.AIMD_MAX_FPS, this.backpressureFps + this.AIMD_INCREASE_FPS);
       this.sendBackpressure(this.backpressureFps);
+      this.cb.onBackpressureFps(this.backpressureFps);
     }
 
     // Bandwidth-aware backpressure: if bandwidth drops below threshold, reduce FPS
@@ -610,6 +622,7 @@ export class RelayPlayer {
       if (bwFps < this.backpressureFps) {
         this.backpressureFps = bwFps;
         this.sendBackpressure(this.backpressureFps);
+        this.cb.onBackpressureFps(this.backpressureFps);
       }
     }
     this.lastSequence = sequence;

@@ -89,9 +89,21 @@
         </svg>
       </button>
     </div>
+    <div id="sessionInfoStrip" class="session-info-strip hidden">
+      <span id="si-device" class="si-item"></span>
+      <span id="si-wearable" class="si-item"></span>
+      <span id="si-uptime" class="si-item">--:--</span>
+      <span id="si-viewers" class="si-item"></span>
+      <span id="si-recording" class="si-item si-rec hidden">REC</span>
+    </div>
     <div class="player-canvas">
       <canvas id="liveCanvas"></canvas>
       <canvas id="overlayCanvas"></canvas>
+      <div id="connectionOverlay" class="connection-overlay hidden">
+        <div class="connection-spinner" id="connSpinner"></div>
+        <div id="connStatus" class="connection-status">Connecting...</div>
+        <div id="connDetail" class="connection-detail"></div>
+      </div>
       <!-- AI Guidance Panel (right side overlay) -->
       <div id="guidancePanel" class="guidance-panel collapsed">
         <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">

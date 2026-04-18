@@ -39,7 +39,7 @@ import { join } from "node:path";
 import os from "node:os";
 import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
-import type { WsData, QualityPreset, AccessLevel, AclEntry } from "./types.js";
+import type { WsData, QualityPreset, AccessLevel, AclEntry, Session } from "./types.js";
 import { QUALITY_PRESETS, createTokenBucket } from "./types.js";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, isAudioFrame, isVideoFrame, parseAudioHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
 import { computeHealth } from "./health.js";
@@ -227,6 +227,20 @@ function broadcastToViewers(session: Session | undefined, msg: object): void {
       try { viewer.ws.send(data); } catch { /* skip */ }
     }
   }
+}
+
+/** Build session_info payload for viewer info strip */
+function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any }) {
+  return {
+    deviceName: session.metadata.deviceName || null,
+    deviceModel: session.metadata.deviceModel || null,
+    wearableType: session.metadata.wearableType || null,
+    systemVersion: session.metadata.systemVersion || null,
+    viewerCount: session.viewers.size,
+    recording: !!session.recorder?.getStats?.()?.active,
+    sessionAge: Date.now() - session.createdAt,
+    connectedAt: session.createdAt,
+  };
 }
 
 const server = Bun.serve<WsData>({
@@ -646,7 +660,7 @@ const server = Bun.serve<WsData>({
         // Tell the publisher what session it's on
         ws.send(JSON.stringify({ type: "session_assigned", sessionId }));
         // Notify viewers that publisher is live
-        broadcastToViewers(session, { type: "publisher_status", status: "live" });
+        broadcastToViewers(registry.get(sessionId), { type: "publisher_status", status: "live" });
       } else {
         const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, undefined);
         if (result.startsWith("error:")) {
@@ -666,6 +680,13 @@ const server = Bun.serve<WsData>({
         if (cachedFrame && ws.readyState === WebSocket.OPEN) {
           ws.send(cachedFrame);
           console.log(`[relay] Sent cached frame (${cachedFrame.length}B) to new viewer session=${sessionId}`);
+        }
+
+        // Send session info so viewer can populate the info strip
+        const sessForInfo = registry.get(sessionId);
+        if (sessForInfo && ws.readyState === WebSocket.OPEN) {
+          const si = buildSessionInfo(sessForInfo);
+          ws.send(JSON.stringify({ type: "session_info", ...si }));
         }
       }
     },
@@ -704,6 +725,9 @@ const server = Bun.serve<WsData>({
               session.metadata.wearableType = strField(cmd.wearableType);
 
               console.log(`[relay] Publisher hello: device=${session.publisher.deviceName || "?"} wearable=${session.publisher.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
+
+              // Broadcast session_info to all viewers (device info now available)
+              broadcastToViewers(session, { type: "session_info", ...buildSessionInfo(session) });
 
               // Update recorder device info
               if (session.recorder) {

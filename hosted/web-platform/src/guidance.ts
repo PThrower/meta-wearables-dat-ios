@@ -67,6 +67,27 @@ export interface AppInfo {
 
 const MAX_EVENTS = 50;
 
+const SOURCE_BADGES: Record<string, string> = {
+  vision: "source-vision",
+  camera: "source-vision",
+  gesture: "source-gesture",
+  hand: "source-gesture",
+  voice: "source-voice",
+  audio: "source-voice",
+  speech: "source-voice",
+  auto_timer: "source-timer",
+  timer: "source-timer",
+  manual: "source-manual",
+};
+
+function sourceBadgeClass(source: string): string {
+  const lower = source.toLowerCase();
+  for (const [key, cls] of Object.entries(SOURCE_BADGES)) {
+    if (lower.includes(key)) return cls;
+  }
+  return "source-auto";
+}
+
 const STATUS_COLORS: Record<AIStatus["status"], string> = {
   idle: "rgba(255,255,255,0.25)",
   activating: "#facc15",
@@ -280,10 +301,19 @@ export class GuidancePanel {
       gesturesHtml = `<div class="guidance-gestures">${pills}</div>`;
     }
 
-    // App info line
+    // App info line (model + voice)
     let infoHtml = "";
     if (s.config?.model) {
-      infoHtml = `<div class="guidance-info">Model: ${esc(s.config.model)}</div>`;
+      const parts = [`Model: ${esc(s.config.model)}`];
+      if (s.config.voice) parts.push(`Voice: ${esc(s.config.voice)}`);
+      infoHtml = `<div class="guidance-info">${parts.join(" · ")}</div>`;
+    }
+
+    // App description below selector
+    let descHtml = "";
+    const selectedApp = this.apps.find((a) => a.id === s.appId);
+    if (selectedApp?.description) {
+      descHtml = `<div class="guidance-app-desc">${esc(selectedApp.description)}</div>`;
     }
 
     // Vision FPS slider (only when active)
@@ -308,6 +338,7 @@ export class GuidancePanel {
 
     return `
       <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
+      ${descHtml}
       ${gesturesHtml}
       ${fpsHtml}
       ${overlayHtml}
@@ -352,6 +383,16 @@ export class GuidancePanel {
         // TTS indicator for tool-call events (not transcripts)
         const ttsIcon = e.trigger === "ai_tool_call" ? ` <span class="guidance-tts-badge" title="Spoken via TTS">TTS</span>` : "";
 
+        // Source badge (vision/gesture/voice)
+        const srcBadge = e.source
+          ? `<span class="guidance-source-badge ${sourceBadgeClass(e.source)}">${esc(e.source)}</span>`
+          : "";
+
+        // Trigger badge (when distinct from source)
+        const triggerBadge = (e.trigger && e.trigger !== e.source && e.trigger !== "ai_tool_call")
+          ? `<span class="guidance-trigger-badge">${esc(e.trigger)}</span>`
+          : "";
+
         // BBOX event: show object count and labels
         if (e.type === "guidance.bbox" && e.boundingBoxes) {
           const objectTags = e.boundingBoxes
@@ -359,7 +400,7 @@ export class GuidancePanel {
             .join(" ");
           return `<div class="guidance-event" style="border-left-color:${color}">
             <div class="guidance-event-header">
-              <span class="guidance-event-type" style="color:${color}">${label}</span>
+              <span class="guidance-event-type" style="color:${color}">${label}</span>${srcBadge}${triggerBadge}
               <span class="guidance-event-confidence">${confidence}%</span>
               <span class="guidance-event-time">${time}</span>
             </div>
@@ -369,7 +410,7 @@ export class GuidancePanel {
 
         return `<div class="guidance-event" style="border-left-color:${color}">
           <div class="guidance-event-header">
-            <span class="guidance-event-type" style="color:${color}">${label}</span>${ttsIcon}
+            <span class="guidance-event-type" style="color:${color}">${label}</span>${ttsIcon}${srcBadge}${triggerBadge}
             <span class="guidance-event-confidence">${confidence}%</span>
             <span class="guidance-event-time">${time}</span>
           </div>
@@ -382,6 +423,10 @@ export class GuidancePanel {
   private renderTelemetryInner(): string {
     const t = this.telemetry;
     const uptime = formatUptime(t.uptimeMs);
+    // Active duration from AI status activatedAt
+    const activeDuration = this.status.activatedAt
+      ? formatUptime(Date.now() - this.status.activatedAt)
+      : "--";
     return `
       <div class="guidance-telemetry-row">
         <span class="guidance-tstat"><span class="guidance-tstat-val">${t.triggers}</span><span class="guidance-tstat-label">Triggers</span></span>
@@ -389,6 +434,7 @@ export class GuidancePanel {
         <span class="guidance-tstat"><span class="guidance-tstat-val">${Math.round(t.avgLatencyMs)}</span><span class="guidance-tstat-label">Avg ms</span></span>
         <span class="guidance-tstat"><span class="guidance-tstat-val">${t.lastLatencyMs != null ? Math.round(t.lastLatencyMs) : "--"}</span><span class="guidance-tstat-label">Last ms</span></span>
         <span class="guidance-tstat"><span class="guidance-tstat-val">${t.queueDepth}</span><span class="guidance-tstat-label">Queue</span></span>
+        <span class="guidance-tstat"><span class="guidance-tstat-val">${activeDuration}</span><span class="guidance-tstat-label">Active</span></span>
         <span class="guidance-tstat"><span class="guidance-tstat-val">${uptime}</span><span class="guidance-tstat-label">Uptime</span></span>
       </div>
     `;

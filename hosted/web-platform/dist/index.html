@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-C7TsHH0H.js"></script>
+  <script type="module" crossorigin src="/assets/main-C5rW4W7M.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-BiG6x-x5.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-CpCW8Bvm.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -76,6 +76,8 @@
       <span>AUDIO <span class="audio-val" id="p-audio">OFF</span>
         <span id="audio-meter"><span id="audio-meter-fill"></span></span>
       </span>
+      <span id="p-publisher" class="status-pill status-live" title="Publisher status">PUB LIVE</span>
+      <span id="p-ai" class="status-pill status-off" title="AI status">AI OFF</span>
       <select id="quality-select">
         <option value="high">High (30 FPS)</option>
         <option value="medium">Medium (15 FPS)</option>
@@ -89,8 +91,21 @@
         </svg>
       </button>
     </div>
+    <div id="sessionInfoStrip" class="session-info-strip hidden">
+      <span id="si-device" class="si-item"></span>
+      <span id="si-wearable" class="si-item"></span>
+      <span id="si-uptime" class="si-item">--:--</span>
+      <span id="si-viewers" class="si-item"></span>
+      <span id="si-recording" class="si-item si-rec hidden">REC</span>
+    </div>
     <div class="player-canvas">
       <canvas id="liveCanvas"></canvas>
+      <canvas id="overlayCanvas"></canvas>
+      <div id="connectionOverlay" class="connection-overlay hidden">
+        <div class="connection-spinner" id="connSpinner"></div>
+        <div id="connStatus" class="connection-status">Connecting...</div>
+        <div id="connDetail" class="connection-detail"></div>
+      </div>
       <!-- AI Guidance Panel (right side overlay) -->
       <div id="guidancePanel" class="guidance-panel collapsed">
         <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">
@@ -104,6 +119,7 @@
         </div>
       </div>
     </div>
+    <div id="toastContainer" class="toast-container"></div>
   </div>
 
   <!-- RECORDED VIDEO -->
