@@ -142,7 +142,7 @@ function cardHtml(s: GallerySession, delay: number): string {
         <div class="row"><span class="label">ID</span><span class="value">${escAttr(s.sessionId.slice(0, 8))}</span></div>
       </div>
       <div class="card-actions">
-        ${hasVideo ? `<button class="action-btn primary" data-action="play" data-url="${safeVideoUrl}">Play</button>
+        ${hasVideo ? `<button class="action-btn primary" data-action="play" data-session-id="${escAttr(s.sessionId)}" data-live="false" data-viewer-role="${escAttr(s.viewerRole ?? "none")}">Play</button>
         <a class="action-btn" href="${safeVideoUrl}" target="_blank" rel="noopener">Download</a>` : ""}
         ${s.live ? `<a class="action-btn primary" href="/session/${encodeURIComponent(s.sessionId)}">Watch Live</a>` : ""}
         ${shareBtn}

@@ -6,7 +6,7 @@ import { loadConfig } from "./config.js";
 import { initAuth, requireAuth, authFetch, isNoAuth, getToken } from "./auth.js";
 import { ingest, clearGallery, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
-import { playVideo, closeVideo, initVideoPlayerEvents } from "./recorded.js";
+import { openRecordedPlayer, closeRecordedPlayer, initRecordedPlayerEvents } from "./recorded.js";
 import "./share.js";
 
 // Wire card action delegation
@@ -21,7 +21,7 @@ onCardAction((action, data) => {
       if (data.live === "true") {
         watchLive(data.sessionId);
       } else {
-        playVideo(data.url);
+        openRecordedPlayer(data.sessionId);
       }
       break;
   }
@@ -34,7 +34,7 @@ let hasGalleryData = false;
 
 // Wire button handlers
 document.getElementById("backBtn")!.addEventListener("click", closeLive);
-document.getElementById("closeVideoBtn")!.addEventListener("click", closeVideo);
+document.getElementById("recBackBtn")!.addEventListener("click", closeRecordedPlayer);
 document.getElementById("unmute")!.addEventListener("click", resumeAudio);
 document.getElementById("quality-select")!.addEventListener("change", (e) => {
   setQuality((e.target as HTMLSelectElement).value);
@@ -94,8 +94,8 @@ window.addEventListener("auth:logout", () => {
 // Init filter buttons
 initFilters();
 
-// Init video player overlay click-to-close
-initVideoPlayerEvents();
+// Init video player overlay events
+initRecordedPlayerEvents();
 
 /** Auth-aware gallery fetch */
 export async function fetchGallery(): Promise<void> {
