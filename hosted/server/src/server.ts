@@ -238,6 +238,9 @@ function broadcastToViewers(session: Session | undefined, msg: object): void {
 
 /** Build session_info payload for viewer info strip */
 function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any; linkState?: string }) {
+  const publisherStatus = session.publisher
+    ? (session.publisher.standby ? "standby" : "live")
+    : "offline";
   return {
     deviceName: session.metadata.deviceName || null,
     deviceModel: session.metadata.deviceModel || null,
@@ -248,6 +251,7 @@ function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; reco
     viewerCount: session.viewers.size,
     recording: !!session.recorder?.getStats?.()?.active,
     linkState: session.linkState || null,
+    publisherStatus,
     sessionAge: Date.now() - session.createdAt,
     connectedAt: session.createdAt,
   };
@@ -680,8 +684,8 @@ const server = Bun.serve<WsData>({
         }
         // Tell the publisher what session it's on
         ws.send(JSON.stringify({ type: "session_assigned", sessionId }));
-        // Notify viewers that publisher is live
-        broadcastToViewers(registry.get(sessionId), { type: "publisher_status", status: "live" });
+        // Notify viewers that publisher is in standby (connected but not streaming)
+        broadcastToViewers(registry.get(sessionId), { type: "publisher_status", status: "standby" });
       } else {
         const result = await registry.addViewer(sessionId, ws, clientIp, ws.data.userId, ws.data.email, undefined);
         if (result.startsWith("error:")) {
@@ -846,6 +850,16 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "recording_changed") {
               broadcastToViewers(session, { type: "recording_changed", recording: !!cmd.recording });
             } else if (cmd.type === "stream_changed") {
+              // Toggle publisher standby state on stream change
+              if (session.publisher) {
+                if (cmd.streaming) {
+                  // Publisher went active — start recorder
+                  registry.activatePublisher(sessionId).catch(() => {});
+                } else {
+                  // Publisher went back to standby
+                  session.publisher.standby = true;
+                }
+              }
               broadcastToViewers(session, { type: "stream_changed", streaming: !!cmd.streaming });
             } else if (cmd.type === "publisher_telemetry") {
               broadcastToViewers(session, { type: "publisher_telemetry", ...cmd });
@@ -856,6 +870,14 @@ const server = Bun.serve<WsData>({
               broadcastToViewers(session, { type: "publisher_error", error: cmd.error, state: cmd.state });
             } else if (cmd.type === "spoken_text") {
               broadcastToViewers(session, { type: "spoken_text", text: cmd.text });
+            } else if (cmd.type === "standby") {
+              // Publisher announcing standby state (connected but not streaming)
+              const isReady = cmd.status === "ready";
+              if (session.publisher) {
+                session.publisher.standby = isReady;
+              }
+              console.log(`[relay] Publisher standby: ${isReady} session=${sessionId}`);
+              broadcastToViewers(session, { type: "publisher_status", status: isReady ? "standby" : "live" });
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {

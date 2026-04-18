@@ -115,6 +115,7 @@ export interface Publisher {
   systemVersion: string | null;
   appVersion: string | null;
   buildNumber: string | null;
+  standby: boolean;
 }
 
 // --- Viewer ---

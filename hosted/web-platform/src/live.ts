@@ -256,7 +256,10 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       const s = (msg as { status: string }).status;
       if (s === "live") {
         setPill(pubPill, "PUB LIVE", "status-live");
-        showToast("Publisher connected", "info");
+        showToast("Publisher streaming", "info");
+      } else if (s === "standby") {
+        setPill(pubPill, "PUB READY", "status-standby");
+        showToast("Publisher ready (standby)", "info");
       } else if (s === "dropped") {
         setPill(pubPill, "PUB DROP", "status-error");
         showToast("Publisher disconnected", "warn");
@@ -461,6 +464,18 @@ function handleSessionInfo(msg: Record<string, unknown>): void {
     if (el) {
       el.textContent = ls;
       el.style.color = ls === "connected" ? "#50fa7b" : "#ff5555";
+    }
+  }
+
+  // Publisher status from session snapshot
+  const ps = msg.publisherStatus as string | undefined;
+  if (ps) {
+    if (ps === "live") {
+      setPill(pubPill, "PUB LIVE", "status-live");
+    } else if (ps === "standby") {
+      setPill(pubPill, "PUB READY", "status-standby");
+    } else {
+      setPill(pubPill, "PUB OFF", "status-off");
     }
   }
 }

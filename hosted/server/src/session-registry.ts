@@ -238,6 +238,7 @@ export class SessionRegistry {
       systemVersion: null,
       appVersion: null,
       buildNumber: null,
+      standby: true,
     };
     session.publisher = publisher;
     session.publisherClaiming = false;
@@ -257,12 +258,8 @@ export class SessionRegistry {
       session.metadata.accessLevel = "link";
     }
 
-    // Start recorder — reuse stable recordingId so reconnects append to same R2 prefix
-    if (!session.recordingId) {
-      session.recordingId = crypto.randomUUID();
-    }
-    session.recorder = new SessionRecorder(session.recordingId, this.store);
-    session.recorder.start({});
+    // Do NOT start recorder for standby publishers — wait for activatePublisher()
+    // Recorder will be started when publisher transitions from standby to active
 
     console.log(`[registry] Publisher connected: ${id.slice(0, 8)} session=${sessionId} ip=${clientIp}`);
     return null;
@@ -286,6 +283,24 @@ export class SessionRegistry {
     session.lastFrame = null;  // Clear cached frame — no live source
     session.lastActivityAt = Date.now();
     console.log(`[registry] Publisher disconnected from session=${sessionId}`);
+  }
+
+  /** Activate a standby publisher — starts recorder, marks as active */
+  async activatePublisher(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session?.publisher) return;
+
+    if (!session.publisher.standby) return; // Already active
+    session.publisher.standby = false;
+
+    // Start recorder — reuse stable recordingId so reconnects append to same R2 prefix
+    if (!session.recordingId) {
+      session.recordingId = crypto.randomUUID();
+    }
+    session.recorder = new SessionRecorder(session.recordingId, this.store);
+    session.recorder.start({});
+
+    console.log(`[registry] Publisher activated: ${session.publisher.id.slice(0, 8)} session=${sessionId}`);
   }
 
   // --- Viewer management ---
@@ -488,6 +503,12 @@ export class SessionRegistry {
             session.recorder = null;
           }
           session.lastActivityAt = Date.now();
+          continue;
+        }
+
+        // Standby publishers: skip frame-based stale eviction entirely.
+        // The WebSocket ping keepalive handles transport liveness; Bun's idleTimeout (120s) handles transport cleanup.
+        if (session.publisher.standby) {
           continue;
         }
 
