@@ -142,6 +142,8 @@ export interface SessionMetadata {
   deviceId: string | null;
   systemVersion: string | null;
   wearableType: string | null;
+  appVersion: string | null;
+  buildNumber: string | null;
   resolution: { width: number; height: number } | null;
   ownerEmail: string | null;
   accessLevel: AccessLevel;

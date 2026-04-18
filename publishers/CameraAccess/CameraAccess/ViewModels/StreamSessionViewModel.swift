@@ -140,6 +140,7 @@ class StreamSessionViewModel: ObservableObject {
   private var displayStage: DisplayStage!
   private var inboundAudioEngine: AVAudioEngine?
   private var inboundPlayerNode: AVAudioPlayerNode?
+  private var telemetryPushTimer: Task<Void, Never>?
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -288,6 +289,15 @@ class StreamSessionViewModel: ObservableObject {
         } else {
           self.showError = true
         }
+
+        // Forward error to relay viewers
+        if self.isRelaying {
+          await self.relayStage.sendJson([
+            "type": "publisher_error",
+            "error": rawError,
+            "state": state,
+          ])
+        }
       }
     }
 
@@ -433,6 +443,53 @@ class StreamSessionViewModel: ObservableObject {
             await self?.switchAudioMode(mode)
           }
         }
+
+        // Remote photo capture from viewer
+        if msgType == "capture_photo" {
+          Task { @MainActor [weak self] in
+            self?.capturePhoto()
+            await self?.relayStage.sendJson(["type": "photo_captured"])
+          }
+        }
+
+        // Remote recording control from viewer
+        if msgType == "start_recording" {
+          Task { @MainActor [weak self] in
+            await self?.startRecording()
+            await self?.relayStage.sendJson(["type": "recording_changed", "recording": true])
+          }
+        }
+        if msgType == "stop_recording" {
+          Task { @MainActor [weak self] in
+            await self?.stopRecording()
+            await self?.relayStage.sendJson(["type": "recording_changed", "recording": false])
+          }
+        }
+
+        // Remote stream control from viewer
+        if msgType == "start_stream" {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.startSession()
+            await self.startRelay()
+            await self.relayStage.sendJson(["type": "stream_changed", "streaming": true])
+          }
+        }
+        if msgType == "stop_stream" {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.stopSession()
+            await self.relayStage.sendJson(["type": "stream_changed", "streaming": false])
+          }
+        }
+
+        // Remote TTS from viewer
+        if msgType == "speak_text", let text = msg["text"] as? String, !text.isEmpty {
+          Task { @MainActor [weak self] in
+            await self?.audioPlaybackStage.speakGuidance(text)
+            await self?.relayStage.sendJson(["type": "spoken_text", "text": text])
+          }
+        }
       }
 
       await relayStage.setOnReceivedAudio { [weak self] data in
@@ -503,9 +560,23 @@ class StreamSessionViewModel: ObservableObject {
         NSLog("[StreamSession] Audio tap connect failed (non-fatal): \(error)")
       }
     }
+
+    // Start periodic telemetry push (every 2s)
+    telemetryPushTimer?.cancel()
+    telemetryPushTimer = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        guard let self else { return }
+        await self.pushTelemetry()
+      }
+    }
   }
 
   func stopRelay() async {
+    // Cancel telemetry push timer
+    telemetryPushTimer?.cancel()
+    telemetryPushTimer = nil
+
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
     await glassesAudioStage.stop()
@@ -523,6 +594,32 @@ class StreamSessionViewModel: ObservableObject {
     activeAppId = nil
     boundingBoxes = []
     NSLog("[StreamSession] Relay disconnected")
+  }
+
+  // MARK: - Telemetry Push
+
+  private func pushTelemetry() async {
+    guard isRelaying, let snap = telemetryService?.snapshot else { return }
+    let relayStats = await relayStage.getStats()
+    let payload: [String: Any] = [
+      "type": "publisher_telemetry",
+      "frame": [
+        "fps": snap.frame.effectiveFPS,
+        "jitterMs": snap.frame.jitterMs ?? 0,
+        "totalFrames": snap.frame.totalFramesReceived,
+        "droppedFrames": snap.frame.droppedFrameGaps,
+      ],
+      "relay": relayStats,
+      "session": [
+        "state": String(describing: snap.session.currentState),
+        "uptime": snap.session.uptime.map { Duration.seconds($0.components.seconds).description },
+      ] as [String: Any],
+      "errors": [
+        "total": snap.errors.totalErrors,
+        "recent": snap.errors.recentErrors.map { $0.errorDescription },
+      ],
+    ]
+    await relayStage.sendJson(payload)
   }
 
   // MARK: - AI App Activation

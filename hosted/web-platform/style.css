@@ -405,6 +405,48 @@ header {
   color: #0ff;
 }
 
+/* Control buttons */
+.ctrl-btn {
+  background: var(--panel-bg, rgba(40, 42, 54, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.75);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ctrl-btn:hover {
+  background: rgba(80, 250, 123, 0.15);
+  border-color: rgba(80, 250, 123, 0.4);
+  color: #50fa7b;
+}
+.ctrl-btn:active {
+  transform: scale(0.95);
+}
+.ctrl-btn-start {
+  border-color: rgba(80, 250, 123, 0.3);
+  color: #50fa7b;
+}
+.ctrl-btn-stop {
+  border-color: rgba(255, 85, 85, 0.3);
+  color: #ff5555;
+}
+.speak-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #fff;
+  padding: 3px 8px;
+  font-size: 11px;
+  outline: none;
+  min-width: 0;
+}
+.speak-input:focus {
+  border-color: rgba(80, 250, 123, 0.4);
+}
+
 /* REC indicator */
 .si-rec-row.hidden { display: none; }
 .si-rec {

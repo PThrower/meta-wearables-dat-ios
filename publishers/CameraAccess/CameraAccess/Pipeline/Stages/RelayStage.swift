@@ -530,6 +530,19 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         }
     }
 
+    /// Publisher-side stats for telemetry push to viewers.
+    func getStats() -> [String: Any] {
+        return [
+            "framesSent": framesSent,
+            "framesFailed": framesFailed,
+            "framesDropped": framesDropped,
+            "framesDroppedByPacing": framesDroppedByPacing,
+            "framesDroppedByBackpressure": framesDroppedByBackpressure,
+            "encodeTimeEmaMs": encodeTimeEmaMs ?? 0,
+            "adaptiveQuality": adaptiveQuality,
+        ]
+    }
+
     /// Send pre-built binary data (e.g. FRAU audio frames) over the WebSocket.
     /// The caller is responsible for building the wire protocol header.
     func sendRawData(_ data: Data) {

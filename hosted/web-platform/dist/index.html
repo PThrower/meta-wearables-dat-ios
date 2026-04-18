@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-CxrDMDrf.js"></script>
+  <script type="module" crossorigin src="/assets/main-DYlt4L0L.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-BUY0nSxU.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-D24ovaOt.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -108,6 +108,8 @@
             <div class="info-row"><span class="info-label">Wearable</span><span class="info-value" id="si-wearable">--</span></div>
             <div class="info-row"><span class="info-label">Uptime</span><span class="info-value" id="si-uptime">--:--</span></div>
             <div class="info-row"><span class="info-label">Viewers</span><span class="info-value" id="si-viewers">--</span></div>
+            <div class="info-row"><span class="info-label">App</span><span class="info-value" id="si-app">--</span></div>
+            <div class="info-row"><span class="info-label">Build</span><span class="info-value" id="si-build">--</span></div>
             <div class="info-row si-rec-row hidden" id="si-rec-row"><span class="info-label"><span class="si-rec"></span></span><span class="info-value si-rec-text">Recording</span></div>
           </div>
         </div>
@@ -140,6 +142,50 @@
                 </div>
               </span>
             </div>
+          </div>
+        </div>
+        <!-- Controls section -->
+        <div class="info-section">
+          <div class="info-section-title">Controls</div>
+          <div class="info-rows">
+            <div class="info-row">
+              <span class="info-label">Camera</span>
+              <span class="info-value" style="flex:1">
+                <button class="ctrl-btn" id="btnCapture" title="Capture photo">Photo</button>
+              </span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Record</span>
+              <span class="info-value" style="flex:1">
+                <button class="ctrl-btn ctrl-btn-start" id="btnRecStart">Start</button>
+                <button class="ctrl-btn ctrl-btn-stop" id="btnRecStop">Stop</button>
+              </span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Stream</span>
+              <span class="info-value" style="flex:1">
+                <button class="ctrl-btn ctrl-btn-start" id="btnStreamStart">Start</button>
+                <button class="ctrl-btn ctrl-btn-stop" id="btnStreamStop">Stop</button>
+              </span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Speak</span>
+              <span class="info-value" style="flex:1">
+                <input type="text" id="speakInput" class="speak-input" placeholder="Text to speak...">
+                <button class="ctrl-btn" id="btnSpeak">Speak</button>
+              </span>
+            </div>
+          </div>
+        </div>
+        <!-- Telemetry section -->
+        <div class="info-section">
+          <div class="info-section-title">Telemetry</div>
+          <div class="info-rows">
+            <div class="info-row"><span class="info-label">Relay FPS</span><span class="info-value" id="t-relay-fps">--</span></div>
+            <div class="info-row"><span class="info-label">Encode EMA</span><span class="info-value" id="t-encode-ema">--</span></div>
+            <div class="info-row"><span class="info-label">Dropped</span><span class="info-value" id="t-relay-dropped">--</span></div>
+            <div class="info-row"><span class="info-label">BT Link</span><span class="info-value" id="t-link-state">--</span></div>
+            <div class="info-row"><span class="info-label">Errors</span><span class="info-value" id="t-errors">0</span></div>
           </div>
         </div>
       </div>

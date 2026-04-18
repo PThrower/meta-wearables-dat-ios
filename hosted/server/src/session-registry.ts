@@ -93,6 +93,8 @@ export class SessionRegistry {
           deviceId: null,
           systemVersion: null,
           wearableType: null,
+          appVersion: null,
+          buildNumber: null,
           resolution: null,
           ownerEmail: null,
           accessLevel: "private",

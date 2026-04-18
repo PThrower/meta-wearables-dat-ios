@@ -49,6 +49,36 @@ micSelector.addEventListener("click", (e) => {
   player.sendJson({ type: "set_audio_mode", mode: btn.dataset.mode });
 });
 
+// Control buttons
+document.getElementById("btnCapture")!.addEventListener("click", () => {
+  if (player) player.sendJson({ type: "capture_photo" });
+});
+document.getElementById("btnRecStart")!.addEventListener("click", () => {
+  if (player) player.sendJson({ type: "start_recording" });
+});
+document.getElementById("btnRecStop")!.addEventListener("click", () => {
+  if (player) player.sendJson({ type: "stop_recording" });
+});
+document.getElementById("btnStreamStart")!.addEventListener("click", () => {
+  if (player) player.sendJson({ type: "start_stream" });
+});
+document.getElementById("btnStreamStop")!.addEventListener("click", () => {
+  if (player) player.sendJson({ type: "stop_stream" });
+});
+document.getElementById("btnSpeak")!.addEventListener("click", () => {
+  const input = document.getElementById("speakInput") as HTMLInputElement;
+  const text = input.value.trim();
+  if (text && player) {
+    player.sendJson({ type: "speak_text", text });
+    input.value = "";
+  }
+});
+document.getElementById("speakInput")!.addEventListener("keydown", (e) => {
+  if ((e as KeyboardEvent).key === "Enter") {
+    document.getElementById("btnSpeak")!.click();
+  }
+});
+
 let uptimeInterval: ReturnType<typeof setInterval> | null = null;
 let sessionConnectedAt = 0;
 
@@ -202,6 +232,63 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       const mode = (msg as { mode: string }).mode;
       setMicActive(mode);
     }
+
+    // Photo captured
+    if (msg.type === "photo_captured") {
+      showToast("Photo captured", "info");
+    }
+
+    // Recording changed
+    if (msg.type === "recording_changed") {
+      const rec = (msg as { recording: boolean }).recording;
+      showToast(rec ? "Recording started" : "Recording stopped", "info");
+      siRecRow.classList.toggle("hidden", !rec);
+    }
+
+    // Stream changed
+    if (msg.type === "stream_changed") {
+      showToast((msg as { streaming: boolean }).streaming ? "Stream started" : "Stream stopped", "info");
+    }
+
+    // Spoken text confirmation
+    if (msg.type === "spoken_text") {
+      showToast("Spoken: " + ((msg as { text: string }).text ?? "").slice(0, 40), "info");
+    }
+
+    // Publisher telemetry
+    if (msg.type === "publisher_telemetry") {
+      const frame = (msg as Record<string, unknown>).frame as Record<string, unknown> | undefined;
+      const relay = (msg as Record<string, unknown>).relay as Record<string, unknown> | undefined;
+      const errors = (msg as Record<string, unknown>).errors as Record<string, unknown> | undefined;
+      if (relay) {
+        const el1 = document.getElementById("t-relay-fps");
+        const el2 = document.getElementById("t-encode-ema");
+        const el3 = document.getElementById("t-relay-dropped");
+        if (el1) el1.textContent = String(typeof frame?.fps === "number" ? (frame.fps as number).toFixed(1) : "--");
+        if (el2) el2.textContent = ((relay.encodeTimeEmaMs as number) ?? 0).toFixed(1) + "ms";
+        if (el3) el3.textContent = String(relay.framesDropped ?? "--");
+      }
+      if (errors) {
+        const el = document.getElementById("t-errors");
+        if (el) el.textContent = String(errors.total ?? 0);
+      }
+    }
+
+    // BT link state changed
+    if (msg.type === "link_state_changed") {
+      const el = document.getElementById("t-link-state");
+      if (el) {
+        const state = (msg as { state: string }).state ?? "unknown";
+        el.textContent = state;
+        el.style.color = state === "connected" ? "#50fa7b" : "#ff5555";
+      }
+    }
+
+    // Publisher error
+    if (msg.type === "publisher_error") {
+      const error = (msg as { error: string }).error;
+      showToast("Publisher error: " + (error ?? "").slice(0, 60), "error");
+    }
   };
 
   document.getElementById("gallery")!.classList.add("hidden");
@@ -279,6 +366,13 @@ function handleSessionInfo(msg: Record<string, unknown>): void {
       uptimeInterval = setInterval(updateUptime, 1000);
     }
   }
+
+  const appVer = msg.appVersion as string | undefined;
+  const buildNum = msg.buildNumber as string | undefined;
+  const appEl = document.getElementById("si-app");
+  const buildEl = document.getElementById("si-build");
+  if (appEl) appEl.textContent = appVer ?? "--";
+  if (buildEl) buildEl.textContent = buildNum ?? "--";
 }
 
 function updateUptime(): void {
@@ -304,6 +398,18 @@ export function closeLive(): void {
   sessionConnectedAt = 0;
   if (player) { player.destroy(); player = null; }
   guidancePanel = null;
+
+  // Reset telemetry
+  ["t-relay-fps", "t-encode-ema", "t-relay-dropped"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = "--";
+  });
+  const linkEl = document.getElementById("t-link-state");
+  if (linkEl) { linkEl.textContent = "--"; linkEl.style.color = ""; }
+  const errEl = document.getElementById("t-errors");
+  if (errEl) errEl.textContent = "0";
+  const speakIn = document.getElementById("speakInput") as HTMLInputElement;
+  if (speakIn) speakIn.value = "";
 }
 
 export function setQuality(preset: string): void {

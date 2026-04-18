@@ -236,6 +236,8 @@ function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; reco
     deviceModel: session.metadata.deviceModel || null,
     wearableType: session.metadata.wearableType || null,
     systemVersion: session.metadata.systemVersion || null,
+    appVersion: session.metadata.appVersion || null,
+    buildNumber: session.metadata.buildNumber || null,
     viewerCount: session.viewers.size,
     recording: !!session.recorder?.getStats?.()?.active,
     sessionAge: Date.now() - session.createdAt,
@@ -723,6 +725,8 @@ const server = Bun.serve<WsData>({
               session.metadata.deviceId = strField(cmd.deviceId);
               session.metadata.systemVersion = strField(cmd.systemVersion);
               session.metadata.wearableType = strField(cmd.wearableType);
+              session.metadata.appVersion = strField(cmd.appVersion);
+              session.metadata.buildNumber = strField(cmd.buildNumber);
 
               console.log(`[relay] Publisher hello: device=${session.publisher.deviceName || "?"} wearable=${session.publisher.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
 
@@ -810,6 +814,20 @@ const server = Bun.serve<WsData>({
               // Publisher acknowledges audio mode change — broadcast to all viewers
               console.log(`[relay] Audio mode changed by publisher: mode=${cmd.mode} session=${sessionId}`);
               broadcastToViewers(session, { type: "audio_mode_changed", mode: cmd.mode });
+            } else if (cmd.type === "photo_captured") {
+              broadcastToViewers(session, { type: "photo_captured" });
+            } else if (cmd.type === "recording_changed") {
+              broadcastToViewers(session, { type: "recording_changed", recording: !!cmd.recording });
+            } else if (cmd.type === "stream_changed") {
+              broadcastToViewers(session, { type: "stream_changed", streaming: !!cmd.streaming });
+            } else if (cmd.type === "publisher_telemetry") {
+              broadcastToViewers(session, { type: "publisher_telemetry", ...cmd });
+            } else if (cmd.type === "link_state_changed") {
+              broadcastToViewers(session, { type: "link_state_changed", state: cmd.state });
+            } else if (cmd.type === "publisher_error") {
+              broadcastToViewers(session, { type: "publisher_error", error: cmd.error, state: cmd.state });
+            } else if (cmd.type === "spoken_text") {
+              broadcastToViewers(session, { type: "spoken_text", text: cmd.text });
             }
           } catch (err) { console.warn("[relay] Publisher message parse error:", err); }
         } else {
@@ -953,6 +971,36 @@ const server = Bun.serve<WsData>({
                 if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
                   publisherWs.send(JSON.stringify({ type: "set_audio_mode", mode }));
                 }
+              }
+            } else if (cmd.type === "capture_photo") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "capture_photo" }));
+              }
+            } else if (cmd.type === "start_recording") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "start_recording" }));
+              }
+            } else if (cmd.type === "stop_recording") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "stop_recording" }));
+              }
+            } else if (cmd.type === "start_stream") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "start_stream" }));
+              }
+            } else if (cmd.type === "stop_stream") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "stop_stream" }));
+              }
+            } else if (cmd.type === "speak_text" && typeof cmd.text === "string") {
+              const publisherWs = session.publisher?.ws;
+              if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                publisherWs.send(JSON.stringify({ type: "speak_text", text: cmd.text.slice(0, 500) }));
               }
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }
