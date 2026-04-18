@@ -77,6 +77,7 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   document.getElementById("p-latency")!.textContent = "--";
   document.getElementById("p-drop")!.textContent = "--";
   document.getElementById("p-audio")!.textContent = "OFF";
+  document.getElementById("audio-dot")!.classList.remove("active");
   meterFill.style.width = "0%";
   document.getElementById("unmute")!.classList.remove("show");
   setPill(pubPill, "PUB WAIT", "status-off");
@@ -88,7 +89,11 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     onSize: (w, h) => document.getElementById("p-size")!.textContent = `${w}x${h}`,
     onLatency: (ms) => document.getElementById("p-latency")!.textContent = `${ms}ms`,
     onDropped: (c) => document.getElementById("p-drop")!.textContent = String(c),
-    onAudioState: (s) => document.getElementById("p-audio")!.textContent = s,
+    onAudioState: (s) => {
+      document.getElementById("p-audio")!.textContent = s;
+      const dot = document.getElementById("audio-dot")!;
+      dot.classList.toggle("active", s === "ON");
+    },
     onAudioLevel: (pct) => meterFill.style.width = pct + "%",
     onNeedUnmute: () => document.getElementById("unmute")!.classList.add("show"),
     onAuthRequired: () => {
@@ -112,6 +117,7 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     onAudioCodec: (codecType) => {
       const map: Record<number, string> = { 0: "Phone Mic", 1: "Glasses Mic", 2: "TTS", 3: "Relay In" };
       document.getElementById("p-audio")!.textContent = map[codecType] ?? `Codec ${codecType}`;
+      document.getElementById("audio-dot")!.classList.add("active");
     },
   });
 

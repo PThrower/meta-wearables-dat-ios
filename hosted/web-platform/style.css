@@ -271,20 +271,113 @@ header {
   flex-direction: column;
 }
 #livePlayer.active { display: flex; }
-#livePlayer .player-top {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 16px; background: rgba(0,0,0,0.8);
-  font-size: 11px; color: rgba(255,255,255,0.6); flex-shrink: 0;
+
+/* Header: single compact row with three zones */
+.player-header {
+  flex-shrink: 0;
+  background: rgba(0,0,0,0.85);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  backdrop-filter: blur(8px);
 }
-#livePlayer .player-top .val { color: #0f0; font-weight: 600; }
-#livePlayer .player-top .audio-val { color: #0ff; }
+.player-row-primary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  gap: 12px;
+  min-height: 36px;
+}
+
+/* Left zone: back + session context */
+.player-left {
+  display: flex; align-items: center; gap: 10px;
+  min-width: 0; flex-shrink: 1;
+  overflow: hidden;
+}
 .back-btn {
-  font-family: inherit; font-size: 11px;
-  background: rgba(255,255,255,0.1); color: #fff;
-  border: 1px solid rgba(255,255,255,0.2);
-  padding: 4px 12px; border-radius: 6px; cursor: pointer;
+  font-family: inherit; font-size: 14px; line-height: 1;
+  background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.12);
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
 }
-.back-btn:hover { background: rgba(255,255,255,0.2); }
+.back-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+/* Session info inline (replaces old strip) */
+.session-info-inline {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; color: rgba(255,255,255,0.3);
+  white-space: nowrap; overflow: hidden;
+  min-width: 0;
+}
+.session-info-inline.hidden { display: none; }
+.session-info-inline .si-item {
+  padding: 0;
+}
+.session-info-inline .si-item:not(:last-child)::after {
+  content: "·"; margin-left: 8px; color: rgba(255,255,255,0.15);
+}
+.si-rec {
+  color: #ef4444; font-weight: 700; letter-spacing: 0.5px;
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 9px;
+}
+.si-rec::before {
+  content: ""; display: inline-block;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #ef4444;
+  animation: rec-pulse 1.2s ease-in-out infinite;
+}
+.si-rec.hidden { display: none; }
+
+/* Center zone: stats */
+.player-center {
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.stat {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; color: rgba(255,255,255,0.5);
+}
+.stat-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.3);
+}
+.stat-val {
+  font-weight: 600; color: #4ade80;
+}
+.stat-secondary .val {
+  font-size: 9px; color: rgba(255,255,255,0.25); font-weight: 500;
+}
+
+/* Audio dot indicator */
+.audio-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: rgba(255,255,255,0.15); flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+.audio-dot.active { background: #0ff; box-shadow: 0 0 4px rgba(0,255,255,0.4); }
+
+.audio-val {
+  font-size: 10px; color: rgba(255,255,255,0.5); font-weight: 500;
+}
+#audio-meter {
+  display: inline-block; width: 40px; height: 4px;
+  background: rgba(255,255,255,0.1); border-radius: 2px;
+  vertical-align: middle; margin-left: 3px; overflow: hidden;
+}
+#audio-meter-fill {
+  height: 100%; width: 0%; background: #0ff; border-radius: 2px;
+  transition: width 0.05s linear;
+}
+
+/* Right zone: status pills + controls */
+.player-right {
+  display: flex; align-items: center; gap: 6px;
+  flex-shrink: 0;
+}
 
 /* Status pills */
 .status-pill {
@@ -296,6 +389,15 @@ header {
 .status-error { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
 .status-warn { background: rgba(251, 146, 60, 0.2); color: #fb923c; }
 .status-active { background: rgba(96, 165, 250, 0.2); color: #60a5fa; }
+
+/* Quality select */
+#quality-select {
+  background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.6);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px; padding: 2px 6px;
+  font-size: 10px; font-family: inherit;
+}
+#quality-select option { background: #1a1a1a; }
 
 /* Toast notifications */
 .toast-container {
@@ -313,6 +415,8 @@ header {
 .toast-info { background: rgba(96, 165, 250, 0.9); color: #fff; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes toast-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* Canvas */
 #livePlayer .player-canvas {
   flex: 1; display: flex; align-items: center; justify-content: center;
   overflow: hidden; position: relative;
@@ -324,22 +428,6 @@ header {
   pointer-events: none;
   z-index: 5;
 }
-#audio-meter {
-  display: inline-block; width: 60px; height: 6px;
-  background: rgba(255,255,255,0.15); border-radius: 3px;
-  vertical-align: middle; margin-left: 4px; overflow: hidden;
-}
-#audio-meter-fill {
-  height: 100%; width: 0%; background: #0ff; border-radius: 3px;
-  transition: width 0.05s linear;
-}
-#quality-select {
-  background: rgba(255,255,255,0.1); color: #fff;
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 4px; padding: 2px 6px;
-  font-size: 11px; font-family: inherit;
-}
-#quality-select option { background: #222; }
 
 /* === PUSH-TO-TALK === */
 .ptt-button {
@@ -875,32 +963,6 @@ header {
 .connection-detail {
   font-size: 11px; color: rgba(255,255,255,0.4);
   text-align: center;
-}
-
-/* === SESSION INFO STRIP === */
-.session-info-strip {
-  display: flex; gap: 12px; padding: 4px 16px;
-  background: rgba(0,0,0,0.5);
-  font-size: 10px; color: rgba(255,255,255,0.4);
-  flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.04);
-  align-items: center;
-}
-.session-info-strip.hidden { display: none; }
-.si-item { white-space: nowrap; }
-.si-rec {
-  color: #ef4444; font-weight: 700; letter-spacing: 0.5px;
-  display: inline-flex; align-items: center; gap: 4px;
-}
-.si-rec::before {
-  content: ""; display: inline-block;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #ef4444;
-  animation: rec-pulse 1.2s ease-in-out infinite;
-}
-.si-rec.hidden { display: none; }
-@keyframes rec-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 /* === SOURCE BADGES (guidance events) === */
