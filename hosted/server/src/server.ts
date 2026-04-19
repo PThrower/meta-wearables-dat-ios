@@ -64,6 +64,7 @@ import { SessionStore } from "./session-store.js";
 import { initDb, getDbRaw } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { dbWriter } from "./db/db-writer.js";
+import * as q from "./db/queries.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -207,6 +208,24 @@ await loadWasm();
 // --- Stale cleanup ---
 
 const staleCleanupTimer = setInterval(() => registry.cleanupStale(), 5_000);
+
+// --- Periodic session stats flush to SQLite ---
+
+const STATS_FLUSH_INTERVAL_MS = 30_000;
+setInterval(() => {
+  for (const s of registry.listActive()) {
+    const session = registry.get(s.id);
+    if (!session?.publisher) continue;
+    if (session.publisher.standby) continue; // No stats for standby publishers
+    dbWriter.enqueue(q.updateSessionStats(s.id, {
+      totalFrames: session.publisher.frameCount,
+      totalBytes: session.publisher.totalBytes + session.publisher.audioBytes,
+      peakViewers: session.viewers.size,
+      resolutionW: session.metadata.resolution?.width,
+      resolutionH: session.metadata.resolution?.height,
+    }));
+  }
+}, STATS_FLUSH_INTERVAL_MS);
 
 // --- Background timers for gallery index and cleanup ---
 
