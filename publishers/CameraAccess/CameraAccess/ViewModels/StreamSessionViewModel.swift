@@ -52,6 +52,14 @@ enum AudioInputMode: String, CaseIterable, Identifiable {
   }
 }
 
+/// Lightweight representation of an AI app from the relay server.
+struct AppInfo: Identifiable, Equatable {
+  let id: String
+  let name: String
+  let description: String
+  let icon: String  // SF Symbol name
+}
+
 @MainActor
 class StreamSessionViewModel: ObservableObject {
   @Published var currentVideoFrame: UIImage?
@@ -94,6 +102,9 @@ class StreamSessionViewModel: ObservableObject {
   @Published var relayMode: RelayMode = .disconnected
   @Published var isTapConnected: Bool = false
   @Published var activeAppId: String?
+  @Published var availableApps: [AppInfo] = []
+  @Published var isLoadingApps: Bool = false
+  @Published var appFetchError: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
   @Published var boundingBoxes: [BoundingBox] = []
   @Published var showBboxOverlay: Bool = true
@@ -408,18 +419,11 @@ class StreamSessionViewModel: ObservableObject {
       await wireControlMessageHandler()
 
       await relayStage.setOnReceivedAudio { [weak self] data in
-        guard data.count >= 29 else { return }
-        let sampleRate = UInt32(data[13])
-          | UInt32(data[14]) << 8
-          | UInt32(data[15]) << 16
-          | UInt32(data[16]) << 24
-        let channels = UInt16(data[17]) | UInt16(data[18]) << 8
-        let bitsPerSample = UInt16(data[19]) | UInt16(data[20]) << 8
-        let pcmData = data.subdata(in: 29..<data.count)
-        NSLog("[StreamSession] Server audio: \(pcmData.count) bytes, \(sampleRate)Hz, \(channels)ch, \(bitsPerSample)bit")
+        guard let parsed = WireProtocol.parseFRAU(data) else { return }
+        NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
         Task { @MainActor [weak self] in
           guard let self else { return }
-          self.playInboundPCM(pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
+          self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
         }
       }
       try await relayStage.connect(to: url)
@@ -505,17 +509,11 @@ class StreamSessionViewModel: ObservableObject {
 
     // Phase 3: Wire inbound audio handler and start audio/telemetry
     await relayStage.setOnReceivedAudio { [weak self] data in
-      guard data.count >= 29 else { return }
-      let sampleRate = UInt32(data[13])
-        | UInt32(data[14]) << 8
-        | UInt32(data[15]) << 16
-        | UInt32(data[16]) << 24
-      let channels = UInt16(data[17]) | UInt16(data[18]) << 8
-      let bitsPerSample = UInt16(data[19]) | UInt16(data[20]) << 8
-      let pcmData = data.subdata(in: 29..<data.count)
+      guard let parsed = WireProtocol.parseFRAU(data) else { return }
+      NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
       Task { @MainActor [weak self] in
         guard let self else { return }
-        self.playInboundPCM(pcmData, sampleRate: sampleRate, channels: channels, bitsPerSample: bitsPerSample)
+        self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
       }
     }
 
@@ -839,6 +837,70 @@ class StreamSessionViewModel: ObservableObject {
     let _ = activeAppId
     activeAppId = nil
     Task { await relayStage.sendJson(["type": "deactivate_app"]) }
+  }
+
+  // MARK: - App Discovery
+
+  enum AppFetchError: LocalizedError {
+    case invalidURL
+    case serverError(Int)
+    case parseError
+
+    var errorDescription: String? {
+      switch self {
+      case .invalidURL: return "Invalid relay URL"
+      case .serverError(let code): return "Server error (\(code))"
+      case .parseError: return "Failed to parse app list"
+      }
+    }
+  }
+
+  /// Fetch available AI apps from the relay server's GET /apps endpoint.
+  /// Skips if already populated (cache). Converts wss:// URL to https://.
+  func fetchApps() async {
+    guard availableApps.isEmpty else { return }
+    isLoadingApps = true
+    appFetchError = nil
+
+    do {
+      guard let wsURL = URL(string: relayURL),
+            let host = wsURL.host
+      else {
+        throw AppFetchError.invalidURL
+      }
+
+      let scheme = wsURL.scheme == "wss" ? "https" : "http"
+      let appsURL = URL(string: "\(scheme)://\(host)/apps")!
+
+      let (data, response) = try await URLSession.shared.data(from: appsURL)
+
+      guard let httpResponse = response as? HTTPURLResponse,
+            (200...299).contains(httpResponse.statusCode)
+      else {
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        throw AppFetchError.serverError(code)
+      }
+
+      guard let json = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        throw AppFetchError.parseError
+      }
+
+      let apps = json.compactMap { item -> AppInfo? in
+        guard let id = item["id"] as? String else { return nil }
+        return AppInfo(
+          id: id,
+          name: (item["name"] as? String) ?? id,
+          description: (item["description"] as? String) ?? "",
+          icon: (item["icon"] as? String) ?? "app"
+        )
+      }
+
+      availableApps = apps
+    } catch {
+      appFetchError = error.localizedDescription
+    }
+
+    isLoadingApps = false
   }
 
   // MARK: - Remote Audio Mode Switching
