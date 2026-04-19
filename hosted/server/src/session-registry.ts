@@ -13,6 +13,8 @@ import { SessionRecorder } from "./session-recorder.js";
 import { DEFAULT_QUALITY, createTokenBucket, bucketTryConsume } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
 import { resolvePermission } from "./permissions.js";
+import { dbWriter } from "./db/db-writer.js";
+import * as q from "./db/queries.js";
 import { computeStats, type StatsSource } from "./stats.js";
 
 const DEFAULT_SESSION_ID = "default";
@@ -113,6 +115,9 @@ export class SessionRegistry {
       };
       this.sessions.set(id, session);
       console.log(`[registry] Session created: ${id}`);
+
+      // Shadow write: session created
+      dbWriter.enqueue(q.upsertSession({ id, status: "active" }));
     }
     return session;
   }
@@ -198,6 +203,7 @@ export class SessionRegistry {
     // Track reconnects — session already existed with a disconnected publisher
     if (session.publisher === null && this.sessions.has(sessionId) && session.createdAt < Date.now() - 1000) {
       this.publisherReconnects++;
+      dbWriter.incrementCounter("publisher_reconnects");
     }
 
     // Evict this publisher from any OTHER session it may still be registered in
@@ -216,6 +222,7 @@ export class SessionRegistry {
     }
 
     this.sessionsStarted++;
+    dbWriter.incrementCounter("sessions_started");
 
     const id = crypto.randomUUID();
     const publisher: Publisher = {
@@ -261,6 +268,16 @@ export class SessionRegistry {
     // Do NOT start recorder for standby publishers — wait for activatePublisher()
     // Recorder will be started when publisher transitions from standby to active
 
+    // Shadow write: user + session ownership
+    if (userId) {
+      dbWriter.enqueue(q.upsertUser({ id: userId, email: email || "" }));
+      dbWriter.enqueue(q.upsertSession({
+        id: sessionId,
+        publisherUserId: userId,
+        accessLevel: session.accessLevel,
+      }));
+    }
+
     console.log(`[registry] Publisher connected: ${id.slice(0, 8)} session=${sessionId} ip=${clientIp}`);
     return null;
   }
@@ -273,6 +290,26 @@ export class SessionRegistry {
     // Accumulate dropped frames from publisher timing before clearing
     if (session.publisher) {
       this.totalDroppedFrames += session.publisher.timing.droppedFrames;
+    }
+
+    // Shadow write: finalize session + update device status
+    const pub = session.publisher;
+    const recorder = session.recorder;
+    if (pub && recorder) {
+      const stats = recorder.getStats();
+      const res = session.metadata.resolution;
+      dbWriter.enqueue(q.endSession(sessionId, {
+        durationMs: stats.active ? Date.now() - (stats as any).startedAt : 0,
+        totalFrames: pub.frameCount,
+        totalBytes: pub.totalBytes + pub.audioBytes,
+        audioChunks: stats.audioChunks,
+        peakViewers: session.viewers.size, // approximation
+        resolutionW: res?.width,
+        resolutionH: res?.height,
+      }));
+    }
+    if (pub?.deviceId) {
+      dbWriter.enqueue(q.updateDeviceStatus(pub.deviceId, "standby"));
     }
 
     if (session.recorder) {
@@ -299,6 +336,12 @@ export class SessionRegistry {
     }
     session.recorder = new SessionRecorder(session.recordingId, this.store);
     session.recorder.start({});
+
+    // Shadow write: session activated with recording ID
+    dbWriter.enqueue(q.activateSession(sessionId, session.recordingId));
+    if (session.publisher?.deviceId) {
+      dbWriter.enqueue(q.updateDeviceStatus(session.publisher.deviceId, "online"));
+    }
 
     console.log(`[registry] Publisher activated: ${session.publisher.id.slice(0, 8)} session=${sessionId}`);
   }
@@ -335,6 +378,15 @@ export class SessionRegistry {
     }
 
     console.log(`[registry] Viewer connected: ${id.slice(0, 8)} session=${sessionId} (total: ${session.viewers.size})`);
+
+    // Shadow write: viewer connected
+    dbWriter.enqueue(q.addViewer({
+      id,
+      sessionId,
+      userId,
+      clientIp,
+    }));
+
     return id;
   }
 
@@ -351,6 +403,12 @@ export class SessionRegistry {
 
     session.viewers.delete(viewerId);
     session.lastActivityAt = Date.now();
+
+    // Shadow write: viewer disconnected
+    if (viewer) {
+      dbWriter.enqueue(q.removeViewer(viewerId, viewer.frameCount, viewer.totalBytes));
+    }
+
     console.log(`[registry] Viewer disconnected: ${viewerId.slice(0, 8)} session=${sessionId} (${session.viewers.size} remaining)`);
 
     // Garbage collect phantom sessions: no publisher (ever), no viewers left
@@ -401,6 +459,8 @@ export class SessionRegistry {
     if (session.viewers.size === 0) return;
 
     this.totalFramesRelayed++;
+    // Batch increment -- flushed every 60s by DbWriter
+    dbWriter.incrementCounter("total_frames_relayed");
 
     const now = Date.now();
 
@@ -421,6 +481,7 @@ export class SessionRegistry {
       } catch {
         session.viewers.delete(id);
         this.viewersRejected++;
+        dbWriter.incrementCounter("viewers_rejected");
       }
     }
   }
@@ -459,6 +520,7 @@ export class SessionRegistry {
       } catch {
         session.viewers.delete(id);
         this.viewersRejected++;
+        dbWriter.incrementCounter("viewers_rejected");
       }
     }
   }
@@ -540,6 +602,7 @@ export class SessionRegistry {
           try { viewer.ws.close(4003, "viewer stale"); } catch {}
           session.viewers.delete(viewerId);
           this.viewersRejected++;
+        dbWriter.incrementCounter("viewers_rejected");
         }
       }
 

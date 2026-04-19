@@ -63,6 +63,7 @@ import {
 import { SessionStore } from "./session-store.js";
 import { initDb, getDbRaw } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
+import { dbWriter } from "./db/db-writer.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -93,6 +94,7 @@ const sessionStore = new SessionStore(store);
 
 initDb();
 runMigrations(getDbRaw());
+dbWriter.start();
 
 // --- Session Registry ---
 
@@ -764,6 +766,26 @@ const server = Bun.serve<WsData>({
               }
 
               console.log(`[relay] Publisher hello: device=${session.publisher.deviceName || "?"} wearable=${session.publisher.wearableType || "none"} ip=${session.publisher.clientIp} session=${sessionId}`);
+
+              // Shadow write: upsert device + link session to device
+              if (session.publisher.deviceId) {
+                dbWriter.enqueue(q.upsertDevice({
+                  id: session.publisher.deviceId,
+                  name: session.publisher.deviceName ?? undefined,
+                  model: session.publisher.deviceModel ?? undefined,
+                  systemVersion: session.publisher.systemVersion ?? undefined,
+                  wearableType: session.publisher.wearableType ?? undefined,
+                  wearableId: session.publisher.wearableId ?? undefined,
+                  appVersion: session.publisher.appVersion ?? undefined,
+                  buildNumber: session.publisher.buildNumber ?? undefined,
+                  status: session.publisher.standby ? "standby" : "online",
+                  lastSessionId: sessionId,
+                }));
+                dbWriter.enqueue(q.upsertSession({
+                  id: sessionId,
+                  publisherDeviceId: session.publisher.deviceId,
+                }));
+              }
 
               // Broadcast session_info to all viewers (device info now available)
               broadcastToViewers(session, { type: "session_info", ...buildSessionInfo(session) });
