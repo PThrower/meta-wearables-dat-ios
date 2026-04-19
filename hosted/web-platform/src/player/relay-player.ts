@@ -92,7 +92,7 @@ export class RelayPlayer {
   // Mic capture (push-to-talk)
   private micStream: MediaStream | null = null;
   private micContext: AudioContext | null = null;
-  private micProcessor: ScriptProcessorNode | null = null;
+  private micWorkletNode: AudioWorkletNode | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
   private micSeqNum = 0;
   private isMicActive = false;
@@ -339,37 +339,59 @@ export class RelayPlayer {
     }
 
     // Create an AudioContext — browsers typically run at 48kHz regardless of
-    // the requested sampleRate in getUserMedia, so we resample below.
+    // the requested sampleRate in getUserMedia, so we resample in the worklet.
     this.micContext = new AudioContext({ sampleRate: 48000 });
+
+    // Register worklet from inline source (avoids needing a separate static file)
+    const workletSource = `
+      class MicCaptureProcessor extends AudioWorkletProcessor {
+        process(inputs) {
+          const input = inputs[0];
+          if (!input || input.length === 0) return true;
+          const ch0 = input[0];
+          if (ch0.length === 0) return true;
+          // Transfer ownership of the Float32Array buffer to main thread
+          this.port.postMessage(ch0.buffer, [ch0.buffer]);
+          return true;
+        }
+      }
+      registerProcessor("mic-capture", MicCaptureProcessor);
+    `;
+    const blob = new Blob([workletSource], { type: "application/javascript" });
+    const workletUrl = URL.createObjectURL(blob);
+
+    try {
+      await this.micContext.audioWorklet.addModule(workletUrl);
+    } catch (err) {
+      console.warn("[RelayPlayer] AudioWorklet failed to load:", err);
+      URL.revokeObjectURL(workletUrl);
+      return;
+    }
+    URL.revokeObjectURL(workletUrl);
+
     const source = this.micContext.createMediaStreamSource(this.micStream);
     this.micSource = source;
 
-    // bufferSize must be a power of 2 (256..16384).
-    // 2048 at 48kHz = ~43ms, decimated to ~683 samples at 16kHz
-    const bufferSize = 2048;
-    const processor = this.micContext.createScriptProcessor(bufferSize, 1, 1);
-    this.micProcessor = processor;
+    const workletNode = new AudioWorkletNode(this.micContext, "mic-capture");
+    this.micWorkletNode = workletNode;
 
     const self = this;
 
-    processor.onaudioprocess = (event: AudioProcessingEvent) => {
+    workletNode.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
       if (!self.isMicActive || !self.ws || self.ws.readyState !== WebSocket.OPEN) return;
 
-      const input: Float32Array = event.inputBuffer.getChannelData(0);
+      const input = new Float32Array(event.data);
       const srcSampleRate = self.micContext!.sampleRate;
       const targetSampleRate = 16000;
-
-      // Decimation ratio (typically 48kHz / 16kHz = 3)
       const ratio = srcSampleRate / targetSampleRate;
 
-      // Convert Float32 -> Int16 with clamping, then decimate
+      // Convert Float32 -> Int16 with clamping + decimate
       const outLength = Math.floor(input.length / ratio);
       const pcmInt16 = new Int16Array(outLength);
 
       for (let i = 0; i < outLength; i++) {
         const srcIdx = Math.floor(i * ratio);
         let sample = input[srcIdx];
-        // Clamp to -1..1
         if (sample > 1) sample = 1;
         else if (sample < -1) sample = -1;
         pcmInt16[i] = sample * 0x7FFF;
@@ -385,9 +407,8 @@ export class RelayPlayer {
       }
     };
 
-    source.connect(processor);
-    // Must connect to destination for the processor to fire onaudioprocess
-    processor.connect(this.micContext.destination);
+    source.connect(workletNode);
+    workletNode.connect(this.micContext.destination);
 
     this.isMicActive = true;
   }
@@ -397,10 +418,10 @@ export class RelayPlayer {
 
     this.isMicActive = false;
 
-    if (this.micProcessor) {
-      this.micProcessor.disconnect();
-      this.micProcessor.onaudioprocess = null;
-      this.micProcessor = null;
+    if (this.micWorkletNode) {
+      this.micWorkletNode.port.onmessage = null;
+      this.micWorkletNode.disconnect();
+      this.micWorkletNode = null;
     }
 
     if (this.micSource) {
