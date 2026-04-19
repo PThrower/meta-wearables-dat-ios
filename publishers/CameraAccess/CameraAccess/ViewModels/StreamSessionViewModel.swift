@@ -1253,9 +1253,7 @@ class StreamSessionViewModel: ObservableObject {
     let sr = Double(sampleRate)
     let ch = UInt32(channels)
 
-    // Lazy-init engine + player node on first call.
-    // Do NOT change preferredInput here — that can tear down the DAT SDK BT video stream.
-    // The output route is determined by the audioInputMode set before streaming starts.
+    // Lazy-init engine + player node on first call
     if inboundAudioEngine == nil {
       let engine = AVAudioEngine()
       let player = AVAudioPlayerNode()
@@ -1270,7 +1268,15 @@ class StreamSessionViewModel: ObservableObject {
       do {
         try engine.start()
 
+        // Route output to glasses HFP speaker if available.
+        // Setting preferredInput to a BT HFP port routes both input and output there.
+        // This is the only reliable way to play audio through the glasses speaker on iOS.
         let audioSession = AVAudioSession.sharedInstance()
+        if let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+          try audioSession.setPreferredInput(btHFP)
+          NSLog("[StreamSession] Inbound engine: routed to HFP \(btHFP.portName)")
+        }
+
         let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
         NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz, output: \(outputs)")
       } catch {
