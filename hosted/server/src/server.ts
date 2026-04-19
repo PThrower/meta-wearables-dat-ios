@@ -1046,6 +1046,13 @@ const server = Bun.serve<WsData>({
               orchestrator.setVisionFps(sessionId, fps);
               console.log(`[relay] Vision FPS set to ${fps} session=${sessionId}`);
               ws.send(JSON.stringify({ type: "vision_fps", fps }));
+            } else if (cmd.type === "send_text" && typeof cmd.text === "string") {
+              // Viewer sends text prompt to the active AI service
+              const text = cmd.text.slice(0, 1000);
+              if (text.length > 0) {
+                orchestrator.sendTrigger(sessionId, text);
+                console.log(`[relay] Text to AI: "${text.slice(0, 80)}${text.length > 80 ? "..." : ""}" session=${sessionId}`);
+              }
             } else if (cmd.type === "ai_telemetry") {
               // Viewer requests telemetry
               ws.send(JSON.stringify({
@@ -1136,7 +1143,10 @@ const server = Bun.serve<WsData>({
           // Binary frame from viewer — forward FRAU audio to publisher
           const buf = message as Uint8Array;
           if (isAudioFrame(buf)) {
-            registry.sendToPublisher(sessionId, buf);
+            const sent = registry.sendToPublisher(sessionId, buf);
+            if (!sent) {
+              console.warn(`[relay] Viewer audio frame dropped: publisher not connected for session=${sessionId}`);
+            }
           }
         }
       }

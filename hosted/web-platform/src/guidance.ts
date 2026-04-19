@@ -188,7 +188,17 @@ export class GuidancePanel {
         this.renderEventLog();
       }
     } else if (msg.type === "ai_telemetry") {
-      this.telemetry = msg as unknown as AITelemetry;
+      const data = (msg as { telemetry?: AITelemetry }).telemetry;
+      if (data) {
+        this.telemetry = {
+          triggers: data.triggers ?? 0,
+          guidanceEvents: data.guidanceEvents ?? 0,
+          avgLatencyMs: data.avgLatencyMs ?? 0,
+          lastLatencyMs: data.lastLatencyMs ?? null,
+          queueDepth: data.queueDepth ?? 0,
+          uptimeMs: data.uptimeMs ?? 0,
+        };
+      }
       this.renderTelemetry();
     } else if (msg.type === "vision_fps") {
       this.visionFps = (msg as { fps: number }).fps;
@@ -336,12 +346,22 @@ export class GuidancePanel {
       </div>`;
     }
 
+    // Text input to AI (only when active)
+    let textInputHtml = "";
+    if (isActive) {
+      textInputHtml = `<div class="guidance-text-input-row">
+        <input id="guidanceTextInput" type="text" class="guidance-text-input" placeholder="Send text to AI..." maxlength="1000">
+        <button id="guidanceTextSend" class="guidance-btn guidance-btn-send">Send</button>
+      </div>`;
+    }
+
     return `
       <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
       ${descHtml}
       ${gesturesHtml}
       ${fpsHtml}
       ${overlayHtml}
+      ${textInputHtml}
       ${infoHtml}
     `;
   }
@@ -495,6 +515,19 @@ export class GuidancePanel {
     if (overlayToggle) {
       overlayToggle.addEventListener("click", () => this.handleOverlayToggle());
     }
+
+    // Text input to AI
+    const textInput = document.getElementById("guidanceTextInput") as HTMLInputElement | null;
+    const textSend = document.getElementById("guidanceTextSend");
+    if (textInput && textSend) {
+      textSend.addEventListener("click", () => this.handleSendText(textInput));
+      textInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.handleSendText(textInput);
+        }
+      });
+    }
   }
 
   private handleActivate(): void {
@@ -524,6 +557,13 @@ export class GuidancePanel {
     this.showOverlays = !this.showOverlays;
     if (this.onOverlayToggle) this.onOverlayToggle(this.showOverlays);
     this.renderControlSection();
+  }
+
+  private handleSendText(input: HTMLInputElement): void {
+    const text = input.value.trim();
+    if (!text) return;
+    this.sendFn({ type: "send_text", text });
+    input.value = "";
   }
 
   private updateFpsDisplay(): void {

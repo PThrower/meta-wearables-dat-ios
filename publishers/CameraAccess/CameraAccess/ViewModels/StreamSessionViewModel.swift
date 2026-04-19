@@ -1253,7 +1253,9 @@ class StreamSessionViewModel: ObservableObject {
     let sr = Double(sampleRate)
     let ch = UInt32(channels)
 
-    // Lazy-init engine + player node on first call
+    // Lazy-init engine + player node on first call.
+    // Do NOT change preferredInput here — that can tear down the DAT SDK BT video stream.
+    // The output route is determined by the audioInputMode set before streaming starts.
     if inboundAudioEngine == nil {
       let engine = AVAudioEngine()
       let player = AVAudioPlayerNode()
@@ -1267,16 +1269,10 @@ class StreamSessionViewModel: ObservableObject {
 
       do {
         try engine.start()
-        NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz")
 
-        // Re-apply HFP output routing — engine.start() can reset the audio route
-        // to the phone speaker. Force output back to glasses if HFP is available.
-        let session = AVAudioSession.sharedInstance()
-        let btInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP })
-        if let bt = btInput {
-          try session.setPreferredInput(bt)
-          NSLog("[StreamSession] Inbound engine: re-routed output to HFP (\(bt.portName))")
-        }
+        let audioSession = AVAudioSession.sharedInstance()
+        let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
+        NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz, output: \(outputs)")
       } catch {
         NSLog("[StreamSession] Audio engine start failed: \(error)")
         return
@@ -1286,10 +1282,10 @@ class StreamSessionViewModel: ObservableObject {
       inboundPlayerNode = player
     }
 
-    guard let player = inboundPlayerNode, let engine = inboundAudioEngine else { return }
+    guard let player = inboundPlayerNode else { return }
 
     // Convert Int16 PCM → Float32 for AVAudioPlayerNode
-    let frameCount = UInt32(pcm.count) / 2  // 2 bytes per Int16 sample
+    let frameCount = UInt32(pcm.count) / (ch * 2)  // frames = bytes / (channels * bytesPerSample)
     guard frameCount > 0,
           let format = AVAudioFormat(standardFormatWithSampleRate: sr, channels: ch),
           let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)
@@ -1304,9 +1300,7 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    player.scheduleBuffer(buffer) {
-      NSLog("[StreamSession] Inbound buffer playback complete")
-    }
+    player.scheduleBuffer(buffer)
     if !player.isPlaying { player.play() }
   }
 

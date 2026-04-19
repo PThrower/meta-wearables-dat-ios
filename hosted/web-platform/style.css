@@ -898,6 +898,42 @@ header {
   text-align: right;
 }
 
+/* Text input to AI */
+.guidance-text-input-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.guidance-text-input {
+  flex: 1;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 8px;
+  outline: none;
+}
+.guidance-text-input:focus {
+  border-color: rgba(255,255,255,0.35);
+}
+.guidance-text-input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+.guidance-btn-send {
+  padding: 4px 10px;
+  font-size: 10px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.guidance-btn-send:hover {
+  background: rgba(255,255,255,0.2);
+}
+
 /* Transcript entries — compact, muted */
 .guidance-transcript {
   padding: 2px 6px !important;
