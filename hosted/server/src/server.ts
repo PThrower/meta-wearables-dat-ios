@@ -1147,6 +1147,16 @@ const server = Bun.serve<WsData>({
             if (!sent) {
               console.warn(`[relay] Viewer audio frame dropped: publisher not connected for session=${sessionId}`);
             }
+            // Log first frame only, then every 100th
+            if (sent && !ws.data._audioFrameCount) {
+              ws.data._audioFrameCount = 1;
+              console.log(`[relay] Viewer audio forwarding to publisher: session=${sessionId} frameSize=${buf.length}`);
+            } else if (sent) {
+              ws.data._audioFrameCount++;
+              if (ws.data._audioFrameCount % 100 === 0) {
+                console.log(`[relay] Viewer audio: ${ws.data._audioFrameCount} frames forwarded session=${sessionId}`);
+              }
+            }
           }
         }
       }
