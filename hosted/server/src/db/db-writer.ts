@@ -46,6 +46,11 @@ class DbWriter {
     this.queue.push(op);
   }
 
+  /** Flush the write queue immediately (for latency-sensitive writes like APNs tokens) */
+  flushNow() {
+    this.flush();
+  }
+
   /** Increment a telemetry counter (batched, flushed every 60s) */
   incrementCounter(key: string, delta: number = 1) {
     this.pendingCounters.set(key, (this.pendingCounters.get(key) || 0) + delta);

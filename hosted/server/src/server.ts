@@ -543,6 +543,7 @@ const server = Bun.serve<WsData>({
           return Response.json({ error: "deviceId and deviceToken required" }, { status: 400 });
         }
         dbWriter.enqueue(q.updateDeviceToken(body.deviceId, body.deviceToken));
+        dbWriter.flushNow();
         console.log(`[apns] Device token registered for ${body.deviceId.slice(0, 8)}... (${(body.deviceToken as string).slice(0, 8)}...)`);
         return Response.json({ ok: true });
       } catch (e) {
