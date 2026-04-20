@@ -624,10 +624,8 @@ const server = Bun.serve<WsData>({
       } catch (e) {
         const apnsStatus = {
           configured: isApnsConfigured(),
-          keyLen: process.env.APNS_KEY_PEM?.length ?? 0,
-          keyStart: process.env.APNS_KEY_PEM?.slice(0, 30) ?? "N/A",
-          keyId: process.env.APNS_KEY_ID ?? "N/A",
-          teamId: process.env.APNS_TEAM_ID ?? "N/A",
+          keyId: process.env.APNS_KEY_ID ? "set" : "missing",
+          teamId: process.env.APNS_TEAM_ID ? "set" : "missing",
           bundleId: process.env.APNS_BUNDLE_ID ?? "N/A",
           production: process.env.APNS_PRODUCTION ?? "N/A",
         };
