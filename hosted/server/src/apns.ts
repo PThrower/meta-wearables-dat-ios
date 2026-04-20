@@ -35,7 +35,16 @@ let tokenIssuedAt = 0;
 
 function loadKey(): string {
   if (!KEY_PEM) throw new Error("[apns] APNS_KEY_PEM not configured");
-  return KEY_PEM.replace(/\\n/g, "\n");
+  let key = KEY_PEM.trim();
+  // Handle both literal \n and actual newlines from different env sources
+  if (!key.includes("-----BEGIN")) {
+    throw new Error("[apns] APNS_KEY_PEM does not contain a valid PEM header");
+  }
+  // Replace literal \n with actual newlines (Doppler stores them this way)
+  key = key.replace(/\\n/g, "\n");
+  // Ensure single trailing newline
+  if (!key.endsWith("\n")) key += "\n";
+  return key;
 }
 
 /** Generate ES256 JWT for APNs authentication */
