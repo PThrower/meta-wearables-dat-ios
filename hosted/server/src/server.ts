@@ -601,7 +601,7 @@ const server = Bun.serve<WsData>({
 
         // Send silent push to wake the app
         console.log(`[wake] Sending silent push to device ${deviceId.slice(0, 8)}...`);
-        const silentResult = await sendSilentWake(deviceToken, sessionId);
+        const silentResult = await sendSilentWake(deviceToken, body.sessionId);
 
         if (silentResult.reason === "Unregistered" || silentResult.reason === "BadDeviceToken") {
           dbWriter.enqueue(q.clearDeviceToken(deviceId));
@@ -613,7 +613,7 @@ const server = Bun.serve<WsData>({
           const checkSession = registry.findByDevice(deviceId);
           if (!checkSession) {
             console.log(`[wake] Device ${deviceId.slice(0, 8)} still not connected after 15s — sending visible fallback`);
-            const visibleResult = await sendVisibleWake(deviceToken, sessionId);
+            const visibleResult = await sendVisibleWake(deviceToken, body.sessionId);
             if (visibleResult.reason === "Unregistered" || visibleResult.reason === "BadDeviceToken") {
               dbWriter.enqueue(q.clearDeviceToken(deviceId));
             }
