@@ -167,13 +167,15 @@ export function updateDeviceStatus(deviceId: string, status: string) {
 
 // --- APNs Device Tokens ---
 
-/** Store APNs device token for push notifications */
+/** Store APNs device token for push notifications. Uses upsert so it works even if no device row exists yet. */
 export function updateDeviceToken(deviceId: string, token: string) {
   return () => {
     const db = getDbRaw();
     db.prepare(`
-      UPDATE devices SET apns_device_token = ?, updated_at = ? WHERE id = ?
-    `).run(token, now(), deviceId);
+      INSERT INTO devices (id, apns_device_token, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET apns_device_token = excluded.apns_device_token, updated_at = excluded.updated_at
+    `).run(deviceId, token, now(), now());
   };
 }
 
