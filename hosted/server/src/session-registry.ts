@@ -167,6 +167,14 @@ export class SessionRegistry {
     return this.deviceSessionMap.get(deviceId);
   }
 
+  /** Find device ID by session ID (reverse lookup). */
+  findDeviceBySession(sessionId: string): string | undefined {
+    for (const [devId, sid] of this.deviceSessionMap) {
+      if (sid === sessionId) return devId;
+    }
+    return undefined;
+  }
+
   /** Get a session by ID. Returns undefined if not found. */
   getSession(id: string): Session | undefined {
     return this.sessions.get(id);

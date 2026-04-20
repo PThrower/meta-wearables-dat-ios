@@ -273,6 +273,7 @@ function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; reco
     ? (session.publisher.standby ? "standby" : "live")
     : "offline";
   return {
+    deviceId: session.metadata.deviceId || null,
     deviceName: session.metadata.deviceName || null,
     deviceModel: session.metadata.deviceModel || null,
     wearableType: session.metadata.wearableType || null,
@@ -562,23 +563,20 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/api/wake-device" && req.method === "POST") {
       try {
-        const rawBody = await req.text();
-        console.log(`[wake] Raw body (${rawBody.length} bytes): ${rawBody.slice(0, 200)}`);
-        if (!rawBody) {
-          return Response.json({ error: "Empty body", method: req.method, ct: req.headers.get("content-type") }, { status: 400 });
-        }
-        let body: { deviceId?: string; sessionId?: string };
-        try {
-          body = JSON.parse(rawBody);
-        } catch {
-          return Response.json({ error: "JSON parse failed", raw: rawBody.slice(0, 100), len: rawBody.length }, { status: 400 });
-        }
-        if (!body.deviceId) {
-          return Response.json({ error: "deviceId required" }, { status: 400 });
-        }
+        const body = await req.json() as { deviceId?: string; sessionId?: string };
 
-        const deviceId = body.deviceId;
-        const sessionId = body.sessionId;
+        // Resolve deviceId: explicit > session metadata > deviceSessionMap reverse lookup
+        let deviceId = body.deviceId;
+        if (!deviceId && body.sessionId) {
+          const session = registry.getSession(body.sessionId);
+          deviceId = session?.metadata?.deviceId;
+          if (!deviceId) {
+            deviceId = registry.findDeviceBySession(body.sessionId);
+          }
+        }
+        if (!deviceId) {
+          return Response.json({ error: "No device found for this session" }, { status: 404 });
+        }
 
         // Check if device already has an active WebSocket connection
         const existingSessionId = registry.findByDevice(deviceId);

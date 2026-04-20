@@ -82,28 +82,21 @@ document.getElementById("speakInput")!.addEventListener("keydown", (e) => {
 // --- Wake Device (APNs push) ---
 document.getElementById("btnWakeDevice")!.addEventListener("click", async () => {
   const wakeStatus = document.getElementById("wakeStatus")!;
-  if (!currentDeviceId) {
-    // Try to find a registered device if none from active session
-    try {
-      const devRes = await fetch("/api/registered-devices");
-      const devices = await devRes.json();
-      if (Array.isArray(devices) && devices.length > 0) {
-        currentDeviceId = devices[0].id;
-      }
-    } catch { /* ignore */ }
-    if (!currentDeviceId) {
+  wakeStatus.textContent = "Waking...";
+  wakeStatus.style.color = "#8be9fd";
+  try {
+    const payload: { deviceId?: string; sessionId?: string } = {};
+    if (currentDeviceId) payload.deviceId = currentDeviceId;
+    else if (currentSessionId) payload.sessionId = currentSessionId;
+    else {
       wakeStatus.textContent = "No device";
       wakeStatus.style.color = "#ff5555";
       return;
     }
-  }
-  wakeStatus.textContent = "Waking...";
-  wakeStatus.style.color = "#8be9fd";
-  try {
     const res = await fetch("/api/wake-device", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceId: currentDeviceId }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.ok) {
@@ -176,6 +169,7 @@ function resetAudioControls(): void {
 let uptimeInterval: ReturnType<typeof setInterval> | null = null;
 let sessionConnectedAt = 0;
 let currentDeviceId: string | null = null;
+let currentSessionId: string | null = null;
 
 // --- Toast notifications ---
 function showToast(message: string, kind: "info" | "warn" | "error" = "info"): void {
@@ -212,6 +206,7 @@ export function clearPendingLiveSession(): void {
  */
 export function watchLive(sessionId: string, shareToken?: string): boolean {
   if (requireAuth()) return true;
+  currentSessionId = sessionId;
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   // No token in URL — auth is done via hello message (RelayPlayer includes it)
@@ -549,6 +544,7 @@ export function closeLive(): void {
   if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
   sessionConnectedAt = 0;
   currentDeviceId = null;
+  currentSessionId = null;
   if (player) { player.destroy(); player = null; }
   guidancePanel = null;
 
