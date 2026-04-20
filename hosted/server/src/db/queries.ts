@@ -206,6 +206,15 @@ export function listDevicesWithTokens(): { id: string; name: string | null; mode
   ).all() as { id: string; name: string | null; model: string | null; hasToken: true }[];
 }
 
+/** Find a device ID by its last known session ID (DB fallback for wake after restart) */
+export function findDeviceBySessionDb(sessionId: string): string | null {
+  const db = getDbRaw();
+  const row = db.prepare(
+    "SELECT id FROM devices WHERE last_session_id = ? AND apns_device_token IS NOT NULL ORDER BY updated_at DESC LIMIT 1"
+  ).get(sessionId) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
 // --- Users ---
 
 /** Upsert user on first auth */

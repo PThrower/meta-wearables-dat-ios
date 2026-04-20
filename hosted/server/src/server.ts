@@ -565,13 +565,16 @@ const server = Bun.serve<WsData>({
       try {
         const body = await req.json() as { deviceId?: string; sessionId?: string };
 
-        // Resolve deviceId: explicit > session metadata > deviceSessionMap reverse lookup
+        // Resolve deviceId: explicit > session metadata > in-memory map > DB fallback
         let deviceId = body.deviceId;
         if (!deviceId && body.sessionId) {
           const session = registry.getSession(body.sessionId);
           deviceId = session?.metadata?.deviceId;
           if (!deviceId) {
             deviceId = registry.findDeviceBySession(body.sessionId);
+          }
+          if (!deviceId) {
+            deviceId = q.findDeviceBySessionDb(body.sessionId);
           }
         }
         if (!deviceId) {
