@@ -39,13 +39,15 @@ export async function proxyRequest(req: Request, path: string, user?: AuthUser):
 
   try {
     const hasBody = req.body != null && !["GET", "HEAD"].includes(req.method);
+    // Read body as ArrayBuffer to avoid ReadableStream locking issues
+    const bodyBuffer = hasBody ? await req.arrayBuffer() : undefined;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       return await fetch(target.toString(), {
         method: req.method,
         headers,
-        body: hasBody ? req.body : undefined,
+        body: bodyBuffer,
         redirect: "manual",
         signal: controller.signal,
       });
