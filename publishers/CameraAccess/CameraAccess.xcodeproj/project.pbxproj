@@ -387,6 +387,11 @@
 			productName = CameraAccess;
 			productReference = 3A3A3A3A3A3A3A3A3A3A3A3A /* CameraAccess.app */;
 			productType = "com.apple.product-type.application";
+			systemCapabilities = {
+				"com.apple.Push" = {
+					enabled = 1;
+				};
+			};
 		};
 		E66CC00C2F3E05D900B07379 /* CameraAccessUITests */ = {
 			isa = PBXNativeTarget;
@@ -630,7 +635,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.meta.wearables.external.CameraAccess;
+				PRODUCT_BUNDLE_IDENTIFIER = ebowwa.caringmind;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
@@ -657,7 +662,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.meta.wearables.external.CameraAccess;
+				PRODUCT_BUNDLE_IDENTIFIER = ebowwa.caringmind;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
