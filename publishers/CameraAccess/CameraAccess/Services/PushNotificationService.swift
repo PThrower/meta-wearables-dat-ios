@@ -154,48 +154,35 @@ final class PushNotificationService: ObservableObject {
 
   // MARK: - Relay URL
 
-  /// Reads the relay URL from the same source as StreamSessionViewModel.
+  /// Derives the HTTP base URL for the relay server from the WebSocket URL.
+  /// Converts wss://relay.simulationapi.com/publish -> https://relay.simulationapi.com
   private func getRelayURL() -> String? {
-    // Try Keychain first (same as relay URL storage in the app)
-    let query: [String: Any] = [
-      kSecClass as String: kSecClassGenericPassword,
-      kSecAttrAccount as String: "relay-url",
-      kSecAttrService as String: Bundle.main.bundleIdentifier ?? "com.mwdat-ios",
-      kSecReturnData as String: true,
-      kSecMatchLimit as String: kSecMatchLimitOne,
-    ]
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecSuccess, let data = result as? Data,
-       let url = String(data: data, encoding: .utf8), !url.isEmpty {
-      return url
-    }
+    // Use the same default as StreamSessionViewModel
+    let wsURL = ProcessInfo.processInfo.environment["RELAY_URL"]
+      ?? "wss://relay.simulationapi.com/publish"
 
-    // Fallback to environment or default
-    return ProcessInfo.processInfo.environment["RELAY_URL"]
-      ?? "ws://\(getWiFiIP()):8080"
+    return wsToHTTP(wsURL)
   }
 
-  private func getWiFiIP() -> String {
-    // Simple WiFi IP detection
-    var address = "127.0.0.1"
-    var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return address }
-    defer { freeifaddrs(ifaddr) }
-    for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
-      let interface = ptr.pointee
-      let addrFamily = interface.ifa_addr.pointee.sa_family
-      if addrFamily == UInt8(AF_INET) {
-        let name = String(cString: interface.ifa_name)
-        if name == "en0" {
-          var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-          getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
-                      &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
-          address = String(cString: hostname)
-          break
-        }
+  /// Convert a WebSocket URL to an HTTP base URL.
+  /// wss://host/path -> https://host, ws://host:port/path -> http://host:port
+  private func wsToHTTP(_ ws: String) -> String? {
+    var base = ws
+    if base.hasPrefix("wss://") {
+      base = "https://" + String(base.dropFirst(6))
+    } else if base.hasPrefix("ws://") {
+      base = "http://" + String(base.dropFirst(5))
+    } else if !base.hasPrefix("http") {
+      return nil
+    }
+    // Strip path components (e.g. /publish) — keep scheme + host + port only
+    if let schemeEnd = base.range(of: "://") {
+      let afterScheme = base[schemeEnd.upperBound...]
+      if let slashIdx = afterScheme.firstIndex(of: "/") {
+        base = String(base[..<slashIdx])
       }
     }
-    return address
+    return base
   }
+
 }

@@ -154,6 +154,18 @@ export function createFetchHandler(config?: {
       if (resp) return resp;
     }
 
+    // --- APNs device token registration ---
+
+    if (pathname === "/api/device-token" && req.method === "POST") {
+      return proxyRequest(req, pathname);
+    }
+
+    // --- APNs wake device ---
+
+    if (pathname === "/api/wake-device" && req.method === "POST") {
+      return proxyRequest(req, pathname);
+    }
+
     // --- Gallery API ---
 
     if (pathname === "/gallery/api") {

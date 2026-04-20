@@ -19,7 +19,7 @@ import { createSign } from "node:crypto";
 const KEY_ID = process.env.APNS_KEY_ID || "";
 const TEAM_ID = process.env.APNS_TEAM_ID || "";
 const KEY_PEM = process.env.APNS_KEY_PEM || ""; // .p8 key content (from Doppler)
-const BUNDLE_ID = process.env.APNS_BUNDLE_ID || "com.mwdat-ios";
+const BUNDLE_ID = process.env.APNS_BUNDLE_ID || "ebowwa.caringmind";
 const IS_PRODUCTION = process.env.APNS_PRODUCTION === "true";
 
 const APNS_HOST = IS_PRODUCTION
