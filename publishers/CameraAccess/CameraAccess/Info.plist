@@ -62,6 +62,7 @@
 		<string>audio</string>
 		<string>bluetooth-peripheral</string>
 		<string>external-accessory</string>
+		<string>remote-notification</string>
 	</array>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Needed to connect to Meta AI Glasses</string>

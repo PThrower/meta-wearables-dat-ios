@@ -78,6 +78,7 @@ export const devices = sqliteTable("devices", {
   lastSessionId: text("last_session_id"),
   status: text("status").notNull().default("unknown"),  // online, standby, offline, unknown
   batteryLevel: integer("battery_level"),
+  apnsDeviceToken: text("apns_device_token"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [

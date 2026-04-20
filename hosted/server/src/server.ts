@@ -24,6 +24,8 @@
  *   /session/<id>/audio-in   - Push audio to publisher (POST)
  *   /session/<id>/guidance   - AI guidance history, status, telemetry (GET)
  *   /session/<id>/guidance/history - Persisted guidance events from R2 (GET)
+ *   /api/device-token       - Register APNs device token (POST)
+ *   /api/wake-device         - Wake device via APNs push (POST)
  *   /latest/video.mp4        - Redirect to most recent session's mp4 export
  *   /latest/export           - JSON metadata for most recent session
  *   /stats                   - JSON stats (platform-wide + per-session)
@@ -65,6 +67,7 @@ import { initDb, getDbRaw } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
 import { dbWriter } from "./db/db-writer.js";
 import * as q from "./db/queries.js";
+import { isApnsConfigured, sendSilentWake, sendVisibleWake } from "./apns.js";
 
 // --- Auto-detect WiFi IP ---
 
@@ -529,6 +532,87 @@ const server = Bun.serve<WsData>({
         noAuth: true,
         version: { gitCommit: VIEWER_GIT_COMMIT, buildVersion: VIEWER_BUILD_VERSION },
       });
+    }
+
+    // --- APNs Device Token Registration ---
+
+    if (url.pathname === "/api/device-token" && req.method === "POST") {
+      try {
+        const body = await req.json() as { deviceId?: string; deviceToken?: string; platform?: string; bundleId?: string };
+        if (!body.deviceId || !body.deviceToken) {
+          return Response.json({ error: "deviceId and deviceToken required" }, { status: 400 });
+        }
+        dbWriter.enqueue(q.updateDeviceToken(body.deviceId, body.deviceToken));
+        console.log(`[apns] Device token registered for ${body.deviceId.slice(0, 8)}... (${(body.deviceToken as string).slice(0, 8)}...)`);
+        return Response.json({ ok: true });
+      } catch (e) {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+    }
+
+    // --- Wake Device via APNs ---
+
+    if (url.pathname === "/api/wake-device" && req.method === "POST") {
+      try {
+        const body = await req.json() as { deviceId?: string; sessionId?: string };
+        if (!body.deviceId) {
+          return Response.json({ error: "deviceId required" }, { status: 400 });
+        }
+
+        const deviceId = body.deviceId;
+        const sessionId = body.sessionId;
+
+        // Check if device already has an active WebSocket connection
+        const existingSessionId = registry.findByDevice(deviceId);
+        if (existingSessionId) {
+          const session = registry.getSession(existingSessionId);
+          if (session?.publisher?.ws && session.publisher.ws.readyState === 1) { // WebSocket.OPEN
+            console.log(`[wake] Device ${deviceId.slice(0, 8)} already connected — sending start_stream directly`);
+            session.publisher.ws.send(JSON.stringify({ type: "start_stream" }));
+            return Response.json({ ok: true, status: "already_connected" });
+          }
+        }
+
+        // Look up APNs device token
+        const deviceToken = q.getDeviceToken(deviceId);
+        if (!deviceToken) {
+          return Response.json({ error: "No device token registered for this device" }, { status: 404 });
+        }
+
+        if (!isApnsConfigured()) {
+          return Response.json({ error: "APNs not configured on server" }, { status: 503 });
+        }
+
+        // Send silent push to wake the app
+        console.log(`[wake] Sending silent push to device ${deviceId.slice(0, 8)}...`);
+        const silentResult = await sendSilentWake(deviceToken, sessionId);
+
+        if (silentResult.reason === "Unregistered" || silentResult.reason === "BadDeviceToken") {
+          dbWriter.enqueue(q.clearDeviceToken(deviceId));
+          return Response.json({ error: "Device token invalid", reason: silentResult.reason }, { status: 410 });
+        }
+
+        // Schedule visible notification fallback after 15s if device doesn't connect
+        const wakeTimeout = setTimeout(async () => {
+          const checkSession = registry.findByDevice(deviceId);
+          if (!checkSession) {
+            console.log(`[wake] Device ${deviceId.slice(0, 8)} still not connected after 15s — sending visible fallback`);
+            const visibleResult = await sendVisibleWake(deviceToken, sessionId);
+            if (visibleResult.reason === "Unregistered" || visibleResult.reason === "BadDeviceToken") {
+              dbWriter.enqueue(q.clearDeviceToken(deviceId));
+            }
+          } else {
+            console.log(`[wake] Device ${deviceId.slice(0, 8)} connected — no fallback needed`);
+          }
+        }, 15_000);
+
+        // Don't let the timeout block server shutdown
+        wakeTimeout.unref();
+
+        return Response.json({ ok: true, status: "silent_push_sent" });
+      } catch (e) {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
     }
 
     // --- App Registry ---

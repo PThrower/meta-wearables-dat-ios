@@ -20,13 +20,84 @@ import Foundation
 import MWDATCore
 import UIKit
 import SwiftUI
+import UserNotifications
 
 #if DEBUG
 import MWDATMockDevice
 #endif
 
+// MARK: - AppDelegate for Push Notifications
+
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+  let pushService = PushNotificationService()
+
+  func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+  ) -> Bool {
+    UNUserNotificationCenter.current().delegate = self
+
+    // Request push authorization asynchronously
+    Task { @MainActor in
+      await pushService.requestAuthorization()
+      // Re-send stored token on each launch
+      pushService.resendStoredToken()
+    }
+
+    return true
+  }
+
+  func application(
+    _ application: UIApplication,
+    didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+  ) {
+    pushService.handleDeviceToken(deviceToken)
+  }
+
+  func application(
+    _ application: UIApplication,
+    didFailToRegisterForRemoteNotificationsWithError error: Error
+  ) {
+    NSLog("[PushNotification] Failed to register for remote notifications: \(error)")
+  }
+
+  func application(
+    _ application: UIApplication,
+    didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+    fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+  ) {
+    pushService.handleIncomingPush(userInfo: userInfo, completionHandler: completionHandler)
+  }
+
+  // MARK: - UNUserNotificationCenterDelegate
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    let userInfo = response.notification.request.content.userInfo
+    NSLog("[PushNotification] Notification tapped: \(userInfo)")
+    // The app is now foregrounded — onWakeFromPush will be triggered
+    // via the ViewModel wiring if relayMode == .disconnected
+    completionHandler()
+  }
+
+  nonisolated func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    // Show notification even when app is in foreground
+    completionHandler([.banner, .sound])
+  }
+}
+
+// MARK: - App
+
 @main
 struct CameraAccessApp: App {
+  @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
   #if DEBUG
   // Debug menu for simulating device connections during development
   @StateObject private var debugMenuViewModel = DebugMenuViewModel(mockDeviceKit: MockDeviceKit.shared)
@@ -115,7 +186,8 @@ struct CameraAccessApp: App {
           wearables: Wearables.shared,
           viewModel: wearablesViewModel,
           telemetryService: telemetryService,
-          mockDeviceViewModel: debugMenuViewModel.mockDeviceKitViewModel
+          mockDeviceViewModel: debugMenuViewModel.mockDeviceKitViewModel,
+          pushNotificationService: appDelegate.pushService
         )
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {
@@ -128,7 +200,8 @@ struct CameraAccessApp: App {
       MainAppView(
           wearables: Wearables.shared,
           viewModel: wearablesViewModel,
-          telemetryService: telemetryService
+          telemetryService: telemetryService,
+          pushNotificationService: appDelegate.pushService
         )
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {

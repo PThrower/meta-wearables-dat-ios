@@ -25,23 +25,26 @@ struct StreamSessionView: View {
   @ObservedObject private var telemetryService: TelemetryService
   @State private var orientation: UIInterfaceOrientation?
   @Environment(\.scenePhase) private var scenePhase
+  var pushNotificationService: PushNotificationService?
 
   #if DEBUG
   @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
 
-  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, mockDeviceVM: MockDeviceKitView.ViewModel) {
+  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, mockDeviceVM: MockDeviceKitView.ViewModel, pushNotificationService: PushNotificationService? = nil) {
     self.wearables = wearables
     self.wearablesViewModel = wearablesVM
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
     self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
     self._mockDeviceVM = ObservedObject(wrappedValue: mockDeviceVM)
+    self.pushNotificationService = pushNotificationService
   }
   #else
-  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService) {
+  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, pushNotificationService: PushNotificationService? = nil) {
     self.wearables = wearables
     self.wearablesViewModel = wearablesVM
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
     self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
+    self.pushNotificationService = pushNotificationService
   }
   #endif
 
@@ -67,6 +70,14 @@ struct StreamSessionView: View {
       Text(viewModel.errorMessage)
     }
     .onAppear {
+      // Wire push notification wake callback to standby relay
+      if let pushService = pushNotificationService {
+        pushService.onWakeFromPush = { [weak viewModel] in
+          Task { @MainActor in
+            viewModel?.handleWakeFromPush()
+          }
+        }
+      }
       if viewModel.isStreaming {
         OrientationLock.shared.unlock()
       } else {

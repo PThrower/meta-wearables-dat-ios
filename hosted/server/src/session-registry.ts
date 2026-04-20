@@ -162,6 +162,16 @@ export class SessionRegistry {
     this.deviceSessionMap.set(deviceId, sessionId);
   }
 
+  /** Look up session ID by device ID. Returns undefined if device not connected. */
+  findByDevice(deviceId: string): string | undefined {
+    return this.deviceSessionMap.get(deviceId);
+  }
+
+  /** Get a session by ID. Returns undefined if not found. */
+  getSession(id: string): Session | undefined {
+    return this.sessions.get(id);
+  }
+
   // --- Publisher management ---
 
   /** Claim the publisher slot for a session. Returns error string or null on success. */

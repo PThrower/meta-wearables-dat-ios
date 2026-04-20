@@ -25,21 +25,24 @@ struct MainAppView: View {
   let wearables: WearablesInterface
   @ObservedObject private var viewModel: WearablesViewModel
   @ObservedObject private var telemetryService: TelemetryService
+  var pushNotificationService: PushNotificationService?
 
   #if DEBUG
   @ObservedObject var mockDeviceViewModel: MockDeviceKitView.ViewModel
 
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, mockDeviceViewModel: MockDeviceKitView.ViewModel) {
+  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, mockDeviceViewModel: MockDeviceKitView.ViewModel, pushNotificationService: PushNotificationService? = nil) {
     self.wearables = wearables
     self.viewModel = viewModel
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
     self._mockDeviceViewModel = ObservedObject(wrappedValue: mockDeviceViewModel)
+    self.pushNotificationService = pushNotificationService
   }
   #else
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService) {
+  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, pushNotificationService: PushNotificationService? = nil) {
     self.wearables = wearables
     self.viewModel = viewModel
     self._telemetryService = ObservedObject(wrappedValue: telemetryService)
+    self.pushNotificationService = pushNotificationService
   }
   #endif
 
@@ -50,13 +53,15 @@ struct MainAppView: View {
         wearables: wearables,
         wearablesVM: viewModel,
         telemetryService: telemetryService,
-        mockDeviceVM: mockDeviceViewModel
+        mockDeviceVM: mockDeviceViewModel,
+        pushNotificationService: pushNotificationService
       )
       #else
       StreamSessionView(
         wearables: wearables,
         wearablesVM: viewModel,
-        telemetryService: telemetryService
+        telemetryService: telemetryService,
+        pushNotificationService: pushNotificationService
       )
       #endif
     } else {

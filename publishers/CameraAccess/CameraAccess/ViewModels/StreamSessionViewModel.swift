@@ -497,6 +497,18 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  /// Handle wake from APNs push notification.
+  /// Reconnects standby relay if currently disconnected (app was backgrounded/killed).
+  @MainActor
+  func handleWakeFromPush() {
+    guard relayMode == .disconnected else {
+      NSLog("[StreamSession] Wake push ignored — already connected (relayMode=\(relayMode))")
+      return
+    }
+    NSLog("[StreamSession] Wake push received — reconnecting standby relay")
+    Task { await startStandbyRelay() }
+  }
+
   /// Transition from standby to active — start camera, wait for BT link, then audio + telemetry.
   /// Called when start_stream is received while in standby.
   private func activateFromStandby() async {

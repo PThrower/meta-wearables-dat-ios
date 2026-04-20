@@ -165,6 +165,37 @@ export function updateDeviceStatus(deviceId: string, status: string) {
   };
 }
 
+// --- APNs Device Tokens ---
+
+/** Store APNs device token for push notifications */
+export function updateDeviceToken(deviceId: string, token: string) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare(`
+      UPDATE devices SET apns_device_token = ?, updated_at = ? WHERE id = ?
+    `).run(token, now(), deviceId);
+  };
+}
+
+/** Retrieve APNs device token for a device */
+export function getDeviceToken(deviceId: string): string | null {
+  const db = getDbRaw();
+  const row = db.prepare(
+    "SELECT apns_device_token FROM devices WHERE id = ?"
+  ).get(deviceId) as { apns_device_token: string | null } | undefined;
+  return row?.apns_device_token ?? null;
+}
+
+/** Clear APNs device token (e.g. on Unregistered response from Apple) */
+export function clearDeviceToken(deviceId: string) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare(`
+      UPDATE devices SET apns_device_token = NULL, updated_at = ? WHERE id = ?
+    `).run(now(), deviceId);
+  };
+}
+
 // --- Users ---
 
 /** Upsert user on first auth */
