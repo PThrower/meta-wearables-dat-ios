@@ -34,39 +34,21 @@ let cachedToken: string | null = null;
 let tokenIssuedAt = 0;
 
 function loadKey(): string {
-  if (!KEY_PEM) throw new Error("[apns] APNS_KEY_PEM not configured");
-  let key = KEY_PEM.trim();
-
-  // The env var may have the key in various formats:
-  // 1. With literal \n:  "-----BEGIN PRIVATE KEY-----\nMIG...\n-----END..."
-  // 2. With bare n:      "-----BEGIN PRIVATE KEY-----nMIG...n-----END..."  (shell ate the backslash)
-  // 3. With actual newlines (multi-line env value)
-  // Reconstruct a clean PEM by extracting the base64 body between markers.
-
-  const beginMatch = key.match(/-----BEGIN PRIVATE KEY-----/);
-  const endMatch = key.match(/-----END PRIVATE KEY-----/);
-  if (!beginMatch || !endMatch) {
-    throw new Error("[apns] APNS_KEY_PEM does not contain valid PEM markers");
+  // Prefer APNS_KEY_B64 (plain base64 body, no escaping issues)
+  const b64Body = process.env.APNS_KEY_B64?.trim();
+  if (b64Body && b64Body.length > 20) {
+    const lines: string[] = [];
+    for (let i = 0; i < b64Body.length; i += 64) {
+      lines.push(b64Body.slice(i, i + 64));
+    }
+    const key = `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----\n`;
+    console.log(`[apns] Built PEM from APNS_KEY_B64 (${b64Body.length} chars, ${lines.length} lines)`);
+    return key;
   }
 
-  // Extract the base64 content between the markers
-  const afterBegin = key.slice(beginMatch.index! + beginMatch[0].length);
-  const beforeEnd = afterBegin.slice(0, afterBegin.indexOf("-----END"));
-
-  // Clean the base64 body: remove all whitespace, backslashes, and bare 'n' artifacts
-  let body = beforeEnd
-    .replace(/\\n/g, "")   // remove literal \n sequences
-    .replace(/[\s\n\r]/g, ""); // remove whitespace
-
-  // The body is base64. Re-wrap at 64 chars per line.
-  const lines: string[] = [];
-  for (let i = 0; i < body.length; i += 64) {
-    lines.push(body.slice(i, i + 64));
-  }
-
-  key = `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----\n`;
-  console.log(`[apns] Reconstructed PEM key (${key.length} bytes, ${lines.length} body lines)`);
-  return key;
+  // Fallback: try to parse APNS_KEY_PEM
+  if (!KEY_PEM) throw new Error("[apns] APNS_KEY_B64 or APNS_KEY_PEM must be configured");
+  throw new Error("[apns] APNS_KEY_PEM has escaping issues — use APNS_KEY_B64 instead");
 }
 
 /** Generate ES256 JWT for APNs authentication */
