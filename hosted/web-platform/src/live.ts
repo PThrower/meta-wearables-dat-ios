@@ -79,6 +79,37 @@ document.getElementById("speakInput")!.addEventListener("keydown", (e) => {
   }
 });
 
+// --- Wake Device (APNs push) ---
+document.getElementById("btnWakeDevice")!.addEventListener("click", async () => {
+  const wakeStatus = document.getElementById("wakeStatus")!;
+  if (!currentDeviceId) {
+    wakeStatus.textContent = "No device";
+    wakeStatus.style.color = "#ff5555";
+    return;
+  }
+  wakeStatus.textContent = "Waking...";
+  wakeStatus.style.color = "#8be9fd";
+  try {
+    const res = await fetch("/api/wake-device", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId: currentDeviceId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      wakeStatus.textContent = data.status === "already_connected" ? "Already online" : "Push sent";
+      wakeStatus.style.color = "#50fa7b";
+    } else {
+      wakeStatus.textContent = data.error || "Failed";
+      wakeStatus.style.color = "#ff5555";
+    }
+  } catch {
+    wakeStatus.textContent = "Network error";
+    wakeStatus.style.color = "#ff5555";
+  }
+  setTimeout(() => { wakeStatus.textContent = ""; }, 5000);
+});
+
 // --- Audio processing controls ---
 const gainPhoneSlider = document.getElementById("gainPhone") as HTMLInputElement;
 const gainGlassesSlider = document.getElementById("gainGlasses") as HTMLInputElement;
@@ -134,6 +165,7 @@ function resetAudioControls(): void {
 
 let uptimeInterval: ReturnType<typeof setInterval> | null = null;
 let sessionConnectedAt = 0;
+let currentDeviceId: string | null = null;
 
 // --- Toast notifications ---
 function showToast(message: string, kind: "info" | "warn" | "error" = "info"): void {
@@ -428,6 +460,10 @@ function handleConnectionStatus(status: string): void {
 function handleSessionInfo(msg: Record<string, unknown>): void {
   siStrip.classList.remove("hidden");
 
+  // Capture device ID for wake-device push
+  const devId = msg.deviceId as string | undefined;
+  if (devId) currentDeviceId = devId;
+
   const device = [msg.deviceName, msg.deviceModel].filter(Boolean).join(" / ") as string || "Unknown Device";
   siDevice.textContent = device;
 
@@ -502,6 +538,7 @@ export function closeLive(): void {
   resetAudioControls();
   if (uptimeInterval) { clearInterval(uptimeInterval); uptimeInterval = null; }
   sessionConnectedAt = 0;
+  currentDeviceId = null;
   if (player) { player.destroy(); player = null; }
   guidancePanel = null;
 
