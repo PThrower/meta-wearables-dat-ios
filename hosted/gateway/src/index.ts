@@ -156,6 +156,10 @@ export function createFetchHandler(config?: {
 
     // --- APNs device token registration ---
 
+    if (pathname === "/api/registered-devices" && req.method === "GET") {
+      return proxyRequest(req, pathname);
+    }
+
     if (pathname === "/api/device-token" && req.method === "POST") {
       return proxyRequest(req, pathname);
     }

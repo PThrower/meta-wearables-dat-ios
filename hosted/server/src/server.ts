@@ -534,6 +534,13 @@ const server = Bun.serve<WsData>({
       });
     }
 
+    // --- List devices with APNs tokens ---
+
+    if (url.pathname === "/api/registered-devices" && req.method === "GET") {
+      const devices = q.listDevicesWithTokens();
+      return Response.json(devices);
+    }
+
     // --- APNs Device Token Registration ---
 
     if (url.pathname === "/api/device-token" && req.method === "POST") {

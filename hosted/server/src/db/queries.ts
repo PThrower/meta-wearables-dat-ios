@@ -198,6 +198,14 @@ export function clearDeviceToken(deviceId: string) {
   };
 }
 
+/** List devices that have APNs tokens registered */
+export function listDevicesWithTokens(): { id: string; name: string | null; model: string | null; hasToken: true }[] {
+  const db = getDbRaw();
+  return db.prepare(
+    "SELECT id, name, model FROM devices WHERE apns_device_token IS NOT NULL AND length(apns_device_token) > 10 ORDER BY updated_at DESC"
+  ).all() as { id: string; name: string | null; model: string | null; hasToken: true }[];
+}
+
 // --- Users ---
 
 /** Upsert user on first auth */

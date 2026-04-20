@@ -83,9 +83,19 @@ document.getElementById("speakInput")!.addEventListener("keydown", (e) => {
 document.getElementById("btnWakeDevice")!.addEventListener("click", async () => {
   const wakeStatus = document.getElementById("wakeStatus")!;
   if (!currentDeviceId) {
-    wakeStatus.textContent = "No device";
-    wakeStatus.style.color = "#ff5555";
-    return;
+    // Try to find a registered device if none from active session
+    try {
+      const devRes = await fetch("/api/registered-devices");
+      const devices = await devRes.json();
+      if (Array.isArray(devices) && devices.length > 0) {
+        currentDeviceId = devices[0].id;
+      }
+    } catch { /* ignore */ }
+    if (!currentDeviceId) {
+      wakeStatus.textContent = "No device";
+      wakeStatus.style.color = "#ff5555";
+      return;
+    }
   }
   wakeStatus.textContent = "Waking...";
   wakeStatus.style.color = "#8be9fd";
