@@ -12,15 +12,13 @@
  *   APNS_PRODUCTION  — "true" for production, anything else for sandbox
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { createSign } from "node:crypto";
 
 // --- Configuration ---
 
 const KEY_ID = process.env.APNS_KEY_ID || "";
 const TEAM_ID = process.env.APNS_TEAM_ID || "";
-const KEY_PATH = process.env.APNS_KEY_PATH || "";
+const KEY_PEM = process.env.APNS_KEY_PEM || ""; // .p8 key content (from Doppler)
 const BUNDLE_ID = process.env.APNS_BUNDLE_ID || "com.mwdat-ios";
 const IS_PRODUCTION = process.env.APNS_PRODUCTION === "true";
 
@@ -36,11 +34,8 @@ let cachedToken: string | null = null;
 let tokenIssuedAt = 0;
 
 function loadKey(): string {
-  if (!KEY_PATH) throw new Error("[apns] APNS_KEY_PATH not configured");
-  const resolved = KEY_PATH.startsWith("/")
-    ? KEY_PATH
-    : join(process.cwd(), KEY_PATH);
-  return readFileSync(resolved, "utf8");
+  if (!KEY_PEM) throw new Error("[apns] APNS_KEY_PEM not configured");
+  return KEY_PEM.replace(/\\n/g, "\n");
 }
 
 /** Generate ES256 JWT for APNs authentication */
@@ -73,7 +68,7 @@ function generateProviderToken(): string {
 // --- Check if APNs is configured ---
 
 export function isApnsConfigured(): boolean {
-  return !!(KEY_ID && TEAM_ID && KEY_PATH);
+  return !!(KEY_ID && TEAM_ID && KEY_PEM);
 }
 
 // --- Send Push ---
