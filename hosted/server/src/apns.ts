@@ -13,6 +13,7 @@
  */
 
 import { createSign } from "node:crypto";
+import http2 from "node:http2";
 
 // --- Configuration ---
 
@@ -93,46 +94,86 @@ interface ApnsResponse {
 }
 
 /**
- * Send a raw APNs push notification via HTTP/2
+ * Send a raw APNs push notification via HTTP/2 (node:http2)
  *
- * Returns the response body from Apple, or throws on network errors.
+ * Bun's fetch() doesn't handle Apple's HTTP/2 responses correctly,
+ * so we use Node's native http2 client for APNs requests.
  */
+function sendPushHttp2(
+  deviceToken: string,
+  payload: Record<string, unknown>,
+  pushType: "background" | "alert" = "background",
+): Promise<{ status: number; body: ApnsResponse | null }> {
+  return new Promise((resolve, reject) => {
+    if (!isApnsConfigured()) {
+      console.log("[apns] Not configured — skipping push");
+      return resolve({ status: 0, body: null });
+    }
+
+    const jwt = generateProviderToken();
+    const host = IS_PRODUCTION ? "api.push.apple.com" : "api.sandbox.push.apple.com";
+    const path = `/3/device/${deviceToken}`;
+    const bodyStr = JSON.stringify(payload);
+
+    const client = http2.connect(`https://${host}`);
+    client.setTimeout(10_000);
+
+    client.on("error", (err) => {
+      console.error("[apns] HTTP/2 connection error:", err.message);
+      client.close();
+      reject(err);
+    });
+
+    const req = client.request({
+      ":method": "POST",
+      ":path": path,
+      "authorization": `bearer ${jwt}`,
+      "apns-topic": BUNDLE_ID,
+      "apns-push-type": pushType,
+      "content-type": "application/json",
+    });
+
+    req.on("response", (headers) => {
+      const status = headers[":status"] as number;
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks).toString();
+        client.close();
+
+        if (status === 200) {
+          console.log(`[apns] Push delivered (HTTP ${status})`);
+          return resolve({ status, body: null });
+        }
+
+        let parsed: ApnsResponse | null = null;
+        try { parsed = JSON.parse(raw); } catch { /* empty body */ }
+
+        if (status === 410 || parsed?.reason === "Unregistered" || parsed?.reason === "BadDeviceToken") {
+          console.warn(`[apns] Device token invalid: ${parsed?.reason}`);
+        } else if (status >= 400) {
+          console.error(`[apns] Push failed: ${status} ${parsed?.reason || "unknown"}`);
+        }
+
+        resolve({ status, body: parsed });
+      });
+    });
+
+    req.on("error", (err) => {
+      client.close();
+      reject(err);
+    });
+
+    req.end(bodyStr);
+  });
+}
+
+/** @deprecated Use sendPushHttp2 instead — Bun fetch doesn't support HTTP/2 APNs */
 async function sendPush(
   deviceToken: string,
   payload: Record<string, unknown>,
 ): Promise<ApnsResponse | null> {
-  if (!isApnsConfigured()) {
-    console.log("[apns] Not configured — skipping push");
-    return null;
-  }
-
-  const token = generateProviderToken();
-
-  const url = `${APNS_HOST}/3/device/${deviceToken}`;
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "authorization": `bearer ${token}`,
-      "apns-topic": BUNDLE_ID,
-      "apns-push-type": "background",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (res.status === 200) {
-    return null; // Success, no body
-  }
-
-  const body = await res.json() as ApnsResponse;
-
-  if (res.status === 410 || body.reason === "Unregistered" || body.reason === "BadDeviceToken") {
-    console.warn(`[apns] Device token invalid: ${body.reason} — should be cleared`);
-  } else if (res.status >= 400) {
-    console.error(`[apns] Push failed: ${res.status} ${body.reason || "unknown"}`);
-  }
-
+  const { status, body } = await sendPushHttp2(deviceToken, payload, "background");
   return body;
 }
 
@@ -197,26 +238,13 @@ export async function sendVisibleWake(
 
   // Visible notifications use "alert" push type
   if (isApnsConfigured()) {
-    const token = generateProviderToken();
-    const url = `${APNS_HOST}/3/device/${deviceToken}`;
+    const { status, body } = await sendPushHttp2(deviceToken, payload, "alert");
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "authorization": `bearer ${token}`,
-        "apns-topic": BUNDLE_ID,
-        "apns-push-type": "alert",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.status === 200) {
+    if (status === 200) {
       return { success: true };
     }
 
-    const body = await res.json() as ApnsResponse;
-    return { success: false, reason: body.reason || "unknown" };
+    return { success: false, reason: body?.reason || "unknown" };
   }
 
   console.log("[apns] Not configured — skipping visible push");
