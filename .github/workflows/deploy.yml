@@ -79,6 +79,13 @@ jobs:
             cd /root/relay-server/hosted/gateway
             /root/.bun/bin/bun install
 
+            echo ">>> Injecting APNs secrets into relay .env"
+            cd /root/relay-server/hosted/server
+            if [ -n "${{ secrets.APNS_KEY_B64 }}" ]; then
+              grep -q '^APNS_KEY_B64=' .env && sed -i "s|^APNS_KEY_B64=.*|APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}|" .env || echo "APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}" >> .env
+              echo "APNS_KEY_B64 injected"
+            fi
+
             echo ">>> Syncing infra configs"
             cp /root/relay-server/hosted/infra/caringmind-relay.service /etc/systemd/system/
             cp /root/relay-server/hosted/infra/caringmind-gateway.service /etc/systemd/system/

@@ -81,7 +81,8 @@ function generateProviderToken(): string {
 // --- Check if APNs is configured ---
 
 export function isApnsConfigured(): boolean {
-  return !!(KEY_ID && TEAM_ID && KEY_PEM);
+  const b64 = process.env.APNS_KEY_B64?.trim();
+  return !!(KEY_ID && TEAM_ID && b64 && b64.length > 20);
 }
 
 // --- Send Push ---
