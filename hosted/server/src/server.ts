@@ -557,7 +557,15 @@ const server = Bun.serve<WsData>({
       try {
         const rawBody = await req.text();
         console.log(`[wake] Raw body (${rawBody.length} bytes): ${rawBody.slice(0, 200)}`);
-        const body = JSON.parse(rawBody) as { deviceId?: string; sessionId?: string };
+        if (!rawBody) {
+          return Response.json({ error: "Empty body", method: req.method, ct: req.headers.get("content-type") }, { status: 400 });
+        }
+        let body: { deviceId?: string; sessionId?: string };
+        try {
+          body = JSON.parse(rawBody);
+        } catch {
+          return Response.json({ error: "JSON parse failed", raw: rawBody.slice(0, 100), len: rawBody.length }, { status: 400 });
+        }
         if (!body.deviceId) {
           return Response.json({ error: "deviceId required" }, { status: 400 });
         }
@@ -614,7 +622,7 @@ const server = Bun.serve<WsData>({
 
         return Response.json({ ok: true, status: "silent_push_sent" });
       } catch (e) {
-        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        return Response.json({ error: "Wake handler error", msg: String(e) }, { status: 500 });
       }
     }
 
