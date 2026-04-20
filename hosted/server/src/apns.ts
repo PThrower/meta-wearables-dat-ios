@@ -36,16 +36,36 @@ let tokenIssuedAt = 0;
 function loadKey(): string {
   if (!KEY_PEM) throw new Error("[apns] APNS_KEY_PEM not configured");
   let key = KEY_PEM.trim();
-  console.log(`[apns] KEY_PEM raw length=${KEY_PEM.length}, trimmed=${key.length}, starts=${JSON.stringify(key.slice(0, 40))}`);
-  // Handle both literal \n and actual newlines from different env sources
-  if (!key.includes("-----BEGIN")) {
-    throw new Error("[apns] APNS_KEY_PEM does not contain a valid PEM header");
+
+  // The env var may have the key in various formats:
+  // 1. With literal \n:  "-----BEGIN PRIVATE KEY-----\nMIG...\n-----END..."
+  // 2. With bare n:      "-----BEGIN PRIVATE KEY-----nMIG...n-----END..."  (shell ate the backslash)
+  // 3. With actual newlines (multi-line env value)
+  // Reconstruct a clean PEM by extracting the base64 body between markers.
+
+  const beginMatch = key.match(/-----BEGIN PRIVATE KEY-----/);
+  const endMatch = key.match(/-----END PRIVATE KEY-----/);
+  if (!beginMatch || !endMatch) {
+    throw new Error("[apns] APNS_KEY_PEM does not contain valid PEM markers");
   }
-  // Replace literal \n with actual newlines (Doppler stores them this way)
-  key = key.replace(/\\n/g, "\n");
-  // Ensure single trailing newline
-  if (!key.endsWith("\n")) key += "\n";
-  console.log(`[apns] Parsed key length=${key.length}, first line=${JSON.stringify(key.split("\n")[0])}`);
+
+  // Extract the base64 content between the markers
+  const afterBegin = key.slice(beginMatch.index! + beginMatch[0].length);
+  const beforeEnd = afterBegin.slice(0, afterBegin.indexOf("-----END"));
+
+  // Clean the base64 body: remove all whitespace, backslashes, and bare 'n' artifacts
+  let body = beforeEnd
+    .replace(/\\n/g, "")   // remove literal \n sequences
+    .replace(/[\s\n\r]/g, ""); // remove whitespace
+
+  // The body is base64. Re-wrap at 64 chars per line.
+  const lines: string[] = [];
+  for (let i = 0; i < body.length; i += 64) {
+    lines.push(body.slice(i, i + 64));
+  }
+
+  key = `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----\n`;
+  console.log(`[apns] Reconstructed PEM key (${key.length} bytes, ${lines.length} body lines)`);
   return key;
 }
 
