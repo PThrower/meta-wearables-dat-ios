@@ -555,7 +555,9 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/api/wake-device" && req.method === "POST") {
       try {
-        const body = await req.json() as { deviceId?: string; sessionId?: string };
+        const rawBody = await req.text();
+        console.log(`[wake] Raw body (${rawBody.length} bytes): ${rawBody.slice(0, 200)}`);
+        const body = JSON.parse(rawBody) as { deviceId?: string; sessionId?: string };
         if (!body.deviceId) {
           return Response.json({ error: "deviceId required" }, { status: 400 });
         }
