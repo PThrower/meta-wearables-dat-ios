@@ -426,6 +426,19 @@ class StreamSessionViewModel: ObservableObject {
           self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
         }
       }
+
+      // On auto-reconnect, re-announce streaming state so server stops treating us as standby
+      await relayStage.setOnReconnected { [weak self] in
+        Task { [weak self] in
+          guard let self else { return }
+          let mode = await self.relayMode
+          if mode == .active {
+            NSLog("[StreamSession] Re-announcing active stream after auto-reconnect")
+            await self.relayStage.sendJson(["type": "stream_changed", "streaming": true])
+          }
+        }
+      }
+
       try await relayStage.connect(to: url)
       relayMode = .active
       NSLog("[StreamSession] Relay connected to \(url)")
@@ -1052,6 +1065,9 @@ class StreamSessionViewModel: ObservableObject {
           if relayMode == .active, await relayStage.connected {
             do {
               try await relayStage.reconnect()
+              // After reconnect, server registers us as standby.
+              // If we were active, re-announce as streaming.
+              await relayStage.sendJson(["type": "stream_changed", "streaming": true])
               NSLog("[StreamSession] Relay reconnected on foreground recovery")
             } catch {
               NSLog("[StreamSession] Relay reconnect failed: \(error)")

@@ -77,6 +77,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // Reconnection config
     private var shouldAutoReconnect = false
+    private var inboundAudioCount = 0
     private var reconnectDelay: UInt64 = 1_000_000_000 // 1 second
     private let maxReconnectDelay: UInt64 = 30_000_000_000 // 30 seconds
     private var lastConnectedURL: String?
@@ -93,6 +94,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Callback to dispatch received FRAU audio to the AudioEventBus.
     /// Set by StreamSessionViewModel before connecting.
     private var onReceivedAudio: (@Sendable (Data) -> Void)?
+
+    /// Called after auto-reconnect succeeds so the ViewModel can re-announce state.
+    var onReconnected: (@Sendable () -> Void)?
 
     /// Callback for JSON control responses from the server (e.g. app_status).
     /// Set by StreamSessionViewModel before connecting.
@@ -264,6 +268,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                     case .data(let data):
                         // Check if this is a FRAU audio frame (server → publisher)
                         if WireProtocol.parseFRAU(data) != nil {
+                            self.inboundAudioCount += 1
+                            if self.inboundAudioCount <= 3 || self.inboundAudioCount % 100 == 0 {
+                                NSLog("[RelayStage] Inbound audio frame #\(self.inboundAudioCount): \(data.count) bytes")
+                            }
                             if let handler = await self.onReceivedAudio {
                                 handler(data)
                             }
@@ -574,6 +582,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
             do {
                 try await self.connect(to: urlString)
+                NSLog("[RelayStage] Auto-reconnect succeeded")
+                self.onReconnected?()
             } catch {
                 NSLog("[RelayStage] Reconnect failed: \(error)")
             }
@@ -671,6 +681,11 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Called by StreamSessionViewModel before connecting.
     func setOnReceivedAudio(_ handler: @Sendable @escaping (Data) -> Void) {
         self.onReceivedAudio = handler
+    }
+
+    /// Set callback fired after auto-reconnect succeeds.
+    func setOnReconnected(_ handler: @Sendable @escaping () -> Void) {
+        self.onReconnected = handler
     }
 
     /// Set the callback for JSON control responses from the server.
