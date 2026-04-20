@@ -36,6 +36,7 @@ let tokenIssuedAt = 0;
 function loadKey(): string {
   if (!KEY_PEM) throw new Error("[apns] APNS_KEY_PEM not configured");
   let key = KEY_PEM.trim();
+  console.log(`[apns] KEY_PEM raw length=${KEY_PEM.length}, trimmed=${key.length}, starts=${JSON.stringify(key.slice(0, 40))}`);
   // Handle both literal \n and actual newlines from different env sources
   if (!key.includes("-----BEGIN")) {
     throw new Error("[apns] APNS_KEY_PEM does not contain a valid PEM header");
@@ -44,6 +45,7 @@ function loadKey(): string {
   key = key.replace(/\\n/g, "\n");
   // Ensure single trailing newline
   if (!key.endsWith("\n")) key += "\n";
+  console.log(`[apns] Parsed key length=${key.length}, first line=${JSON.stringify(key.split("\n")[0])}`);
   return key;
 }
 

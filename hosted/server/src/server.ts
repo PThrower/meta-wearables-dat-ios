@@ -622,7 +622,16 @@ const server = Bun.serve<WsData>({
 
         return Response.json({ ok: true, status: "silent_push_sent" });
       } catch (e) {
-        return Response.json({ error: "Wake handler error", msg: String(e) }, { status: 500 });
+        const apnsStatus = {
+          configured: isApnsConfigured(),
+          keyLen: process.env.APNS_KEY_PEM?.length ?? 0,
+          keyStart: process.env.APNS_KEY_PEM?.slice(0, 30) ?? "N/A",
+          keyId: process.env.APNS_KEY_ID ?? "N/A",
+          teamId: process.env.APNS_TEAM_ID ?? "N/A",
+          bundleId: process.env.APNS_BUNDLE_ID ?? "N/A",
+          production: process.env.APNS_PRODUCTION ?? "N/A",
+        };
+        return Response.json({ error: "Wake handler error", msg: String(e), apns: apnsStatus }, { status: 500 });
       }
     }
 
