@@ -84,7 +84,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     let wakeType = userInfo["wake"] as? String
     if wakeType == "standby" {
       NSLog("[PushNotification] Wake notification tapped — triggering standby connect")
-      pushService.onWakeFromPush?()
+      Task { @MainActor in
+        pushService.onWakeFromPush?()
+      }
     }
 
     completionHandler()
