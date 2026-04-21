@@ -690,7 +690,7 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
-  private func configureRelayEncoder() async {
+  func configureRelayEncoder() async {
     switch videoCodec {
     case .jpeg:
       await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
@@ -704,6 +704,15 @@ class StreamSessionViewModel: ObservableObject {
         await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
       }
     }
+  }
+
+  /// Switch video codec mid-stream and notify viewers.
+  func switchCodec(_ codec: RelayVideoCodec) async {
+    guard codec != videoCodec else { return }
+    videoCodec = codec
+    await configureRelayEncoder()
+    await relayStage.sendJson(["type": "codec_changed", "codec": codec == .h264 ? "h264" : "jpeg"])
+    NSLog("[StreamSession] Codec switched to \(codec)")
   }
 
   /// Wire the onControlMessage callback — shared between startRelay and startStandbyRelay.

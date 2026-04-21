@@ -47,6 +47,7 @@ struct SettingsView: View {
             streamConfigSection
             ttsSection
           case .liveStream:
+            codecSection
             audioInputSection
           }
 
@@ -325,6 +326,54 @@ struct SettingsView: View {
               else { await viewModel.stopTTSPlayback() }
             }
           }
+      }
+    }
+  }
+
+  // MARK: - Live: Codec
+
+  private var codecSection: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      sectionHeader("VIDEO CODEC")
+
+      VStack(alignment: .leading, spacing: 2) {
+        Text("Relay Encoding")
+          .font(.system(size: 13, weight: .medium))
+          .foregroundColor(.primary)
+        Text("JPEG: universal, larger frames. H.264: 5-10x smaller, needs WebCodecs viewer.")
+          .font(.system(size: 11))
+          .foregroundColor(.secondary)
+      }
+
+      ForEach(RelayVideoCodec.allCases, id: \.self) { codec in
+        Button {
+          Task { await viewModel.switchCodec(codec) }
+        } label: {
+          HStack(spacing: 10) {
+            Image(systemName: codec == .h264 ? "bolt.horizontal.icloud.fill" : "photo")
+              .font(.system(size: 14))
+              .foregroundColor(viewModel.videoCodec == codec ? .blue : .secondary)
+              .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+              Text(codec.displayName)
+                .font(.system(size: 14, weight: viewModel.videoCodec == codec ? .medium : .regular))
+                .foregroundColor(viewModel.videoCodec == codec ? .primary : .secondary)
+            }
+
+            Spacer()
+
+            if viewModel.videoCodec == codec {
+              Image(systemName: "checkmark")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.blue)
+            }
+          }
+          .padding(.horizontal, 12)
+          .padding(.vertical, 10)
+          .background(viewModel.videoCodec == codec ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
+          .cornerRadius(8)
+        }
       }
     }
   }
