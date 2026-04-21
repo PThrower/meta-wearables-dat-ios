@@ -77,6 +77,10 @@ export class Gemma4Service implements AIService {
   private frameBuffer: Uint8Array[] = [];
   private readonly maxFrames = 3;
 
+  // Audio buffer -- accumulated PCM chunks for the next request (E4B/E2B only)
+  private audioBuffer: Uint8Array[] = [];
+  private readonly maxAudioBytes = 16000 * 2 * 10; // 10s of 16kHz 16-bit mono
+
   // Conversation history (bounded) — text only, no images
   private history: GeminiContent[] = [];
   private readonly maxHistoryTurns = 10;
@@ -132,8 +136,15 @@ export class Gemma4Service implements AIService {
     }
   }
 
-  sendAudio(_pcm: Uint8Array): void {
-    // Gemma 4 26B A4B has no audio encoder -- no-op
+  sendAudio(pcm: Uint8Array): void {
+    if (this._status !== "connected" || !this.hasAudioEncoder()) return;
+
+    this.audioBuffer.push(pcm);
+    // Trim to maxAudioBytes
+    let total = this.audioBuffer.reduce((sum, b) => sum + b.length, 0);
+    while (total > this.maxAudioBytes && this.audioBuffer.length > 1) {
+      total -= this.audioBuffer.shift()!.length;
+    }
   }
 
   sendText(text: string): void {
@@ -147,6 +158,7 @@ export class Gemma4Service implements AIService {
       this.analysisTimer = null;
     }
     this.frameBuffer = [];
+    this.audioBuffer = [];
     this.history = [];
     this.isAnalyzing = false;
     this._status = "disconnected";
@@ -175,6 +187,25 @@ export class Gemma4Service implements AIService {
     }, this.analysisIntervalMs);
   }
 
+  /** Check if the current model has an audio encoder (E2B/E4B edge models only). */
+  private hasAudioEncoder(): boolean {
+    const model = this.config?.model ?? "";
+    return /e[24]b/i.test(model);
+  }
+
+  /** Merge all audio buffer chunks into a single Uint8Array. */
+  private mergeAudioBuffer(): Uint8Array {
+    if (this.audioBuffer.length === 0) return new Uint8Array(0);
+    const total = this.audioBuffer.reduce((sum, b) => sum + b.length, 0);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of this.audioBuffer) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return merged;
+  }
+
   private async analyze(prompt: string): Promise<void> {
     if (this.isAnalyzing || !this.callbacks || !this.config) return;
     this.isAnalyzing = true;
@@ -185,7 +216,7 @@ export class Gemma4Service implements AIService {
       return;
     }
 
-    // Build user parts: frames + text
+    // Build user parts: frames + audio + text
     const userParts: Array<Record<string, unknown>> = [];
 
     for (const frame of this.frameBuffer) {
@@ -195,6 +226,22 @@ export class Gemma4Service implements AIService {
           data: uint8ToBase64(frame),
         },
       });
+    }
+
+    // Include audio if model supports it and buffer has data
+    if (this.hasAudioEncoder() && this.audioBuffer.length > 0) {
+      const mergedPcm = this.mergeAudioBuffer();
+      if (mergedPcm.length > 0) {
+        const wav = pcmToWav(mergedPcm);
+        userParts.push({
+          inlineData: {
+            mimeType: "audio/wav",
+            data: uint8ToBase64(wav),
+          },
+        });
+        console.log(`[gemma4] Including audio: ${mergedPcm.length} bytes PCM -> ${wav.length} bytes WAV`);
+        this.audioBuffer = []; // clear after sending
+      }
     }
 
     userParts.push({ text: prompt });
@@ -371,6 +418,38 @@ export class Gemma4Service implements AIService {
 
 function uint8ToBase64(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64");
+}
+
+/** Convert raw PCM 16-bit LE mono to a WAV file (adds 44-byte header). */
+function pcmToWav(pcm: Uint8Array, sampleRate: number = 16000, numChannels: number = 1, bitsPerSample: number = 16): Uint8Array {
+  const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
+  const blockAlign = numChannels * (bitsPerSample / 8);
+  const dataSize = pcm.length;
+  const headerSize = 44;
+  const wav = new Uint8Array(headerSize + dataSize);
+  const view = new DataView(wav.buffer);
+
+  // RIFF header
+  view.setUint32(0, 0x52494646, false);   // "RIFF"
+  view.setUint32(4, 36 + dataSize, true); // file size - 8
+  view.setUint32(8, 0x57415645, false);   // "WAVE"
+
+  // fmt chunk
+  view.setUint32(12, 0x666d7420, false);  // "fmt "
+  view.setUint32(16, 16, true);           // chunk size
+  view.setUint16(20, 1, true);            // PCM format
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+
+  // data chunk
+  view.setUint32(36, 0x64617461, false);  // "data"
+  view.setUint32(40, dataSize, true);
+
+  wav.set(pcm, headerSize);
+  return wav;
 }
 
 // --- Register provider ---

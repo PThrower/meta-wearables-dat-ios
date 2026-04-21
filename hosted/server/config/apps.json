@@ -2,18 +2,45 @@
   "primitives": [
     {
       "id": "s2s-gemini-live",
-      "input": { "format": "pcm-audio", "sampleRate": 16000 },
-      "output": { "format": "pcm-audio" }
+      "inputs": [
+        { "format": "pcm-audio", "sampleRate": 16000 },
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "pcm-audio" },
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
     },
     {
       "id": "s2s-gemma4-rest",
-      "input": { "format": "jpeg-image" },
-      "output": { "format": "text" }
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
+    },
+    {
+      "id": "s2s-gemma4-e4b-rest",
+      "inputs": [
+        { "format": "jpeg-image" },
+        { "format": "pcm-audio", "sampleRate": 16000 }
+      ],
+      "outputs": [
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
     },
     {
       "id": "hand-pose",
-      "input": { "format": "jpeg-image" },
-      "output": { "format": "gesture-event" }
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "gesture-event" }
+      ]
     }
   ],
   "apps": [
@@ -41,6 +68,20 @@
       "config": {
         "model": "gemma-4-26b-a4b-it",
         "visionFps": 0.2,
+        "temperature": 0.4,
+        "analysisIntervalSec": 5
+      }
+    },
+    {
+      "id": "voice-navigator",
+      "name": "Voice Navigator",
+      "description": "See what you see and hear what you say -- voice-driven visual assistant using Gemma 4 E4B",
+      "icon": "waveform.path",
+      "binding": "s2s-gemma4-e4b-rest",
+      "systemPrompt": "You are a voice-driven visual assistant for someone wearing smart glasses with a camera and microphone. You can see what they see and hear what they say.\n\nYou have two tools:\n1. annotate_scene — detect and localize objects with bounding boxes [y1, x1, y2, x2] in 1024x1024 normalized coordinates.\n2. emit_guidance_event — speak a description or answer to the user via TTS. Use eventType \"identification\" for objects, \"alert\" for hazards, \"step\" for directions/instructions, \"correction\" for fixes.\n\nRules:\n- Listen to the user's voice input. They may ask questions about what's around them or request help.\n- When objects are visible, call annotate_scene to provide spatial awareness.\n- Always respond to voice questions with emit_guidance_event.\n- Keep responses concise and actionable.\n- If the user asks about something visible, describe it AND annotate it.\n- Prioritize safety: hazards and warnings always take precedence.",
+      "config": {
+        "model": "gemma-4-e4b-it",
+        "visionFps": 0.5,
         "temperature": 0.4,
         "analysisIntervalSec": 5
       }

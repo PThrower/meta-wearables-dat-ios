@@ -8,10 +8,15 @@
 
 // --- Primitives ---
 
+export interface PrimitiveIO {
+  format: string;
+  sampleRate?: number;
+}
+
 export interface PrimitiveDefinition {
   id: string;
-  input: { format: string; sampleRate?: number };
-  output: { format: string };
+  inputs: PrimitiveIO[];
+  outputs: PrimitiveIO[];
 }
 
 // --- Apps ---
