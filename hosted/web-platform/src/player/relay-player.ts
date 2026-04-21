@@ -703,15 +703,138 @@ export class RelayPlayer {
 
   // --- H.264 rendering (WebCodecs) ---
 
+  // Stored SPS/PPS parameter sets extracted from keyframes, used to build
+  // the avcC description for VideoDecoder.configure().
+  private _h264ParameterSets: Uint8Array[] = [];
+
+  /** Parse Annex B NAL units from a buffer. Returns array of {type, data} slices. */
+  private _parseAnnexBNals(payload: Uint8Array): { type: number; data: Uint8Array }[] {
+    const nals: { type: number; data: Uint8Array }[] = [];
+    let start = 0;
+    const len = payload.length;
+
+    while (start < len) {
+      // Find next start code (00 00 00 01 or 00 00 01)
+      let scLen = 0;
+      let found = -1;
+      for (let i = start; i < len - 2; i++) {
+        if (payload[i] === 0 && payload[i + 1] === 0) {
+          if (payload[i + 2] === 1) { found = i; scLen = 3; break; }
+          if (i + 3 < len && payload[i + 2] === 0 && payload[i + 3] === 1) { found = i; scLen = 4; break; }
+        }
+      }
+      if (found === -1) break;
+
+      const nalStart = found + scLen;
+      // Find next start code to determine NAL end
+      let nalEnd = len;
+      for (let i = nalStart + 1; i < len - 2; i++) {
+        if (payload[i] === 0 && payload[i + 1] === 0) {
+          if (payload[i + 2] === 1) { nalEnd = i; break; }
+          if (i + 3 < len && payload[i + 2] === 0 && payload[i + 3] === 1) { nalEnd = i; break; }
+        }
+      }
+
+      if (nalStart < nalEnd) {
+        const nalType = payload[nalStart] & 0x1F;
+        nals.push({ type: nalType, data: payload.slice(nalStart, nalEnd) });
+      }
+      start = nalEnd;
+    }
+    return nals;
+  }
+
+  /** Build an avcC box from extracted SPS/PPS parameter sets for VideoDecoder config. */
+  private _buildAvcC(spsList: Uint8Array[], ppsList: Uint8Array[]): Uint8Array {
+    // avcC layout:
+    // [0] version=1, [1] profile, [2] compat, [3] level,
+    // [4] 0xFF + lengthSizeMinusOne(2 bits) = 0xFF (4-byte NAL length),
+    // [5] 0xE0 + numSPS, then each SPS as (2-byte len + data),
+    // then numPPS, then each PPS as (2-byte len + data)
+    const parts: Uint8Array[] = [];
+    parts.push(new Uint8Array([1, spsList[0][1], spsList[0][2], spsList[0][3], 0xFF, 0xE0 | spsList.length]));
+    for (const sps of spsList) {
+      const len = new Uint8Array([(sps.length >> 8) & 0xFF, sps.length & 0xFF]);
+      parts.push(len, sps);
+    }
+    parts.push(new Uint8Array([ppsList.length]));
+    for (const pps of ppsList) {
+      const len = new Uint8Array([(pps.length >> 8) & 0xFF, pps.length & 0xFF]);
+      parts.push(len, pps);
+    }
+    const total = parts.reduce((s, p) => s + p.length, 0);
+    const result = new Uint8Array(total);
+    let offset = 0;
+    for (const p of parts) { result.set(p, offset); offset += p.length; }
+    return result;
+  }
+
+  /** Convert Annex B NAL units to AVCC format (4-byte big-endian length prefix). */
+  private _annexBToAvcc(nals: Uint8Array[]): Uint8Array {
+    let totalLen = 0;
+    for (const nal of nals) totalLen += 4 + nal.length;
+    const result = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const nal of nals) {
+      result[offset++] = (nal.length >> 24) & 0xFF;
+      result[offset++] = (nal.length >> 16) & 0xFF;
+      result[offset++] = (nal.length >> 8) & 0xFF;
+      result[offset++] = nal.length & 0xFF;
+      result.set(nal, offset);
+      offset += nal.length;
+    }
+    return result;
+  }
+
   private _renderH264Frame(nalPayload: Uint8Array, width: number, height: number, flags: number, timestampMs: number): void {
     const isKeyframe = (flags & H264_FLAG_KEYFRAME) !== 0;
 
-    // Initialize decoder on first frame or after keyframe loss
+    // Parse all NAL units from Annex B payload
+    const nals = this._parseAnnexBNals(nalPayload);
+    if (nals.length === 0) return;
+
+    // Extract SPS (type 7) and PPS (type 8) from keyframes
+    const spsNals = nals.filter(n => n.type === 7).map(n => n.data);
+    const ppsNals = nals.filter(n => n.type === 8).map(n => n.data);
+    const hasNewParams = spsNals.length > 0 && ppsNals.length > 0;
+
+    if (hasNewParams) {
+      this._h264ParameterSets = [...spsNals, ...ppsNals];
+    }
+
+    // Strip SPS/PPS from NALs — only pass VCL (slice) NALs to decoder
+    const vclNals = nals.filter(n => n.type !== 7 && n.type !== 8).map(n => n.data);
+    if (vclNals.length === 0) return;
+
+    // Convert to AVCC format (4-byte length-prefixed)
+    const avccData = this._annexBToAvcc(vclNals);
+
+    // Initialize or reconfigure decoder
     if (!this.videoDecoder || this.videoDecoder.state === "closed") {
       if (typeof VideoDecoder === "undefined") {
         console.warn("[RelayPlayer] WebCodecs VideoDecoder not supported — cannot decode H.264");
         return;
       }
+
+      // Need SPS/PPS before we can configure
+      if (this._h264ParameterSets.length === 0) {
+        // First keyframe with SPS/PPS hasn't arrived yet — skip
+        return;
+      }
+
+      const currentSps = this._h264ParameterSets.filter((_, i) => {
+        const nalType = this._h264ParameterSets[i][0] & 0x1F;
+        return nalType === 7;
+      });
+      const currentPps = this._h264ParameterSets.filter((_, i) => {
+        const nalType = this._h264ParameterSets[i][0] & 0x1F;
+        return nalType === 8;
+      });
+
+      if (currentSps.length === 0 || currentPps.length === 0) return;
+
+      const avcC = this._buildAvcC(currentSps, currentPps);
+
       this.videoDecoder = new VideoDecoder({
         output: (frame) => {
           if (!this.canvas || !this.ctx) { frame.close(); return; }
@@ -729,22 +852,24 @@ export class RelayPlayer {
           console.error("[RelayPlayer] VideoDecoder error:", e);
         },
       });
+
       this.videoDecoder.configure({
-        codec: "avc1.42001E", // Baseline 3.0
+        codec: "avc1.42001E",
         optimizeForLatency: true,
+        description: avcC,
       });
+      console.log("[RelayPlayer] VideoDecoder configured with avcC description");
     }
 
-    // Must wait for a keyframe before decoding deltas
-    if (this.videoDecoder.decodeQueueSize > 0 && !isKeyframe) {
-      // If decoder is backed up, skip non-keyframes to reduce latency
+    // If decoder is backed up (queue > 3), skip non-keyframes to reduce latency
+    if (this.videoDecoder.decodeQueueSize > 3 && !isKeyframe) {
       return;
     }
 
     const chunk = new EncodedVideoChunk({
       type: isKeyframe ? "key" : "delta",
       timestamp: timestampMs * 1000, // microseconds
-      data: nalPayload,
+      data: avccData,
     });
 
     this.videoDecoder.decode(chunk);
