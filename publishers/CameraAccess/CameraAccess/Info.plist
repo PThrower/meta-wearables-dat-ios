@@ -75,6 +75,8 @@
 	<string>This app needs camera access to stream video from your iPhone camera to viewers.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to relay audio from your glasses to viewers.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location is used for telemetry metrics (speed, altitude) displayed to viewers.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>UIApplicationSceneManifest</key>

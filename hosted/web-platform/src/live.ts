@@ -367,6 +367,15 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       const motion = m.motion as Record<string, unknown> | undefined;
       const bluetooth = m.bluetooth as Record<string, unknown> | undefined;
       const cpu = m.cpu as Record<string, unknown> | undefined;
+      const location = m.location as Record<string, unknown> | undefined;
+      const gyro = m.gyro as Record<string, unknown> | undefined;
+      const magnetometer = m.magnetometer as Record<string, unknown> | undefined;
+      const barometer = m.barometer as Record<string, unknown> | undefined;
+      const audioLevel = m.audioLevel as Record<string, unknown> | undefined;
+      const memoryFootprint = m.memoryFootprint as Record<string, unknown> | undefined;
+      const proximity = m.proximity as Record<string, unknown> | undefined;
+      const background = m.background as Record<string, unknown> | undefined;
+      const throughput = m.throughput as Record<string, unknown> | undefined;
 
       // Frame / relay stats
       const set = (id: string, text: string) => { const el = document.getElementById(id); if (el) el.textContent = text; };
@@ -468,6 +477,67 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
         const pct = typeof cpu.usagePercent === "number" ? (cpu.usagePercent as number).toFixed(1) : "--";
         set("t-cpu", pct + "%");
       }
+
+      // Location
+      if (location) {
+        const speed = typeof location.speed === "number" ? (location.speed as number).toFixed(1) + "m/s" : "";
+        const alt = typeof location.altitude === "number" ? " " + (location.altitude as number).toFixed(0) + "m" : "";
+        set("t-location", speed + alt || "--");
+      } else { set("t-location", "--"); }
+
+      // Gyroscope
+      if (gyro) {
+        const x = typeof gyro.x === "number" ? (gyro.x as number).toFixed(1) : "0";
+        const y = typeof gyro.y === "number" ? (gyro.y as number).toFixed(1) : "0";
+        const z = typeof gyro.z === "number" ? (gyro.z as number).toFixed(1) : "0";
+        set("t-gyro", "x" + x + " y" + y + " z" + z);
+      } else { set("t-gyro", "--"); }
+
+      // Magnetometer
+      if (magnetometer) {
+        const x = typeof magnetometer.x === "number" ? (magnetometer.x as number).toFixed(0) : "0";
+        const y = typeof magnetometer.y === "number" ? (magnetometer.y as number).toFixed(0) : "0";
+        const z = typeof magnetometer.z === "number" ? (magnetometer.z as number).toFixed(0) : "0";
+        set("t-magnetometer", "x" + x + " y" + y + " z" + z + "uT");
+      } else { set("t-magnetometer", "--"); }
+
+      // Barometer
+      if (barometer && typeof barometer.pressureKPa === "number") {
+        set("t-barometer", (barometer.pressureKPa as number).toFixed(2) + "kPa");
+      } else { set("t-barometer", "--"); }
+
+      // Audio level
+      if (audioLevel && audioLevel.peakDb != null) {
+        const peak = typeof audioLevel.peakDb === "number" ? (audioLevel.peakDb as number).toFixed(0) : "--";
+        const avg = typeof audioLevel.averageDb === "number" ? (audioLevel.averageDb as number).toFixed(0) : "--";
+        set("t-audio-level", "p:" + peak + "dB a:" + avg + "dB");
+      } else { set("t-audio-level", "--"); }
+
+      // Memory footprint
+      if (memoryFootprint && typeof memoryFootprint.footprintMB === "number") {
+        set("t-memory-footprint", (memoryFootprint.footprintMB as number).toFixed(0) + "MB");
+      } else { set("t-memory-footprint", "--"); }
+
+      // Proximity
+      if (proximity) {
+        set("t-proximity", proximity.near ? "near" : "far");
+      }
+
+      // Background ratio
+      if (background) {
+        const fg = typeof background.foregroundSec === "number" ? background.foregroundSec as number : 0;
+        const bg = typeof background.backgroundSec === "number" ? background.backgroundSec as number : 0;
+        const total = fg + bg;
+        set("t-background", total > 0 ? Math.round((fg / total) * 100) + "%fg" : "--");
+      }
+
+      // Throughput
+      if (throughput && typeof throughput.bytesPerSec === "number") {
+        const bps = throughput.bytesPerSec as number;
+        const totalMB = typeof throughput.totalMB === "number" ? (throughput.totalMB as number).toFixed(1) : "0";
+        const kbps = bps / 1024;
+        set("t-throughput", (kbps > 1024 ? (kbps / 1024).toFixed(1) + "MB/s" : kbps.toFixed(0) + "KB/s") + " " + totalMB + "MB");
+      } else { set("t-throughput", "--"); }
     }
 
     // BT link state changed

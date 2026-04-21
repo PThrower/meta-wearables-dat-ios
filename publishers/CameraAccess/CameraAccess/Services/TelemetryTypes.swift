@@ -151,6 +151,51 @@ struct CPUMetrics: Sendable {
     let usagePercent: Double
 }
 
+struct LocationMetrics: Sendable {
+    let speed: Double?       // m/s, nil if unavailable
+    let altitude: Double?    // meters
+    let accuracy: Double?    // horizontal accuracy meters
+}
+
+struct GyroMetrics: Sendable {
+    let rotationX: Double    // rad/s
+    let rotationY: Double
+    let rotationZ: Double
+}
+
+struct MagnetometerMetrics: Sendable {
+    let magX: Double         // microteslas
+    let magY: Double
+    let magZ: Double
+}
+
+struct BarometerMetrics: Sendable {
+    let pressureKPa: Double  // kilopascals
+}
+
+struct AudioLevelMetrics: Sendable {
+    let peakDb: Float
+    let averageDb: Float
+}
+
+struct MemoryFootprintMetrics: Sendable {
+    let footprintMB: Double  // app's actual memory usage
+}
+
+struct ProximityMetrics: Sendable {
+    let near: Bool           // object near proximity sensor
+}
+
+struct BackgroundMetrics: Sendable {
+    let foregroundSec: Double
+    let backgroundSec: Double
+}
+
+struct ThroughputMetrics: Sendable {
+    let bytesPerSec: Double  // outbound throughput
+    let totalMB: Double      // total bytes sent
+}
+
 // MARK: - Snapshot
 
 struct TelemetrySnapshot: Sendable {
@@ -171,6 +216,15 @@ struct TelemetrySnapshot: Sendable {
     let motion: MotionMetrics?
     let bluetooth: BluetoothMetrics
     let cpu: CPUMetrics
+    let location: LocationMetrics?
+    let gyro: GyroMetrics?
+    let magnetometer: MagnetometerMetrics?
+    let barometer: BarometerMetrics?
+    let audioLevel: AudioLevelMetrics?
+    let memoryFootprint: MemoryFootprintMetrics
+    let proximity: ProximityMetrics
+    let background: BackgroundMetrics
+    let throughput: ThroughputMetrics?
     let photoCapture: PhotoCaptureEvent?
     let snapshotTimestamp: ContinuousClock.Instant
 }

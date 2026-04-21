@@ -106,6 +106,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var isLoadingApps: Bool = false
   @Published var appFetchError: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
+  @Published var videoCodec: VideoCodec = .jpeg
   @Published var boundingBoxes: [BoundingBox] = []
   @Published var showBboxOverlay: Bool = true
   @Published var audioInputMode: AudioInputMode = .builtInMic {
@@ -457,6 +458,9 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // Configure encoder based on selected codec
+      await configureRelayEncoder()
+
       // Wire control message callback
       await wireControlMessageHandler()
 
@@ -532,6 +536,10 @@ class StreamSessionViewModel: ObservableObject {
       }
 
       await wireControlMessageHandler()
+
+      // Configure encoder based on selected codec
+      await configureRelayEncoder()
+
       try await relayStage.connect(to: url)
       relayMode = .standby
       NSLog("[StreamSession] Standby relay connected to \(url)")
@@ -680,6 +688,23 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   // MARK: - Shared Relay Helpers
+
+  /// Configure the relay encoder based on the selected videoCodec.
+  private func configureRelayEncoder() async {
+    switch videoCodec {
+    case .jpeg:
+      await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
+    case .h264:
+      do {
+        let h264Encoder = try H264FrameEncoder(config: .default)
+        await relayStage.setEncoder(h264Encoder)
+        NSLog("[StreamSession] H.264 encoder configured")
+      } catch {
+        NSLog("[StreamSession] H.264 encoder init failed, falling back to JPEG: \(error)")
+        await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
+      }
+    }
+  }
 
   /// Wire the onControlMessage callback — shared between startRelay and startStandbyRelay.
   private func wireControlMessageHandler() async {
@@ -888,6 +913,7 @@ class StreamSessionViewModel: ObservableObject {
     telemetryPushTimer?.cancel()
     telemetryPushTimer = Task { [weak self] in
       while !Task.isCancelled {
+        // TODO: telemetry push interval subject to review (currently 2s)
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         guard let self else { return }
         await self.pushTelemetry()
@@ -926,6 +952,7 @@ class StreamSessionViewModel: ObservableObject {
     guard relayMode == .active, let snap = telemetryService?.snapshot else { return }
     let relayStats = await relayStage.getStats()
     telemetryService?.updateRelayLatency(relayStats["latencyMs"] as? Double)
+    telemetryService?.lastTotalBytesSent = relayStats["totalBytesSent"] as? UInt64 ?? 0
     var payload: [String: Any] = [
       "type": "publisher_telemetry",
       "frame": [
@@ -993,6 +1020,42 @@ class StreamSessionViewModel: ObservableObject {
       "cpu": [
         "usagePercent": snap.cpu.usagePercent,
       ],
+      "location": [
+        "speed": snap.location?.speed as Any,
+        "altitude": snap.location?.altitude as Any,
+        "accuracy": snap.location?.accuracy as Any,
+      ] as [String: Any],
+      "gyro": [
+        "x": snap.gyro?.rotationX as Any,
+        "y": snap.gyro?.rotationY as Any,
+        "z": snap.gyro?.rotationZ as Any,
+      ] as [String: Any],
+      "magnetometer": [
+        "x": snap.magnetometer?.magX as Any,
+        "y": snap.magnetometer?.magY as Any,
+        "z": snap.magnetometer?.magZ as Any,
+      ] as [String: Any],
+      "barometer": [
+        "pressureKPa": snap.barometer?.pressureKPa as Any,
+      ] as [String: Any],
+      "audioLevel": [
+        "peakDb": snap.audioLevel?.peakDb as Any,
+        "averageDb": snap.audioLevel?.averageDb as Any,
+      ] as [String: Any],
+      "memoryFootprint": [
+        "footprintMB": snap.memoryFootprint.footprintMB,
+      ],
+      "proximity": [
+        "near": snap.proximity.near,
+      ],
+      "background": [
+        "foregroundSec": snap.background.foregroundSec,
+        "backgroundSec": snap.background.backgroundSec,
+      ],
+      "throughput": [
+        "bytesPerSec": snap.throughput?.bytesPerSec as Any,
+        "totalMB": snap.throughput?.totalMB as Any,
+      ] as [String: Any],
     ]
 
     // Now Playing removed — iOS 18 blocks MediaRemote for third-party apps

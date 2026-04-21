@@ -31,11 +31,15 @@ struct TelemetryHUDView: View {
                 row("TTFF", telemetry.ttffText)
                 thermalRow(telemetry.thermalText)
                 row("Memory", telemetry.memoryText)
+                row("Mem RSS", telemetry.memoryFootprintText)
                 row("Disk", telemetry.diskText)
                 row("Brightness", telemetry.brightnessText)
                 row("Orient", telemetry.orientationText)
+                row("Proximity", telemetry.proximityText)
                 row("Motion", telemetry.motionText)
+                row("Gyro", telemetry.gyroText)
                 row("CPU", telemetry.cpuText)
+                row("FG/BG", telemetry.backgroundText)
 
                 Divider().background(.white.opacity(0.2))
 
@@ -50,10 +54,19 @@ struct TelemetryHUDView: View {
 
                 Divider().background(.white.opacity(0.2))
 
+                sectionHeader("SENSORS")
+                row("GPS", telemetry.locationText)
+                row("Mag", telemetry.magnetometerText)
+                row("Baro", telemetry.barometerText)
+                row("Audio dB", telemetry.audioLevelText)
+
+                Divider().background(.white.opacity(0.2))
+
                 sectionHeader("CONNECTION")
                 row("Link", telemetry.connectionText)
                 row("Network", telemetry.networkText)
                 row("RTT", telemetry.relayLatencyText)
+                row("Throughput", telemetry.throughputText)
                 row("BT", telemetry.bluetoothText)
                 if telemetry.cellularText != "--" {
                     row("Cellular", telemetry.cellularText)

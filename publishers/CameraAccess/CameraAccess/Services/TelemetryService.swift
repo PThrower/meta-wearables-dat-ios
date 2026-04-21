@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreBluetooth
+import CoreLocation
 import CoreMedia
 import CoreMotion
 import CoreTelephony
@@ -26,6 +27,19 @@ private final class BTDelegateWrapper: NSObject, CBCentralManagerDelegate, Senda
         default: state = "unknown"
         }
         onUpdate(state)
+    }
+}
+
+private final class LocationDelegate: NSObject, CLLocationManagerDelegate, Sendable {
+    let onUpdate: @Sendable (CLLocation?) -> Void
+    init(onUpdate: @Sendable @escaping (CLLocation?) -> Void) {
+        self.onUpdate = onUpdate
+    }
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        onUpdate(locations.last)
+    }
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Ignore — may not have permission or GPS unavailable
     }
 }
 
@@ -63,6 +77,15 @@ final class TelemetryService: ObservableObject {
     @Published private(set) var motionText: String = "--"
     @Published private(set) var bluetoothText: String = "--"
     @Published private(set) var cpuText: String = "--"
+    @Published private(set) var locationText: String = "--"
+    @Published private(set) var gyroText: String = "--"
+    @Published private(set) var magnetometerText: String = "--"
+    @Published private(set) var barometerText: String = "--"
+    @Published private(set) var audioLevelText: String = "--"
+    @Published private(set) var memoryFootprintText: String = "--"
+    @Published private(set) var proximityText: String = "--"
+    @Published private(set) var backgroundText: String = "--"
+    @Published private(set) var throughputText: String = "--"
 
     // MARK: - Frame Tracking
 
@@ -137,6 +160,39 @@ final class TelemetryService: ObservableObject {
     private var btDelegateWrapper: BTDelegateWrapper?
     private var currentBTState: String = "unknown"
 
+    // Location
+    private var locationManager: CLLocationManager?
+    private var locationDelegate: LocationDelegate?
+    private var currentLocation: CLLocation?
+
+    // Gyroscope
+    private var lastGyroX: Double = 0
+    private var lastGyroY: Double = 0
+    private var lastGyroZ: Double = 0
+
+    // Magnetometer
+    private var lastMagX: Double = 0
+    private var lastMagY: Double = 0
+    private var lastMagZ: Double = 0
+
+    // Barometer
+    private let altimeter = CMAltimeter()
+    private var currentPressureKPa: Double?
+
+    // Audio level provider (set by ViewModel)
+    var audioLevelProvider: (@MainActor () -> (peakDb: Float, averageDb: Float)?)?
+
+    // Throughput tracking
+    private var lastThroughputBytes: UInt64 = 0
+    private var lastThroughputTime: ContinuousClock.Instant?
+    private var currentBytesPerSec: Double = 0
+    var lastTotalBytesSent: UInt64 = 0
+
+    // App-level fg/bg tracking
+    private let serviceStartTime: ContinuousClock.Instant = .now
+    private var totalAppBackgroundDuration: Duration = .zero
+    private var appBackgroundEnterTime: ContinuousClock.Instant?
+
     // MARK: - Init
 
     init() {
@@ -185,6 +241,54 @@ final class TelemetryService: ObservableObject {
         }
         btDelegateWrapper = wrapper
         btManager = CBCentralManager(delegate: wrapper, queue: nil)
+
+        // Location monitoring
+        let locDelegate = LocationDelegate { [weak self] location in
+            Task { @MainActor [weak self] in
+                self?.currentLocation = location
+            }
+        }
+        locationDelegate = locDelegate
+        let locManager = CLLocationManager()
+        locManager.delegate = locDelegate
+        locManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        locManager.distanceFilter = 10
+        locManager.requestWhenInUseAuthorization()
+        locManager.startUpdatingLocation()
+        locationManager = locManager
+
+        // Gyroscope at 1Hz
+        if motionManager.isGyroAvailable {
+            motionManager.gyroUpdateInterval = 1.0
+            motionManager.startGyroUpdates(to: .main) { [weak self] data, _ in
+                guard let self, let data else { return }
+                self.lastGyroX = data.rotationRate.x
+                self.lastGyroY = data.rotationRate.y
+                self.lastGyroZ = data.rotationRate.z
+            }
+        }
+
+        // Magnetometer at 1Hz
+        if motionManager.isMagnetometerAvailable {
+            motionManager.magnetometerUpdateInterval = 1.0
+            motionManager.startMagnetometerUpdates(to: .main) { [weak self] data, _ in
+                guard let self, let data else { return }
+                self.lastMagX = data.magneticField.x
+                self.lastMagY = data.magneticField.y
+                self.lastMagZ = data.magneticField.z
+            }
+        }
+
+        // Barometer
+        if CMAltimeter.isRelativeAltitudeAvailable() {
+            altimeter.startRelativeAltitudeUpdates(to: .main) { [weak self] data, _ in
+                guard let self, let data else { return }
+                self.currentPressureKPa = data.pressure.doubleValue
+            }
+        }
+
+        // Proximity monitoring
+        UIDevice.current.isProximityMonitoringEnabled = true
     }
 
     // MARK: - Attach to SDK
@@ -253,6 +357,7 @@ final class TelemetryService: ObservableObject {
         guard !isUptimePaused else { return }
         isUptimePaused = true
         backgroundEnterTime = ContinuousClock.Instant.now
+        appBackgroundEnterTime = ContinuousClock.Instant.now
 
         // Close current segment into accumulated
         if let segStart = currentSegmentStart {
@@ -269,6 +374,10 @@ final class TelemetryService: ObservableObject {
         if let bgEnter = backgroundEnterTime {
             totalBackgroundDuration += ContinuousClock.Instant.now - bgEnter
             backgroundEnterTime = nil
+        }
+        if let appBgEnter = appBackgroundEnterTime {
+            totalAppBackgroundDuration += ContinuousClock.Instant.now - appBgEnter
+            appBackgroundEnterTime = nil
         }
 
         // Start new segment if streaming
@@ -644,6 +753,107 @@ final class TelemetryService: ObservableObject {
         let cpuMetrics = CPUMetrics(usagePercent: cpuUsage)
         cpuText = String(format: "%.1f%%", cpuUsage)
 
+        // Location
+        let locationMetrics: LocationMetrics?
+        if let loc = currentLocation {
+            locationMetrics = LocationMetrics(
+                speed: loc.speed >= 0 ? loc.speed : nil,
+                altitude: loc.verticalAccuracy >= 0 ? loc.altitude : nil,
+                accuracy: loc.horizontalAccuracy >= 0 ? loc.horizontalAccuracy : nil
+            )
+            let speedStr = loc.speed >= 0 ? String(format: "%.1fm/s", loc.speed) : ""
+            let altStr = loc.verticalAccuracy >= 0 ? String(format: " %.0fm", loc.altitude) : ""
+            locationText = speedStr + altStr
+        } else {
+            locationMetrics = nil
+            locationText = "--"
+        }
+
+        // Gyroscope
+        let gyroMetrics: GyroMetrics?
+        if motionManager.isGyroAvailable {
+            gyroMetrics = GyroMetrics(rotationX: lastGyroX, rotationY: lastGyroY, rotationZ: lastGyroZ)
+            gyroText = String(format: "x%.1f y%.1f z%.1f r/s", lastGyroX, lastGyroY, lastGyroZ)
+        } else {
+            gyroMetrics = nil
+            gyroText = "--"
+        }
+
+        // Magnetometer
+        let magMetrics: MagnetometerMetrics?
+        if motionManager.isMagnetometerAvailable {
+            magMetrics = MagnetometerMetrics(magX: lastMagX, magY: lastMagY, magZ: lastMagZ)
+            magnetometerText = String(format: "x%.0f y%.0f z%.0f uT", lastMagX, lastMagY, lastMagZ)
+        } else {
+            magMetrics = nil
+            magnetometerText = "--"
+        }
+
+        // Barometer
+        let baroMetrics: BarometerMetrics?
+        if let pressure = currentPressureKPa {
+            baroMetrics = BarometerMetrics(pressureKPa: pressure)
+            barometerText = String(format: "%.2fkPa", pressure)
+        } else {
+            baroMetrics = nil
+            barometerText = "--"
+        }
+
+        // Audio level (from provider set by ViewModel)
+        let audioMetrics: AudioLevelMetrics?
+        if let level = audioLevelProvider?() {
+            audioMetrics = AudioLevelMetrics(peakDb: level.peakDb, averageDb: level.averageDb)
+            audioLevelText = String(format: "peak:%.0fdB avg:%.0fdB", level.peakDb, level.averageDb)
+        } else {
+            audioMetrics = nil
+            audioLevelText = "--"
+        }
+
+        // Memory footprint (app's actual RSS)
+        let physFootprint = computeMemoryFootprint()
+        let footprintMetrics = MemoryFootprintMetrics(footprintMB: physFootprint)
+        memoryFootprintText = String(format: "%.0fMB", physFootprint)
+
+        // Proximity sensor
+        let proxNear = UIDevice.current.proximityState
+        let proxMetrics = ProximityMetrics(near: proxNear)
+        proximityText = proxNear ? "near" : "far"
+
+        // Foreground / background ratio
+        let totalAppDuration = ContinuousClock.Instant.now - serviceStartTime
+        let totalAppMs = durationToMs(totalAppDuration)
+        var bgMs = durationToMs(totalAppBackgroundDuration)
+        if let appBgEnter = appBackgroundEnterTime {
+            bgMs += durationToMs(ContinuousClock.Instant.now - appBgEnter)
+        }
+        let fgMs = totalAppMs - bgMs
+        let bgMetrics = BackgroundMetrics(foregroundSec: fgMs / 1000.0, backgroundSec: bgMs / 1000.0)
+        backgroundText = totalAppMs > 0 ? String(format: "%.0f%%fg", (fgMs / totalAppMs) * 100) : "--"
+
+        // Throughput (outbound bytes/sec from relay)
+        let throughputMetrics: ThroughputMetrics?
+        if lastTotalBytesSent > 0 {
+            let now = ContinuousClock.Instant.now
+            if let lastTime = lastThroughputTime {
+                let elapsed = now - lastTime
+                let elapsedSec = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+                if elapsedSec > 0 {
+                    let bytesDelta = Double(lastTotalBytesSent - lastThroughputBytes)
+                    currentBytesPerSec = bytesDelta / elapsedSec
+                }
+            }
+            lastThroughputBytes = lastTotalBytesSent
+            lastThroughputTime = now
+            let totalMB = Double(lastTotalBytesSent) / 1_048_576.0
+            throughputMetrics = ThroughputMetrics(bytesPerSec: currentBytesPerSec, totalMB: totalMB)
+            let kbps = currentBytesPerSec / 1024.0
+            throughputText = kbps > 1024 ? String(format: "%.1fMB/s %.0fMB", kbps / 1024.0, totalMB)
+                : String(format: "%.0fKB/s %.1fMB", kbps, totalMB)
+        } else {
+            throughputMetrics = nil
+            throughputText = "--"
+        }
+
         // Build snapshot
         let frameMetrics = FrameMetrics(
             effectiveFPS: effectiveFPS,
@@ -692,6 +902,15 @@ final class TelemetryService: ObservableObject {
             motion: motionMetrics,
             bluetooth: btMetrics,
             cpu: cpuMetrics,
+            location: locationMetrics,
+            gyro: gyroMetrics,
+            magnetometer: magMetrics,
+            barometer: baroMetrics,
+            audioLevel: audioMetrics,
+            memoryFootprint: footprintMetrics,
+            proximity: proxMetrics,
+            background: bgMetrics,
+            throughput: throughputMetrics,
             photoCapture: lastPhotoCapture,
             snapshotTimestamp: ContinuousClock.Instant.now
         )
@@ -766,6 +985,18 @@ final class TelemetryService: ObservableObject {
         let userTime = Double(taskInfo.user_time.seconds) + Double(taskInfo.user_time.microseconds) / 1_000_000.0
         let sysTime = Double(taskInfo.system_time.seconds) + Double(taskInfo.system_time.microseconds) / 1_000_000.0
         return min((userTime + sysTime) * 10.0, 100.0)  // rough scale
+    }
+
+    private func computeMemoryFootprint() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.phys_footprint) / 1_048_576.0
     }
 
     private func describeError(_ error: StreamSessionError) -> String {

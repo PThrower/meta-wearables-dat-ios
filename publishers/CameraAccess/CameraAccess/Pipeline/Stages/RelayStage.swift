@@ -1,14 +1,14 @@
 /*
  * RelayStage.swift
  *
- * Pipeline stage that encodes CMSampleBuffer frames as JPEG,
- * wraps them in the FRLY wire protocol, and sends them over
- * a WebSocket connection to the gateway (which proxies to the relay server).
+ * Pipeline stage that encodes CMSampleBuffer frames using a FrameEncoder
+ * (JPEG or H.264), wraps them in the FRLY wire protocol, and sends them
+ * over a WebSocket connection to the relay server.
  *
- * Wire protocol v1 per frame (36-byte header):
- *   [4 bytes "FRLY"][1 byte version=1][4 bytes payloadLength][8 bytes sequence]
- *   [4 bytes width][4 bytes height][1 byte quality][8 bytes timestamp_ms]
- *   [2 bytes headerCrc16][JPEG payload]
+ * Wire protocol per frame (36-byte header):
+ *   [4 bytes "FRLY"][1 byte version][4 bytes payloadLength][8 bytes sequence]
+ *   [4 bytes width][4 bytes height][1 byte codec+flags][8 bytes timestamp_ms]
+ *   [2 bytes headerCrc16][payload]
  *
  * Includes a receive loop (required for URLSessionWebSocketTask protocol
  * handling) and ping keepalive (prevents proxy/NAT idle disconnects).
@@ -16,12 +16,9 @@
  * Runs on its own actor executor -- never blocks the main thread.
  */
 
-import CoreImage
 import CoreMedia
 import Foundation
-import ImageIO
 import UIKit
-import UniformTypeIdentifiers
 
 // MARK: - CRC-16 (delegated to CRC16)
 
@@ -85,11 +82,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Public accessor for the URL last connected to (for foreground reconnection).
     var currentURL: String? { lastConnectedURL }
 
-    // JPEG encoding — CIContext for YUV->RGB, CGImageDestination for JPEG (no UIKit)
-    private var adaptiveQuality: CGFloat       // Adjusted by encode time feedback
-    private let minQuality: CGFloat = 0.2
-    private let maxQuality: CGFloat = 0.8
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    // Frame encoding — delegates to FrameEncoder (JPEG or H.264)
+    private var encoder: FrameEncoder
+    private var adaptiveQuality: CGFloat       // Adjusted by encode time feedback (JPEG only)
 
     /// Callback to dispatch received FRAU audio to the AudioEventBus.
     /// Set by StreamSessionViewModel before connecting.
@@ -116,6 +111,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     // Stats
     private var framesSent: UInt64 = 0
+    private var totalBytesSent: UInt64 = 0
     private var framesFailed: UInt64 = 0
     private var framesDropped: UInt64 = 0
     private var framesDroppedByPacing: UInt64 = 0
@@ -129,6 +125,13 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.5) {
         self.config = config
         self.adaptiveQuality = jpegQuality
+        self.encoder = JPEGFrameEncoder(quality: jpegQuality)
+    }
+
+    /// Set a different encoder before connecting.
+    /// Defaults to JPEGFrameEncoder. Call before connect().
+    func setEncoder(_ encoder: FrameEncoder) {
+        self.encoder = encoder
     }
 
     // MARK: - Connection
@@ -237,9 +240,14 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         lastRelayTime = nil
         encodeTimeEmaMs = nil
         adaptiveQuality = 0.5  // Reset to default
+        // Reset encoder state for a fresh session
+        if let jpegEnc = encoder as? JPEGFrameEncoder {
+            jpegEnc.quality = adaptiveQuality
+        }
     }
 
     func stop() async {
+        encoder.destroy()
         disconnect()
     }
 
@@ -408,35 +416,23 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // Increment sequence first (on actor), then do heavy encoding off-actor
         sequenceNumber += 1
         let seq = sequenceNumber
-        let quality = adaptiveQuality
-        let ciCtx = ciContext
 
-        // Capture websocket reference for off-actor use
+        // Capture references for off-actor use
         let wsTask = webSocketTask
+        let currentEncoder = encoder
+        let currentQuality = adaptiveQuality
 
-        // Detach the expensive JPEG encoding + send so actor returns immediately
+        // Detach the encoding + send so actor returns immediately
         Task.detached { [weak self] in
             defer { Task { [weak self] in await self?.clearEncodingFlag() } }
 
             let encodeStart = ContinuousClock.Instant.now
 
-            // Step 1: CVPixelBuffer -> CIImage -> CGImage (CIContext handles YUV->RGB)
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
-            let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
 
-            guard let cgImage = ciCtx.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: width, height: height)) else { return }
-
-            // Step 2: CGImage -> JPEG via CGImageDestination (ImageIO C API, no UIKit)
-            let mutableData = CFDataCreateMutable(kCFAllocatorDefault, 0)!
-            guard let destination = CGImageDestinationCreateWithData(
-                mutableData, UTType.jpeg.identifier as CFString, 1, nil
-            ) else { return }
-
-            let jpegOptions: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: quality]
-            CGImageDestinationAddImage(destination, cgImage, jpegOptions as CFDictionary)
-            guard CGImageDestinationFinalize(destination) else { return }
+            guard let encoded = currentEncoder.encode(pixelBuffer, width: width, height: height) else { return }
 
             let encodeEnd = ContinuousClock.Instant.now
             let encodeDuration = encodeEnd - encodeStart
@@ -446,18 +442,19 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             // Update EMA on actor
             Task { [weak self] in await self?.updateEncodeTime(encodeMs) }
 
-            let jpegData = mutableData as Data
-
-            // Build FRLY v1 wire protocol message using WireProtocol builder
-            let message = WireProtocol.buildFRLY(
-                jpegData: jpegData,
+            // Build FRLY wire protocol message
+            let message = WireProtocol.buildVideoFrame(
+                codec: currentEncoder.codec,
+                payload: encoded.payload,
                 sequenceNumber: seq,
-                width: width,
-                height: height,
-                quality: quality,
-                timestampMs: UInt64(Date().timeIntervalSince1970 * 1000)
+                width: encoded.width,
+                height: encoded.height,
+                isKeyframe: encoded.isKeyframe,
+                hasParameterSets: encoded.hasParameterSets,
+                jpegQuality: currentQuality
             )
 
+            let msgSize = UInt64(message.count)
             wsTask.send(.data(message)) { error in
                 if let error {
                     NSLog("[RelayStage] Send error: \(error)")
@@ -466,15 +463,16 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                     }
                 } else {
                     Task { [weak self] in
-                        await self?.onSendSuccess()
+                        await self?.onSendSuccess(bytes: msgSize)
                     }
                 }
             }
         }
     }
 
-    private func onSendSuccess() {
+    private func onSendSuccess(bytes: UInt64 = 0) {
         framesSent += 1
+        totalBytesSent += bytes
         if framesSent % 50 == 1 {
             NSLog("[RelayStage] Frames sent: \(framesSent), encodeEma=\(String(format: "%.1f", encodeTimeEmaMs ?? 0))ms, adaptiveFps=\(String(format: "%.1f", effectiveTargetFps))")
         }
@@ -511,12 +509,14 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     func getStats() -> [String: Any] {
         return [
             "framesSent": framesSent,
+            "totalBytesSent": totalBytesSent,
             "framesFailed": framesFailed,
             "framesDropped": framesDropped,
             "framesDroppedByPacing": framesDroppedByPacing,
             "framesDroppedByBackpressure": framesDroppedByBackpressure,
             "encodeTimeEmaMs": encodeTimeEmaMs ?? 0,
             "adaptiveQuality": adaptiveQuality,
+            "videoCodec": encoder.codec.rawValue,
             "latencyMs": relayLatencyMs ?? 0,
         ]
     }
@@ -549,9 +549,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         isEncoding = false
     }
 
-    /// Update EMA encode time and adapt JPEG quality toward target FPS.
-    /// If encode is slower than the frame budget, reduce quality to speed up.
-    /// If encode is faster than needed, increase quality for sharper frames.
+    /// Update EMA encode time and adapt quality toward target FPS.
+    /// For JPEG: adjusts adaptive quality (0.2-0.8).
+    /// For H.264: only tracks encode time for FPS adaptation (bitrate is encoder-managed).
     private func updateEncodeTime(_ encodeMs: Double) {
         let previous: Double
         if let ema = encodeTimeEmaMs {
@@ -567,20 +567,20 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         let targetFps = effectiveTargetFps
         let frameBudgetMs = (targetFps > 0) ? 1000.0 / targetFps : 100.0
 
-        // Adapt quality: multiplicative decrease if over budget, additive increase if under
-        let oldQuality = adaptiveQuality
-        if ema > frameBudgetMs * 1.2 {
-            // Encode too slow — reduce quality to speed up
-            adaptiveQuality = max(minQuality, adaptiveQuality * 0.95)
-        } else if ema < frameBudgetMs * 0.8 {
-            // Encode fast enough — reclaim quality
-            adaptiveQuality = min(maxQuality, adaptiveQuality * 1.02)
-        }
+        // Adapt quality for JPEG encoder only
+        if let jpegEnc = encoder as? JPEGFrameEncoder {
+            let oldQuality = adaptiveQuality
+            if ema > frameBudgetMs * 1.2 {
+                adaptiveQuality = jpegEnc.clampQuality(adaptiveQuality * 0.95)
+            } else if ema < frameBudgetMs * 0.8 {
+                adaptiveQuality = jpegEnc.clampQuality(adaptiveQuality * 1.02)
+            }
+            jpegEnc.quality = adaptiveQuality
 
-        // Log quality changes and periodic EMA updates
-        let hardwareCap = 1000.0 / (ema * 1.1)
-        if abs(adaptiveQuality - oldQuality) > 0.01 {
-            NSLog("[RelayStage] Quality adapt: \(String(format: "%.2f", oldQuality))→\(String(format: "%.2f", adaptiveQuality)), encode=\(String(format: "%.1f", ema))ms, budget=\(String(format: "%.1f", frameBudgetMs))ms, hwCap=\(String(format: "%.1f", hardwareCap))fps")
+            let hardwareCap = 1000.0 / (ema * 1.1)
+            if abs(adaptiveQuality - oldQuality) > 0.01 {
+                NSLog("[RelayStage] Quality adapt: \(String(format: "%.2f", oldQuality))→\(String(format: "%.2f", adaptiveQuality)), encode=\(String(format: "%.1f", ema))ms, budget=\(String(format: "%.1f", frameBudgetMs))ms, hwCap=\(String(format: "%.1f", hardwareCap))fps")
+            }
         }
     }
 
@@ -640,6 +640,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // UIDevice.current is @MainActor-isolated in iOS 17+.
         // Dispatch to main to read device info, then send using captured wsTask.
         // No await back to self — the captured references are all we need.
+        let capturedCodec = encoder.codec.rawValue
         Task { @MainActor in
             let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
             let deviceName = UIDevice.current.name
@@ -667,6 +668,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                     }
                 }(),
                 "lowPowerMode": ProcessInfo.processInfo.isLowPowerModeEnabled,
+                "videoCodec": capturedCodec,
             ]
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
