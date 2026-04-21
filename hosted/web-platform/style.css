@@ -339,16 +339,46 @@ header {
 .info-panel-inner {
   padding: 48px 14px 14px;
 }
-.info-section {
+/* Collapsible sections */
+.info-collapsible {
   margin-bottom: 16px;
 }
-.info-section-title {
+.info-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; background: none; border: none; cursor: pointer;
+  padding: 0 0 4px 0; margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-family: inherit;
+}
+.info-section-header .info-section-title {
   font-size: 9px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.8px;
   color: rgba(255,255,255,0.2);
-  margin-bottom: 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 0; padding-bottom: 0; border-bottom: none;
+  transition: color 0.15s ease;
+}
+.info-section-header:hover .info-section-title {
+  color: rgba(255,255,255,0.4);
+}
+.info-chevron {
+  display: inline-block; width: 0; height: 0;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 4px solid rgba(255,255,255,0.2);
+  transition: transform 0.2s ease, border-top-color 0.15s ease;
+  flex-shrink: 0;
+}
+.info-section-header:hover .info-chevron {
+  border-top-color: rgba(255,255,255,0.4);
+}
+.info-collapsible.open .info-chevron {
+  transform: rotate(180deg);
+}
+.info-collapsible-body {
+  max-height: 0; overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+.info-collapsible.open .info-collapsible-body {
+  max-height: 600px;
 }
 .info-rows {
   display: flex; flex-direction: column; gap: 4px;

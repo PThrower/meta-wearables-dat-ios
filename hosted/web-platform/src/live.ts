@@ -34,6 +34,16 @@ infoPanelToggle.addEventListener("click", () => {
   infoPanelToggle.classList.toggle("active");
 });
 
+// Collapsible section headers
+document.querySelectorAll(".info-section-header").forEach((header) => {
+  header.addEventListener("click", () => {
+    const collapsible = header.closest(".info-collapsible") as HTMLElement;
+    if (!collapsible) return;
+    const isOpen = collapsible.classList.toggle("open");
+    header.setAttribute("aria-expanded", String(isOpen));
+  });
+});
+
 // Mic selector buttons
 const micSelector = document.getElementById("micSelector")!;
 function setMicActive(mode: string): void {
