@@ -71,6 +71,8 @@
 		<string>com.meta.ar.wearable</string>
 	</array>
 	<!-- End required section for Device Access Toolkit Apps -->
+	<key>NSCameraUsageDescription</key>
+	<string>This app needs camera access to stream video from your iPhone camera to viewers.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to relay audio from your glasses to viewers.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -122,6 +122,10 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private var framesDroppedByBackpressure: UInt64 = 0
     private var isEncoding = false
 
+    // Relay latency (RTT from ping/pong)
+    private var lastPingStart: ContinuousClock.Instant?
+    private var relayLatencyMs: Double?
+
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.5) {
         self.config = config
         self.adaptiveQuality = jpegQuality
@@ -302,16 +306,33 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
                 guard !Task.isCancelled else { break }
                 guard let wsTask = self.webSocketTask else { break }
+                let pingStart = ContinuousClock.Instant.now
+                self.lastPingStart = pingStart
                 wsTask.sendPing { [weak self] error in
                     if let error {
                         NSLog("[RelayStage] Ping failed: \(error)")
                         Task { [weak self] in
                             await self?.markDisconnected()
                         }
+                    } else {
+                        let pongTime = ContinuousClock.Instant.now
+                        Task { [weak self] in
+                            guard let self else { return }
+                            if let start = await self.lastPingStart {
+                                let latency = pongTime - start
+                                let ms = Double(latency.components.seconds) * 1000.0
+                                    + Double(latency.components.attoseconds) / 1_000_000_000_000_000.0
+                                await self.setRelayLatency(ms)
+                            }
+                        }
                     }
                 }
             }
         }
+    }
+
+    private func setRelayLatency(_ ms: Double) {
+        relayLatencyMs = ms
     }
 
     // MARK: - Server Backpressure
@@ -496,6 +517,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             "framesDroppedByBackpressure": framesDroppedByBackpressure,
             "encodeTimeEmaMs": encodeTimeEmaMs ?? 0,
             "adaptiveQuality": adaptiveQuality,
+            "latencyMs": relayLatencyMs ?? 0,
         ]
     }
 

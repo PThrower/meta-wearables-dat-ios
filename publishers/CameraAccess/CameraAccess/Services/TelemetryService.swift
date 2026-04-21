@@ -1,9 +1,33 @@
+import AVFoundation
+import CoreBluetooth
 import CoreMedia
+import CoreMotion
+import CoreTelephony
 import Foundation
 import MWDATCamera
 import MWDATCore
+import Network
 import os.log
 import UIKit
+
+private final class BTDelegateWrapper: NSObject, CBCentralManagerDelegate, Sendable {
+    let onUpdate: @Sendable (String) -> Void
+    init(onUpdate: @Sendable @escaping (String) -> Void) {
+        self.onUpdate = onUpdate
+    }
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        let state: String
+        switch central.state {
+        case .poweredOn: state = "poweredOn"
+        case .poweredOff: state = "poweredOff"
+        case .unauthorized: state = "unauthorized"
+        case .unsupported: state = "unsupported"
+        case .resetting: state = "resetting"
+        default: state = "unknown"
+        }
+        onUpdate(state)
+    }
+}
 
 @MainActor
 final class TelemetryService: ObservableObject {
@@ -27,6 +51,18 @@ final class TelemetryService: ObservableObject {
     @Published private(set) var droppedFramesText: String = "0"
     @Published private(set) var deviceInfoText: String = ""
     @Published private(set) var batteryText: String = "--"
+    @Published private(set) var thermalText: String = "--"
+    @Published private(set) var networkText: String = "--"
+    @Published private(set) var memoryText: String = "--"
+    @Published private(set) var relayLatencyText: String = "--"
+    @Published private(set) var diskText: String = "--"
+    @Published private(set) var cellularText: String = "--"
+    @Published private(set) var brightnessText: String = "--"
+    @Published private(set) var cameraInfoText: String = "--"
+    @Published private(set) var orientationText: String = "--"
+    @Published private(set) var motionText: String = "--"
+    @Published private(set) var bluetoothText: String = "--"
+    @Published private(set) var cpuText: String = "--"
 
     // MARK: - Frame Tracking
 
@@ -83,12 +119,72 @@ final class TelemetryService: ObservableObject {
 
     private var streamTokens: [AnyListenerToken] = []
 
+    // MARK: - Network Monitoring
+
+    private let pathMonitor = NWPathMonitor()
+    private let monitorQueue = DispatchQueue(label: "telemetry.network")
+    private var currentNetworkType: String = "unknown"
+    private var currentNetworkExpensive: Bool = false
+    private var currentNetworkConstrained: Bool = false
+    private var lastRelayLatencyMs: Double?
+    private let networkInfo = CTTelephonyNetworkInfo()
+    var phoneCameraDeviceProvider: (@MainActor () -> AVCaptureDevice?)?
+    private let motionManager = CMMotionManager()
+    private var lastAccelX: Double = 0
+    private var lastAccelY: Double = 0
+    private var lastAccelZ: Double = 0
+    private var btManager: CBCentralManager?
+    private var btDelegateWrapper: BTDelegateWrapper?
+    private var currentBTState: String = "unknown"
+
     // MARK: - Init
 
     init() {
         frameInstants = RingBuffer(capacity: 60)
         recentErrors = RingBuffer(capacity: 20)
         UIDevice.current.isBatteryMonitoringEnabled = true
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let type: String
+                if path.status == .satisfied {
+                    if path.usesInterfaceType(.wifi) { type = "wifi" }
+                    else if path.usesInterfaceType(.cellular) { type = "cellular" }
+                    else if path.usesInterfaceType(.wiredEthernet) { type = "wired" }
+                    else { type = "unknown" }
+                } else {
+                    type = "disconnected"
+                }
+                self.currentNetworkType = type
+                self.currentNetworkExpensive = path.isExpensive
+                self.currentNetworkConstrained = path.isConstrained
+                self.updateDisplayStrings()
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
+
+        // Accelerometer at 1Hz for telemetry
+        if motionManager.isAccelerometerAvailable {
+            motionManager.accelerometerUpdateInterval = 1.0
+            motionManager.startAccelerometerUpdates(to: .main) { [weak self] data, _ in
+                guard let self, let data else { return }
+                self.lastAccelX = data.acceleration.x
+                self.lastAccelY = data.acceleration.y
+                self.lastAccelZ = data.acceleration.z
+            }
+        }
+
+        // Bluetooth state monitoring
+        let wrapper = BTDelegateWrapper { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.currentBTState = state
+                self?.updateDisplayStrings()
+            }
+        }
+        btDelegateWrapper = wrapper
+        btManager = CBCentralManager(delegate: wrapper, queue: nil)
     }
 
     // MARK: - Attach to SDK
@@ -140,6 +236,15 @@ final class TelemetryService: ObservableObject {
     func recordPhotoRequest() {
         pendingPhotoRequestTime = ContinuousClock.Instant.now
         TelemetryLogger.photos.info("Photo capture requested")
+    }
+
+    func updateRelayLatency(_ latencyMs: Double?) {
+        lastRelayLatencyMs = latencyMs
+        if let ms = latencyMs, ms > 0 {
+            relayLatencyText = String(format: "%.1fms", ms)
+        } else {
+            relayLatencyText = "--"
+        }
     }
 
     // MARK: - Uptime Pause/Resume (background transitions)
@@ -420,6 +525,125 @@ final class TelemetryService: ObservableObject {
             batteryText = "--"
         }
 
+        // Thermal state
+        let thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+        let thermalStr: String
+        switch thermalState {
+        case .nominal: thermalStr = "nominal"
+        case .fair: thermalStr = "fair"
+        case .serious: thermalStr = "serious"
+        case .critical: thermalStr = "critical"
+        @unknown default: thermalStr = "unknown"
+        }
+        let thermalMetrics = ThermalMetrics(state: thermalStr)
+        thermalText = thermalStr
+
+        // Network
+        let networkMetrics = NetworkMetrics(
+            type: currentNetworkType,
+            expensive: currentNetworkExpensive,
+            constrained: currentNetworkConstrained
+        )
+        networkText = currentNetworkType
+
+        // Memory
+        let availableBytes = os_proc_available_memory()
+        let availableMB = Double(availableBytes) / 1_048_576.0
+        let totalPhysical = ProcessInfo.processInfo.physicalMemory
+        let usedRatio = 1.0 - (Double(availableBytes) / Double(totalPhysical))
+        let pressureStr: String
+        if usedRatio < 0.7 { pressureStr = "normal" }
+        else if usedRatio < 0.85 { pressureStr = "warning" }
+        else { pressureStr = "critical" }
+        let memoryMetrics = MemoryMetrics(availableMB: availableMB, pressure: pressureStr)
+        memoryText = String(format: "%.0fMB", availableMB)
+
+        // Disk space
+        let diskMetrics: DiskMetrics
+        if let docURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+           let values = try? docURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey]) {
+            let available = Double(values.volumeAvailableCapacityForImportantUsage ?? 0) / 1_073_741_824.0
+            let total = Double(values.volumeTotalCapacity ?? 0) / 1_073_741_824.0
+            let percentUsed = total > 0 ? ((total - available) / total) * 100.0 : 0
+            diskMetrics = DiskMetrics(availableGB: available, totalGB: total, percentUsed: percentUsed)
+            diskText = String(format: "%.1f/%.0fGB", available, total)
+        } else {
+            diskMetrics = DiskMetrics(availableGB: 0, totalGB: 0, percentUsed: 0)
+            diskText = "--"
+        }
+
+        // Cellular
+        let radioTech = networkInfo.serviceCurrentRadioAccessTechnology?.values.first
+        let carrierName = networkInfo.serviceSubscriberCellularProviders?.values.first?.carrierName
+        let cellularMetrics: CellularMetrics?
+        if let tech = radioTech {
+            let shortTech = tech
+                .replacingOccurrences(of: "CTRadioAccessTechnology", with: "")
+            cellularMetrics = CellularMetrics(technology: shortTech, carrier: carrierName)
+            cellularText = shortTech + (carrierName.map { " (\($0))" } ?? "")
+        } else {
+            cellularMetrics = nil
+            cellularText = currentNetworkType == "cellular" ? "unknown" : "--"
+        }
+
+        // Display brightness
+        let brightness = UIScreen.main.brightness
+        let displayMetrics = DisplayMetrics(brightness: Float(brightness))
+        brightnessText = String(format: "%.0f%%", brightness * 100)
+
+        // Camera ISO/Exposure (phone camera mode only)
+        let cameraMetrics: CameraMetrics?
+        if let device = phoneCameraDeviceProvider?() {
+            let iso = device.iso
+            let exposureDuration = device.exposureDuration
+            let exposureMs = CMTimeGetSeconds(exposureDuration) * 1000.0
+            let aperture = device.lensAperture
+            cameraMetrics = CameraMetrics(iso: iso, exposureMs: exposureMs, lensAperture: aperture)
+            cameraInfoText = String(format: "ISO%.0f %.1fms", iso, exposureMs)
+        } else {
+            cameraMetrics = nil
+            cameraInfoText = "--"
+        }
+
+        // Device orientation
+        let deviceOrientation = UIDevice.current.orientation
+        let orientationStr: String
+        switch deviceOrientation {
+        case .portrait: orientationStr = "portrait"
+        case .portraitUpsideDown: orientationStr = "portraitUpsideDown"
+        case .landscapeLeft: orientationStr = "landscapeLeft"
+        case .landscapeRight: orientationStr = "landscapeRight"
+        case .faceUp: orientationStr = "faceUp"
+        case .faceDown: orientationStr = "faceDown"
+        default: orientationStr = "unknown"
+        }
+        let orientationMetrics = OrientationMetrics(orientation: orientationStr)
+        orientationText = orientationStr
+
+        // Motion (accelerometer)
+        let motionMetrics: MotionMetrics?
+        if motionManager.isAccelerometerAvailable {
+            let magnitude = sqrt(lastAccelX * lastAccelX + lastAccelY * lastAccelY + lastAccelZ * lastAccelZ)
+            let stationary = magnitude < 0.3
+            motionMetrics = MotionMetrics(
+                accelX: lastAccelX, accelY: lastAccelY, accelZ: lastAccelZ,
+                isStationary: stationary
+            )
+            motionText = String(format: "x%.2f y%.2f z%.2f", lastAccelX, lastAccelY, lastAccelZ)
+        } else {
+            motionMetrics = nil
+            motionText = "--"
+        }
+
+        // Bluetooth state
+        let btMetrics = BluetoothMetrics(state: currentBTState)
+        bluetoothText = currentBTState
+
+        // CPU usage (app process)
+        let cpuUsage = computeCPUUsage()
+        let cpuMetrics = CPUMetrics(usagePercent: cpuUsage)
+        cpuText = String(format: "%.1f%%", cpuUsage)
+
         // Build snapshot
         let frameMetrics = FrameMetrics(
             effectiveFPS: effectiveFPS,
@@ -456,6 +680,18 @@ final class TelemetryService: ObservableObject {
             session: sessionMetrics,
             errors: errorMetrics,
             battery: batteryMetrics,
+            thermal: thermalMetrics,
+            network: networkMetrics,
+            memory: memoryMetrics,
+            relay: RelayMetrics(latencyMs: lastRelayLatencyMs, reconnectCount: 0),
+            disk: diskMetrics,
+            cellular: cellularMetrics,
+            display: displayMetrics,
+            camera: cameraMetrics,
+            orientation: orientationMetrics,
+            motion: motionMetrics,
+            bluetooth: btMetrics,
+            cpu: cpuMetrics,
             photoCapture: lastPhotoCapture,
             snapshotTimestamp: ContinuousClock.Instant.now
         )
@@ -516,6 +752,20 @@ final class TelemetryService: ObservableObject {
         let minutes = Int(seconds) / 60
         let secs = Int(seconds) % 60
         return "\(minutes)m\(secs)s"
+    }
+
+    private func computeCPUUsage() -> Double {
+        var taskInfo = task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<task_basic_info>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &taskInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_BASIC_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        let userTime = Double(taskInfo.user_time.seconds) + Double(taskInfo.user_time.microseconds) / 1_000_000.0
+        let sysTime = Double(taskInfo.system_time.seconds) + Double(taskInfo.system_time.microseconds) / 1_000_000.0
+        return min((userTime + sysTime) * 10.0, 100.0)  // rough scale
     }
 
     private func describeError(_ error: StreamSessionError) -> String {

@@ -90,6 +90,67 @@ struct BatteryMetrics: Sendable {
     let lowPowerMode: Bool
 }
 
+struct ThermalMetrics: Sendable {
+    /// "nominal", "fair", "serious", "critical"
+    let state: String
+}
+
+struct NetworkMetrics: Sendable {
+    let type: String      // "wifi", "cellular", "wired", "unknown", "disconnected"
+    let expensive: Bool
+    let constrained: Bool
+}
+
+struct MemoryMetrics: Sendable {
+    let availableMB: Double
+    let pressure: String  // "normal", "warning", "critical"
+}
+
+struct RelayMetrics: Sendable {
+    let latencyMs: Double?
+    let reconnectCount: Int
+}
+
+struct DiskMetrics: Sendable {
+    let availableGB: Double
+    let totalGB: Double
+    let percentUsed: Double
+}
+
+struct CellularMetrics: Sendable {
+    let technology: String?  // "LTE", "5G NR", "EDGE", nil
+    let carrier: String?
+}
+
+struct DisplayMetrics: Sendable {
+    let brightness: Float  // 0.0 to 1.0
+}
+
+struct CameraMetrics: Sendable {
+    let iso: Float?
+    let exposureMs: Double?
+    let lensAperture: Float?
+}
+
+struct OrientationMetrics: Sendable {
+    let orientation: String  // "portrait", "landscapeLeft", "faceUp", etc.
+}
+
+struct MotionMetrics: Sendable {
+    let accelX: Double
+    let accelY: Double
+    let accelZ: Double
+    let isStationary: Bool
+}
+
+struct BluetoothMetrics: Sendable {
+    let state: String  // "poweredOn", "poweredOff", "unauthorized", etc.
+}
+
+struct CPUMetrics: Sendable {
+    let usagePercent: Double
+}
+
 // MARK: - Snapshot
 
 struct TelemetrySnapshot: Sendable {
@@ -98,6 +159,18 @@ struct TelemetrySnapshot: Sendable {
     let session: SessionMetrics
     let errors: ErrorMetrics
     let battery: BatteryMetrics
+    let thermal: ThermalMetrics
+    let network: NetworkMetrics
+    let memory: MemoryMetrics
+    let relay: RelayMetrics?
+    let disk: DiskMetrics
+    let cellular: CellularMetrics?
+    let display: DisplayMetrics
+    let camera: CameraMetrics?
+    let orientation: OrientationMetrics
+    let motion: MotionMetrics?
+    let bluetooth: BluetoothMetrics
+    let cpu: CPUMetrics
     let photoCapture: PhotoCaptureEvent?
     let snapshotTimestamp: ContinuousClock.Instant
 }

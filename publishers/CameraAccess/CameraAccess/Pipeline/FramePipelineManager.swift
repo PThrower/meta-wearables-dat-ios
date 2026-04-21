@@ -55,6 +55,27 @@ final class FramePipelineManager {
         NSLog("[Pipeline] Detached from StreamSession")
     }
 
+    // MARK: - Raw Buffer Injection (Phone Camera)
+
+    /// Inject a raw CMSampleBuffer into the pipeline.
+    /// Used by PhoneCameraCapture to bypass StreamSession entirely.
+    /// Stages receive identical FramePackets -- they cannot distinguish the source.
+    func onRawSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        sequenceNumber += 1
+        let packet = FramePacket(
+            sampleBuffer: sampleBuffer,
+            timestamp: .now,
+            sequenceNumber: sequenceNumber
+        )
+
+        for stage in stages {
+            guard stage.config.isEnabled else { continue }
+            Task.detached { [stage] in
+                await stage.processFrame(packet)
+            }
+        }
+    }
+
     // MARK: - Frame Dispatch
 
     private func onVideoFrame(_ videoFrame: VideoFrame) {

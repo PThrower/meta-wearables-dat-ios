@@ -197,6 +197,45 @@ struct DevicePickerSection: View {
         }
       }
 
+      // Phone camera option
+      Button {
+        if viewModel.isPhoneCameraMode {
+          viewModel.deselectPhoneCamera()
+        } else {
+          viewModel.selectPhoneCamera()
+        }
+      } label: {
+        HStack(spacing: 10) {
+          Image(systemName: "iphone.gen3.camera")
+            .foregroundColor(.primary)
+            .frame(width: 20)
+
+          VStack(alignment: .leading, spacing: 2) {
+            Text("iPhone Camera")
+              .font(.system(size: 14, weight: .medium))
+              .foregroundColor(.primary)
+            Text("READY")
+              .font(.system(size: 9, weight: .semibold, design: .monospaced))
+              .foregroundColor(.green)
+              .padding(.horizontal, 4)
+              .padding(.vertical, 1)
+              .background(Color.green.opacity(0.2))
+              .cornerRadius(3)
+          }
+
+          Spacer()
+
+          if viewModel.isPhoneCameraMode {
+            Image(systemName: "checkmark.circle.fill")
+              .foregroundColor(.blue)
+          }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(viewModel.isPhoneCameraMode ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
+        .cornerRadius(8)
+      }
+
       // Auto-select option
       Button {
         viewModel.selectDevice(nil)

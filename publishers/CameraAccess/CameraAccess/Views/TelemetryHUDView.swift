@@ -29,6 +29,13 @@ struct TelemetryHUDView: View {
                 row("State", telemetry.sessionStateText)
                 row("Uptime", telemetry.uptimeText)
                 row("TTFF", telemetry.ttffText)
+                thermalRow(telemetry.thermalText)
+                row("Memory", telemetry.memoryText)
+                row("Disk", telemetry.diskText)
+                row("Brightness", telemetry.brightnessText)
+                row("Orient", telemetry.orientationText)
+                row("Motion", telemetry.motionText)
+                row("CPU", telemetry.cpuText)
 
                 Divider().background(.white.opacity(0.2))
 
@@ -37,11 +44,20 @@ struct TelemetryHUDView: View {
                 row("Jitter", telemetry.jitterText)
                 row("Frames", telemetry.frameCountText)
                 row("Drops", telemetry.droppedFramesText)
+                if telemetry.cameraInfoText != "--" {
+                    row("Camera", telemetry.cameraInfoText)
+                }
 
                 Divider().background(.white.opacity(0.2))
 
                 sectionHeader("CONNECTION")
                 row("Link", telemetry.connectionText)
+                row("Network", telemetry.networkText)
+                row("RTT", telemetry.relayLatencyText)
+                row("BT", telemetry.bluetoothText)
+                if telemetry.cellularText != "--" {
+                    row("Cellular", telemetry.cellularText)
+                }
                 if !telemetry.deviceInfoText.isEmpty {
                     row("Device", telemetry.deviceInfoText)
                 }
@@ -87,6 +103,25 @@ struct TelemetryHUDView: View {
             Spacer()
             Text(value)
                 .foregroundColor(.white)
+        }
+    }
+
+    private func thermalRow(_ value: String) -> some View {
+        let color: Color = {
+            switch value {
+            case "nominal": return .green
+            case "fair": return .yellow
+            case "serious": return .orange
+            case "critical": return .red
+            default: return .white
+            }
+        }()
+        return HStack {
+            Text("Thermal")
+                .foregroundColor(.white.opacity(0.6))
+            Spacer()
+            Text(value)
+                .foregroundColor(color)
         }
     }
 }

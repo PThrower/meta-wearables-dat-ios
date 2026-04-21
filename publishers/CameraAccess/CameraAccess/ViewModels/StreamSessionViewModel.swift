@@ -161,6 +161,10 @@ class StreamSessionViewModel: ObservableObject {
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var telemetryPushTimer: Task<Void, Never>?
 
+  // Phone camera mode
+  private let phoneCamera = PhoneCameraCapture()
+  @Published var isPhoneCameraMode: Bool = false
+
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
       videoCodec: VideoCodec.raw,
@@ -228,6 +232,12 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     updateStatusFromState(streamSession.state)
+
+    // Wire phone camera device provider for telemetry camera metrics
+    self.telemetryService?.phoneCameraDeviceProvider = { [weak self] in
+      guard let self else { return nil }
+      return self.phoneCamera.currentDevice
+    }
   }
 
   // MARK: - Device Selection
@@ -235,6 +245,9 @@ class StreamSessionViewModel: ObservableObject {
   func selectDevice(_ deviceId: DeviceIdentifier?) {
     guard !isStreaming else { return }
     selectedDeviceId = deviceId
+
+    // Clear phone camera mode when selecting a real SDK device
+    isPhoneCameraMode = false
 
     // Stop monitoring old selector
     deviceMonitorTask?.cancel()
@@ -269,6 +282,31 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     updateStatusFromState(streamSession.state)
+  }
+
+  // MARK: - Phone Camera Selection
+
+  /// Select the iPhone camera as the video source (bypasses DAT SDK StreamSession).
+  func selectPhoneCamera() {
+    guard !isStreaming else { return }
+    isPhoneCameraMode = true
+    selectedDeviceId = nil
+    hasActiveDevice = true
+
+    // Cancel SDK device monitor — phone camera doesn't use it
+    deviceMonitorTask?.cancel()
+    deviceMonitorTask = nil
+
+    NSLog("[StreamSession] Phone camera selected")
+  }
+
+  /// Deselect phone camera mode (return to no-device state).
+  func deselectPhoneCamera() {
+    guard !isStreaming else { return }
+    isPhoneCameraMode = false
+    hasActiveDevice = false
+
+    NSLog("[StreamSession] Phone camera deselected")
   }
 
   // MARK: - Config
@@ -406,13 +444,17 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     do {
-      // Use manually selected device, or fall back to auto-selected active device
-      let wearableId = selectedDeviceId ?? activeWearableId
-      if let wearableId {
-        let deviceTypeName: String? = selectedDeviceId != nil
-          ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
-          : activeWearableType
-        await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
+      // Set device identity on relay stage
+      if isPhoneCameraMode {
+        await relayStage.setDeviceIdentity(wearableId: PhoneDevice.shared.id, wearableType: "iPhone Camera")
+      } else {
+        let wearableId = selectedDeviceId ?? activeWearableId
+        if let wearableId {
+          let deviceTypeName: String? = selectedDeviceId != nil
+            ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
+            : activeWearableType
+          await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
+        }
       }
 
       // Wire control message callback
@@ -477,12 +519,16 @@ class StreamSessionViewModel: ObservableObject {
     guard !url.isEmpty else { return }
 
     do {
-      let wearableId = selectedDeviceId ?? activeWearableId
-      if let wearableId {
-        let deviceTypeName: String? = selectedDeviceId != nil
-          ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
-          : activeWearableType
-        await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
+      if isPhoneCameraMode {
+        await relayStage.setDeviceIdentity(wearableId: PhoneDevice.shared.id, wearableType: "iPhone Camera")
+      } else {
+        let wearableId = selectedDeviceId ?? activeWearableId
+        if let wearableId {
+          let deviceTypeName: String? = selectedDeviceId != nil
+            ? wearables.deviceForIdentifier(wearableId)?.deviceType().displayName
+            : activeWearableType
+          await relayStage.setDeviceIdentity(wearableId: wearableId, wearableType: deviceTypeName)
+        }
       }
 
       await wireControlMessageHandler()
@@ -544,9 +590,30 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
+    relayMode = .active
+
+    if isPhoneCameraMode {
+      // Phone camera path: no BT link to wait for, start directly
+      await startPhoneCameraSession()
+
+      // Wire inbound audio handler
+      await relayStage.setOnReceivedAudio { [weak self] data in
+        guard let parsed = WireProtocol.parseFRAU(data) else { return }
+        NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
+        }
+      }
+
+      await startRelayAudioAndTelemetry()
+      await relayStage.sendJson(["type": "link_state_changed", "state": "connected"])
+      return
+    }
+
+    // Glasses (SDK) path: start camera session and wait for BT link
     // Phase 1: Start camera session (establishes BT link to glasses)
     await startSession()
-    relayMode = .active
 
     // Phase 2: Wait for DAT SDK BT video link to stabilize before touching audio.
     // Starting audio (especially HFP/Bluetooth mic) while the SDK's BT handshake
@@ -746,8 +813,13 @@ class StreamSessionViewModel: ObservableObject {
           if self.relayMode == .standby {
             await self.activateFromStandby()
           } else if self.relayMode == .disconnected {
-            await self.startSession()
-            await self.startRelay()
+            if self.isPhoneCameraMode {
+              await self.startPhoneCameraSession()
+              await self.startRelay()
+            } else {
+              await self.startSession()
+              await self.startRelay()
+            }
           }
           await self.relayStage.sendJson(["type": "stream_changed", "streaming": true])
         }
@@ -759,7 +831,11 @@ class StreamSessionViewModel: ObservableObject {
             // Stop camera, keep WebSocket in standby
             if self.isRecording { await self.stopRecording() }
             await self.backToStandby()
-            await self.streamSession.stop()
+            if self.isPhoneCameraMode {
+              await self.stopPhoneCameraSession()
+            } else {
+              await self.streamSession.stop()
+            }
             let audioSession = AVAudioSession.sharedInstance()
             try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
           }
@@ -849,6 +925,7 @@ class StreamSessionViewModel: ObservableObject {
   private func pushTelemetry() async {
     guard relayMode == .active, let snap = telemetryService?.snapshot else { return }
     let relayStats = await relayStage.getStats()
+    telemetryService?.updateRelayLatency(relayStats["latencyMs"] as? Double)
     var payload: [String: Any] = [
       "type": "publisher_telemetry",
       "frame": [
@@ -870,6 +947,51 @@ class StreamSessionViewModel: ObservableObject {
         "level": snap.battery.level,
         "state": snap.battery.state,
         "lowPowerMode": snap.battery.lowPowerMode,
+      ],
+      "thermal": [
+        "state": snap.thermal.state,
+      ],
+      "network": [
+        "type": snap.network.type,
+        "expensive": snap.network.expensive,
+        "constrained": snap.network.constrained,
+      ],
+      "memory": [
+        "availableMB": snap.memory.availableMB,
+        "pressure": snap.memory.pressure,
+      ],
+      "relayLatency": [
+        "ms": snap.relay?.latencyMs ?? 0,
+      ],
+      "disk": [
+        "availableGB": snap.disk.availableGB,
+        "totalGB": snap.disk.totalGB,
+        "percentUsed": snap.disk.percentUsed,
+      ],
+      "cellular": [
+        "technology": snap.cellular?.technology as Any,
+        "carrier": snap.cellular?.carrier as Any,
+      ],
+      "display": [
+        "brightness": snap.display.brightness,
+      ],
+      "camera": [
+        "iso": snap.camera?.iso as Any,
+        "exposureMs": snap.camera?.exposureMs as Any,
+        "lensAperture": snap.camera?.lensAperture as Any,
+      ] as [String: Any],
+      "orientation": snap.orientation.orientation,
+      "motion": [
+        "x": snap.motion?.accelX as Any,
+        "y": snap.motion?.accelY as Any,
+        "z": snap.motion?.accelZ as Any,
+        "stationary": snap.motion?.isStationary as Any,
+      ] as [String: Any],
+      "bluetooth": [
+        "state": snap.bluetooth.state,
+      ],
+      "cpu": [
+        "usagePercent": snap.cpu.usagePercent,
       ],
     ]
 
@@ -1199,6 +1321,11 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - Config
 
   func handleStartStreaming() async {
+    if isPhoneCameraMode {
+      await startPhoneCameraSession()
+      return
+    }
+
     let permission = Permission.camera
     do {
       let status = try await wearables.checkPermissionStatus(permission)
@@ -1222,6 +1349,57 @@ class StreamSessionViewModel: ObservableObject {
     await streamSession.start()
   }
 
+  // MARK: - Phone Camera Session
+
+  /// Start the phone camera capture session. Checks iOS camera permission,
+  /// wires frame callback to pipeline, and starts all pipeline stages.
+  private func startPhoneCameraSession() async {
+    // Check camera permission
+    let authStatus = AVCaptureDevice.authorizationStatus(for: .video)
+    if authStatus == .notDetermined {
+      let granted = await withCheckedContinuation { cont in
+        AVCaptureDevice.requestAccess(for: .video) { granted in
+          cont.resume(returning: granted)
+        }
+      }
+      guard granted else {
+        showError("Camera permission denied")
+        return
+      }
+    } else if authStatus != .authorized {
+      showError("Camera permission required. Enable in Settings.")
+      return
+    }
+
+    // Start pipeline stages
+    await pipeline.startAll()
+    streamingStatus = .streaming
+
+    // Wire phone camera frames -> pipeline
+    do {
+      try await phoneCamera.start { [weak self] sampleBuffer in
+        Task { @MainActor [weak self] in
+          self?.pipeline.onRawSampleBuffer(sampleBuffer)
+        }
+      }
+      NSLog("[StreamSession] Phone camera session started")
+    } catch {
+      streamingStatus = .stopped
+      await pipeline.stopAll()
+      showError("Phone camera failed: \(error.localizedDescription)")
+    }
+  }
+
+  /// Stop the phone camera capture session and pipeline stages.
+  private func stopPhoneCameraSession() async {
+    await phoneCamera.stop()
+    await pipeline.stopAll()
+    streamingStatus = .stopped
+    currentVideoFrame = nil
+    hasReceivedFirstFrame = false
+    NSLog("[StreamSession] Phone camera session stopped")
+  }
+
   private func showError(_ message: String) {
     errorMessage = message
     showError = true
@@ -1231,6 +1409,30 @@ class StreamSessionViewModel: ObservableObject {
     if isRecording {
       await stopRecording()
     }
+
+    // Phone camera path
+    if isPhoneCameraMode {
+      if relayMode == .active {
+        telemetryPushTimer?.cancel()
+        telemetryPushTimer = nil
+        await audioStage.stop()
+        await glassesAudioStage.stop()
+        stopInboundAudioEngine()
+        await audioRelayStage.detachFromEventBus(audioEventBus)
+        await audioTapClient.disconnect()
+        isTapConnected = false
+        activeAppId = nil
+        boundingBoxes = []
+        relayMode = .standby
+        await relayStage.sendJson(["type": "standby", "status": "ready"])
+      }
+      await stopPhoneCameraSession()
+      let audioSession = AVAudioSession.sharedInstance()
+      try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+      return
+    }
+
+    // Glasses (SDK) path
     if relayMode == .active {
       // Stop audio/telemetry but keep WebSocket in standby
       telemetryPushTimer?.cancel()
@@ -1262,6 +1464,16 @@ class StreamSessionViewModel: ObservableObject {
 
   func capturePhoto() {
     telemetryService?.recordPhotoRequest()
+
+    if isPhoneCameraMode {
+      // Phone camera has no SDK capturePhoto — use the current displayed frame
+      if let frame = currentVideoFrame {
+        capturedPhoto = frame
+        showPhotoPreview = true
+      }
+      return
+    }
+
     streamSession.capturePhoto(format: .jpeg)
   }
 
@@ -1333,6 +1545,10 @@ class StreamSessionViewModel: ObservableObject {
         if let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
           try audioSession.setPreferredInput(btHFP)
           NSLog("[StreamSession] Inbound engine: routed to HFP \(btHFP.portName)")
+        } else {
+          // No BT HFP -- route to phone loudspeaker (default .playAndRecord goes to earpiece)
+          try audioSession.overrideOutputAudioPort(.speaker)
+          NSLog("[StreamSession] Inbound engine: routed to loudspeaker")
         }
 
         let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
