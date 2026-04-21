@@ -704,7 +704,6 @@ export class RelayPlayer {
         // WebCodecs path: Annex B → AVCC → VideoDecoder
         this._renderH264Frame(payload, width, height, flags, timestampMs);
       }
-      this._renderH264Frame(payload, width, height, flags, timestampMs);
     } else {
       // JPEG (default): render via Blob -> Image -> Canvas
       this._renderJPEGFrame(payload, width, height);
