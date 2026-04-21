@@ -3,6 +3,7 @@ import Foundation
 import MWDATCamera
 import MWDATCore
 import os.log
+import UIKit
 
 @MainActor
 final class TelemetryService: ObservableObject {
