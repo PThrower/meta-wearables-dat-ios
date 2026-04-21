@@ -5,12 +5,17 @@
  * Takes CVPixelBuffer directly (no YUV-to-RGB conversion needed) and produces
  * H.264 NAL units with SPS/PPS parameter sets on keyframes.
  *
- * Designed for real-time streaming: real-time mode, average bitrate control,
- * hardware-accelerated on Apple Silicon.
+ * Uses VTCompressionSessionEncodeFrameWithOutputHandler (per-frame Swift closure
+ * output handler) instead of the C-style callback. The session is created with
+ * outputCallback=nil, which is required for the output handler API.
+ *
+ * Synchronization: a DispatchSemaphore coordinates between encode() and the
+ * output handler block, which may fire asynchronously on some hardware.
  */
 
 import CoreMedia
 import CoreVideo
+import Dispatch
 import Foundation
 import VideoToolbox
 
@@ -38,8 +43,9 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     /// Whether a keyframe has been requested
     private var keyframeRequested = false
 
-    /// Stored encoded frame from the output callback
-    private var pendingSampleBuffer: CMSampleBuffer?
+    /// Semaphore + storage for synchronizing encode() with the output handler
+    private let outputSemaphore = DispatchSemaphore(value: 0)
+    private var outputSampleBuffer: CMSampleBuffer?
 
     init(config: H264EncoderConfig = .default) throws {
         self.config = config
@@ -52,17 +58,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         var compressionSession: VTCompressionSession?
 
-        // C-style callback: pass self through refcon (Unmanaged) since closures
-        // that capture context cannot be converted to C function pointers.
-        let callback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
-            guard status == noErr, let sampleBuffer = sampleBuffer else { return }
-            guard let refcon = refcon else { return }
-            let encoder = Unmanaged<H264FrameEncoder>.fromOpaque(refcon).takeUnretainedValue()
-            encoder.pendingSampleBuffer = sampleBuffer
-        }
-
-        let refcon = Unmanaged.passUnretained(self).toOpaque()
-
+        // Create with outputCallback=nil — required for the output handler API.
         let status = VTCompressionSessionCreate(
             allocator: nil,
             width: width,
@@ -73,8 +69,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
                 kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             ] as CFDictionary,
             compressedDataAllocator: nil,
-            outputCallback: callback,
-            refcon: refcon,
+            outputCallback: nil,
+            refcon: nil,
             compressionSessionOut: &compressionSession
         )
 
@@ -98,10 +94,10 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         self.session = session
     }
 
+    // MARK: - Encode
+
     func encode(_ pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> EncodedFrame? {
         guard let session = session else { return nil }
-
-        pendingSampleBuffer = nil
 
         let needsKeyframe = keyframeRequested || frameCount == 0 || (frameCount % config.keyframeInterval == 0)
         keyframeRequested = false
@@ -119,15 +115,25 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         var flags: VTEncodeInfoFlags = []
 
+        // Clear previous output
+        outputSampleBuffer = nil
+
         let status = VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTimestamp,
             duration: duration,
             frameProperties: frameProperties,
-            sourceFrameRefcon: nil,
             infoFlagsOut: &flags
-        )
+        ) { [weak self] (status: OSStatus, _: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?) in
+            guard status == noErr, let sampleBuffer = sampleBuffer else {
+                self?.outputSampleBuffer = nil
+                self?.outputSemaphore.signal()
+                return
+            }
+            self?.outputSampleBuffer = sampleBuffer
+            self?.outputSemaphore.signal()
+        }
 
         guard status == noErr else {
             NSLog("[H264Encoder] Encode failed: status=\(status)")
@@ -136,10 +142,13 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         frameCount += 1
 
-        guard let sampleBuffer = pendingSampleBuffer else {
-            NSLog("[H264Encoder] No sample buffer received from callback")
+        // Wait for the output handler to fire (with timeout to avoid hanging)
+        let waitResult = outputSemaphore.wait(timeout: .now() + 2.0)
+        guard waitResult == .success, let sampleBuffer = outputSampleBuffer else {
+            NSLog("[H264Encoder] Timeout or nil sample buffer from output handler (waitResult=\(waitResult))")
             return nil
         }
+        outputSampleBuffer = nil
 
         return extractNALUnits(from: sampleBuffer, isKeyframe: needsKeyframe, width: width, height: height)
     }
@@ -229,7 +238,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         }
         session = nil
         frameCount = 0
-        pendingSampleBuffer = nil
+        // Signal semaphore in case encode() is blocked waiting
+        outputSemaphore.signal()
     }
 }
 
