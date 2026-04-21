@@ -350,30 +350,123 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
 
     // Publisher telemetry
     if (msg.type === "publisher_telemetry") {
-      const frame = (msg as Record<string, unknown>).frame as Record<string, unknown> | undefined;
-      const relay = (msg as Record<string, unknown>).relay as Record<string, unknown> | undefined;
-      const errors = (msg as Record<string, unknown>).errors as Record<string, unknown> | undefined;
+      const m = msg as Record<string, unknown>;
+      const frame = m.frame as Record<string, unknown> | undefined;
+      const relay = m.relay as Record<string, unknown> | undefined;
+      const errors = m.errors as Record<string, unknown> | undefined;
+      const battery = m.battery as Record<string, unknown> | undefined;
+      const thermal = m.thermal as Record<string, unknown> | undefined;
+      const network = m.network as Record<string, unknown> | undefined;
+      const memory = m.memory as Record<string, unknown> | undefined;
+      const relayLatency = m.relayLatency as Record<string, unknown> | undefined;
+      const disk = m.disk as Record<string, unknown> | undefined;
+      const cellular = m.cellular as Record<string, unknown> | undefined;
+      const display = m.display as Record<string, unknown> | undefined;
+      const camera = m.camera as Record<string, unknown> | undefined;
+      const orientation = m.orientation as string | undefined;
+      const motion = m.motion as Record<string, unknown> | undefined;
+      const bluetooth = m.bluetooth as Record<string, unknown> | undefined;
+      const cpu = m.cpu as Record<string, unknown> | undefined;
+
+      // Frame / relay stats
+      const set = (id: string, text: string) => { const el = document.getElementById(id); if (el) el.textContent = text; };
       if (relay) {
-        const el1 = document.getElementById("t-relay-fps");
-        const el2 = document.getElementById("t-encode-ema");
-        const el3 = document.getElementById("t-relay-dropped");
-        if (el1) el1.textContent = String(typeof frame?.fps === "number" ? (frame.fps as number).toFixed(1) : "--");
-        if (el2) el2.textContent = ((relay.encodeTimeEmaMs as number) ?? 0).toFixed(1) + "ms";
-        if (el3) el3.textContent = String(relay.framesDropped ?? "--");
+        set("t-relay-fps", typeof frame?.fps === "number" ? (frame.fps as number).toFixed(1) : "--");
+        set("t-encode-ema", ((relay.encodeTimeEmaMs as number) ?? 0).toFixed(1) + "ms");
+        set("t-relay-dropped", String(relay.framesDropped ?? "--"));
       }
-      if (errors) {
-        const el = document.getElementById("t-errors");
-        if (el) el.textContent = String(errors.total ?? 0);
-      }
-      const battery = (msg as Record<string, unknown>).battery as Record<string, unknown> | undefined;
+      if (errors) set("t-errors", String(errors.total ?? 0));
+
+      // Battery
       if (battery) {
-        const el = document.getElementById("t-battery");
+        const level = typeof battery.level === "number" && battery.level >= 0 ? Math.round(battery.level * 100) + "%" : "--";
+        const state = typeof battery.state === "string" ? battery.state : "";
+        const lpm = battery.lowPowerMode ? " LPM" : "";
+        set("t-battery", level + (state === "charging" ? " +" : "") + lpm);
+      }
+
+      // Thermal (color-coded)
+      if (thermal) {
+        const s = String(thermal.state ?? "--");
+        const el = document.getElementById("t-thermal");
         if (el) {
-          const level = typeof battery.level === "number" && battery.level >= 0 ? Math.round(battery.level * 100) + "%" : "--";
-          const state = typeof battery.state === "string" ? battery.state : "";
-          const lpm = battery.lowPowerMode ? " LPM" : "";
-          el.textContent = level + (state === "charging" ? " +" : "") + lpm;
+          el.textContent = s;
+          el.style.color = s === "nominal" ? "#50fa7b" : s === "fair" ? "#f1fa8c" : s === "serious" ? "#ffb86c" : s === "critical" ? "#ff5555" : "";
         }
+      }
+
+      // Network
+      if (network) {
+        const t = String(network.type ?? "--");
+        const exp = network.expensive ? " $" : "";
+        set("t-network", t + exp);
+      }
+
+      // Memory
+      if (memory) {
+        const mb = typeof memory.availableMB === "number" ? (memory.availableMB as number).toFixed(0) : "--";
+        set("t-memory", mb + "MB " + String(memory.pressure ?? ""));
+      }
+
+      // Relay RTT
+      if (relayLatency) {
+        const ms = typeof relayLatency.ms === "number" ? (relayLatency.ms as number).toFixed(1) : "--";
+        set("t-relay-rtt", ms + "ms");
+      }
+
+      // Disk
+      if (disk) {
+        const avail = typeof disk.availableGB === "number" ? (disk.availableGB as number).toFixed(1) : "--";
+        const total = typeof disk.totalGB === "number" ? (disk.totalGB as number).toFixed(0) : "--";
+        set("t-disk", avail + "/" + total + "GB");
+      }
+
+      // Cellular (show only when present)
+      if (cellular && cellular.technology) {
+        const tech = String(cellular.technology);
+        const carrier = cellular.carrier ? " (" + String(cellular.carrier) + ")" : "";
+        set("t-cellular", tech + carrier);
+      } else {
+        set("t-cellular", "--");
+      }
+
+      // Display
+      if (display) {
+        const b = typeof display.brightness === "number" ? Math.round((display.brightness as number) * 100) : "--";
+        set("t-display", b + "%");
+      }
+
+      // Camera ISO/Exposure
+      if (camera && camera.iso != null) {
+        const iso = typeof camera.iso === "number" ? (camera.iso as number).toFixed(0) : "--";
+        const exp = typeof camera.exposureMs === "number" ? (camera.exposureMs as number).toFixed(1) : "--";
+        set("t-camera", "ISO" + iso + " " + exp + "ms");
+      } else {
+        set("t-camera", "--");
+      }
+
+      // Orientation
+      set("t-orientation", orientation ?? "--");
+
+      // Motion
+      if (motion) {
+        const x = typeof motion.x === "number" ? (motion.x as number).toFixed(2) : "0";
+        const y = typeof motion.y === "number" ? (motion.y as number).toFixed(2) : "0";
+        const z = typeof motion.z === "number" ? (motion.z as number).toFixed(2) : "0";
+        const stat = motion.stationary ? " idle" : "";
+        set("t-motion", "x" + x + " y" + y + " z" + z + stat);
+      }
+
+      // Bluetooth
+      if (bluetooth) {
+        const bs = String(bluetooth.state ?? "--");
+        set("t-bluetooth", bs);
+      }
+
+      // CPU
+      if (cpu) {
+        const pct = typeof cpu.usagePercent === "number" ? (cpu.usagePercent as number).toFixed(1) : "--";
+        set("t-cpu", pct + "%");
       }
     }
 
