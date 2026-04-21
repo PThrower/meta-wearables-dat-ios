@@ -25,6 +25,7 @@ final class TelemetryService: ObservableObject {
     @Published private(set) var frameCountText: String = "0"
     @Published private(set) var droppedFramesText: String = "0"
     @Published private(set) var deviceInfoText: String = ""
+    @Published private(set) var batteryText: String = "--"
 
     // MARK: - Frame Tracking
 
@@ -86,6 +87,7 @@ final class TelemetryService: ObservableObject {
     init() {
         frameInstants = RingBuffer(capacity: 60)
         recentErrors = RingBuffer(capacity: 20)
+        UIDevice.current.isBatteryMonitoringEnabled = true
     }
 
     // MARK: - Attach to SDK
@@ -394,6 +396,29 @@ final class TelemetryService: ObservableObject {
         frameCountText = "\(frameCount)"
         droppedFramesText = "\(droppedFrameGaps)"
 
+        // Battery
+        let batteryLevel = UIDevice.current.batteryLevel
+        let batteryState: UIDevice.BatteryState = UIDevice.current.batteryState
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let stateStr: String
+        switch batteryState {
+        case .unplugged: stateStr = "unplugged"
+        case .charging: stateStr = "charging"
+        case .full: stateStr = "full"
+        case .unknown: stateStr = "unknown"
+        @unknown default: stateStr = "unknown"
+        }
+        let batteryMetrics = BatteryMetrics(
+            level: batteryLevel,
+            state: stateStr,
+            lowPowerMode: lowPower
+        )
+        if batteryLevel >= 0 {
+            batteryText = "\(Int(batteryLevel * 100))%\(lowPower ? " LPM" : "")\(batteryState == .charging ? " +" : "")"
+        } else {
+            batteryText = "--"
+        }
+
         // Build snapshot
         let frameMetrics = FrameMetrics(
             effectiveFPS: effectiveFPS,
@@ -429,6 +454,7 @@ final class TelemetryService: ObservableObject {
             connection: connectionMetrics,
             session: sessionMetrics,
             errors: errorMetrics,
+            battery: batteryMetrics,
             photoCapture: lastPhotoCapture,
             snapshotTimestamp: ContinuousClock.Instant.now
         )

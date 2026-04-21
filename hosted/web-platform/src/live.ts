@@ -365,6 +365,16 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
         const el = document.getElementById("t-errors");
         if (el) el.textContent = String(errors.total ?? 0);
       }
+      const battery = (msg as Record<string, unknown>).battery as Record<string, unknown> | undefined;
+      if (battery) {
+        const el = document.getElementById("t-battery");
+        if (el) {
+          const level = typeof battery.level === "number" && battery.level >= 0 ? Math.round(battery.level * 100) + "%" : "--";
+          const state = typeof battery.state === "string" ? battery.state : "";
+          const lpm = battery.lowPowerMode ? " LPM" : "";
+          el.textContent = level + (state === "charging" ? " +" : "") + lpm;
+        }
+      }
     }
 
     // BT link state changed

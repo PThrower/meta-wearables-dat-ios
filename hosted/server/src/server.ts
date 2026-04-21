@@ -868,6 +868,9 @@ const server = Bun.serve<WsData>({
               session.publisher.systemVersion = strField(cmd.systemVersion);
               session.publisher.appVersion = strField(cmd.appVersion);
               session.publisher.buildNumber = strField(cmd.buildNumber);
+              session.publisher.batteryLevel = typeof cmd.batteryLevel === "number" ? cmd.batteryLevel : null;
+              session.publisher.batteryState = strField(cmd.batteryState);
+              session.publisher.lowPowerMode = !!cmd.lowPowerMode;
 
               // Update session metadata
               session.metadata.deviceName = strField(cmd.deviceName);
@@ -896,6 +899,7 @@ const server = Bun.serve<WsData>({
                   wearableId: session.publisher.wearableId ?? undefined,
                   appVersion: session.publisher.appVersion ?? undefined,
                   buildNumber: session.publisher.buildNumber ?? undefined,
+                  batteryLevel: session.publisher.batteryLevel ?? undefined,
                   status: session.publisher.standby ? "standby" : "online",
                   lastSessionId: sessionId,
                 }));
@@ -1009,6 +1013,12 @@ const server = Bun.serve<WsData>({
               }
               broadcastToViewers(session, { type: "stream_changed", streaming: !!cmd.streaming });
             } else if (cmd.type === "publisher_telemetry") {
+              // Update battery from telemetry
+              if (cmd.battery && session.publisher) {
+                session.publisher.batteryLevel = typeof cmd.battery.level === "number" ? cmd.battery.level : null;
+                session.publisher.batteryState = typeof cmd.battery.state === "string" ? cmd.battery.state : null;
+                session.publisher.lowPowerMode = !!cmd.battery.lowPowerMode;
+              }
               broadcastToViewers(session, { type: "publisher_telemetry", ...cmd });
             } else if (cmd.type === "link_state_changed") {
               session.linkState = cmd.state as string || "unknown";

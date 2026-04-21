@@ -624,7 +624,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
             let systemVersion = UIDevice.current.systemVersion
 
-            let hello: [String: String] = [
+            let hello: [String: Any] = [
                 "type": "hello",
                 "deviceId": deviceId,
                 "deviceName": deviceName,
@@ -634,6 +634,17 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 "wearableType": capturedWearableType ?? "",
                 "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
                 "buildNumber": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
+                "batteryLevel": UIDevice.current.batteryLevel,
+                "batteryState": {
+                    switch UIDevice.current.batteryState {
+                    case .unplugged: return "unplugged"
+                    case .charging: return "charging"
+                    case .full: return "full"
+                    case .unknown: return "unknown"
+                    @unknown default: return "unknown"
+                    }
+                }(),
+                "lowPowerMode": ProcessInfo.processInfo.isLowPowerModeEnabled,
             ]
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),

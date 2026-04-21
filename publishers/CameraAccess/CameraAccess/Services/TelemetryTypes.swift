@@ -82,6 +82,14 @@ struct ErrorMetrics: Sendable {
     let recentErrors: [ErrorEvent]
 }
 
+struct BatteryMetrics: Sendable {
+    /// 0.0 to 1.0, or -1.0 if unavailable
+    let level: Float
+    /// "unplugged", "charging", "full", "unknown"
+    let state: String
+    let lowPowerMode: Bool
+}
+
 // MARK: - Snapshot
 
 struct TelemetrySnapshot: Sendable {
@@ -89,6 +97,7 @@ struct TelemetrySnapshot: Sendable {
     let connection: ConnectionMetrics?
     let session: SessionMetrics
     let errors: ErrorMetrics
+    let battery: BatteryMetrics
     let photoCapture: PhotoCaptureEvent?
     let snapshotTimestamp: ContinuousClock.Instant
 }

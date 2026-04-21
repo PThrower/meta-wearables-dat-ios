@@ -115,6 +115,9 @@ export interface Publisher {
   systemVersion: string | null;
   appVersion: string | null;
   buildNumber: string | null;
+  batteryLevel: number | null;
+  batteryState: string | null;
+  lowPowerMode: boolean;
   standby: boolean;
 }
 

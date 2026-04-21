@@ -116,6 +116,7 @@ export function upsertDevice(params: {
   wearableId?: string;
   appVersion?: string;
   buildNumber?: string;
+  batteryLevel?: number;
   status?: string;
   lastSessionId?: string;
 }) {
@@ -123,8 +124,8 @@ export function upsertDevice(params: {
     const db = getDbRaw();
     const ts = now();
     db.prepare(`
-      INSERT INTO devices (id, name, model, system_version, wearable_type, wearable_id, app_version, build_number, status, last_seen_at, last_session_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO devices (id, name, model, system_version, wearable_type, wearable_id, app_version, build_number, battery_level, status, last_seen_at, last_session_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = COALESCE(excluded.name, devices.name),
         model = COALESCE(excluded.model, devices.model),
@@ -133,6 +134,7 @@ export function upsertDevice(params: {
         wearable_id = COALESCE(excluded.wearable_id, devices.wearable_id),
         app_version = COALESCE(excluded.app_version, devices.app_version),
         build_number = COALESCE(excluded.build_number, devices.build_number),
+        battery_level = COALESCE(excluded.battery_level, devices.battery_level),
         status = excluded.status,
         last_seen_at = excluded.last_seen_at,
         last_session_id = COALESCE(excluded.last_session_id, devices.last_session_id),
@@ -146,6 +148,7 @@ export function upsertDevice(params: {
       params.wearableId ?? null,
       params.appVersion ?? null,
       params.buildNumber ?? null,
+      params.batteryLevel ?? null,
       params.status ?? "online",
       ts,
       params.lastSessionId ?? null,

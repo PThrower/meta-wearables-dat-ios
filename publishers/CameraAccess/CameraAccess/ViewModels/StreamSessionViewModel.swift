@@ -866,6 +866,11 @@ class StreamSessionViewModel: ObservableObject {
         "total": snap.errors.totalErrors,
         "recent": snap.errors.recentErrors.map { $0.errorDescription },
       ],
+      "battery": [
+        "level": snap.battery.level,
+        "state": snap.battery.state,
+        "lowPowerMode": snap.battery.lowPowerMode,
+      ],
     ]
 
     // Now Playing removed — iOS 18 blocks MediaRemote for third-party apps

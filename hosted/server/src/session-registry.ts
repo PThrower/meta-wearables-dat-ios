@@ -263,6 +263,9 @@ export class SessionRegistry {
       systemVersion: null,
       appVersion: null,
       buildNumber: null,
+      batteryLevel: null,
+      batteryState: null,
+      lowPowerMode: false,
       standby: true,
     };
     session.publisher = publisher;
