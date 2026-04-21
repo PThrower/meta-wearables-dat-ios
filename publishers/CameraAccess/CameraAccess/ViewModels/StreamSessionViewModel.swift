@@ -499,20 +499,44 @@ class StreamSessionViewModel: ObservableObject {
 
   /// Handle wake from APNs push notification.
   /// Reconnects standby relay if currently disconnected (app was backgrounded/killed).
+  /// Requests background time so the WebSocket stays alive long enough to receive start_stream.
   @MainActor
   func handleWakeFromPush() {
     guard relayMode == .disconnected else {
       NSLog("[StreamSession] Wake push ignored — already connected (relayMode=\(relayMode))")
       return
     }
+
+    // Request background execution time (~30s) to keep WebSocket alive
+    if wakeBackgroundTask == .invalid {
+      wakeBackgroundTask = UIApplication.shared.beginBackgroundTask(
+        withName: "StreamSession.wakeStandby"
+      ) { [weak self] in
+        self?.endWakeBackgroundTask()
+      }
+      NSLog("[StreamSession] Wake background task started")
+    }
+
     NSLog("[StreamSession] Wake push received — reconnecting standby relay")
     Task { await startStandbyRelay() }
+  }
+
+  private var wakeBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+  private func endWakeBackgroundTask() {
+    guard wakeBackgroundTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(wakeBackgroundTask)
+    wakeBackgroundTask = .invalid
+    NSLog("[StreamSession] Wake background task ended")
   }
 
   /// Transition from standby to active — start camera, wait for BT link, then audio + telemetry.
   /// Called when start_stream is received while in standby.
   private func activateFromStandby() async {
     guard relayMode == .standby else { return }
+
+    // Wake task no longer needed — streaming has its own background handling
+    endWakeBackgroundTask()
 
     // Check mic permission
     guard await checkMicPermission() else {
@@ -816,6 +840,7 @@ class StreamSessionViewModel: ObservableObject {
     relayMode = .disconnected
     activeAppId = nil
     boundingBoxes = []
+    endWakeBackgroundTask()
     NSLog("[StreamSession] Relay disconnected")
   }
 

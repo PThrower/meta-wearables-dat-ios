@@ -602,33 +602,22 @@ const server = Bun.serve<WsData>({
           return Response.json({ error: "APNs not configured on server" }, { status: 503 });
         }
 
-        // Send silent push to wake the app
-        console.log(`[wake] Sending silent push to device ${deviceId.slice(0, 8)}...`);
-        const silentResult = await sendSilentWake(deviceToken, body.sessionId);
+        // Send both silent + visible push simultaneously.
+        // Silent push wakes the app in background (when iOS delivers it).
+        // Visible push shows a banner the user can tap (reliable even when silent is throttled).
+        console.log(`[wake] Sending silent + visible push to device ${deviceId.slice(0, 8)}...`);
+        const [silentResult, visibleResult] = await Promise.all([
+          sendSilentWake(deviceToken, body.sessionId),
+          sendVisibleWake(deviceToken, body.sessionId),
+        ]);
 
         if (silentResult.reason === "Unregistered" || silentResult.reason === "BadDeviceToken") {
           dbWriter.enqueue(q.clearDeviceToken(deviceId));
           return Response.json({ error: "Device token invalid", reason: silentResult.reason }, { status: 410 });
         }
 
-        // Schedule visible notification fallback after 15s if device doesn't connect
-        const wakeTimeout = setTimeout(async () => {
-          const checkSession = registry.findByDevice(deviceId);
-          if (!checkSession) {
-            console.log(`[wake] Device ${deviceId.slice(0, 8)} still not connected after 15s — sending visible fallback`);
-            const visibleResult = await sendVisibleWake(deviceToken, body.sessionId);
-            if (visibleResult.reason === "Unregistered" || visibleResult.reason === "BadDeviceToken") {
-              dbWriter.enqueue(q.clearDeviceToken(deviceId));
-            }
-          } else {
-            console.log(`[wake] Device ${deviceId.slice(0, 8)} connected — no fallback needed`);
-          }
-        }, 15_000);
-
-        // Don't let the timeout block server shutdown
-        wakeTimeout.unref();
-
-        return Response.json({ ok: true, status: "silent_push_sent" });
+        console.log(`[wake] Silent: ${silentResult.success ? "sent" : silentResult.reason}, Visible: ${visibleResult.success ? "sent" : visibleResult.reason}`);
+        return Response.json({ ok: true, status: "push_sent", silent: silentResult.success, visible: visibleResult.success });
       } catch (e) {
         const apnsStatus = {
           configured: isApnsConfigured(),

@@ -78,8 +78,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
   ) {
     let userInfo = response.notification.request.content.userInfo
     NSLog("[PushNotification] Notification tapped: \(userInfo)")
-    // The app is now foregrounded — onWakeFromPush will be triggered
-    // via the ViewModel wiring if relayMode == .disconnected
+
+    // Route visible notification taps through the same wake flow as silent pushes.
+    // This handles the case where the user taps the "Stream Ready" fallback notification.
+    let wakeType = userInfo["wake"] as? String
+    if wakeType == "standby" {
+      NSLog("[PushNotification] Wake notification tapped — triggering standby connect")
+      pushService.onWakeFromPush?()
+    }
+
     completionHandler()
   }
 
