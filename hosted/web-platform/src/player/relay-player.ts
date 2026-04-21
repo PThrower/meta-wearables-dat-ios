@@ -4,7 +4,8 @@
  * Migrated from relay-player.js to TypeScript with shared protocol imports.
  */
 
-import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecType } from "@ebowwa/relay-protocol";
+import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecType,
+         VIDEO_CODEC_JPEG, VIDEO_CODEC_H264, H264_FLAG_KEYFRAME } from "@ebowwa/relay-protocol";
 import { buildFrauFrame } from "./frau-builder.js";
 import { windowedSincResample } from "./resampler.js";
 import { getConfig } from "../config.js";
@@ -88,6 +89,9 @@ export class RelayPlayer {
   // Latency tracking
   private _firstFrameLocalTime = 0;
   private _firstFrameSenderTime = 0;
+
+  // H.264 decoder (WebCodecs VideoDecoder)
+  private videoDecoder: VideoDecoder | null = null;
 
   // Mic capture (push-to-talk)
   private micStream: MediaStream | null = null;
@@ -589,6 +593,9 @@ export class RelayPlayer {
     const sequence = Number(view.getBigUint64(9, true));
     const width = view.getUint32(17, true);
     const height = view.getUint32(21, true);
+    const codecFlags = buf[25];
+    const codecType = (codecFlags >> 4) & 0x0F;
+    const flags = codecFlags & 0x0F;
     const timestampMs = Number(view.getBigUint64(26, true));
 
     // Validate payload length against actual buffer
@@ -648,26 +655,16 @@ export class RelayPlayer {
     }
     this.lastSequence = sequence;
 
-    // JPEG payload — render to canvas
-    const jpeg = buf.slice(HEADER_SIZE);
-    const blob = new Blob([jpeg], { type: "image/jpeg" });
-    const url = URL.createObjectURL(blob);
-    const img = new Image();
-    img.onload = () => {
-      if (!this.canvas || !this.ctx) return;
-      if (this.canvas.width !== width || this.canvas.height !== height) {
-        this.canvas.width = width;
-        this.canvas.height = height;
-      }
-      this.ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
+    // Codec-aware rendering
+    const payload = buf.slice(HEADER_SIZE);
 
-      // Update overlay dimensions and redraw bounding boxes
-      this.lastVideoWidth = width;
-      this.lastVideoHeight = height;
-      this.drawBoundingBoxes();
-    };
-    img.src = url;
+    if (codecType === VIDEO_CODEC_H264) {
+      // H.264: decode via WebCodecs VideoDecoder
+      this._renderH264Frame(payload, width, height, flags, timestampMs);
+    } else {
+      // JPEG (default): render via Blob -> Image -> Canvas
+      this._renderJPEGFrame(payload, width, height);
+    }
 
     // FPS counter
     this.frameCount++;
@@ -690,6 +687,76 @@ export class RelayPlayer {
     this.cb.onSequence(sequence);
     this.cb.onLatency(absLatency);
     this.cb.onDropped(this.droppedFrames);
+  }
+
+  // --- H.264 rendering (WebCodecs) ---
+
+  private _renderH264Frame(nalPayload: Uint8Array, width: number, height: number, flags: number, timestampMs: number): void {
+    const isKeyframe = (flags & H264_FLAG_KEYFRAME) !== 0;
+
+    // Initialize decoder on first frame or after keyframe loss
+    if (!this.videoDecoder || this.videoDecoder.state === "closed") {
+      if (typeof VideoDecoder === "undefined") {
+        console.warn("[RelayPlayer] WebCodecs VideoDecoder not supported — cannot decode H.264");
+        return;
+      }
+      this.videoDecoder = new VideoDecoder({
+        output: (frame) => {
+          if (!this.canvas || !this.ctx) { frame.close(); return; }
+          if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
+            this.canvas.width = frame.displayWidth;
+            this.canvas.height = frame.displayHeight;
+          }
+          this.ctx.drawImage(frame, 0, 0);
+          frame.close();
+          this.lastVideoWidth = frame.displayWidth;
+          this.lastVideoHeight = frame.displayHeight;
+          this.drawBoundingBoxes();
+        },
+        error: (e) => {
+          console.error("[RelayPlayer] VideoDecoder error:", e);
+        },
+      });
+      this.videoDecoder.configure({
+        codec: "avc1.42001E", // Baseline 3.0
+        optimizeForLatency: true,
+      });
+    }
+
+    // Must wait for a keyframe before decoding deltas
+    if (this.videoDecoder.decodeQueueSize > 0 && !isKeyframe) {
+      // If decoder is backed up, skip non-keyframes to reduce latency
+      return;
+    }
+
+    const chunk = new EncodedVideoChunk({
+      type: isKeyframe ? "key" : "delta",
+      timestamp: timestampMs * 1000, // microseconds
+      data: nalPayload,
+    });
+
+    this.videoDecoder.decode(chunk);
+  }
+
+  // --- JPEG rendering (legacy) ---
+
+  private _renderJPEGFrame(jpegPayload: Uint8Array, width: number, height: number): void {
+    const blob = new Blob([jpegPayload], { type: "image/jpeg" });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      if (!this.canvas || !this.ctx) return;
+      if (this.canvas.width !== width || this.canvas.height !== height) {
+        this.canvas.width = width;
+        this.canvas.height = height;
+      }
+      this.ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      this.lastVideoWidth = width;
+      this.lastVideoHeight = height;
+      this.drawBoundingBoxes();
+    };
+    img.src = url;
   }
 
   // --- Audio engine ---

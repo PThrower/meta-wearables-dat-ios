@@ -1056,14 +1056,18 @@ const server = Bun.serve<WsData>({
               orchestrator.sendAudio(sessionId, pcmPayload);
             }
           } else if (isVideoFrame(buf)) {
-            // Video frame (FRLY)
+            // Video frame (FRLY) — codec-aware routing
             session.publisher.frameCount++;
             session.publisher.totalBytes += buf.length;
             registry.fanout(sessionId, buf);
             session.recorder?.appendVideo(buf);
 
-            // Forward JPEG payload to AI service (if active, rate-limited by service)
-            if (session.activeAppId) {
+            // Decode codec from byte[25]: top nibble = codec type (0=JPEG, 1=H.264)
+            const codecFlags = buf[25];
+            const codecType = (codecFlags >> 4) & 0x0F;
+
+            // Forward payload to AI service (JPEG only — H.264 requires server-side decode)
+            if (session.activeAppId && codecType === 0) {
               const jpegPayload = buf.slice(HEADER_SIZE);
               orchestrator.sendVideoFrame(sessionId, jpegPayload);
             }

@@ -421,8 +421,30 @@ struct StreamConfigSection: View {
         }
       }
 
+      // Relay codec picker
+      HStack(spacing: 6) {
+        Text("Codec")
+          .font(.system(size: 13))
+          .foregroundColor(.secondary)
+          .frame(width: 80, alignment: .leading)
+
+        ForEach(RelayVideoCodec.allCases, id: \.self) { codec in
+          Button {
+            viewModel.videoCodec = codec
+          } label: {
+            Text(codec.displayName)
+              .font(.system(size: 12, weight: viewModel.videoCodec == codec ? .bold : .regular, design: .monospaced))
+              .foregroundColor(viewModel.videoCodec == codec ? .white : .secondary)
+              .padding(.horizontal, 10)
+              .padding(.vertical, 6)
+              .background(viewModel.videoCodec == codec ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .cornerRadius(6)
+          }
+        }
+      }
+
       // Current config summary
-      Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} RAW codec")
+      Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} \(viewModel.videoCodec.displayName)")
         .font(.system(size: 10, design: .monospaced))
         .foregroundColor(.secondary)
         .padding(.top, 2)

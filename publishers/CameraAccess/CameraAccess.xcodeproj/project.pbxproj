@@ -53,6 +53,9 @@
 		PHNCAM00000001 /* PhoneCameraCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = PHNCAM00000002 /* PhoneCameraCapture.swift */; };
 		PHNDEV00000001 /* PhoneDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = PHNDEV00000002 /* PhoneDevice.swift */; };
 		PIPEAOBUILDF01 /* AudioPlaybackStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEAOFILREF01 /* AudioPlaybackStage.swift */; };
+		PIPEENCB001 /* FrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEENCB002 /* FrameEncoder.swift */; };
+		PIPEJPEGB01 /* JPEGFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEJPEGR01 /* JPEGFrameEncoder.swift */; };
+		PIPEH264B01 /* H264FrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEH264R01 /* H264FrameEncoder.swift */; };
 		PIPEDECO01 /* AudioPacket.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO02 /* AudioPacket.swift */; };
 		PIPEDECO03 /* AudioTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO04 /* AudioTransport.swift */; };
 		PIPEDECO05 /* AudioEventBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDECO06 /* AudioEventBus.swift */; };
@@ -146,6 +149,9 @@
 		PHNCAM00000002 /* PhoneCameraCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneCameraCapture.swift; sourceTree = "<group>"; };
 		PHNDEV00000002 /* PhoneDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneDevice.swift; sourceTree = "<group>"; };
 		PIPEAOFILREF01 /* AudioPlaybackStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPlaybackStage.swift; sourceTree = "<group>"; };
+		PIPEENCB002 /* FrameEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameEncoder.swift; sourceTree = "<group>"; };
+		PIPEJPEGR01 /* JPEGFrameEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JPEGFrameEncoder.swift; sourceTree = "<group>"; };
+		PIPEH264R01 /* H264FrameEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264FrameEncoder.swift; sourceTree = "<group>"; };
 		PIPEDECO02 /* AudioPacket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPacket.swift; sourceTree = "<group>"; };
 		PIPEDECO04 /* AudioTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTransport.swift; sourceTree = "<group>"; };
 		PIPEDECO06 /* AudioEventBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEventBus.swift; sourceTree = "<group>"; };
@@ -330,6 +336,7 @@
 				PIPE00C02E91PIPE01 /* Stages */,
 				PIPE00202E91PIPE01 /* FramePipelineTypes.swift */,
 				PIPE00402E91PIPE01 /* FramePipelineManager.swift */,
+				PIPEENCB002 /* FrameEncoder.swift */,
 				PIPE00602E91PIPE01 /* ThrottledStage.swift */,
 				PHNDEV00000002 /* PhoneDevice.swift */,
 				PIPEDECO02 /* AudioPacket.swift */,
@@ -357,6 +364,8 @@
 				PIPEDECO08 /* AudioRelayStage.swift */,
 				PIPETAPC02 /* AudioTapClient.swift */,
 				PHNCAM00000002 /* PhoneCameraCapture.swift */,
+				PIPEJPEGR01 /* JPEGFrameEncoder.swift */,
+				PIPEH264R01 /* H264FrameEncoder.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -577,6 +586,9 @@
 				PIPEAOBUILDF01 /* AudioPlaybackStage.swift in Sources */,
 				PHNCAM00000001 /* PhoneCameraCapture.swift in Sources */,
 				PHNDEV00000001 /* PhoneDevice.swift in Sources */,
+				PIPEENCB001 /* FrameEncoder.swift in Sources */,
+				PIPEJPEGB01 /* JPEGFrameEncoder.swift in Sources */,
+				PIPEH264B01 /* H264FrameEncoder.swift in Sources */,
 				PIPEDECO01 /* AudioPacket.swift in Sources */,
 				PIPEDECO03 /* AudioTransport.swift in Sources */,
 				PIPEDECO05 /* AudioEventBus.swift in Sources */,

@@ -5,6 +5,12 @@
  * Both protocols share the same framing pattern:
  *   [4-byte magic][1-byte version][4-byte payloadLen][...fields...][2-byte CRC-16][payload]
  *
+ * FRLY byte[25] layout (codec+flags):
+ *   Top 4 bits: codec type (0=JPEG, 1=H.264)
+ *   Bottom 4 bits: codec-specific flags
+ *     JPEG: quality tier (0-15, mapped from 0.0-1.0)
+ *     H.264: bit0=isKeyframe, bit1=hasSPSPPS
+ *
  * Provides a fluent Data builder with LE serialization helpers and CRC.
  */
 
@@ -93,6 +99,64 @@ enum WireProtocol {
         var header = h.finalizeWithCRC()
         header.append(jpegData)
         return header
+    }
+
+    // MARK: - FRLY (Video — codec-aware)
+
+    /// Build an FRLY wire protocol message with codec-aware header.
+    /// Byte [25] encodes codec type + flags:
+    ///   Top nibble: codec (0=JPEG, 1=H.264)
+    ///   Bottom nibble: JPEG quality tier (0-15) or H.264 flags (bit0=keyframe, bit1=hasSPSPPS)
+    static func buildVideoFrame(
+        codec: RelayVideoCodec,
+        payload: Data,
+        sequenceNumber: UInt64,
+        width: Int, height: Int,
+        isKeyframe: Bool,
+        hasParameterSets: Bool,
+        jpegQuality: CGFloat = 0.5
+    ) -> Data {
+        let codecFlags: UInt8
+        switch codec {
+        case .jpeg:
+            // Map quality (0.0-1.0) to 4-bit tier (0-15)
+            let tier = UInt8(max(0, min(15, jpegQuality * 16)))
+            codecFlags = (codec.rawValue << 4) | (tier & 0x0F)
+        case .h264:
+            var flags: UInt8 = 0
+            if isKeyframe { flags |= 0x01 }
+            if hasParameterSets { flags |= 0x02 }
+            codecFlags = (codec.rawValue << 4) | (flags & 0x0F)
+        }
+
+        var h = HeaderBuilder(capacity: 36)
+        h.appendMagic([0x46, 0x52, 0x4C, 0x59]) // "FRLY"
+        h.appendUInt8(1) // version (same version, codec is in byte[25])
+        h.appendUInt32(UInt32(payload.count))
+        h.appendUInt64(sequenceNumber)
+        h.appendUInt32(UInt32(width))
+        h.appendUInt32(UInt32(height))
+        h.appendUInt8(codecFlags)  // codec type + flags
+        h.appendUInt64(UInt64(Date().timeIntervalSince1970 * 1000)) // timestamp
+        var header = h.finalizeWithCRC()
+        header.append(payload)
+        return header
+    }
+
+    // MARK: - FRLY Parsing (codec-aware)
+
+    /// Parse an FRLY header to extract codec type and flags from byte[25].
+    static func parseFRLYCodec(_ data: Data) -> (codec: RelayVideoCodec, flags: UInt8)? {
+        guard data.count >= 36 else { return nil }
+        let prefix = [UInt8](data.prefix(4))
+        guard prefix == [0x46, 0x52, 0x4C, 0x59] else { return nil }
+
+        let codecAndFlags = data[25]
+        let codecRaw = (codecAndFlags >> 4) & 0x0F
+        let flags = codecAndFlags & 0x0F
+
+        guard let codec = RelayVideoCodec(rawValue: codecRaw) else { return nil }
+        return (codec, flags)
     }
 
     // MARK: - FRAU (Audio)

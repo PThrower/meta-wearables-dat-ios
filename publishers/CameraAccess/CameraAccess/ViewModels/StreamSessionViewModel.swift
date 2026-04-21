@@ -106,7 +106,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var isLoadingApps: Bool = false
   @Published var appFetchError: String?
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
-  @Published var videoCodec: VideoCodec = .jpeg
+  @Published var videoCodec: RelayVideoCodec = .jpeg
   @Published var boundingBoxes: [BoundingBox] = []
   @Published var showBboxOverlay: Bool = true
   @Published var audioInputMode: AudioInputMode = .builtInMic {

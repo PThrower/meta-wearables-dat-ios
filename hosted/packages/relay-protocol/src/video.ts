@@ -1,5 +1,5 @@
 /**
- * Video frame (FRLY) parsing — v1
+ * Video frame (FRLY) parsing — codec-aware
  *
  * Wire layout (36 byte header):
  *   [0:4]   magic "FRLY"
@@ -8,13 +8,18 @@
  *   [9:17]  sequence   (u64 LE)
  *   [17:21] width      (u32 LE)
  *   [21:25] height     (u32 LE)
- *   [25]    quality    (u8)
+ *   [25]    codecFlags (u8) — top nibble: codec type, bottom nibble: flags
  *   [26:34] timestamp  (u64 LE, ms)
  *   [34:36] headerCrc16 (u16 LE)
- *   [36:]   JPEG payload
+ *   [36:]   payload (JPEG or H.264 NAL units)
+ *
+ * Codec types: 0=JPEG, 1=H.264
+ * JPEG flags: quality tier (0-15)
+ * H.264 flags: bit0=isKeyframe, bit1=hasSPSPPS
  */
 
-import { FRLY_MAGIC, HEADER_SIZE, PROTOCOL_VERSION, CRC_OFFSET, HEADER_BEFORE_CRC } from "./constants.js";
+import { FRLY_MAGIC, HEADER_SIZE, PROTOCOL_VERSION, CRC_OFFSET, HEADER_BEFORE_CRC,
+         VIDEO_CODEC_JPEG, VIDEO_CODEC_H264, H264_FLAG_KEYFRAME, H264_FLAG_SPSPPS } from "./constants.js";
 import { crc16 } from "./crc16.js";
 
 export function isVideoFrame(buf: Uint8Array): boolean {
@@ -27,6 +32,17 @@ export interface VideoHeader {
   sequence: number;
   width: number;
   height: number;
+  /** Byte[25] raw value — top nibble is codec, bottom nibble is flags */
+  codecFlags: number;
+  /** Decoded codec type: 0=JPEG, 1=H.264 */
+  codecType: number;
+  /** For JPEG: quality tier (0-15). For H.264: flags bits */
+  flags: number;
+  /** H.264: true if this is a keyframe (IDR). JPEG: always true */
+  isKeyframe: boolean;
+  /** H.264: true if payload includes SPS/PPS parameter sets */
+  hasParameterSets: boolean;
+  /** Legacy quality field — byte[25] raw (backward compat for old JPEG-only viewers) */
   quality: number;
   timestampMs: number;
 }
@@ -46,6 +62,9 @@ export function parseVideoHeader(buf: Uint8Array): VideoHeader | null {
   if (expectedCrc !== computedCrc) return null;
 
   const payloadLength = view.getUint32(5, true);
+  const codecFlags = buf[25];
+  const codecType = (codecFlags >> 4) & 0x0F;
+  const flags = codecFlags & 0x0F;
 
   return {
     version,
@@ -53,13 +72,18 @@ export function parseVideoHeader(buf: Uint8Array): VideoHeader | null {
     sequence: Number(view.getBigUint64(9, true)),
     width: view.getUint32(17, true),
     height: view.getUint32(21, true),
-    quality: buf[25],
+    codecFlags,
+    codecType,
+    flags,
+    isKeyframe: codecType === VIDEO_CODEC_H264 ? (flags & H264_FLAG_KEYFRAME) !== 0 : true,
+    hasParameterSets: codecType === VIDEO_CODEC_H264 ? (flags & H264_FLAG_SPSPPS) !== 0 : false,
+    quality: codecFlags, // raw byte[25] for backward compat
     timestampMs: Number(view.getBigUint64(26, true)),
   };
 }
 
 /**
- * Build a FRLY v1 frame (header + JPEG payload).
+ * Build a FRLY v1 frame (header + payload).
  * Returns the complete binary message ready for WebSocket send.
  */
 export function buildVideoFrame(
@@ -93,7 +117,7 @@ export function buildVideoFrame(
   // Height
   view.setUint32(21, height, true);
 
-  // Quality
+  // Quality (legacy — byte[25])
   buf[25] = quality;
 
   // Timestamp
