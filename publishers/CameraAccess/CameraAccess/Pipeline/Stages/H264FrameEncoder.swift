@@ -53,16 +53,15 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     }
 
     private func createSession() throws {
-        let width: Int32 = 1280
-        let height: Int32 = 720
-
+        // Use 1x1 placeholder — VTCompressionSession auto-detects from the
+        // first pixel buffer. The actual encoded dimensions come from
+        // the CMSampleBuffer's format description, not these values.
         var compressionSession: VTCompressionSession?
 
-        // Create with outputCallback=nil — required for the output handler API.
         let status = VTCompressionSessionCreate(
             allocator: nil,
-            width: width,
-            height: height,
+            width: 1,
+            height: 1,
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
             imageBufferAttributes: [
@@ -150,10 +149,10 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         }
         outputSampleBuffer = nil
 
-        return extractNALUnits(from: sampleBuffer, isKeyframe: needsKeyframe, width: width, height: height)
+        return extractNALUnits(from: sampleBuffer, isKeyframe: needsKeyframe, inputWidth: width, inputHeight: height)
     }
 
-    private func extractNALUnits(from sampleBuffer: CMSampleBuffer, isKeyframe: Bool, width: Int, height: Int) -> EncodedFrame? {
+    private func extractNALUnits(from sampleBuffer: CMSampleBuffer, isKeyframe: Bool, inputWidth: Int, inputHeight: Int) -> EncodedFrame? {
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
 
         let length = CMBlockBufferGetDataLength(blockBuffer)
@@ -198,12 +197,21 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         guard !nalData.isEmpty else { return nil }
 
+        // Get actual encoded dimensions from the format description
+        var encodedWidth = inputWidth
+        var encodedHeight = inputHeight
+        if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
+            let dims = CMVideoFormatDescriptionGetDimensions(formatDesc)
+            encodedWidth = Int(dims.width)
+            encodedHeight = Int(dims.height)
+        }
+
         return EncodedFrame(
             payload: nalData,
             isKeyframe: isKeyframe,
             hasParameterSets: hasParameterSets,
-            width: width,
-            height: height
+            width: encodedWidth,
+            height: encodedHeight
         )
     }
 
