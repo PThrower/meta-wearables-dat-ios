@@ -1025,6 +1025,9 @@ const server = Bun.serve<WsData>({
               broadcastToViewers(session, { type: "link_state_changed", state: session.linkState });
             } else if (cmd.type === "publisher_error") {
               broadcastToViewers(session, { type: "publisher_error", error: cmd.error, state: cmd.state });
+            } else if (cmd.type === "codec_changed") {
+              console.log(`[relay] Publisher codec changed: codec=${cmd.codec} session=${sessionId}`);
+              broadcastToViewers(session, { type: "codec_changed", codec: cmd.codec });
             } else if (cmd.type === "spoken_text") {
               broadcastToViewers(session, { type: "spoken_text", text: cmd.text });
             } else if (cmd.type === "standby") {
@@ -1249,6 +1252,16 @@ const server = Bun.serve<WsData>({
               const publisherWs = session.publisher?.ws;
               if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
                 publisherWs.send(JSON.stringify({ type: "speak_text", text: cmd.text.slice(0, 500) }));
+              }
+            } else if (cmd.type === "set_codec" && typeof cmd.codec === "string") {
+              // Viewer -> Server -> Publisher: relay codec switch command
+              const codec = (cmd.codec as string).toLowerCase();
+              if (["jpeg", "h264"].includes(codec)) {
+                console.log(`[relay] Codec change from viewer: codec=${codec} session=${sessionId}`);
+                const publisherWs = session.publisher?.ws;
+                if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
+                  publisherWs.send(JSON.stringify({ type: "set_codec", codec }));
+                }
               }
             }
           } catch (err) { console.warn("[relay] Viewer message parse error:", err); }

@@ -290,8 +290,20 @@ export class RelayPlayer {
     this.disconnect();
     this.stopMic();
     this._cleanupAudio();
+    if (this.videoDecoder && this.videoDecoder.state !== "closed") {
+      this.videoDecoder.close();
+    }
+    this.videoDecoder = null;
     this.canvas = null;
     this.ctx = null;
+  }
+
+  /** Reset the H.264 decoder (call on codec switch to flush stale state). */
+  resetVideoDecoder(): void {
+    if (this.videoDecoder && this.videoDecoder.state !== "closed") {
+      this.videoDecoder.close();
+    }
+    this.videoDecoder = null;
   }
 
   setQuality(preset: string): void {

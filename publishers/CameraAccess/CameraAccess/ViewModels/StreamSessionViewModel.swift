@@ -763,6 +763,23 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // Codec change from viewer
+      if msgType == "set_codec", let codec = msg["codec"] as? String {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          let newCodec: RelayVideoCodec
+          switch codec {
+          case "h264": newCodec = .h264
+          default: newCodec = .jpeg
+          }
+          guard newCodec != self.videoCodec else { return }
+          self.videoCodec = newCodec
+          await self.configureRelayEncoder()
+          await self.relayStage.sendJson(["type": "codec_changed", "codec": newCodec == .h264 ? "h264" : "jpeg"])
+          NSLog("[StreamSession] Codec switched to \(newCodec) by viewer")
+        }
+      }
+
       // Audio gain control from viewer
       if msgType == "set_audio_gain",
          let codecType = msg["codecType"] as? Int,

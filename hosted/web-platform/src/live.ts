@@ -59,6 +59,21 @@ micSelector.addEventListener("click", (e) => {
   player.sendJson({ type: "set_audio_mode", mode: btn.dataset.mode });
 });
 
+// Codec selector buttons
+const codecSelector = document.getElementById("codecSelector")!;
+function setCodecActive(codec: string): void {
+  codecSelector.querySelectorAll(".mic-btn").forEach((btn) => {
+    btn.classList.toggle("active", (btn as HTMLElement).dataset.codec === codec);
+  });
+}
+codecSelector.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest(".mic-btn") as HTMLElement | null;
+  if (!btn?.dataset.codec) return;
+  if (btn.classList.contains("active")) return;
+  if (!player) return;
+  player.sendJson({ type: "set_codec", codec: btn.dataset.codec });
+});
+
 // Control buttons
 document.getElementById("btnCapture")!.addEventListener("click", () => {
   if (player) player.sendJson({ type: "capture_photo" });
@@ -336,6 +351,14 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
       setMicActive(mode);
     }
 
+    // Codec changed (from publisher via server)
+    if (msg.type === "codec_changed") {
+      const codec = (msg as { codec: string }).codec;
+      setCodecActive(codec);
+      showToast("Codec: " + codec.toUpperCase(), "info");
+      if (player) player.resetVideoDecoder();
+    }
+
     // Photo captured
     if (msg.type === "photo_captured") {
       showToast("Photo captured", "info");
@@ -393,6 +416,11 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
         set("t-relay-fps", typeof frame?.fps === "number" ? (frame.fps as number).toFixed(1) : "--");
         set("t-encode-ema", ((relay.encodeTimeEmaMs as number) ?? 0).toFixed(1) + "ms");
         set("t-relay-dropped", String(relay.framesDropped ?? "--"));
+        // Sync codec selector with publisher's current codec
+        const codecVal = relay.videoCodec as number | undefined;
+        if (typeof codecVal === "number") {
+          setCodecActive(codecVal === 1 ? "h264" : "jpeg");
+        }
       }
       if (errors) set("t-errors", String(errors.total ?? 0));
 
