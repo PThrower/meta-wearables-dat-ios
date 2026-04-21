@@ -98,6 +98,20 @@ export class RelayPlayer {
   private mseRafId: number = 0;
   private useMSE: boolean = false;
 
+  // H.264 debug state (drawn on canvas for live diagnostics)
+  private _h264Debug = {
+    framesIn: 0,
+    nalsParsed: 0,
+    vclNals: 0,
+    spsFound: false,
+    ppsFound: false,
+    decoderState: "none",
+    decoderPath: "",
+    lastError: "",
+    codecStr: "",
+    avccSize: 0,
+  };
+
   // Mic capture (push-to-talk)
   private micStream: MediaStream | null = null;
   private micContext: AudioContext | null = null;
@@ -690,6 +704,7 @@ export class RelayPlayer {
 
     if (codecType === VIDEO_CODEC_H264) {
       // H.264: dual decoder path — WebCodecs (Chrome/Edge) or MSE/jMuxer (Safari/Firefox)
+      this._h264Debug.framesIn++;
       const hasWebCodecs = typeof VideoDecoder !== "undefined";
 
       if (!hasWebCodecs && !this.useMSE) {
@@ -699,11 +714,16 @@ export class RelayPlayer {
 
       if (this.useMSE) {
         // MSE path: feed raw Annex B NALs to jMuxer
+        this._h264Debug.decoderPath = "MSE";
         this._feedMSE(payload, flags);
       } else if (hasWebCodecs) {
         // WebCodecs path: Annex B → AVCC → VideoDecoder
+        this._h264Debug.decoderPath = "WebCodecs";
         this._renderH264Frame(payload, width, height, flags, timestampMs);
       }
+
+      // Draw debug overlay on canvas
+      this._drawH264Debug();
     } else {
       // JPEG (default): render via Blob -> Image -> Canvas
       this._renderJPEGFrame(payload, width, height);
@@ -889,17 +909,21 @@ export class RelayPlayer {
 
   private _renderH264Frame(nalPayload: Uint8Array, width: number, height: number, flags: number, timestampMs: number): void {
     const isKeyframe = (flags & H264_FLAG_KEYFRAME) !== 0;
+    const d = this._h264Debug;
 
     // Parse all NAL units from Annex B payload
     const nals = this._parseAnnexBNals(nalPayload);
+    d.nalsParsed = nals.length;
     if (nals.length === 0) {
-      console.warn("[RelayPlayer] H.264: no NALs parsed from", nalPayload.length, "bytes, flags=", flags);
+      d.lastError = `no NALs from ${nalPayload.length}B flags=${flags}`;
       return;
     }
 
     // Extract SPS (type 7) and PPS (type 8) from keyframes
     const spsNals = nals.filter(n => n.type === 7).map(n => n.data);
     const ppsNals = nals.filter(n => n.type === 8).map(n => n.data);
+    d.spsFound = spsNals.length > 0;
+    d.ppsFound = ppsNals.length > 0;
     const hasNewParams = spsNals.length > 0 && ppsNals.length > 0;
 
     if (hasNewParams) {
@@ -908,7 +932,11 @@ export class RelayPlayer {
 
     // Strip SPS/PPS from NALs — only pass VCL (slice) NALs to decoder
     const vclNals = nals.filter(n => n.type !== 7 && n.type !== 8).map(n => n.data);
-    if (vclNals.length === 0) return;
+    d.vclNals = vclNals.length;
+    if (vclNals.length === 0) {
+      d.lastError = "no VCL NALs";
+      return;
+    }
 
     // Convert to AVCC format (4-byte length-prefixed)
     const avccData = this._annexBToAvcc(vclNals);
@@ -916,13 +944,13 @@ export class RelayPlayer {
     // Initialize or reconfigure decoder
     if (!this.videoDecoder || this.videoDecoder.state === "closed") {
       if (typeof VideoDecoder === "undefined") {
-        console.warn("[RelayPlayer] WebCodecs VideoDecoder not supported — cannot decode H.264");
+        d.lastError = "VideoDecoder undefined";
         return;
       }
 
       // Need SPS/PPS before we can configure
       if (this._h264ParameterSets.length === 0) {
-        // First keyframe with SPS/PPS hasn't arrived yet — skip
+        d.lastError = "no SPS/PPS yet";
         return;
       }
 
@@ -935,41 +963,56 @@ export class RelayPlayer {
         return nalType === 8;
       });
 
-      if (currentSps.length === 0 || currentPps.length === 0) return;
+      if (currentSps.length === 0 || currentPps.length === 0) {
+        d.lastError = "SPS/PPS filter empty";
+        return;
+      }
 
       const avcC = this._buildAvcC(currentSps, currentPps);
-
-      this.videoDecoder = new VideoDecoder({
-        output: (frame) => {
-          if (!this.canvas || !this.ctx) { frame.close(); return; }
-          if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
-            this.canvas.width = frame.displayWidth;
-            this.canvas.height = frame.displayHeight;
-          }
-          this.ctx.drawImage(frame, 0, 0);
-          frame.close();
-          this.lastVideoWidth = frame.displayWidth;
-          this.lastVideoHeight = frame.displayHeight;
-          this.drawBoundingBoxes();
-        },
-        error: (e) => {
-          console.error("[RelayPlayer] VideoDecoder error:", e);
-        },
-      });
+      d.avccSize = avcC.length;
 
       // Derive codec string from SPS: profile_idc at byte[1], level_idc at byte[3]
       const profile = currentSps[0].length > 1 ? currentSps[0][1] : 0x42;
       const compat = currentSps[0].length > 2 ? currentSps[0][2] : 0x00;
       const level = currentSps[0].length > 3 ? currentSps[0][3] : 0x1E;
       const codecStr = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
+      d.codecStr = codecStr;
 
-      this.videoDecoder.configure({
-        codec: codecStr,
-        optimizeForLatency: true,
-        description: avcC,
-      });
-      console.log("[RelayPlayer] VideoDecoder configured:", codecStr, "avcC:", avcC.length, "bytes");
+      try {
+        this.videoDecoder = new VideoDecoder({
+          output: (frame) => {
+            if (!this.canvas || !this.ctx) { frame.close(); return; }
+            if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
+              this.canvas.width = frame.displayWidth;
+              this.canvas.height = frame.displayHeight;
+            }
+            this.ctx.drawImage(frame, 0, 0);
+            frame.close();
+            this.lastVideoWidth = frame.displayWidth;
+            this.lastVideoHeight = frame.displayHeight;
+            this.drawBoundingBoxes();
+          },
+          error: (e) => {
+            d.lastError = String(e);
+            console.error("[RelayPlayer] VideoDecoder error:", e);
+          },
+        });
+
+        this.videoDecoder.configure({
+          codec: codecStr,
+          optimizeForLatency: true,
+          description: avcC,
+        });
+        d.decoderState = this.videoDecoder.state;
+        console.log("[RelayPlayer] VideoDecoder configured:", codecStr, "avcC:", avcC.length, "bytes");
+      } catch (e) {
+        d.lastError = `init: ${e}`;
+        console.error("[RelayPlayer] VideoDecoder init failed:", e);
+        return;
+      }
     }
+
+    d.decoderState = this.videoDecoder?.state ?? "?";
 
     // If decoder is backed up (queue > 3), skip non-keyframes to reduce latency
     if (this.videoDecoder.decodeQueueSize > 3 && !isKeyframe) {
@@ -983,6 +1026,35 @@ export class RelayPlayer {
     });
 
     this.videoDecoder.decode(chunk);
+  }
+
+  /** Draw H.264 debug info overlay on canvas (visible diagnostics). */
+  private _drawH264Debug(): void {
+    if (!this.ctx || !this.canvas) return;
+    const d = this._h264Debug;
+    const lines = [
+      `H.264 ${d.decoderPath}`,
+      `frames: ${d.framesIn}`,
+      `NALs: ${d.nalsParsed}  VCL: ${d.vclNals}`,
+      `SPS: ${d.spsFound}  PPS: ${d.ppsFound}`,
+      `decoder: ${d.decoderState}`,
+      `codec: ${d.codecStr || "--"}`,
+      `avcC: ${d.avccSize || 0}B`,
+    ];
+    if (d.lastError) lines.push(`ERR: ${d.lastError}`);
+
+    const x = 8, lineH = 14, pad = 4;
+    const boxH = lines.length * lineH + pad * 2;
+    const boxW = 200;
+    this.ctx.fillStyle = "rgba(0,0,0,0.75)";
+    this.ctx.fillRect(x, this.canvas.height - boxH - 8, boxW, boxH);
+    this.ctx.fillStyle = "#0f0";
+    this.ctx.font = "11px monospace";
+    this.ctx.textAlign = "left";
+    lines.forEach((line, i) => {
+      this.ctx.fillStyle = line.startsWith("ERR") ? "#f55" : "#0f0";
+      this.ctx.fillText(line, x + pad, this.canvas.height - boxH - 8 + pad + lineH * (i + 1) - 3);
+    });
   }
 
   // --- JPEG rendering (legacy) ---
