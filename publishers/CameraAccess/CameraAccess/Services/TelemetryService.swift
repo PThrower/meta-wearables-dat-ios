@@ -196,10 +196,12 @@ final class TelemetryService: ObservableObject {
     // MARK: - Init
 
     init() {
+        NSLog("[TelemetryService] init start")
         frameInstants = RingBuffer(capacity: 60)
         recentErrors = RingBuffer(capacity: 20)
         UIDevice.current.isBatteryMonitoringEnabled = true
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NSLog("[TelemetryService] battery+orientation OK")
 
         pathMonitor.pathUpdateHandler = { [weak self] path in
             Task { @MainActor [weak self] in
@@ -220,6 +222,7 @@ final class TelemetryService: ObservableObject {
             }
         }
         pathMonitor.start(queue: monitorQueue)
+        NSLog("[TelemetryService] network monitor started")
 
         // Accelerometer at 1Hz for telemetry
         if motionManager.isAccelerometerAvailable {
@@ -233,6 +236,7 @@ final class TelemetryService: ObservableObject {
         }
 
         // Bluetooth state monitoring
+        NSLog("[TelemetryService] starting BT setup")
         let wrapper = BTDelegateWrapper { [weak self] state in
             Task { @MainActor [weak self] in
                 self?.currentBTState = state
@@ -241,8 +245,10 @@ final class TelemetryService: ObservableObject {
         }
         btDelegateWrapper = wrapper
         btManager = CBCentralManager(delegate: wrapper, queue: nil)
+        NSLog("[TelemetryService] BT OK")
 
         // Location monitoring
+        NSLog("[TelemetryService] starting location setup")
         let locDelegate = LocationDelegate { [weak self] location in
             Task { @MainActor [weak self] in
                 self?.currentLocation = location
@@ -256,6 +262,7 @@ final class TelemetryService: ObservableObject {
         locManager.requestWhenInUseAuthorization()
         locManager.startUpdatingLocation()
         locationManager = locManager
+        NSLog("[TelemetryService] location OK")
 
         // Gyroscope at 1Hz
         if motionManager.isGyroAvailable {
@@ -286,9 +293,11 @@ final class TelemetryService: ObservableObject {
                 self.currentPressureKPa = data.pressure.doubleValue
             }
         }
+        NSLog("[TelemetryService] barometer OK")
 
         // Proximity monitoring
         UIDevice.current.isProximityMonitoringEnabled = true
+        NSLog("[TelemetryService] init complete")
     }
 
     // MARK: - Attach to SDK

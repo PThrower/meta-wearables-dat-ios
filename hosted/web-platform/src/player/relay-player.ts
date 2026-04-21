@@ -671,7 +671,22 @@ export class RelayPlayer {
     const payload = buf.slice(HEADER_SIZE);
 
     if (codecType === VIDEO_CODEC_H264) {
-      // H.264: decode via WebCodecs VideoDecoder
+      // H.264: decode via WebCodecs VideoDecoder (Chrome/Edge only — NOT Safari)
+      if (typeof VideoDecoder === "undefined") {
+        // Show fallback message on canvas
+        if (this.ctx && this.canvas) {
+          this.ctx.fillStyle = "#000";
+          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+          this.ctx.fillStyle = "#ff5555";
+          this.ctx.font = "bold 14px monospace";
+          this.ctx.textAlign = "center";
+          this.ctx.fillText("H.264 requires Chrome/Edge", this.canvas.width / 2, this.canvas.height / 2 - 10);
+          this.ctx.fillStyle = "#888";
+          this.ctx.font = "12px monospace";
+          this.ctx.fillText("Safari does not support WebCodecs VideoDecoder", this.canvas.width / 2, this.canvas.height / 2 + 12);
+        }
+        return;
+      }
       this._renderH264Frame(payload, width, height, flags, timestampMs);
     } else {
       // JPEG (default): render via Blob -> Image -> Canvas
@@ -791,7 +806,10 @@ export class RelayPlayer {
 
     // Parse all NAL units from Annex B payload
     const nals = this._parseAnnexBNals(nalPayload);
-    if (nals.length === 0) return;
+    if (nals.length === 0) {
+      console.warn("[RelayPlayer] H.264: no NALs parsed from", nalPayload.length, "bytes, flags=", flags);
+      return;
+    }
 
     // Extract SPS (type 7) and PPS (type 8) from keyframes
     const spsNals = nals.filter(n => n.type === 7).map(n => n.data);
