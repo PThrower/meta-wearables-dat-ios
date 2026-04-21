@@ -9,6 +9,7 @@ import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecTyp
 import { buildFrauFrame } from "./frau-builder.js";
 import { windowedSincResample } from "./resampler.js";
 import { getConfig } from "../config.js";
+import JMuxer from "jmuxer";
 
 export interface RelayPlayerOptions {
   canvas: HTMLCanvasElement;
@@ -90,8 +91,12 @@ export class RelayPlayer {
   private _firstFrameLocalTime = 0;
   private _firstFrameSenderTime = 0;
 
-  // H.264 decoder (WebCodecs VideoDecoder)
+  // H.264 decoder — dual path: WebCodecs (Chrome/Edge) or MSE/jMuxer (Safari/Firefox)
   private videoDecoder: VideoDecoder | null = null;
+  private jmuxer: JMuxer | null = null;
+  private mseVideo: HTMLVideoElement | null = null;
+  private mseRafId: number = 0;
+  private useMSE: boolean = false;
 
   // Mic capture (push-to-talk)
   private micStream: MediaStream | null = null;
@@ -290,20 +295,31 @@ export class RelayPlayer {
     this.disconnect();
     this.stopMic();
     this._cleanupAudio();
-    if (this.videoDecoder && this.videoDecoder.state !== "closed") {
-      this.videoDecoder.close();
-    }
-    this.videoDecoder = null;
+    this._destroyH264Decoder();
     this.canvas = null;
     this.ctx = null;
   }
 
-  /** Reset the H.264 decoder (call on codec switch to flush stale state). */
-  resetVideoDecoder(): void {
+  /** Tear down both WebCodecs and MSE/jMuxer decoders. */
+  private _destroyH264Decoder(): void {
     if (this.videoDecoder && this.videoDecoder.state !== "closed") {
       this.videoDecoder.close();
     }
     this.videoDecoder = null;
+    this._destroyMSE();
+  }
+
+  /** Tear down MSE/jMuxer resources. */
+  private _destroyMSE(): void {
+    if (this.mseRafId) { cancelAnimationFrame(this.mseRafId); this.mseRafId = 0; }
+    if (this.jmuxer) { try { this.jmuxer.destroy(); } catch {} this.jmuxer = null; }
+    if (this.mseVideo) { this.mseVideo.pause(); this.mseVideo.removeAttribute('src'); this.mseVideo.load(); this.mseVideo.remove(); this.mseVideo = null; }
+    this.useMSE = false;
+  }
+
+  /** Reset the H.264 decoder (call on codec switch to flush stale state). */
+  resetVideoDecoder(): void {
+    this._destroyH264Decoder();
   }
 
   setQuality(preset: string): void {
@@ -484,6 +500,8 @@ export class RelayPlayer {
     this.latestBoundingBoxes = [];
     this.lastVideoWidth = 0;
     this.lastVideoHeight = 0;
+    this._h264ParameterSets = [];
+    this._destroyH264Decoder();
     if (this.overlayCtx && this.overlayCanvas) {
       this.overlayCtx.clearRect(0, 0, this.overlayCanvas.width, this.overlayCanvas.height);
     }
@@ -671,21 +689,20 @@ export class RelayPlayer {
     const payload = buf.slice(HEADER_SIZE);
 
     if (codecType === VIDEO_CODEC_H264) {
-      // H.264: decode via WebCodecs VideoDecoder (Chrome/Edge only — NOT Safari)
-      if (typeof VideoDecoder === "undefined") {
-        // Show fallback message on canvas
-        if (this.ctx && this.canvas) {
-          this.ctx.fillStyle = "#000";
-          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-          this.ctx.fillStyle = "#ff5555";
-          this.ctx.font = "bold 14px monospace";
-          this.ctx.textAlign = "center";
-          this.ctx.fillText("H.264 requires Chrome/Edge", this.canvas.width / 2, this.canvas.height / 2 - 10);
-          this.ctx.fillStyle = "#888";
-          this.ctx.font = "12px monospace";
-          this.ctx.fillText("Safari does not support WebCodecs VideoDecoder", this.canvas.width / 2, this.canvas.height / 2 + 12);
-        }
-        return;
+      // H.264: dual decoder path — WebCodecs (Chrome/Edge) or MSE/jMuxer (Safari/Firefox)
+      const hasWebCodecs = typeof VideoDecoder !== "undefined";
+
+      if (!hasWebCodecs && !this.useMSE) {
+        // Initialize MSE/jMuxer fallback on first H.264 frame (no WebCodecs)
+        this._initMSEDecoder(width, height);
+      }
+
+      if (this.useMSE) {
+        // MSE path: feed raw Annex B NALs to jMuxer
+        this._feedMSE(payload, flags);
+      } else if (hasWebCodecs) {
+        // WebCodecs path: Annex B → AVCC → VideoDecoder
+        this._renderH264Frame(payload, width, height, flags, timestampMs);
       }
       this._renderH264Frame(payload, width, height, flags, timestampMs);
     } else {
@@ -801,6 +818,76 @@ export class RelayPlayer {
     return result;
   }
 
+  // --- MSE/jMuxer H.264 Decoder (Safari/Firefox fallback) ---
+
+  /** Initialize jMuxer with a hidden <video> element and canvas draw loop. */
+  private _initMSEDecoder(width: number, height: number): void {
+    this._destroyMSE();
+    this.useMSE = true;
+
+    // Create hidden <video> for MSE
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.style.display = "none";
+    document.body.appendChild(video);
+    this.mseVideo = video;
+
+    try {
+      this.jmuxer = new JMuxer({
+        node: video,
+        mode: "video",
+        flushingTime: 100,
+        fps: 30,
+        debug: false,
+        onReady: () => {
+          console.log("[RelayPlayer] JMuxer MSE ready");
+          video.play().catch(() => {});
+          this._startMSEDrawLoop();
+        },
+        onError: (e: unknown) => {
+          console.error("[RelayPlayer] JMuxer error:", e);
+        },
+      });
+      console.log("[RelayPlayer] Using MSE/jMuxer H.264 decoder (WebCodecs unavailable)");
+    } catch (e) {
+      console.error("[RelayPlayer] JMuxer init failed:", e);
+      this._destroyMSE();
+    }
+  }
+
+  /** Feed raw Annex B H.264 payload to jMuxer. */
+  private _feedMSE(payload: Uint8Array, flags: number): void {
+    if (!this.jmuxer) return;
+    this.jmuxer.feed({ video: new Uint8Array(payload) });
+  }
+
+  /** requestAnimationFrame loop: draw MSE video frames to canvas for overlay support. */
+  private _startMSEDrawLoop(): void {
+    const draw = () => {
+      this.mseRafId = requestAnimationFrame(draw);
+      if (!this.mseVideo || !this.ctx || !this.canvas) return;
+      if (this.mseVideo.readyState < 2) return; // HAVE_CURRENT_DATA
+
+      const vw = this.mseVideo.videoWidth;
+      const vh = this.mseVideo.videoHeight;
+      if (vw === 0 || vh === 0) return;
+
+      if (this.canvas.width !== vw || this.canvas.height !== vh) {
+        this.canvas.width = vw;
+        this.canvas.height = vh;
+      }
+      this.ctx.drawImage(this.mseVideo, 0, 0);
+      this.lastVideoWidth = vw;
+      this.lastVideoHeight = vh;
+      this.drawBoundingBoxes();
+    };
+    this.mseRafId = requestAnimationFrame(draw);
+  }
+
+  // --- WebCodecs H.264 Decoder (Chrome/Edge) ---
+
   private _renderH264Frame(nalPayload: Uint8Array, width: number, height: number, flags: number, timestampMs: number): void {
     const isKeyframe = (flags & H264_FLAG_KEYFRAME) !== 0;
 
@@ -871,12 +958,18 @@ export class RelayPlayer {
         },
       });
 
+      // Derive codec string from SPS: profile_idc at byte[1], level_idc at byte[3]
+      const profile = currentSps[0].length > 1 ? currentSps[0][1] : 0x42;
+      const compat = currentSps[0].length > 2 ? currentSps[0][2] : 0x00;
+      const level = currentSps[0].length > 3 ? currentSps[0][3] : 0x1E;
+      const codecStr = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
+
       this.videoDecoder.configure({
-        codec: "avc1.42001E",
+        codec: codecStr,
         optimizeForLatency: true,
         description: avcC,
       });
-      console.log("[RelayPlayer] VideoDecoder configured with avcC description");
+      console.log("[RelayPlayer] VideoDecoder configured:", codecStr, "avcC:", avcC.length, "bytes");
     }
 
     // If decoder is backed up (queue > 3), skip non-keyframes to reduce latency

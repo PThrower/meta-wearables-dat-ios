@@ -10,7 +10,8 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@ebowwa/relay-protocol": "file:../packages/relay-protocol"
+    "@ebowwa/relay-protocol": "file:../packages/relay-protocol",
+    "jmuxer": "^2.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
