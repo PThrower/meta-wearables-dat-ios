@@ -329,6 +329,14 @@ export class RelayPlayer {
     if (this.jmuxer) { try { this.jmuxer.destroy(); } catch {} this.jmuxer = null; }
     if (this.mseVideo) { this.mseVideo.pause(); this.mseVideo.removeAttribute('src'); this.mseVideo.load(); this.mseVideo.remove(); this.mseVideo = null; }
     this.useMSE = false;
+    this._mseReady = false;
+    this._msePendingFrames = [];
+    this._h264Debug = {
+      framesIn: 0, nalsParsed: 0, vclNals: 0,
+      spsFound: false, ppsFound: false,
+      decoderState: "none", decoderPath: "",
+      lastError: "", codecStr: "", avccSize: 0,
+    };
   }
 
   /** Reset the H.264 decoder (call on codec switch to flush stale state). */
@@ -722,8 +730,7 @@ export class RelayPlayer {
         this._renderH264Frame(payload, width, height, flags, timestampMs);
       }
 
-      // Draw debug overlay on canvas
-      this._drawH264Debug();
+      // Debug overlay disabled — was painting over video every frame
     } else {
       // JPEG (default): render via Blob -> Image -> Canvas
       this._renderJPEGFrame(payload, width, height);
@@ -857,11 +864,12 @@ export class RelayPlayer {
       this.jmuxer = new JMuxer({
         node: video,
         mode: "video",
-        flushingTime: 100,
-        fps: 30,
+        flushingTime: 50,
+        fps: 15,
         debug: false,
         onReady: () => {
           console.log("[RelayPlayer] JMuxer MSE ready");
+          this._mseReady = true;
           video.play().catch(() => {});
           this._startMSEDrawLoop();
         },
@@ -876,9 +884,25 @@ export class RelayPlayer {
     }
   }
 
+  /** Buffer for frames that arrive before MSE is ready. */
+  private _mseReady = false;
+  private _msePendingFrames: Uint8Array[] = [];
+
   /** Feed raw Annex B H.264 payload to jMuxer. */
   private _feedMSE(payload: Uint8Array, flags: number): void {
     if (!this.jmuxer) return;
+    if (!this._mseReady) {
+      // Buffer up to 5 frames while waiting for MSE to open
+      if (this._msePendingFrames.length < 5) {
+        this._msePendingFrames.push(new Uint8Array(payload));
+      }
+      return;
+    }
+    // Flush any buffered frames first
+    while (this._msePendingFrames.length > 0) {
+      const buffered = this._msePendingFrames.shift()!;
+      this.jmuxer.feed({ video: buffered });
+    }
     this.jmuxer.feed({ video: new Uint8Array(payload) });
   }
 
@@ -927,7 +951,39 @@ export class RelayPlayer {
     const hasNewParams = spsNals.length > 0 && ppsNals.length > 0;
 
     if (hasNewParams) {
+      const prevParams = this._h264ParameterSets;
       this._h264ParameterSets = [...spsNals, ...ppsNals];
+
+      // If decoder exists and SPS changed, reconfigure (handles resolution changes)
+      if (this.videoDecoder && this.videoDecoder.state === "configured") {
+        const currentSps = spsNals[0];
+        const prevSps = prevParams.length > 0 ? prevParams[0] : null;
+        const spsChanged = !prevSps || prevSps.length !== currentSps.length
+          || !prevSps.every((b, i) => b === currentSps[i]);
+        if (spsChanged) {
+          const ppsForConfig = this._h264ParameterSets.filter((_, i) => {
+            const nalType = this._h264ParameterSets[i][0] & 0x1F;
+            return nalType === 8;
+          });
+          const newAvcC = this._buildAvcC(spsNals, ppsForConfig);
+          const profile = currentSps.length > 1 ? currentSps[1] : 0x42;
+          const compat = currentSps.length > 2 ? currentSps[2] : 0x00;
+          const level = currentSps.length > 3 ? currentSps[3] : 0x1E;
+          const codecStr = `avc1.${profile.toString(16).padStart(2, "0")}${compat.toString(16).padStart(2, "0")}${level.toString(16).padStart(2, "0")}`;
+          try {
+            this.videoDecoder.configure({
+              codec: codecStr,
+              optimizeForLatency: true,
+              description: newAvcC,
+            });
+            d.codecStr = codecStr;
+          } catch (e) {
+            console.warn("[RelayPlayer] Decoder reconfigure failed, resetting:", e);
+            this.videoDecoder.close();
+            this.videoDecoder = null;
+          }
+        }
+      }
     }
 
     // Strip SPS/PPS from NALs — only pass VCL (slice) NALs to decoder
