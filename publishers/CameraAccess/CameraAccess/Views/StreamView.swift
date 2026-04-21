@@ -230,6 +230,7 @@ struct ErrorLogSheet: View {
 // Extracted controls for clarity — mic/audio picker moved to live settings
 struct ControlsView: View {
   @ObservedObject var viewModel: StreamSessionViewModel
+  @State private var showAppPicker = false
   var body: some View {
     HStack(spacing: 8) {
       // Stop button
@@ -294,7 +295,7 @@ struct ControlsView: View {
           if viewModel.activeAppId != nil {
             viewModel.deactivateApp()
           } else {
-            viewModel.activateApp("spanish-co-pilot")
+            showAppPicker = true
           }
         }
         .foregroundColor(viewModel.activeAppId != nil ? .cyan : .white)
@@ -302,6 +303,9 @@ struct ControlsView: View {
         .animation(.easeInOut(duration: 0.2), value: viewModel.activeAppId)
         .accessibilityIdentifier("ai_app_toggle")
       }
+    }
+    .sheet(isPresented: $showAppPicker) {
+      AppPickerSheet(viewModel: viewModel)
     }
   }
 }
