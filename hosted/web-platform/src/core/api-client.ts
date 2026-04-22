@@ -93,9 +93,28 @@ export async function apiGet<T>(url: string): Promise<T | null> {
   }
 }
 
-/** Fetch platform stats */
-export function fetchStats(): Promise<StatsResponse | null> {
-  return apiGet<StatsResponse>("/stats");
+/** Fetch platform stats and flatten from nested server response */
+export async function fetchStats(): Promise<StatsResponse | null> {
+  const raw = await apiGet<Record<string, unknown>>("/stats");
+  if (!raw) return null;
+
+  const server = raw.server as Record<string, unknown> | undefined;
+  const hosted = server?.hosted as Record<string, unknown> | undefined;
+  const relay = hosted?.relay as Record<string, unknown> | undefined;
+  const sessions = relay?.sessions as Record<string, number> | undefined;
+  const connections = relay?.connections as Record<string, number> | undefined;
+  const metrics = (server?.metrics as Record<string, unknown>)?.aggregate as Record<string, unknown> | undefined;
+  const bandwidth = metrics?.bandwidth as Record<string, number> | undefined;
+  const frames = metrics?.frames as Record<string, number> | undefined;
+
+  return {
+    activeSessions: sessions?.active,
+    totalSessions: sessions?.started,
+    totalDevices: connections?.publishers,
+    totalBytesSent: bandwidth ? Math.round(((bandwidth.publisherInMB ?? 0) + (bandwidth.viewerOutMB ?? 0)) * 1048576) : undefined,
+    uptime: server?.uptimeMs as number | undefined,
+    guidanceEvents: frames?.relayed,
+  };
 }
 
 /** Fetch active sessions — maps /sessions `id` field to `sessionId` */

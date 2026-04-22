@@ -4,7 +4,7 @@
  */
 
 import type { PageModule } from "../router/router.js";
-import { fetchStats, fetchSessions, fetchApps, esc, formatUptime, formatTime, formatBytes } from "../core/api-client.js";
+import { fetchStats, fetchSessions, fetchGallery, fetchApps, esc, formatUptime, formatTime, formatBytes } from "../core/api-client.js";
 import type { StatsResponse, SessionInfo, AppInfo } from "../core/api-client.js";
 
 export const page: PageModule = {
@@ -69,30 +69,29 @@ export const page: PageModule = {
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 
 async function loadDashboard(container: HTMLElement): Promise<void> {
-  const [stats, sessions, apps] = await Promise.all([
+  const [stats, sessions, gallery, apps] = await Promise.all([
     fetchStats(),
     fetchSessions(),
+    fetchGallery(),
     fetchApps(),
   ]);
 
-  renderStats(container, stats);
-  renderActivity(container, sessions);
+  renderStats(container, stats, gallery);
+  renderActivity(container, sessions, gallery);
   renderAgents(container, apps);
   renderHealth(container, stats, sessions);
 }
 
-function renderStats(container: HTMLElement, stats: StatsResponse | null): void {
-  if (!stats) return;
-
+function renderStats(container: HTMLElement, stats: StatsResponse | null, gallery: SessionInfo[]): void {
   const liveEl = container.querySelector("#dash-live");
   const devicesEl = container.querySelector("#dash-devices");
   const guidanceEl = container.querySelector("#dash-guidance");
   const recsEl = container.querySelector("#dash-recordings");
 
-  const liveCount = stats.activeSessions ?? stats.active_sessions ?? 0;
-  const deviceCount = stats.totalDevices ?? stats.total_devices ?? 0;
-  const guidanceCount = stats.guidanceEvents ?? stats.guidance_events ?? 0;
-  const totalSessions = stats.totalSessions ?? stats.total_sessions ?? 0;
+  const liveCount = stats?.activeSessions ?? gallery.filter(s => s.live).length;
+  const deviceCount = stats?.totalDevices ?? new Set(gallery.map(s => s.device?.deviceName).filter(Boolean)).size;
+  const guidanceCount = stats?.guidanceEvents ?? 0;
+  const totalSessions = gallery.length;
 
   if (liveEl) liveEl.textContent = String(liveCount);
   if (devicesEl) devicesEl.textContent = String(deviceCount);
@@ -103,19 +102,25 @@ function renderStats(container: HTMLElement, stats: StatsResponse | null): void 
   if (liveEl && liveCount > 0) liveEl.classList.add("stat-live");
 }
 
-function renderActivity(container: HTMLElement, sessions: SessionInfo[]): void {
+function renderActivity(container: HTMLElement, sessions: SessionInfo[], gallery: SessionInfo[]): void {
   const feed = container.querySelector("#dash-activity");
   if (!feed) return;
 
-  if (sessions.length === 0) {
+  // Merge: live sessions from /sessions, recent recorded from /gallery/api
+  const liveIds = new Set(sessions.filter(s => s.live).map(s => s.sessionId));
+  const liveItems = sessions.filter(s => s.live);
+  const recordedItems = gallery.filter(s => !liveIds.has(s.sessionId)).slice(0, 12);
+  const all = [...liveItems, ...recordedItems];
+
+  if (all.length === 0) {
     feed.innerHTML = '<p class="empty-state">No recent activity</p>';
     return;
   }
 
-  feed.innerHTML = sessions.slice(0, 15).map(s => `
+  feed.innerHTML = all.slice(0, 15).map(s => `
     <div class="activity-item">
       <span class="activity-dot ${s.live ? "live" : "recorded"}"></span>
-      <span class="activity-text">${esc(s.device?.deviceName || s.sessionId)}</span>
+      <span class="activity-text">${esc(s.device?.deviceName || s.sessionId.slice(0, 8))}</span>
       <span class="activity-time">${s.live ? "LIVE" : formatTime(s.startedAt)}</span>
     </div>
   `).join("");

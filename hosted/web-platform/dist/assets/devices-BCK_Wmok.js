@@ -1,4 +1,4 @@
-import{d as y,a as g,e as o,c as u}from"./main-DecBIQy5.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const q={init(a){a.innerHTML=`
+import{g,a as y,e as o,d as u}from"./main-BLwZrZKp.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const q={init(a){a.innerHTML=`
       <div class="page devices-page">
         <div class="page-header">
           <h1 class="page-title">Fleet</h1>
@@ -26,7 +26,7 @@ import{d as y,a as g,e as o,c as u}from"./main-DecBIQy5.js";import"./moduleprelo
           <div class="modal-body" id="modal-body"></div>
         </div>
       </div>
-    `,S(a),L(a),w(a),M(a)},destroy(){v&&(clearInterval(v),v=null)}};let v=null,r=[],p=[],f="all",b="";async function S(a){const[l,e]=await Promise.all([y(),g()]);r=l,p=e,$(a,l),m(a,l,e),v||(v=setInterval(async()=>{const[i,d]=await Promise.all([y(),g()]);r=i,p=d,$(a,i),m(a,i,d)},2e4))}function $(a,l){const e=a.querySelector("#devices-stats");if(!e)return;const i=l.filter(t=>t.online).length,d=l.length-i,s=l.length>0?Math.round(l.filter(t=>t.battery!=null).reduce((t,n)=>t+(n.battery??0),0)/Math.max(1,l.filter(t=>t.battery!=null).length)):0;e.innerHTML=`
+    `,S(a),L(a),w(a),M(a)},destroy(){v&&(clearInterval(v),v=null)}};let v=null,r=[],p=[],f="all",b="";async function S(a){const[l,e]=await Promise.all([g(),y()]);r=l,p=e,$(a,l),m(a,l,e),v||(v=setInterval(async()=>{const[i,d]=await Promise.all([g(),y()]);r=i,p=d,$(a,i),m(a,i,d)},2e4))}function $(a,l){const e=a.querySelector("#devices-stats");if(!e)return;const i=l.filter(t=>t.online).length,d=l.length-i,s=l.length>0?Math.round(l.filter(t=>t.battery!=null).reduce((t,n)=>t+(n.battery??0),0)/Math.max(1,l.filter(t=>t.battery!=null).length)):0;e.innerHTML=`
     <div class="stat-card"><span class="stat-value">${l.length}</span><span class="stat-label">Total Devices</span></div>
     <div class="stat-card"><span class="stat-value stat-live">${i}</span><span class="stat-label">Online</span></div>
     <div class="stat-card"><span class="stat-value">${d}</span><span class="stat-label">Offline</span></div>
