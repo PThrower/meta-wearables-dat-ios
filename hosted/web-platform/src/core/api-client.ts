@@ -30,9 +30,12 @@ export interface SessionInfo {
   device?: {
     deviceName?: string;
     deviceModel?: string;
+    wearableType?: string;
   };
   access?: string;
   owner?: string;
+  viewerCount?: number;
+  uptimeMs?: number;
 }
 
 export interface DeviceInfo {
@@ -90,9 +93,19 @@ export function fetchStats(): Promise<StatsResponse | null> {
   return apiGet<StatsResponse>("/stats");
 }
 
-/** Fetch active sessions */
+/** Fetch active sessions — maps /sessions `id` field to `sessionId` */
 export function fetchSessions(): Promise<SessionInfo[]> {
-  return apiGet<SessionInfo[]>("/sessions").then(r => r ?? []);
+  return apiGet<Record<string, unknown>[]>("/sessions").then(r => {
+    if (!r) return [];
+    return r.map(s => ({
+      sessionId: (s.id ?? s.sessionId) as string,
+      live: s.live as boolean,
+      startedAt: (s.startedAt ?? (s.metadata as Record<string,string>)?.startedAt) as string | undefined,
+      device: (s.metadata as Record<string, unknown>) ?? s.device as SessionInfo["device"],
+      viewerCount: s.viewerCount as number | undefined,
+      uptimeMs: s.uptimeMs as number | undefined,
+    }));
+  });
 }
 
 /** Fetch all gallery sessions (recorded + live) */
