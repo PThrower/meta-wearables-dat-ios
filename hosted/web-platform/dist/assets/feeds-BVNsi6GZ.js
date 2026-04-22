@@ -1,4 +1,4 @@
-import{g as b,e as i,h as S}from"./api-client-CRb40JQZ.js";import{f as g}from"./main-D3tKFf6t.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const C={init(e){e.innerHTML=`
+import{g as b,e as i,h as S}from"./api-client-DYXhjf31.js";import{f as g}from"./main-Bw222DmB.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const C={init(e){e.innerHTML=`
       <div class="page feeds-page">
         <div class="page-header">
           <h1 class="page-title">Feeds</h1>

@@ -33,8 +33,10 @@ export class Router {
   }
 
   start(): void {
-    const hash = location.hash.slice(1) || "/";
-    this.navigate(hash);
+    // Directly process the current hash — don't rely on navigate()
+    // triggering hashchange (won't fire if hash is already the same value,
+    // e.g. user reloads at #/live).
+    this.onHashChange();
   }
 
   navigate(path: string): void {
