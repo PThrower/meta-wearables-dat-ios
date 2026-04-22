@@ -63,15 +63,7 @@ export class Router {
     // Avoid re-navigating to the same route
     if (path === this.currentPath) return;
 
-    // "/" (gallery) and "/play/*" (recorded player) — handled externally,
-    // but we must still destroy the current SPA page and notify the host.
-    if (path === "/" || path === "") {
-      this.destroyCurrentPage();
-      this.currentPath = "/";
-      document.title = "CaringMind";
-      this.onNavigate?.(path);
-      return;
-    }
+    // "/play/*" — open recorded player overlay (minimal special-case)
     if (path.startsWith("/play/")) {
       this.destroyCurrentPage();
       this.currentPath = path;

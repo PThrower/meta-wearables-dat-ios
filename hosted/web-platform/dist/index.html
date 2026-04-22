@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-DQ1BgOMO.js"></script>
+  <script type="module" crossorigin src="/assets/main-DLsBYPvM.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
   <link rel="stylesheet" crossorigin href="/assets/main-BqhMMS3d.css">
 </head>
@@ -20,27 +20,6 @@
   <!-- SPA SHELL -->
   <aside id="sidebar"></aside>
   <main id="app-main">
-  <!-- GALLERY -->
-  <div id="gallery">
-    <header>
-      <div class="header-left">
-        <a href="/" class="header-home">CaringMind</a>
-        <p id="subtitle"></p>
-      </div>
-      <div class="filters">
-        <button class="filter-btn active" data-filter="all">All</button>
-        <!-- "My Sessions" hidden — auth disabled, no ownership -->
-        <button class="filter-btn" data-filter="live">Live</button>
-        <button class="filter-btn" data-filter="recorded">Recorded</button>
-      </div>
-      <div id="userInfo"></div>
-    </header>
-    <div id="grid"></div>
-    <div id="status-bar">
-      <span id="last-refresh">--</span>
-      <span><a href="/stats">Stats</a> &middot; Auto-refresh 30s</span>
-    </div>
-  </div>
 
   <!-- SHARE DIALOG -->
   <div id="shareDialog" class="hidden">
@@ -69,7 +48,7 @@
   </div>
 
   <!-- SPA page content (router swaps content here) -->
-  <div id="page-content" class="hidden"></div>
+  <div id="page-content"></div>
 
   </main><!-- end #app-main -->
 

@@ -6,7 +6,7 @@
 import type { PageModule } from "../router/router.js";
 import { fetchStats, fetchGallery, esc, formatBytes, formatDateTime } from "../core/api-client.js";
 import type { SessionInfo } from "../core/api-client.js";
-import { fmtDur } from "../gallery/format.js";
+import { fmtDur } from "../core/format.js";
 import { renderLineChart } from "../components/charts/line-chart.js";
 import { renderDonutChart } from "../components/charts/donut-chart.js";
 

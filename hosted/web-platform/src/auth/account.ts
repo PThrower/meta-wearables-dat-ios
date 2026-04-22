@@ -9,7 +9,7 @@ import {
   setToken, clearToken, startRefreshTimer, stopRefreshTimer,
 } from "./core.js";
 import { getConfig } from "../config.js";
-import { getAllSessions } from "../gallery/render.js";
+import { fetchGallery } from "../core/api-client.js";
 // OAuth disabled — import { exchangeCredential } from "./core.js";
 
 const loginOverlay = document.getElementById("loginOverlay")!;
@@ -43,11 +43,11 @@ function updateUserInfo(): void {
 
 // --- Profile modal ---
 
-function toggleProfileModal(): void {
+async function toggleProfileModal(): Promise<void> {
   const existing = document.getElementById("profileModal");
   if (existing) { existing.remove(); return; }
 
-  const sessions = getAllSessions();
+  const sessions = await fetchGallery();
   const live = sessions.filter(s => s.live).length;
   const recorded = sessions.length - live;
   const totalDuration = sessions.reduce((acc, s) => acc + (s.durationMs ?? 0), 0);

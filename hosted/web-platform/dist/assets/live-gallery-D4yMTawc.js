@@ -1,4 +1,4 @@
-import{a as c,e as l,c as v}from"./api-client-DnmY5-31.js";import{w as p}from"./main-DQ1BgOMO.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const w={init(e){e.innerHTML=`
+import{a as o,e as l,c as v,w as p}from"./main-DLsBYPvM.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const y={init(e){e.innerHTML=`
       <div class="page live-gallery-page">
         <div class="page-header">
           <h1 class="page-title">Live Streams</h1>
@@ -9,10 +9,10 @@ import{a as c,e as l,c as v}from"./api-client-DnmY5-31.js";import{w as p}from"./
           <p class="empty-state">Loading live sessions...</p>
         </div>
       </div>
-    `,o(e),r=setInterval(()=>o(e),1e4)},destroy(){r&&(clearInterval(r),r=null)}};let r=null;async function o(e){const s=(await c()).filter(a=>a.live);h(e,s),m(e,s)}function h(e,t){const s=e.querySelector("#live-stats");s&&(s.innerHTML=`
+    `,c(e),r=setInterval(()=>c(e),1e4)},destroy(){r&&(clearInterval(r),r=null)}};let r=null;async function c(e){const s=(await o()).filter(a=>a.live);h(e,s),u(e,s)}function h(e,t){const s=e.querySelector("#live-stats");s&&(s.innerHTML=`
     <div class="stat-card"><span class="stat-value stat-live">${t.length}</span><span class="stat-label">Live Now</span></div>
     <div class="stat-card"><span class="stat-value">${new Set(t.map(a=>{var i;return(i=a.device)==null?void 0:i.deviceName}).filter(Boolean)).size}</span><span class="stat-label">Active Devices</span></div>
-  `)}function m(e,t){const s=e.querySelector("#live-sessions-grid"),a=e.querySelector("#live-subtitle");if(a&&(a.textContent=`${t.length} active session${t.length!==1?"s":""}`),t.length===0){s.innerHTML=`
+  `)}function u(e,t){const s=e.querySelector("#live-sessions-grid"),a=e.querySelector("#live-subtitle");if(a&&(a.textContent=`${t.length} active session${t.length!==1?"s":""}`),t.length===0){s.innerHTML=`
       <div class="empty-state-large">
         <div class="empty-icon">
           <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="color:rgba(255,255,255,0.1)">
@@ -27,7 +27,7 @@ import{a as c,e as l,c as v}from"./api-client-DnmY5-31.js";import{w as p}from"./
       <div class="live-card-thumb">
         <img src="/session/${l(i.sessionId)}/thumbnail" alt="" loading="lazy" onerror="this.style.display='none'" />
         <span class="live-badge">LIVE</span>
-        <span class="live-card-duration">${i.startedAt?u(i.startedAt):""}</span>
+        <span class="live-card-duration">${i.startedAt?g(i.startedAt):""}</span>
       </div>
       <div class="live-card-info">
         <div class="live-card-left">
@@ -37,4 +37,4 @@ import{a as c,e as l,c as v}from"./api-client-DnmY5-31.js";import{w as p}from"./
         <span class="live-card-view-btn">Watch</span>
       </div>
     </div>
-  `}).join(""),s.querySelectorAll(".live-session-card").forEach(i=>{i.addEventListener("click",()=>{const n=i.dataset.sessionId;n&&p(n)})})}function u(e){try{const t=Date.now()-new Date(e).getTime(),s=Math.floor(t/6e4);return s<1?"< 1m":s<60?`${s}m`:`${Math.floor(s/60)}h ${s%60}m`}catch{return""}}export{w as default,w as page};
+  `}).join(""),s.querySelectorAll(".live-session-card").forEach(i=>{i.addEventListener("click",()=>{const n=i.dataset.sessionId;n&&p(n)})})}function g(e){try{const t=Date.now()-new Date(e).getTime(),s=Math.floor(t/6e4);return s<1?"< 1m":s<60?`${s}m`:`${Math.floor(s/60)}h ${s%60}m`}catch{return""}}export{y as default,y as page};

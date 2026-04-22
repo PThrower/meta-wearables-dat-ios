@@ -3,7 +3,7 @@
  */
 
 import { authFetch, authUrl } from "./auth.js";
-import { fmtDur, fmtTime } from "./gallery/format.js";
+import { fmtDur, fmtTime } from "./core/format.js";
 import type { GuidanceEvent } from "./guidance.js";
 import { EVENT_COLORS, EVENT_LABELS, sourceBadgeClass, esc } from "./guidance.js";
 
@@ -48,9 +48,8 @@ function showToast(msg: string, type: "info" | "warn" | "error" = "info"): void 
 export async function openRecordedPlayer(sessionId: string): Promise<void> {
   currentSessionId = sessionId;
 
-  // Show overlay, hide gallery and SPA page-content
+  // Show overlay, hide page-content
   $("recordedPlayer").classList.add("active");
-  $("gallery").classList.add("hidden");
   $("page-content").classList.add("hidden");
 
   // Start loading video immediately (auth-aware URL with ?audio for muxed audio)
@@ -184,14 +183,9 @@ export function closeRecordedPlayer(): void {
   $("recInfoPanel").classList.remove("open");
   $("recInfoPanelToggle").classList.remove("active");
 
-  // Hide overlay, restore correct view based on current route
+  // Hide overlay, restore page-content (router manages which page is visible)
   $("recordedPlayer").classList.remove("active");
-  const hash = location.hash.slice(1) || "/";
-  if (hash === "/" || hash === "" || hash.startsWith("/play/")) {
-    $("gallery").classList.remove("hidden");
-  } else {
-    $("page-content").classList.remove("hidden");
-  }
+  $("page-content").classList.remove("hidden");
 
   // Clear guidance log
   $("recGuidanceLog").innerHTML = "";

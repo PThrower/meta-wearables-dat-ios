@@ -1,13 +1,16 @@
 /**
- * Feeds page — recorded sessions browser with time buckets, expandable rows,
- * inline video player, and guidance events.
- * Phase 4: Full implementation.
+ * Feeds page — all sessions browser with time buckets, expandable rows,
+ * inline video player, guidance events, and action buttons.
+ * Consolidated from gallery — now shows both live and recorded sessions.
  */
 
 import type { PageModule } from "../router/router.js";
 import { fetchGallery, fetchGuidanceHistory, esc } from "../core/api-client.js";
 import type { SessionInfo, GuidanceHistoryEvent } from "../core/api-client.js";
-import { fmtDur } from "../gallery/format.js";
+import { fmtDur } from "../core/format.js";
+import { watchLive } from "../live.js";
+import { openRecordedPlayer } from "../recorded.js";
+import { authUrl } from "../auth.js";
 
 type TimeBucket = "today" | "week" | "month" | "all";
 
@@ -17,7 +20,7 @@ export const page: PageModule = {
       <div class="page feeds-page">
         <div class="page-header">
           <h1 class="page-title">Feeds</h1>
-          <span class="page-subtitle" id="feeds-subtitle">Recorded sessions</span>
+          <span class="page-subtitle" id="feeds-subtitle">Sessions</span>
         </div>
         <div class="feeds-stats" id="feeds-stats"></div>
         <div class="feeds-toolbar">
@@ -29,12 +32,13 @@ export const page: PageModule = {
           </div>
         </div>
         <div id="feeds-list" class="feeds-list">
-          <p class="empty-state">Loading recordings...</p>
+          <p class="empty-state">Loading sessions...</p>
         </div>
       </div>
     `;
     loadFeeds(container);
     bindBucketFilters(container);
+    bindActionDelegation(container);
   },
 
   destroy() {
@@ -69,19 +73,24 @@ function renderStats(container: HTMLElement, sessions: SessionInfo[]): void {
   const recorded = sessions.filter(s => !s.live);
   const totalDuration = recorded.reduce((sum, s) => sum + (s.durationMs || 0), 0);
   const liveCount = sessions.filter(s => s.live).length;
+  const totalSegments = recorded.reduce((sum, s) => sum + (s.segments || 0), 0);
 
   el.innerHTML = `
     <div class="stat-card"><span class="stat-value">${recorded.length}</span><span class="stat-label">Recordings</span></div>
     <div class="stat-card"><span class="stat-value">${fmtDur(totalDuration)}</span><span class="stat-label">Total Runtime</span></div>
     <div class="stat-card"><span class="stat-value stat-live">${liveCount}</span><span class="stat-label">Live Now</span></div>
+    <div class="stat-card"><span class="stat-value">${totalSegments}</span><span class="stat-label">Segments</span></div>
   `;
 }
 
 function renderList(container: HTMLElement, sessions: SessionInfo[]): void {
   const listEl = container.querySelector("#feeds-list")!;
+
+  // Separate live and recorded sessions
+  const liveSessions = sessions.filter(s => s.live);
   let recorded = sessions.filter(s => !s.live);
 
-  // Apply time bucket filter
+  // Apply time bucket filter to recorded only
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekStart = new Date(todayStart);
@@ -103,21 +112,41 @@ function renderList(container: HTMLElement, sessions: SessionInfo[]): void {
     return tb - ta;
   });
 
+  const totalCount = liveSessions.length + recorded.length;
   const subtitle = container.querySelector("#feeds-subtitle");
-  if (subtitle) subtitle.textContent = `${recorded.length} recording${recorded.length !== 1 ? "s" : ""}`;
+  if (subtitle) subtitle.textContent = `${totalCount} session${totalCount !== 1 ? "s" : ""}`;
 
-  if (recorded.length === 0) {
+  if (totalCount === 0) {
     listEl.innerHTML = `<div class="empty-state-large">
-      <p>No recordings found</p>
-      <span class="empty-hint">Recorded sessions will appear here</span>
+      <p>No sessions found</p>
+      <span class="empty-hint">Sessions will appear here after streaming</span>
     </div>`;
     return;
   }
 
-  // Bucket by date
-  const buckets = bucketByDate(recorded);
+  let html = "";
 
-  listEl.innerHTML = Object.entries(buckets)
+  // Live sessions section (always at top)
+  if (liveSessions.length > 0) {
+    html += `
+      <div class="feed-bucket feed-bucket-live">
+        <div class="feed-bucket-header">
+          <span class="feed-bucket-date">
+            <span class="status-pill status-live" style="margin-right:6px">LIVE</span>
+            Active Streams
+          </span>
+          <span class="feed-bucket-count">${liveSessions.length} live</span>
+        </div>
+        <div class="feed-bucket-rows">
+          ${liveSessions.map(s => liveRow(s)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  // Recorded sessions bucketed by date
+  const buckets = bucketByDate(recorded);
+  html += Object.entries(buckets)
     .sort(([a], [b]) => b.localeCompare(a))
     .map(([date, items]) => `
       <div class="feed-bucket">
@@ -131,19 +160,43 @@ function renderList(container: HTMLElement, sessions: SessionInfo[]): void {
       </div>
     `).join("");
 
-  // Bind row clicks
+  listEl.innerHTML = html;
+
+  // Bind row clicks (recorded sessions expand)
   listEl.querySelectorAll<HTMLElement>(".feed-row").forEach((row) => {
     row.addEventListener("click", (e) => {
-      // Don't expand if clicking inside expanded content
       if ((e.target as HTMLElement).closest(".feed-expanded")) return;
+      if ((e.target as HTMLElement).closest("[data-action]")) return;
       const sessionId = row.dataset.sessionId;
       if (sessionId) toggleRow(container, sessionId);
     });
   });
 }
 
+function liveRow(s: SessionInfo): string {
+  return `
+    <div class="feed-row feed-row-live" data-session-id="${esc(s.sessionId)}">
+      <div class="feed-row-expand-icon feed-row-live-dot">
+        <span class="status-pill status-live">LIVE</span>
+      </div>
+      <div class="feed-row-thumb">
+        <div class="feed-row-placeholder feed-row-placeholder-live"></div>
+      </div>
+      <div class="feed-row-info">
+        <span class="feed-row-device">${esc(s.device?.deviceName || "Unknown")}</span>
+        <span class="feed-row-meta">Live &middot; ${fmtDur(s.durationMs || 0)}</span>
+      </div>
+      <div class="feed-row-actions">
+        <button class="action-btn primary" data-action="watch-live" data-session-id="${esc(s.sessionId)}">Watch Live</button>
+        <button class="action-btn" data-action="share" data-session-id="${esc(s.sessionId)}">Share</button>
+      </div>
+    </div>
+  `;
+}
+
 function feedRow(s: SessionInfo): string {
   const isExpanded = _expandedRow === s.sessionId;
+  const hasVideo = (s.segments || 0) > 0;
   return `
     <div class="feed-row${isExpanded ? " expanded" : ""}" data-session-id="${esc(s.sessionId)}">
       <div class="feed-row-expand-icon">
@@ -163,34 +216,44 @@ function feedRow(s: SessionInfo): string {
       <span class="feed-row-time">${fmtSessionTime(s.startedAt)}</span>
     </div>
     <div class="feed-expanded${isExpanded ? " open" : ""}" data-expanded-id="${esc(s.sessionId)}">
-      ${isExpanded ? `<div class="feed-expanded-inner" id="feed-expanded-${esc(s.sessionId)}">
-        <div class="feed-video-wrap">
-          <video class="feed-inline-video" controls preload="metadata">
-            <source src="/session/${esc(s.sessionId)}/video.mp4" type="video/mp4" />
-          </video>
-        </div>
-        <div class="feed-expanded-details" id="feed-details-${esc(s.sessionId)}">
-          <div class="feed-detail-rows">
-            <div class="feed-detail-row"><span class="feed-detail-label">Session</span><span class="feed-detail-value">${esc(s.sessionId.slice(0, 12))}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(s.durationMs || 0)}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(s.startedAt)}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Access</span><span class="feed-detail-value">${esc(s.access || "private")}</span></div>
-          </div>
-          <div class="feed-guidance-section">
-            <h4 class="section-title">Guidance Events</h4>
-            <div class="feed-guidance-log" id="feed-guidance-${esc(s.sessionId)}">
-              <p class="empty-state">Loading...</p>
-            </div>
-          </div>
-        </div>
-      </div>` : ""}
+      ${isExpanded ? buildExpandedContent(s) : ""}
     </div>
   `;
 }
 
+function buildExpandedContent(s: SessionInfo): string {
+  const hasVideo = (s.segments || 0) > 0;
+  return `<div class="feed-expanded-inner" id="feed-expanded-${esc(s.sessionId)}">
+    ${hasVideo ? `<div class="feed-video-wrap">
+      <video class="feed-inline-video" controls preload="metadata">
+        <source src="/session/${esc(s.sessionId)}/video.mp4" type="video/mp4" />
+      </video>
+    </div>` : ""}
+    <div class="feed-expanded-details" id="feed-details-${esc(s.sessionId)}">
+      <div class="feed-detail-rows">
+        <div class="feed-detail-row"><span class="feed-detail-label">Session</span><span class="feed-detail-value">${esc(s.sessionId.slice(0, 12))}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(s.durationMs || 0)}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Segments</span><span class="feed-detail-value">${s.segments || 0}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(s.startedAt)}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Access</span><span class="feed-detail-value">${esc(s.access || "private")}</span></div>
+      </div>
+      <div class="feed-expanded-actions">
+        ${hasVideo ? `<a class="action-btn" href="${authUrl("/session/" + s.sessionId + "/video.mp4")}" target="_blank" rel="noopener">Download MP4</a>
+        <button class="action-btn" data-action="play-overlay" data-session-id="${esc(s.sessionId)}">Open in Player</button>` : ""}
+        <button class="action-btn" data-action="share" data-session-id="${esc(s.sessionId)}">Share</button>
+      </div>
+      <div class="feed-guidance-section">
+        <h4 class="section-title">Guidance Events</h4>
+        <div class="feed-guidance-log" id="feed-guidance-${esc(s.sessionId)}">
+          <p class="empty-state">Loading...</p>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function toggleRow(container: HTMLElement, sessionId: string): Promise<void> {
-  // Collapse previous
   if (_expandedRow && _expandedRow !== sessionId) {
     collapseRow(_expandedRow);
   }
@@ -203,7 +266,6 @@ async function toggleRow(container: HTMLElement, sessionId: string): Promise<voi
 
   _expandedRow = sessionId;
 
-  // Find the expanded container and populate it
   const expandedEl = container.querySelector(`[data-expanded-id="${sessionId}"]`);
   const row = container.querySelector(`.feed-row[data-session-id="${sessionId}"]`);
 
@@ -211,32 +273,9 @@ async function toggleRow(container: HTMLElement, sessionId: string): Promise<voi
   if (expandedEl) {
     expandedEl.classList.add("open");
     const session = _allSessions.find(s => s.sessionId === sessionId);
-    expandedEl.innerHTML = `<div class="feed-expanded-inner">
-      <div class="feed-video-wrap">
-        <video class="feed-inline-video" controls preload="metadata">
-          <source src="/session/${sessionId}/video.mp4" type="video/mp4" />
-        </video>
-      </div>
-      <div class="feed-expanded-details">
-        <div class="feed-detail-rows">
-          ${session ? `
-            <div class="feed-detail-row"><span class="feed-detail-label">Session</span><span class="feed-detail-value">${esc(session.sessionId.slice(0, 12))}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(session.durationMs || 0)}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(session.device?.deviceName || "Unknown")}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(session.startedAt)}</span></div>
-            <div class="feed-detail-row"><span class="feed-detail-label">Access</span><span class="feed-detail-value">${esc(session.access || "private")}</span></div>
-          ` : ""}
-        </div>
-        <div class="feed-guidance-section">
-          <h4 class="section-title">Guidance Events</h4>
-          <div class="feed-guidance-log" id="feed-guidance-${sessionId}">
-            <p class="empty-state">Loading...</p>
-          </div>
-        </div>
-      </div>
-    </div>`;
-
-    // Fetch guidance history in background
+    if (session) {
+      expandedEl.innerHTML = buildExpandedContent(session);
+    }
     loadGuidanceHistory(sessionId);
   }
 }
@@ -247,7 +286,6 @@ function collapseRow(sessionId: string): void {
   if (row) row.classList.remove("expanded");
   if (expandedEl) {
     expandedEl.classList.remove("open");
-    // Pause video if playing
     const video = expandedEl.querySelector("video") as HTMLVideoElement;
     if (video) video.pause();
     expandedEl.innerHTML = "";
@@ -271,6 +309,33 @@ async function loadGuidanceHistory(sessionId: string): Promise<void> {
       <span class="feed-guidance-conf">${Math.round(e.confidence * 100)}%</span>
     </div>
   `).join("");
+}
+
+/** Delegated action handler for share/download/play-overlay/watch-live buttons */
+function bindActionDelegation(container: HTMLElement): void {
+  container.addEventListener("click", (e) => {
+    const target = (e.target as HTMLElement).closest("[data-action]") as HTMLElement | null;
+    if (!target) return;
+    e.stopPropagation();
+
+    const action = target.dataset.action;
+    const sessionId = target.dataset.sessionId;
+    if (!action || !sessionId) return;
+
+    switch (action) {
+      case "watch-live":
+        watchLive(sessionId);
+        break;
+      case "play-overlay":
+        openRecordedPlayer(sessionId);
+        break;
+      case "share": {
+        const openShareDialog = (window as any).openShareDialog;
+        if (openShareDialog) openShareDialog(sessionId);
+        break;
+      }
+    }
+  });
 }
 
 function bindBucketFilters(container: HTMLElement): void {

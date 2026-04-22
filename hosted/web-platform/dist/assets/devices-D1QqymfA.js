@@ -1,4 +1,4 @@
-import{d as y,a as g,e as o,c as u}from"./api-client-DnmY5-31.js";import"./main-DQ1BgOMO.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const E={init(a){a.innerHTML=`
+import{d as y,a as g,e as o,c as u}from"./main-DLsBYPvM.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const q={init(a){a.innerHTML=`
       <div class="page devices-page">
         <div class="page-header">
           <h1 class="page-title">Fleet</h1>
@@ -87,4 +87,4 @@ import{d as y,a as g,e as o,c as u}from"./api-client-DnmY5-31.js";import"./main-
               </div>
             `).join("")}</div>`:'<p class="empty-state">No sessions for this device</p>'}
       </div>
-    `)}export{E as default,E as page};
+    `)}export{q as default,q as page};
