@@ -825,10 +825,11 @@ const server = Bun.serve<WsData>({
         appRegistry.registerTransientApp(virtualApp);
 
         const session = registry.get(body.sessionId);
-        if (session) {
-          session.activeAppId = virtualApp.id;
-          session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+        if (!session) {
+          return Response.json({ error: "Session not found or not active" }, { status: 404 });
         }
+        session.activeAppId = virtualApp.id;
+        session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
 
         await orchestrator.activateWithConfig(body.sessionId, virtualApp);
 
@@ -839,7 +840,10 @@ const server = Bun.serve<WsData>({
           orchestrator.sendVideoFrame(body.sessionId, jpegPayload);
         }
 
-        return Response.json({ appId: virtualApp.id, status: "active" });
+        // Check actual activation status from orchestrator
+        const aiStatus = orchestrator.getStatus(body.sessionId);
+        const finalStatus = aiStatus.status === "error" ? "error" : "active";
+        return Response.json({ appId: virtualApp.id, status: finalStatus });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }

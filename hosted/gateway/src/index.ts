@@ -255,6 +255,13 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
+    // --- Guidance history ---
+
+    const guidanceMatch = pathname.match(/^\/session\/([^/]+)\/guidance/);
+    if (guidanceMatch) {
+      return proxyRequest(req, pathname);
+    }
+
     // --- WebSocket proxy to relay server ---
 
     if (pathname === "/publish" || pathname === "/view" || pathname === "/tap/audio" || pathname === "/telemetry/ai/log") {

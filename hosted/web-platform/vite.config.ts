@@ -20,6 +20,9 @@ export default defineConfig({
       "/latest":   "http://localhost:3000",
       "/api":      "http://localhost:3000",
       "/telemetry": "http://localhost:3000",
+      "/workflows": "http://localhost:3000",
+      "/apps":     "http://localhost:3000",
+      "/primitives": "http://localhost:3000",
     },
   },
   build: {

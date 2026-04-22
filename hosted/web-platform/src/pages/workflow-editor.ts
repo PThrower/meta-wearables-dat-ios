@@ -351,9 +351,20 @@ function wireEditorEvents(): void {
   // Toolbar: publish
   _container?.querySelector("#wf-publish-btn")?.addEventListener("click", async () => {
     if (!_workflow?.id) return;
+    if (_dirty && !confirm("You have unsaved changes. Save before publishing?")) return;
     const newStatus = _workflow.status === "published" ? "draft" : "published";
-    const result = await updateWorkflow(_workflow.id, { status: newStatus });
-    if (result) _workflow = result;
+    // Include current state if dirty so changes aren't lost
+    const payload: Record<string, unknown> = { status: newStatus };
+    if (_dirty) {
+      _workflow.name = (_container?.querySelector("#wf-name") as HTMLInputElement)?.value ?? _workflow.name;
+      _workflow.description = (_container?.querySelector("#wf-desc") as HTMLInputElement)?.value ?? _workflow.description;
+      payload.name = _workflow.name;
+      payload.description = _workflow.description;
+      payload.nodes = _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) }));
+      payload.edges = _workflow.edges;
+    }
+    const result = await updateWorkflow(_workflow.id, payload);
+    if (result) { _workflow = result; _dirty = false; }
     renderEditor(false);
   });
 
