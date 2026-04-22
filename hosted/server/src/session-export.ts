@@ -210,6 +210,9 @@ export interface GallerySession {
   startedAt: string;
   finishedAt?: string;
   durationMs?: number;
+  videoDurationMs?: number;
+  audioDurationMs?: number;
+  driftMs?: number;
   device: {
     deviceName: string | null;
     deviceModel: string | null;
@@ -278,6 +281,9 @@ export async function getGalleryData(
         startedAt: meta.startedAt || new Date(0).toISOString(),
         finishedAt: meta.finishedAt,
         durationMs: meta.durationMs,
+        videoDurationMs: meta.recording?.videoDurationMs,
+        audioDurationMs: meta.recording?.audioDurationMs,
+        driftMs: meta.recording?.driftMs,
         device: {
           deviceName: meta.device?.deviceName || null,
           deviceModel: meta.device?.deviceModel || null,

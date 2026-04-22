@@ -71,13 +71,14 @@ function renderStats(container: HTMLElement, sessions: SessionInfo[]): void {
   if (!el) return;
 
   const recorded = sessions.filter(s => !s.live);
-  const totalDuration = recorded.reduce((sum, s) => sum + (s.durationMs || 0), 0);
+  const totalContentDuration = recorded.reduce((sum, s) => sum + (s.videoDurationMs || s.durationMs || 0), 0);
+  const totalWallDuration = recorded.reduce((sum, s) => sum + (s.durationMs || 0), 0);
   const liveCount = sessions.filter(s => s.live).length;
   const totalSegments = recorded.reduce((sum, s) => sum + (s.segments || 0), 0);
 
   el.innerHTML = `
     <div class="stat-card"><span class="stat-value">${recorded.length}</span><span class="stat-label">Recordings</span></div>
-    <div class="stat-card"><span class="stat-value">${fmtDur(totalDuration)}</span><span class="stat-label">Total Runtime</span></div>
+    <div class="stat-card"><span class="stat-value">${fmtDur(totalContentDuration)}</span><span class="stat-label">Content</span></div>
     <div class="stat-card"><span class="stat-value stat-live">${liveCount}</span><span class="stat-label">Live Now</span></div>
     <div class="stat-card"><span class="stat-value">${totalSegments}</span><span class="stat-label">Segments</span></div>
   `;
@@ -196,7 +197,9 @@ function liveRow(s: SessionInfo): string {
 
 function feedRow(s: SessionInfo): string {
   const isExpanded = _expandedRow === s.sessionId;
-  const hasVideo = (s.segments || 0) > 0;
+  const contentDur = s.videoDurationMs || s.durationMs || 0;
+  const driftAbs = Math.abs(s.driftMs || 0);
+  const driftLabel = driftAbs > 2000 ? ` \u00b1${fmtDur(driftAbs)}` : "";
   return `
     <div class="feed-row${isExpanded ? " expanded" : ""}" data-session-id="${esc(s.sessionId)}">
       <div class="feed-row-expand-icon">
@@ -211,7 +214,7 @@ function feedRow(s: SessionInfo): string {
       </div>
       <div class="feed-row-info">
         <span class="feed-row-device">${esc(s.device?.deviceName || "Unknown")}</span>
-        <span class="feed-row-meta">${fmtDur(s.durationMs || 0)} &middot; ${s.segments || 0} segments</span>
+        <span class="feed-row-meta">${fmtDur(contentDur)}${driftLabel} &middot; ${s.segments || 0} segs</span>
       </div>
       <span class="feed-row-time">${fmtSessionTime(s.startedAt)}</span>
     </div>
@@ -223,6 +226,17 @@ function feedRow(s: SessionInfo): string {
 
 function buildExpandedContent(s: SessionInfo): string {
   const hasVideo = (s.segments || 0) > 0;
+  const contentDur = s.videoDurationMs || s.durationMs || 0;
+  const driftMs = s.driftMs || 0;
+  const driftAbs = Math.abs(driftMs);
+  const hasDrift = driftAbs > 2000;
+
+  let syncHtml = "";
+  if (hasDrift) {
+    const direction = driftMs > 0 ? "audio longer" : "video longer";
+    syncHtml = `<div class="feed-detail-row"><span class="feed-detail-label">A/V Drift</span><span class="feed-detail-value" style="color:#ffb86c">${fmtDur(driftAbs)} (${direction})</span></div>`;
+  }
+
   return `<div class="feed-expanded-inner" id="feed-expanded-${esc(s.sessionId)}">
     ${hasVideo ? `<div class="feed-video-wrap">
       <video class="feed-inline-video" controls preload="metadata">
@@ -232,7 +246,9 @@ function buildExpandedContent(s: SessionInfo): string {
     <div class="feed-expanded-details" id="feed-details-${esc(s.sessionId)}">
       <div class="feed-detail-rows">
         <div class="feed-detail-row"><span class="feed-detail-label">Session</span><span class="feed-detail-value">${esc(s.sessionId.slice(0, 12))}</span></div>
-        <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(s.durationMs || 0)}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(contentDur)}${contentDur !== (s.durationMs || 0) ? ` <span style="color:#6272a4">(wall ${fmtDur(s.durationMs || 0)})</span>` : ""}</span></div>
+        ${s.audioDurationMs ? `<div class="feed-detail-row"><span class="feed-detail-label">Audio</span><span class="feed-detail-value">${fmtDur(s.audioDurationMs)}</span></div>` : ""}
+        ${syncHtml}
         <div class="feed-detail-row"><span class="feed-detail-label">Segments</span><span class="feed-detail-value">${s.segments || 0}</span></div>
         <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}</span></div>
         <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(s.startedAt)}</span></div>

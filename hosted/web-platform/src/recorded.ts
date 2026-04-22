@@ -23,6 +23,15 @@ interface SessionExport {
   systemVersion?: string;
   acl?: Array<{ userId: string; email: string; role: string }>;
   viewerRole?: string;
+  recording?: {
+    videoDurationMs?: number;
+    audioDurationMs?: number;
+    driftMs?: number;
+    totalFrames?: number;
+    segmentsWritten?: number;
+    audioChunks?: number;
+    bytesToBucket?: number;
+  };
 }
 
 let currentSessionId: string | null = null;
@@ -81,21 +90,34 @@ export async function openRecordedPlayer(sessionId: string): Promise<void> {
 function populateInfoPanel(m: SessionExport): void {
   const device = m.device?.deviceName || m.device?.deviceModel || "Unknown Device";
   const wearable = m.device?.wearableType || "--";
+  const contentDur = m.recording?.videoDurationMs ?? m.durationMs ?? 0;
+  const driftMs = m.recording?.driftMs ?? 0;
 
   setText("ri-device", device);
   setText("ri-wearable", wearable);
-  setText("ri-duration", fmtDur(m.durationMs ?? 0));
+  setText("ri-duration", fmtDur(contentDur));
   setText("ri-started", fmtTime(m.startedAt ?? ""));
   setText("ri-finished", fmtTime(m.finishedAt ?? ""));
   setText("ri-session-id", m.sessionId.slice(0, 8));
   setText("ri-access", m.accessLevel ?? "--");
   setText("ri-owner", m.ownerEmail ?? m.ownerId ?? "--");
 
-  setText("ri-segments", String(m.segments ?? 0));
-  setText("ri-audio-chunks", String(m.audioChunks ?? 0));
-  setText("ri-has-audio", (m.audioChunks ?? 0) > 0 ? "Yes" : "No");
+  setText("ri-segments", String(m.segments ?? m.recording?.segmentsWritten ?? 0));
+  setText("ri-audio-chunks", String(m.audioChunks ?? m.recording?.audioChunks ?? 0));
+  setText("ri-has-audio", (m.audioChunks ?? m.recording?.audioChunks ?? 0) > 0 ? "Yes" : "No");
   setText("ri-mp4-status", m.exportCached ? "Cached" : "On-demand");
   setText("ri-system", m.systemVersion ?? "--");
+
+  // Show A/V drift if significant (> 2s)
+  const driftAbs = Math.abs(driftMs);
+  if (driftAbs > 2000 && m.recording?.audioDurationMs) {
+    const el = $("ri-duration");
+    if (el) {
+      const wallEl = m.durationMs && contentDur !== m.durationMs ? ` (wall ${fmtDur(m.durationMs)})` : "";
+      const driftLabel = driftMs > 0 ? "audio +" : "video +";
+      el.textContent = fmtDur(contentDur) + wallEl + ` [${driftLabel}${fmtDur(driftAbs)} drift]`;
+    }
+  }
 
   // Share button visibility — only for owner/editor
   const canShare = m.viewerRole === "owner" || m.viewerRole === "editor";

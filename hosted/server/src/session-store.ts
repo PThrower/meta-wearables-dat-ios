@@ -34,6 +34,10 @@ export interface SessionMeta {
     segmentsWritten?: number;
     audioChunks?: number;
     bytesToBucket?: number;
+    totalFrames?: number;
+    videoDurationMs?: number;
+    audioDurationMs?: number;
+    driftMs?: number;
   };
   [key: string]: unknown;
 }
@@ -229,6 +233,9 @@ export class SessionStore {
         startedAt: meta.startedAt || new Date(0).toISOString(),
         finishedAt: meta.finishedAt,
         durationMs: meta.durationMs,
+        videoDurationMs: meta.recording?.videoDurationMs,
+        audioDurationMs: meta.recording?.audioDurationMs,
+        driftMs: meta.recording?.driftMs,
         device: {
           deviceName: meta.device?.deviceName || null,
           deviceModel: meta.device?.deviceModel || null,

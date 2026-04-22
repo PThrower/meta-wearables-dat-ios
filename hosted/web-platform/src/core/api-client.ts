@@ -25,6 +25,9 @@ export interface SessionInfo {
   startedAt?: string;
   endedAt?: string;
   durationMs?: number;
+  videoDurationMs?: number;
+  audioDurationMs?: number;
+  driftMs?: number;
   hasThumbnail?: boolean;
   segments?: number;
   device?: {

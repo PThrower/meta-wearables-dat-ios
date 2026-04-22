@@ -418,6 +418,27 @@ export class SessionRecorder {
   }
 
   private writeMeta(final: boolean) {
+    // Compute content durations from manifest (not wall clock)
+    let videoDurationMs = 0;
+    let audioDurationMs = 0;
+    const totalFrames = this.videoManifest.reduce((s, m) => s + m.frameCount, 0);
+
+    if (this.videoManifest.length > 0) {
+      const firstTs = this.videoManifest[0].firstTimestampMs;
+      const lastTs = this.videoManifest[this.videoManifest.length - 1].lastTimestampMs;
+      if (lastTs > firstTs) videoDurationMs = lastTs - firstTs;
+    }
+
+    for (const chunk of this.audioManifest) {
+      if (chunk.sampleRate > 0 && chunk.totalSamples > 0) {
+        audioDurationMs += Math.round((chunk.totalSamples / chunk.sampleRate) * 1000);
+      }
+    }
+
+    const driftMs = audioDurationMs > 0 && videoDurationMs > 0
+      ? audioDurationMs - videoDurationMs
+      : 0;
+
     const meta = {
       sessionId: this.sessionId,
       startedAt: new Date(this.startedAt).toISOString(),
@@ -431,6 +452,10 @@ export class SessionRecorder {
         segmentsWritten: this.flushedSegments,
         audioChunks: this.chunkIndex,
         bytesToBucket: this.bytesToBucket,
+        totalFrames,
+        videoDurationMs,
+        audioDurationMs,
+        driftMs,
       },
     };
     this.store.put(`sessions/${this.sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2))).catch(err =>
