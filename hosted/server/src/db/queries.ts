@@ -408,7 +408,11 @@ export function getWorkflow(id: string): {
   status: string; canvasViewport: string; createdAt: string; updatedAt: string;
 } | null {
   const db = getDbRaw();
-  return db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as any ?? null;
+  return db.prepare(`
+    SELECT id, name, description, owner_id as ownerId, status,
+      canvas_viewport as canvasViewport, created_at as createdAt, updated_at as updatedAt
+    FROM workflows WHERE id = ?
+  `).get(id) as any ?? null;
 }
 
 /** List all workflows with node counts */
@@ -418,7 +422,8 @@ export function listWorkflows(): Array<{
 }> {
   const db = getDbRaw();
   return db.prepare(`
-    SELECT w.*, COUNT(n.id) as node_count
+    SELECT w.id, w.name, w.description, w.status, w.owner_id as ownerId,
+      COUNT(n.id) as nodeCount, w.updated_at as updatedAt
     FROM workflows w
     LEFT JOIN workflow_nodes n ON n.workflow_id = w.id
     GROUP BY w.id
@@ -432,7 +437,11 @@ export function getWorkflowNodes(workflowId: string): Array<{
   config: string; positionX: number; positionY: number;
 }> {
   const db = getDbRaw();
-  return db.prepare("SELECT * FROM workflow_nodes WHERE workflow_id = ?").all(workflowId) as any[];
+  return db.prepare(`
+    SELECT id, workflow_id as workflowId, type, label, config,
+      position_x as positionX, position_y as positionY
+    FROM workflow_nodes WHERE workflow_id = ?
+  `).all(workflowId) as any[];
 }
 
 /** Get all edges for a workflow */
@@ -440,7 +449,11 @@ export function getWorkflowEdges(workflowId: string): Array<{
   id: string; workflowId: string; sourceNodeId: string; targetNodeId: string;
 }> {
   const db = getDbRaw();
-  return db.prepare("SELECT * FROM workflow_edges WHERE workflow_id = ?").all(workflowId) as any[];
+  return db.prepare(`
+    SELECT id, workflow_id as workflowId,
+      source_node_id as sourceNodeId, target_node_id as targetNodeId
+    FROM workflow_edges WHERE workflow_id = ?
+  `).all(workflowId) as any[];
 }
 
 // --- Session stats update (periodic) ---
