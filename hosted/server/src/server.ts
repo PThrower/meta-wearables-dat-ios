@@ -633,7 +633,24 @@ const server = Bun.serve<WsData>({
     // --- App Registry ---
 
     if (url.pathname === "/apps") {
-      return Response.json(appRegistry.listApps());
+      const staticApps = appRegistry.listApps();
+      // Include published workflows as selectable apps
+      const publishedWorkflows = q.listWorkflows()
+        .filter(w => w.status === "published")
+        .map(w => {
+          const nodes = q.getWorkflowNodes(w.id);
+          const edges = q.getWorkflowEdges(w.id);
+          try {
+            const virtualApp = resolveWorkflowToApp(
+              nodes.map(n => ({ ...n, config: JSON.parse(n.config) })) as any,
+              edges as any,
+              { id: w.id, name: w.name },
+            );
+            return virtualApp;
+          } catch { return null; }
+        })
+        .filter(Boolean);
+      return Response.json([...staticApps, ...publishedWorkflows]);
     }
 
     // --- Primitives (for workflow node palette metadata) ---
@@ -1168,24 +1185,42 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "activate_app") {
               // Activate an app for this session
               const appId = cmd.appId as string;
-              const pipeline = appRegistry.resolvePipeline(appId);
-              if (pipeline) {
-                session.activeAppId = appId;
-                session.appPipeline = pipeline;
-                console.log(`[relay] App activated: ${appId} binding=${pipeline.primitiveId} session=${sessionId}`);
-                // Confirm to publisher
-                ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
-                // Notify orchestrator
-                orchestrator.activateApp(sessionId, appId).catch(() => {});
-                // Send cached frame to AI so it sees the current scene immediately
-                const cachedFrame = registry.getLastFrame(sessionId);
-                if (cachedFrame) {
-                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+              // If this is a workflow app (wf- prefix), resolve and register it
+              if (appId.startsWith("wf-")) {
+                const wfId = appId.slice(3);
+                try {
+                  const wf = q.getWorkflow(wfId);
+                  if (!wf) throw new Error("Workflow not found");
+                  const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
+                  const edges = q.getWorkflowEdges(wfId);
+                  const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  appRegistry.registerTransientApp(virtualApp);
+                  session.activeAppId = virtualApp.id;
+                  session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+                  await orchestrator.activateWithConfig(sessionId, virtualApp);
+                  ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
+                  const cachedFrame = registry.getLastFrame(sessionId);
+                  if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+                } catch (e) {
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
               } else {
-                console.warn(`[relay] App activation failed: ${appId} not found`);
-                ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+                const pipeline = appRegistry.resolvePipeline(appId);
+                if (pipeline) {
+                  session.activeAppId = appId;
+                  session.appPipeline = pipeline;
+                  console.log(`[relay] App activated: ${appId} binding=${pipeline.primitiveId} session=${sessionId}`);
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
+                  orchestrator.activateApp(sessionId, appId).catch(() => {});
+                  const cachedFrame = registry.getLastFrame(sessionId);
+                  if (cachedFrame) {
+                    const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                    orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                  }
+                } else {
+                  console.warn(`[relay] App activation failed: ${appId} not found`);
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+                }
               }
             } else if (cmd.type === "deactivate_app") {
               const prevApp = session.activeAppId;
@@ -1345,21 +1380,42 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "activate_app" && cmd.appId) {
               // Viewer requests app activation
               const appId = cmd.appId as string;
-              const pipeline = appRegistry.resolvePipeline(appId);
-              if (pipeline) {
-                session.activeAppId = appId;
-                session.appPipeline = pipeline;
-                console.log(`[relay] Viewer activated app: ${appId} session=${sessionId}`);
-                ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
-                orchestrator.activateApp(sessionId, appId).catch(() => {});
-                // Send cached frame to AI so it sees the current scene immediately
-                const cachedFrame = registry.getLastFrame(sessionId);
-                if (cachedFrame) {
-                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
+              if (appId.startsWith("wf-")) {
+                // Workflow app — resolve from DB, register transient, activate
+                const wfId = appId.slice(3);
+                try {
+                  const wf = q.getWorkflow(wfId);
+                  if (!wf) throw new Error("Workflow not found");
+                  const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
+                  const edges = q.getWorkflowEdges(wfId);
+                  const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  appRegistry.registerTransientApp(virtualApp);
+                  session.activeAppId = virtualApp.id;
+                  session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+                  await orchestrator.activateWithConfig(sessionId, virtualApp);
+                  console.log(`[relay] Viewer activated workflow app: ${virtualApp.id} session=${sessionId}`);
+                  ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
+                  const cachedFrame = registry.getLastFrame(sessionId);
+                  if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+                } catch (e) {
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
               } else {
-                ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+                const pipeline = appRegistry.resolvePipeline(appId);
+                if (pipeline) {
+                  session.activeAppId = appId;
+                  session.appPipeline = pipeline;
+                  console.log(`[relay] Viewer activated app: ${appId} session=${sessionId}`);
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
+                  orchestrator.activateApp(sessionId, appId).catch(() => {});
+                  const cachedFrame = registry.getLastFrame(sessionId);
+                  if (cachedFrame) {
+                    const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+                    orchestrator.sendVideoFrame(sessionId, jpegPayload);
+                  }
+                } else {
+                  ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
+                }
               }
             } else if (cmd.type === "deactivate_app") {
               // Viewer requests app deactivation
