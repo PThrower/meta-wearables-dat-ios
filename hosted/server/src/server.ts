@@ -569,12 +569,12 @@ const server = Bun.serve<WsData>({
         let deviceId = body.deviceId;
         if (!deviceId && body.sessionId) {
           const session = registry.getSession(body.sessionId);
-          deviceId = session?.metadata?.deviceId;
+          deviceId = session?.metadata?.deviceId ?? undefined;
           if (!deviceId) {
             deviceId = registry.findDeviceBySession(body.sessionId);
           }
           if (!deviceId) {
-            deviceId = q.findDeviceBySessionDb(body.sessionId);
+            deviceId = q.findDeviceBySessionDb(body.sessionId) ?? undefined;
           }
         }
         if (!deviceId) {
@@ -1278,7 +1278,7 @@ const server = Bun.serve<WsData>({
               ws.data._audioFrameCount = 1;
               console.log(`[relay] Viewer audio forwarding to publisher: session=${sessionId} frameSize=${buf.length}`);
             } else if (sent) {
-              ws.data._audioFrameCount++;
+              ws.data._audioFrameCount = (ws.data._audioFrameCount ?? 0) + 1;
               if (ws.data._audioFrameCount % 100 === 0) {
                 console.log(`[relay] Viewer audio: ${ws.data._audioFrameCount} frames forwarded session=${sessionId}`);
               }

@@ -213,6 +213,8 @@ export interface GallerySession {
   videoDurationMs?: number;
   audioDurationMs?: number;
   driftMs?: number;
+  framesRelayed?: number;
+  framesRecorded?: number;
   device: {
     deviceName: string | null;
     deviceModel: string | null;
@@ -284,6 +286,8 @@ export async function getGalleryData(
         videoDurationMs: meta.recording?.videoDurationMs,
         audioDurationMs: meta.recording?.audioDurationMs,
         driftMs: meta.recording?.driftMs,
+        framesRelayed: meta.recording?.framesRelayed,
+        framesRecorded: meta.recording?.totalFrames,
         device: {
           deviceName: meta.device?.deviceName || null,
           deviceModel: meta.device?.deviceModel || null,

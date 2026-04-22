@@ -237,6 +237,19 @@ function buildExpandedContent(s: SessionInfo): string {
     syncHtml = `<div class="feed-detail-row"><span class="feed-detail-label">A/V Drift</span><span class="feed-detail-value" style="color:#ffb86c">${fmtDur(driftAbs)} (${direction})</span></div>`;
   }
 
+  let streamDriftHtml = "";
+  const relayed = s.framesRelayed;
+  const recorded = s.framesRecorded;
+  if (relayed != null && recorded != null) {
+    const diff = Math.abs(relayed - recorded);
+    if (diff > 0) {
+      const direction = relayed > recorded ? "more streamed" : "more recorded";
+      streamDriftHtml = `<div class="feed-detail-row"><span class="feed-detail-label">Stream Drift</span><span class="feed-detail-value" style="color:#bd93f9">${diff} frames (${direction}) &middot; ${relayed} relayed / ${recorded} recorded</span></div>`;
+    } else {
+      streamDriftHtml = `<div class="feed-detail-row"><span class="feed-detail-label">Stream Drift</span><span class="feed-detail-value" style="color:#50fa7b">0 (perfect match: ${recorded} frames)</span></div>`;
+    }
+  }
+
   return `<div class="feed-expanded-inner" id="feed-expanded-${esc(s.sessionId)}">
     ${hasVideo ? `<div class="feed-video-wrap">
       <video class="feed-inline-video" controls preload="metadata">
@@ -249,6 +262,7 @@ function buildExpandedContent(s: SessionInfo): string {
         <div class="feed-detail-row"><span class="feed-detail-label">Duration</span><span class="feed-detail-value">${fmtDur(contentDur)}${contentDur !== (s.durationMs || 0) ? ` <span style="color:#6272a4">(wall ${fmtDur(s.durationMs || 0)})</span>` : ""}</span></div>
         ${s.audioDurationMs ? `<div class="feed-detail-row"><span class="feed-detail-label">Audio</span><span class="feed-detail-value">${fmtDur(s.audioDurationMs)}</span></div>` : ""}
         ${syncHtml}
+        ${streamDriftHtml}
         <div class="feed-detail-row"><span class="feed-detail-label">Segments</span><span class="feed-detail-value">${s.segments || 0}</span></div>
         <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}</span></div>
         <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(s.startedAt)}</span></div>

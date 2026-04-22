@@ -64,6 +64,7 @@ export class SessionRecorder {
   private _acl: Array<{ userId: string; email: string; role: string }> = [];
   private _ownerId: string | undefined;
   private _ownerEmail: string | undefined;
+  private _framesRelayed = 0;
 
   // Guidance event buffer for buffered JSONL write to R2
   private guidanceEventLines: string[] = [];
@@ -109,6 +110,11 @@ export class SessionRecorder {
 
   set ownerEmail(email: string | undefined) {
     this._ownerEmail = email;
+  }
+
+  /** Set frames relayed to live viewers (for streaming vs recording drift tracking) */
+  set framesRelayed(count: number) {
+    this._framesRelayed = count;
   }
 
   async start(params: Record<string, string | null>) {
@@ -456,6 +462,7 @@ export class SessionRecorder {
         videoDurationMs,
         audioDurationMs,
         driftMs,
+        framesRelayed: this._framesRelayed,
       },
     };
     this.store.put(`sessions/${this.sessionId}/meta.json`, Buffer.from(JSON.stringify(meta, null, 2))).catch(err =>

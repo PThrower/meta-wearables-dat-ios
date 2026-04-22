@@ -91,6 +91,7 @@ export interface WsData {
   unsub?: () => void;   // Audio tap unsubscribe callback
   guidanceUnsub?: () => void; // Guidance orchestrator unsubscribe callback
   aiLogUnsubs?: (() => void)[]; // AI telemetry log unsubscribe callbacks
+  _audioFrameCount?: number;   // Viewer audio frame counter for logging
 }
 
 // --- Publisher ---
@@ -167,6 +168,7 @@ export interface Session {
   ownerEmail?: string;          // Google email of session creator
   accessLevel: AccessLevel;
   acl: AclEntry[];
+  framesRelayed: number;        // Frames forwarded to live viewers (streaming vs recording drift)
   publisherClaiming: boolean;   // Mutex for atomic publisher claim
   recordingId?: string;         // Stable R2 prefix — survives reconnections
   activeAppId: string | null;   // Currently active app for this session

@@ -28,6 +28,7 @@ interface SessionExport {
     audioDurationMs?: number;
     driftMs?: number;
     totalFrames?: number;
+    framesRelayed?: number;
     segmentsWritten?: number;
     audioChunks?: number;
     bytesToBucket?: number;
@@ -107,6 +108,21 @@ function populateInfoPanel(m: SessionExport): void {
   setText("ri-has-audio", (m.audioChunks ?? m.recording?.audioChunks ?? 0) > 0 ? "Yes" : "No");
   setText("ri-mp4-status", m.exportCached ? "Cached" : "On-demand");
   setText("ri-system", m.systemVersion ?? "--");
+
+  // Stream vs recording drift
+  const relayed = m.recording?.framesRelayed;
+  const recorded = m.recording?.totalFrames;
+  if (relayed != null && recorded != null) {
+    const diff = Math.abs(relayed - recorded);
+    if (diff > 0) {
+      const dir = relayed > recorded ? "more streamed" : "more recorded";
+      setText("ri-stream-drift", `${diff} frames (${dir}) — ${relayed} relayed / ${recorded} recorded`);
+    } else {
+      setText("ri-stream-drift", `0 (perfect — ${recorded} frames)`);
+    }
+  } else {
+    setText("ri-stream-drift", "--");
+  }
 
   // Show A/V drift if significant (> 2s)
   const driftAbs = Math.abs(driftMs);

@@ -107,6 +107,7 @@ export class SessionRegistry {
         ownerEmail: undefined,
         accessLevel: "private",
         acl: [],
+        framesRelayed: 0,
         publisherClaiming: false,
         activeAppId: null,
         appPipeline: null,
@@ -334,6 +335,7 @@ export class SessionRegistry {
     }
 
     if (session.recorder) {
+      session.recorder.framesRelayed = session.framesRelayed;
       await session.recorder.finish();
       session.recorder = null;
     }
@@ -480,6 +482,7 @@ export class SessionRegistry {
     if (session.viewers.size === 0) return;
 
     this.totalFramesRelayed++;
+    session.framesRelayed++;
     // Batch increment -- flushed every 60s by DbWriter
     dbWriter.incrementCounter("total_frames_relayed");
 

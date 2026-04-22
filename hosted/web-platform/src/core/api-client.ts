@@ -28,6 +28,8 @@ export interface SessionInfo {
   videoDurationMs?: number;
   audioDurationMs?: number;
   driftMs?: number;
+  framesRelayed?: number;
+  framesRecorded?: number;
   hasThumbnail?: boolean;
   segments?: number;
   device?: {
