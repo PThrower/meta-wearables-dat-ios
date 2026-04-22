@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-CA2kRAiO.js"></script>
+  <script type="module" crossorigin src="/assets/main-jaxQ9a5Y.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-B7hDYwUd.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-BqhMMS3d.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -17,6 +17,9 @@
     <!-- OAuth disabled: <div id="g_id_signin"></div> -->
   </div>
 
+  <!-- SPA SHELL -->
+  <aside id="sidebar"></aside>
+  <main id="app-main">
   <!-- GALLERY -->
   <div id="gallery">
     <header>
@@ -64,6 +67,11 @@
       </div>
     </div>
   </div>
+
+  <!-- SPA page content (router swaps content here) -->
+  <div id="page-content" class="hidden"></div>
+
+  </main><!-- end #app-main -->
 
   <!-- LIVE PLAYER -->
   <div id="livePlayer">

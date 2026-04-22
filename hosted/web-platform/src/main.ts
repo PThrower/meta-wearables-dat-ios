@@ -1,5 +1,5 @@
 /**
- * Viewer entry point — gallery init, auth, auto-open session
+ * Viewer entry point — SPA router, gallery init, auth, auto-open session
  */
 
 import { loadConfig } from "./config.js";
@@ -7,7 +7,64 @@ import { initAuth, requireAuth, authFetch, isNoAuth, getToken } from "./auth.js"
 import { ingest, clearGallery, initFilters, onCardAction } from "./gallery/render.js";
 import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
 import { openRecordedPlayer, closeRecordedPlayer, initRecordedPlayerEvents } from "./recorded.js";
+import { Router } from "./router/router.js";
+import { routes } from "./router/routes.js";
+import { initSidebar } from "./components/sidebar.js";
+import { bus } from "./core/event-bus.js";
 import "./share.js";
+
+// ─── SPA Router Setup ───
+
+const gallery = document.getElementById("gallery")!;
+const pageContent = document.getElementById("page-content")!;
+const sidebar = document.getElementById("sidebar")!;
+
+// Show gallery by default, hide page-content
+function showGallery(): void {
+  gallery.classList.remove("hidden");
+  pageContent.classList.add("hidden");
+}
+
+function showPageContent(): void {
+  gallery.classList.add("hidden");
+  pageContent.classList.remove("hidden");
+}
+
+// Override router page loading to handle gallery vs SPA pages
+const router = new Router(pageContent, (path) => {
+  bus.emit("route:changed", { path, params: {} });
+});
+
+// The "/" route is handled specially — it shows the gallery
+// Other routes render SPA pages
+const spaRoutes = routes.filter((r) => r.path !== "/");
+router.addRoutes(spaRoutes);
+
+// Handle "/" by showing gallery, other routes by SPA
+function handleRoute(): void {
+  const path = location.hash.slice(1) || "/";
+  if (path === "/" || path === "") {
+    showGallery();
+    // Load gallery data if not already loaded
+    if (!hasGalleryData) fetchGallery();
+  } else if (path.startsWith("/play/")) {
+    // Direct play route — open recorded player
+    const sessionId = path.slice(6);
+    if (sessionId) openRecordedPlayer(sessionId);
+    showGallery();
+  } else {
+    showPageContent();
+  }
+}
+
+window.addEventListener("hashchange", () => {
+  handleRoute();
+});
+
+// Init sidebar
+const cleanupSidebar = initSidebar(sidebar, location.hash.slice(1) || "/");
+
+// ─── Existing functionality (preserved) ───
 
 // Wire card action delegation
 onCardAction((action, data) => {
@@ -79,7 +136,6 @@ window.addEventListener("auth:login", () => {
       clearPendingLiveSession();
       watchLive(pending.sessionId, pending.shareToken);
     } else {
-      // Always re-fetch — user may have changed (different account)
       fetchGallery();
     }
   }
@@ -99,14 +155,12 @@ initRecordedPlayerEvents();
 
 /** Auth-aware gallery fetch */
 export async function fetchGallery(): Promise<void> {
-  // If no token at all, show login instead of making a doomed request
   if (!isNoAuth() && !getToken()) {
     requireAuth();
     return;
   }
   try {
     const res = await authFetch("/gallery/api");
-    // authFetch already handles 401 (clears token, dispatches events) — no duplicate handling here
     if (!res.ok) {
       if (res.status !== 401) showNetworkError(`Server error ${res.status}`);
       return;
@@ -141,10 +195,8 @@ function clearNetworkError(): void {
 
 // Derive session ID and share token from URL
 function sessionIdFromUrl(): string | null {
-  // /session/<id> path format
   const m = location.pathname.match(/^\/session\/([^/]+)$/);
   if (m) return m[1];
-  // ?session=<id> query param
   return new URLSearchParams(location.search).get("session");
 }
 
@@ -152,7 +204,8 @@ function shareTokenFromUrl(): string | null {
   return new URLSearchParams(location.search).get("share");
 }
 
-// Boot sequence
+// ─── Boot sequence ───
+
 (async () => {
   await loadConfig();
   await initAuth();
@@ -162,17 +215,35 @@ function shareTokenFromUrl(): string | null {
 
   console.log("[boot] sessionId:", sessionId, "shareToken:", !!shareToken, "token:", !!getToken(), "noAuth:", isNoAuth());
 
+  // If a specific session is in the URL, open it directly
   if (sessionId) {
     const authNeeded = watchLive(sessionId, shareToken ?? undefined);
     if (authNeeded) {
       pendingSession = sessionId;
       pendingShareToken = shareToken;
     }
-  } else {
-    if (requireAuth()) return; // show login overlay, auth:login handler will call fetchGallery()
-    fetchGallery();
+    return;
   }
+
+  // SPA routing: if hash is set, use router; otherwise default to gallery
+  const hash = location.hash.slice(1);
+  if (hash && hash !== "/") {
+    handleRoute();
+  } else {
+    // Default: show gallery
+    showGallery();
+    if (!requireAuth()) {
+      fetchGallery();
+    }
+  }
+
+  // Start the router (listens for hash changes)
+  router.start();
 })();
 
-// Background refresh every 30s
-setInterval(fetchGallery, 30000);
+// Background refresh every 30s (gallery only when visible)
+setInterval(() => {
+  if (!gallery.classList.contains("hidden")) {
+    fetchGallery();
+  }
+}, 30000);

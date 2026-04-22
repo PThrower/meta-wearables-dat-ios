@@ -4,6 +4,7 @@ import { resolve } from "path";
 export default defineConfig({
   server: {
     port: 5173,
+    historyApiFallback: true, // SPA fallback for hash routes
     proxy: {
       // All routes go through the gateway (port 3000)
       // Gateway proxies HTTP to relay server and handles WebSocket upgrade
