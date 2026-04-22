@@ -194,6 +194,23 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
+    // --- Primitives (for workflow node palette) ---
+
+    if (pathname === "/primitives") {
+      return proxyRequest(req, pathname);
+    }
+
+    // --- Workflow CRUD ---
+
+    if (pathname === "/workflows") {
+      return proxyRequest(req, pathname);
+    }
+
+    const wfMatch = pathname.match(/^\/workflows\/([^/]+)(\/activate)?$/);
+    if (wfMatch) {
+      return proxyRequest(req, pathname);
+    }
+
     // --- AI Telemetry ---
 
     if (pathname === "/telemetry/ai") {
