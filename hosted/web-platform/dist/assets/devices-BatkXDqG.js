@@ -1,4 +1,4 @@
-import{d as y,a as g,e as o,c as u}from"./api-client-DYXhjf31.js";import"./main-Bw222DmB.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const E={init(a){a.innerHTML=`
+import{d as y,a as g,e as o,c as u}from"./api-client-DnmY5-31.js";import"./main-DQ1BgOMO.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const E={init(a){a.innerHTML=`
       <div class="page devices-page">
         <div class="page-header">
           <h1 class="page-title">Fleet</h1>

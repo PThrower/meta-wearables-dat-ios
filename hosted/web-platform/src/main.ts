@@ -32,7 +32,11 @@ function showPageContent(): void {
 
 const router = new Router(pageContent, (path) => {
   bus.emit("route:changed", { path, params: {} });
-  showPageContent();
+  if (path === "/" || path.startsWith("/play/")) {
+    showGallery();
+  } else {
+    showPageContent();
+  }
 });
 
 // All SPA routes (the router handles these, "/" is handled by gallery)

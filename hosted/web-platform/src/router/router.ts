@@ -63,12 +63,20 @@ export class Router {
     // Avoid re-navigating to the same route
     if (path === this.currentPath) return;
 
-    // Skip "/" (gallery) and "/play/*" (recorded player) — handled externally
+    // "/" (gallery) and "/play/*" (recorded player) — handled externally,
+    // but we must still destroy the current SPA page and notify the host.
     if (path === "/" || path === "") {
+      this.destroyCurrentPage();
       this.currentPath = "/";
+      document.title = "CaringMind";
+      this.onNavigate?.(path);
       return;
     }
     if (path.startsWith("/play/")) {
+      this.destroyCurrentPage();
+      this.currentPath = path;
+      document.title = "CaringMind";
+      this.onNavigate?.(path);
       return;
     }
 
@@ -82,18 +90,8 @@ export class Router {
       return;
     }
 
-    // Destroy current page
-    if (this.currentPage) {
-      try {
-        this.currentPage.destroy();
-      } catch (err) {
-        console.error("[router] destroy error:", err);
-      }
-      this.currentPage = null;
-    }
-
-    // Clear container
-    this.container.innerHTML = "";
+    // Destroy current page + clear container
+    this.destroyCurrentPage();
 
     // Load new page
     try {
@@ -107,6 +105,18 @@ export class Router {
       console.error(`[router] failed to load page "${path}":`, err);
       this.container.innerHTML = `<div class="page-error"><p>Failed to load page.</p></div>`;
     }
+  }
+
+  private destroyCurrentPage(): void {
+    if (this.currentPage) {
+      try {
+        this.currentPage.destroy();
+      } catch (err) {
+        console.error("[router] destroy error:", err);
+      }
+      this.currentPage = null;
+    }
+    this.container.innerHTML = "";
   }
 
   private findRoute(path: string): RouteConfig | undefined {
