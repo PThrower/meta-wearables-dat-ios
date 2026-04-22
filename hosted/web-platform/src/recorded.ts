@@ -48,9 +48,10 @@ function showToast(msg: string, type: "info" | "warn" | "error" = "info"): void 
 export async function openRecordedPlayer(sessionId: string): Promise<void> {
   currentSessionId = sessionId;
 
-  // Show overlay, hide gallery
+  // Show overlay, hide gallery and SPA page-content
   $("recordedPlayer").classList.add("active");
   $("gallery").classList.add("hidden");
+  $("page-content").classList.add("hidden");
 
   // Start loading video immediately (auth-aware URL with ?audio for muxed audio)
   const video = $("recVideo") as HTMLVideoElement;
@@ -183,9 +184,14 @@ export function closeRecordedPlayer(): void {
   $("recInfoPanel").classList.remove("open");
   $("recInfoPanelToggle").classList.remove("active");
 
-  // Hide overlay, show gallery
+  // Hide overlay, restore correct view based on current route
   $("recordedPlayer").classList.remove("active");
-  $("gallery").classList.remove("hidden");
+  const hash = location.hash.slice(1) || "/";
+  if (hash === "/" || hash === "" || hash.startsWith("/play/")) {
+    $("gallery").classList.remove("hidden");
+  } else {
+    $("page-content").classList.remove("hidden");
+  }
 
   // Clear guidance log
   $("recGuidanceLog").innerHTML = "";

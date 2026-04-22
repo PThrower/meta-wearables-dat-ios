@@ -622,7 +622,9 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
     }
   };
 
+  // Hide both gallery and SPA page-content behind the player overlay
   document.getElementById("gallery")!.classList.add("hidden");
+  document.getElementById("page-content")!.classList.add("hidden");
   document.getElementById("livePlayer")!.classList.add("active");
   // Pass token separately — RelayPlayer includes it in the hello message
   player.connect(wsUrl, shareToken, getToken() || undefined);
@@ -747,7 +749,13 @@ function updateUptime(): void {
 export function closeLive(): void {
   document.getElementById("livePlayer")!.classList.remove("active");
   document.getElementById("unmute")!.classList.remove("show");
-  document.getElementById("gallery")!.classList.remove("hidden");
+  // Restore the correct view based on current route
+  const hash = location.hash.slice(1) || "/";
+  if (hash === "/" || hash === "" || hash.startsWith("/play/")) {
+    document.getElementById("gallery")!.classList.remove("hidden");
+  } else {
+    document.getElementById("page-content")!.classList.remove("hidden");
+  }
   connOverlay.classList.add("hidden");
   infoPanel.classList.remove("open");
   infoPanelToggle.classList.remove("active");
