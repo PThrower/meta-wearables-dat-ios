@@ -2,13 +2,15 @@
  * H264FrameEncoder.swift
  *
  * Hardware-accelerated H.264 encoder using VideoToolbox VTCompressionSession.
- * Uses the C-style outputCallback (most reliable across iOS versions/devices).
- * A DispatchSemaphore synchronizes the async callback with encode() callers.
+ *
+ * Uses a non-blocking pipeline: the C-style callback stores the encoded frame,
+ * and encode() returns the previously stored frame. This avoids all
+ * synchronization issues (semaphores, deadlocks, stale state).
+ * Trade-off: 1-frame pipeline delay (negligible for real-time streaming).
  */
 
 import CoreMedia
 import CoreVideo
-import Dispatch
 import Foundation
 import VideoToolbox
 
@@ -32,10 +34,12 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     private var frameCount: Int = 0
     private var keyframeRequested = false
 
-    // Callback synchronization
-    private let callbackSemaphore = DispatchSemaphore(value: 0)
-    private var callbackSampleBuffer: CMSampleBuffer?
-    private var callbackStatus: OSStatus = noErr
+    // Pipeline: callback writes, encode() reads. Protected by lock.
+    private let lock = NSLock()
+    private var _pendingFrame: EncodedFrame?
+
+    // Track keyframe status for the pending frame
+    private var _pendingIsKeyframe = false
 
     init(config: H264EncoderConfig = .default) throws {
         self.config = config
@@ -45,13 +49,27 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     private func createSession() throws {
         var compressionSession: VTCompressionSession?
 
-        // C-style output callback — stores result and signals semaphore.
         let callback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
             guard let refcon = refcon else { return }
             let encoder = Unmanaged<H264FrameEncoder>.fromOpaque(refcon).takeUnretainedValue()
-            encoder.callbackStatus = status
-            encoder.callbackSampleBuffer = sampleBuffer
-            encoder.callbackSemaphore.signal()
+
+            guard status == noErr, let sampleBuffer = sampleBuffer else {
+                NSLog("[H264Encoder] Callback error: status=\(status)")
+                return
+            }
+
+            let frame = encoder.extractNALUnits(
+                from: sampleBuffer,
+                isKeyframe: encoder._pendingIsKeyframe,
+                inputWidth: 0,  // Will be read from format description
+                inputHeight: 0
+            )
+
+            if let frame = frame {
+                encoder.lock.lock()
+                encoder._pendingFrame = frame
+                encoder.lock.unlock()
+            }
         }
 
         let status = VTCompressionSessionCreate(
@@ -93,8 +111,17 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     func encode(_ pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> EncodedFrame? {
         guard let session = session else { return nil }
 
+        // Return the previously encoded frame (pipeline delay)
+        lock.lock()
+        let result = _pendingFrame
+        _pendingFrame = nil
+        lock.unlock()
+
         let needsKeyframe = keyframeRequested || frameCount == 0 || (frameCount % config.keyframeInterval == 0)
         keyframeRequested = false
+
+        // Store keyframe status for the callback to use
+        _pendingIsKeyframe = needsKeyframe
 
         let presentationTimestamp = CMTime(
             seconds: Double(frameCount) / Double(config.expectedFPS),
@@ -105,10 +132,6 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         let frameProperties: CFDictionary? = needsKeyframe
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
             : nil
-
-        // Clear previous output
-        callbackSampleBuffer = nil
-        callbackStatus = noErr
 
         var flags: VTEncodeInfoFlags = []
 
@@ -122,28 +145,23 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
             infoFlagsOut: &flags
         )
 
-        guard status == noErr else {
+        if status != noErr {
             NSLog("[H264Encoder] EncodeFrame failed: \(status)")
-            return nil
+            return result  // Return any pending frame even if current encode failed
         }
 
         frameCount += 1
 
-        // Wait for callback to fire (up to 500ms)
-        let waitResult = callbackSemaphore.wait(timeout: .now() + 0.5)
-
-        if waitResult == .timedOut {
-            NSLog("[H264Encoder] Callback timed out frame=\(frameCount)")
-            return nil
+        // For the first frame, check if output arrived synchronously
+        if result == nil && frameCount == 1 {
+            lock.lock()
+            let syncResult = _pendingFrame
+            _pendingFrame = nil
+            lock.unlock()
+            return syncResult
         }
 
-        guard callbackStatus == noErr, let sampleBuffer = callbackSampleBuffer else {
-            NSLog("[H264Encoder] Callback error: status=\(callbackStatus), hasBuffer=\(callbackSampleBuffer != nil)")
-            return nil
-        }
-
-        callbackSampleBuffer = nil
-        return extractNALUnits(from: sampleBuffer, isKeyframe: needsKeyframe, inputWidth: width, inputHeight: height)
+        return result
     }
 
     private func extractNALUnits(from sampleBuffer: CMSampleBuffer, isKeyframe: Bool, inputWidth: Int, inputHeight: Int) -> EncodedFrame? {
@@ -188,8 +206,9 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         guard !nalData.isEmpty else { return nil }
 
-        var encodedWidth = inputWidth
-        var encodedHeight = inputHeight
+        // Get dimensions from format description
+        var encodedWidth = 0
+        var encodedHeight = 0
         if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
             let dims = CMVideoFormatDescriptionGetDimensions(formatDesc)
             encodedWidth = Int(dims.width)
@@ -232,7 +251,9 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         session = nil
         frameCount = 0
         keyframeRequested = false
-        callbackSampleBuffer = nil
+        lock.lock()
+        _pendingFrame = nil
+        lock.unlock()
     }
 }
 
