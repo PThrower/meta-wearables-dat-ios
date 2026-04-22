@@ -44,6 +44,7 @@ export class RelayPlayer {
   private currentFps = 0;
   private droppedFrames = 0;
   private lastSequence = 0;
+  private _lastCodecType: number | undefined;
 
   // AIMD backpressure state (TCP-style congestion control)
   private backpressureFps = 30;          // Current AIMD target (starts at max)
@@ -504,6 +505,7 @@ export class RelayPlayer {
     this.currentFps = 0;
     this.droppedFrames = 0;
     this.lastSequence = 0;
+    this._lastCodecType = undefined;
     this.backpressureFps = this.AIMD_MAX_FPS;
     this.lastBackpressureTime = 0;
     this.bwWindowBytes = [];
@@ -650,6 +652,12 @@ export class RelayPlayer {
     const flags = codecFlags & 0x0F;
     const timestampMs = Number(view.getBigUint64(26, true));
 
+    // Reset sequence tracking on codec switch to prevent false gap detection
+    if (this._lastCodecType !== undefined && this._lastCodecType !== codecType) {
+      this.lastSequence = 0;
+    }
+    this._lastCodecType = codecType;
+
     // Validate payload length against actual buffer
     const actualPayload = buf.length - HEADER_SIZE;
     if (payloadLength > actualPayload) return;
@@ -694,8 +702,8 @@ export class RelayPlayer {
       this.cb.onBackpressureFps(this.backpressureFps);
     }
 
-    // Bandwidth-aware backpressure: if bandwidth drops below threshold, reduce FPS
-    if (!bandwidthOk && this.bwEstimate < Infinity
+    // Bandwidth-aware backpressure: only engage after enough samples to be reliable
+    if (!bandwidthOk && this.bwEstimate < Infinity && this.frameCount >= 15
         && nowMs - this.lastBackpressureTime > this.AIMD_INCREASE_INTERVAL_MS) {
       const bwFps = Math.max(this.AIMD_MIN_FPS,
         Math.floor(this.bwEstimate / 20_000));  // ~20KB per frame at 30fps

@@ -117,6 +117,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private var framesDroppedByPacing: UInt64 = 0
     private var framesDroppedByBackpressure: UInt64 = 0
     private var isEncoding = false
+    private var lastFrameSizeBytes: Int = 0
 
     // Relay latency (RTT from ping/pong)
     private var lastPingStart: ContinuousClock.Instant?
@@ -413,9 +414,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         guard !isEncoding else { return }
         isEncoding = true
 
-        // Increment sequence first (on actor), then do heavy encoding off-actor
-        sequenceNumber += 1
-        let seq = sequenceNumber
+        // Peek at next sequence (only claimed on successful send)
+        let nextSeq = sequenceNumber + 1
 
         // Capture references for off-actor use
         let wsTask = webSocketTask
@@ -432,7 +432,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             let width = CVPixelBufferGetWidth(pixelBuffer)
             let height = CVPixelBufferGetHeight(pixelBuffer)
 
-            guard let encoded = currentEncoder.encode(pixelBuffer, width: width, height: height) else { return }
+            guard let encoded = currentEncoder.encode(pixelBuffer, width: width, height: height) else {
+                return
+            }
+
+            // Claim the sequence number only on successful encode
+            let seq = await self?.claimSequence(nextSeq) ?? nextSeq
 
             let encodeEnd = ContinuousClock.Instant.now
             let encodeDuration = encodeEnd - encodeStart
@@ -473,6 +478,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private func onSendSuccess(bytes: UInt64 = 0) {
         framesSent += 1
         totalBytesSent += bytes
+        lastFrameSizeBytes = Int(bytes)
         if framesSent % 50 == 1 {
             NSLog("[RelayStage] Frames sent: \(framesSent), encodeEma=\(String(format: "%.1f", encodeTimeEmaMs ?? 0))ms, adaptiveFps=\(String(format: "%.1f", effectiveTargetFps))")
         }
@@ -518,6 +524,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             "adaptiveQuality": adaptiveQuality,
             "videoCodec": encoder.codec.rawValue,
             "latencyMs": relayLatencyMs ?? 0,
+            "lastFrameSizeBytes": lastFrameSizeBytes,
+            "avgFrameSizeBytes": framesSent > 0 ? Int(totalBytesSent / framesSent) : 0,
         ]
     }
 
@@ -547,6 +555,16 @@ actor RelayStage: @preconcurrency FramePipelineStage {
 
     private func clearEncodingFlag() {
         isEncoding = false
+    }
+
+    /// Claim a sequence number for a successfully encoded frame.
+    /// Only updates the actor-isolated counter if the proposed seq is higher,
+    /// preventing sequence gaps from failed encodes.
+    private func claimSequence(_ seq: UInt64) -> UInt64 {
+        if seq > sequenceNumber {
+            sequenceNumber = seq
+        }
+        return sequenceNumber
     }
 
     /// Update EMA encode time and adapt quality toward target FPS.

@@ -3,10 +3,12 @@
  *
  * Hardware-accelerated H.264 encoder using VideoToolbox VTCompressionSession.
  *
+ * Session is created lazily on the first encode() call using actual pixel buffer
+ * dimensions. VTCompressionSession requires valid dimensions at creation time;
+ * placeholder dimensions (e.g. 1x1) cause all callbacks to return errors.
+ *
  * Uses a non-blocking pipeline: the C-style callback stores the encoded frame,
- * and encode() returns the previously stored frame. This avoids all
- * synchronization issues (semaphores, deadlocks, stale state).
- * Trade-off: 1-frame pipeline delay (negligible for real-time streaming).
+ * and encode() returns the previously stored frame. 1-frame pipeline delay.
  */
 
 import CoreMedia
@@ -41,12 +43,22 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     // Track keyframe status for the pending frame
     private var _pendingIsKeyframe = false
 
-    init(config: H264EncoderConfig = .default) throws {
+    // Last encoded dimensions — recreate session if they change
+    private var lastWidth: Int = 0
+    private var lastHeight: Int = 0
+
+    init(config: H264EncoderConfig = .default) {
         self.config = config
-        try createSession()
+        // Session created lazily in encode() when we have real dimensions
     }
 
-    private func createSession() throws {
+    private func createSession(width: Int, height: Int) throws {
+        // Invalidate existing session if any
+        if let existing = session {
+            VTCompressionSessionInvalidate(existing)
+            session = nil
+        }
+
         var compressionSession: VTCompressionSession?
 
         let callback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
@@ -54,15 +66,13 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
             let encoder = Unmanaged<H264FrameEncoder>.fromOpaque(refcon).takeUnretainedValue()
 
             guard status == noErr, let sampleBuffer = sampleBuffer else {
-                NSLog("[H264Encoder] Callback error: status=\(status)")
+                NSLog("[H264] callback ERROR status=\(status)")
                 return
             }
 
             let frame = encoder.extractNALUnits(
                 from: sampleBuffer,
-                isKeyframe: encoder._pendingIsKeyframe,
-                inputWidth: 0,  // Will be read from format description
-                inputHeight: 0
+                isKeyframe: encoder._pendingIsKeyframe
             )
 
             if let frame = frame {
@@ -74,8 +84,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         let status = VTCompressionSessionCreate(
             allocator: nil,
-            width: 1,
-            height: 1,
+            width: Int32(width),
+            height: Int32(height),
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
             imageBufferAttributes: [
@@ -103,12 +113,42 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         guard prepareStatus == noErr else {
             throw H264EncoderError.prepareFailed(prepareStatus)
         }
+
         self.session = session
+        self.lastWidth = width
+        self.lastHeight = height
+
+        NSLog("[H264] session created: \(width)x\(height)")
     }
 
     // MARK: - Encode
 
     func encode(_ pixelBuffer: CVPixelBuffer, width: Int, height: Int) -> EncodedFrame? {
+        // Lazy session creation with real dimensions
+        if session == nil {
+            do {
+                try createSession(width: width, height: height)
+            } catch {
+                NSLog("[H264] session create failed: \(error)")
+                return nil
+            }
+        }
+
+        // Recreate session if dimensions changed
+        if width != lastWidth || height != lastHeight {
+            NSLog("[H264] dimension change: \(lastWidth)x\(lastHeight) -> \(width)x\(height)")
+            lock.lock()
+            _pendingFrame = nil
+            lock.unlock()
+            frameCount = 0
+            do {
+                try createSession(width: width, height: height)
+            } catch {
+                NSLog("[H264] session recreate failed: \(error)")
+                return nil
+            }
+        }
+
         guard let session = session else { return nil }
 
         // Return the previously encoded frame (pipeline delay)
@@ -146,8 +186,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         )
 
         if status != noErr {
-            NSLog("[H264Encoder] EncodeFrame failed: \(status)")
-            return result  // Return any pending frame even if current encode failed
+            NSLog("[H264] encode#\(frameCount) FAILED status=\(status)")
+            return result
         }
 
         frameCount += 1
@@ -164,7 +204,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         return result
     }
 
-    private func extractNALUnits(from sampleBuffer: CMSampleBuffer, isKeyframe: Bool, inputWidth: Int, inputHeight: Int) -> EncodedFrame? {
+    private func extractNALUnits(from sampleBuffer: CMSampleBuffer, isKeyframe: Bool) -> EncodedFrame? {
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
 
         let length = CMBlockBufferGetDataLength(blockBuffer)
@@ -206,7 +246,6 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         guard !nalData.isEmpty else { return nil }
 
-        // Get dimensions from format description
         var encodedWidth = 0
         var encodedHeight = 0
         if let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
@@ -251,6 +290,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         session = nil
         frameCount = 0
         keyframeRequested = false
+        lastWidth = 0
+        lastHeight = 0
         lock.lock()
         _pendingFrame = nil
         lock.unlock()

@@ -416,6 +416,8 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
         set("t-relay-fps", typeof frame?.fps === "number" ? (frame.fps as number).toFixed(1) : "--");
         set("t-encode-ema", ((relay.encodeTimeEmaMs as number) ?? 0).toFixed(1) + "ms");
         set("t-relay-dropped", String(relay.framesDropped ?? "--"));
+        const avgFrame = (relay.avgFrameSizeBytes as number) ?? 0;
+        set("t-frame-size", avgFrame > 0 ? (avgFrame / 1024).toFixed(1) + " KB" : "--");
         // Sync codec selector with publisher's current codec
         const codecVal = relay.videoCodec as number | undefined;
         if (typeof codecVal === "number") {
