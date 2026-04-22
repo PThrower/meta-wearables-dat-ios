@@ -230,7 +230,20 @@ export function clearPendingLiveSession(): void {
  * @returns true if auth was required (caller should store sessionId for post-login replay)
  */
 export function watchLive(sessionId: string, shareToken?: string): boolean {
-  if (requireAuth()) return true;
+  console.log("[watchLive] called — sessionId:", sessionId, "shareToken:", !!shareToken);
+  try {
+    return _watchLiveInner(sessionId, shareToken);
+  } catch (err) {
+    console.error("[watchLive] FATAL — uncaught error:", err);
+    showToast("Failed to open live stream — see console", "error");
+    return false;
+  }
+}
+
+function _watchLiveInner(sessionId: string, shareToken?: string): boolean {
+  const authNeeded = requireAuth();
+  console.log("[watchLive] requireAuth() =", authNeeded);
+  if (authNeeded) return true;
   currentSessionId = sessionId;
 
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -623,6 +636,7 @@ export function watchLive(sessionId: string, shareToken?: string): boolean {
   };
 
   // Hide both gallery and SPA page-content behind the player overlay
+  console.log("[watchLive] showing overlay — wsUrl:", wsUrl);
   document.getElementById("gallery")!.classList.add("hidden");
   document.getElementById("page-content")!.classList.add("hidden");
   document.getElementById("livePlayer")!.classList.add("active");
