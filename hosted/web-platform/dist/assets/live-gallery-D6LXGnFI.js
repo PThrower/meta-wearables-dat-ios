@@ -1,4 +1,4 @@
-import{a as c,e as l,c as v}from"./api-client-CzRKcnHI.js";import{w as p}from"./main-DLcfjzgZ.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const w={init(e){e.innerHTML=`
+import{a as c,e as l,c as v}from"./api-client-CRb40JQZ.js";import{w as p}from"./main-D3tKFf6t.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const w={init(e){e.innerHTML=`
       <div class="page live-gallery-page">
         <div class="page-header">
           <h1 class="page-title">Live Streams</h1>

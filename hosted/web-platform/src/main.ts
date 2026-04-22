@@ -30,36 +30,14 @@ function showPageContent(): void {
   pageContent.classList.remove("hidden");
 }
 
-// Override router page loading to handle gallery vs SPA pages
 const router = new Router(pageContent, (path) => {
   bus.emit("route:changed", { path, params: {} });
+  showPageContent();
 });
 
-// The "/" route is handled specially — it shows the gallery
-// Other routes render SPA pages
+// All SPA routes (the router handles these, "/" is handled by gallery)
 const spaRoutes = routes.filter((r) => r.path !== "/");
 router.addRoutes(spaRoutes);
-
-// Handle "/" by showing gallery, other routes by SPA
-function handleRoute(): void {
-  const path = location.hash.slice(1) || "/";
-  if (path === "/" || path === "") {
-    showGallery();
-    // Load gallery data if not already loaded
-    if (!hasGalleryData) fetchGallery();
-  } else if (path.startsWith("/play/")) {
-    // Direct play route — open recorded player
-    const sessionId = path.slice(6);
-    if (sessionId) openRecordedPlayer(sessionId);
-    showGallery();
-  } else {
-    showPageContent();
-  }
-}
-
-window.addEventListener("hashchange", () => {
-  handleRoute();
-});
 
 // Init sidebar
 const cleanupSidebar = initSidebar(sidebar, location.hash.slice(1) || "/");
@@ -225,20 +203,23 @@ function shareTokenFromUrl(): string | null {
     return;
   }
 
-  // SPA routing: if hash is set, use router; otherwise default to gallery
-  const hash = location.hash.slice(1);
-  if (hash && hash !== "/") {
-    handleRoute();
-  } else {
-    // Default: show gallery
+  // Start the router (listens for hash changes, skips "/" and "/play/*")
+  router.start();
+
+  // Initial route: check hash and show correct view
+  const hash = location.hash.slice(1) || "/";
+  if (hash === "/" || hash === "") {
     showGallery();
     if (!requireAuth()) {
       fetchGallery();
     }
+  } else if (hash.startsWith("/play/")) {
+    const playId = hash.slice(6);
+    if (playId) openRecordedPlayer(playId);
+    showGallery();
   }
-
-  // Start the router (listens for hash changes)
-  router.start();
+  // SPA routes (e.g., /devices, /live, /feeds, /analytics) are handled
+  // by the router's onHashChange which fires on start()
 })();
 
 // Background refresh every 30s (gallery only when visible)

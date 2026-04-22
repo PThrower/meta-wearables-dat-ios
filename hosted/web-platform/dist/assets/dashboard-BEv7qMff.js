@@ -1,4 +1,4 @@
-import{f as h,a as g,b as u,e as o,c as f}from"./api-client-CzRKcnHI.js";import"./main-DLcfjzgZ.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const A={init(t){t.innerHTML=`
+import{f as h,a as g,b as u,e as o,c as f}from"./api-client-CRb40JQZ.js";import"./main-D3tKFf6t.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const A={init(t){t.innerHTML=`
       <div class="page dashboard-page">
         <div class="page-header">
           <div class="page-header-row">

@@ -61,6 +61,15 @@ export class Router {
     // Avoid re-navigating to the same route
     if (path === this.currentPath) return;
 
+    // Skip "/" (gallery) and "/play/*" (recorded player) — handled externally
+    if (path === "/" || path === "") {
+      this.currentPath = "/";
+      return;
+    }
+    if (path.startsWith("/play/")) {
+      return;
+    }
+
     // Find matching route (exact match first, then prefix)
     const route = this.findRoute(path);
     if (!route) {
