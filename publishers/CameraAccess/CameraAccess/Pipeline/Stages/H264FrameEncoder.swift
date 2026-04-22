@@ -2,12 +2,8 @@
  * H264FrameEncoder.swift
  *
  * Hardware-accelerated H.264 encoder using VideoToolbox VTCompressionSession.
- * Takes CVPixelBuffer directly (no YUV-to-RGB conversion needed) and produces
- * H.264 NAL units with SPS/PPS parameter sets on keyframes.
- *
- * Uses VTCompressionSessionEncodeFrameWithOutputHandler (per-frame Swift closure
- * output handler). A fresh DispatchSemaphore is created per encode call to avoid
- * stale state from previous calls or destroy().
+ * Uses the C-style outputCallback (most reliable across iOS versions/devices).
+ * A DispatchSemaphore synchronizes the async callback with encode() callers.
  */
 
 import CoreMedia
@@ -17,9 +13,9 @@ import Foundation
 import VideoToolbox
 
 struct H264EncoderConfig: Sendable {
-    let bitrate: Int           // Target bitrate in bps (e.g. 750_000 = 750kbps)
-    let keyframeInterval: Int  // Force IDR every N frames
-    let expectedFPS: Int       // Used for bitrate calculation hints
+    let bitrate: Int
+    let keyframeInterval: Int
+    let expectedFPS: Int
 
     static let `default` = H264EncoderConfig(
         bitrate: 750_000,
@@ -33,12 +29,13 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
     private var session: VTCompressionSession?
     private var config: H264EncoderConfig
-
-    /// Frame counter for keyframe interval enforcement
     private var frameCount: Int = 0
-
-    /// Whether a keyframe has been requested
     private var keyframeRequested = false
+
+    // Callback synchronization
+    private let callbackSemaphore = DispatchSemaphore(value: 0)
+    private var callbackSampleBuffer: CMSampleBuffer?
+    private var callbackStatus: OSStatus = noErr
 
     init(config: H264EncoderConfig = .default) throws {
         self.config = config
@@ -47,6 +44,15 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
     private func createSession() throws {
         var compressionSession: VTCompressionSession?
+
+        // C-style output callback — stores result and signals semaphore.
+        let callback: VTCompressionOutputCallback = { refcon, _, status, _, sampleBuffer in
+            guard let refcon = refcon else { return }
+            let encoder = Unmanaged<H264FrameEncoder>.fromOpaque(refcon).takeUnretainedValue()
+            encoder.callbackStatus = status
+            encoder.callbackSampleBuffer = sampleBuffer
+            encoder.callbackSemaphore.signal()
+        }
 
         let status = VTCompressionSessionCreate(
             allocator: nil,
@@ -58,8 +64,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
                 kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             ] as CFDictionary,
             compressedDataAllocator: nil,
-            outputCallback: nil,
-            refcon: nil,
+            outputCallback: callback,
+            refcon: Unmanaged.passUnretained(self).toOpaque(),
             compressionSessionOut: &compressionSession
         )
 
@@ -100,13 +106,11 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
             : nil
 
-        var flags: VTEncodeInfoFlags = []
+        // Clear previous output
+        callbackSampleBuffer = nil
+        callbackStatus = noErr
 
-        // Fresh semaphore per frame — no stale state from previous calls.
-        // Strong capture: the encoder is alive during encode() because
-        // RelayStage's Task.detached holds it via currentEncoder.
-        let sem = DispatchSemaphore(value: 0)
-        var outputBuffer: CMSampleBuffer?
+        var flags: VTEncodeInfoFlags = []
 
         let status = VTCompressionSessionEncodeFrame(
             session,
@@ -114,31 +118,31 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
             presentationTimeStamp: presentationTimestamp,
             duration: duration,
             frameProperties: frameProperties,
+            sourceFrameRefcon: nil,
             infoFlagsOut: &flags
-        ) { (status: OSStatus, _: VTEncodeInfoFlags, sampleBuffer: CMSampleBuffer?) in
-            if status == noErr, let sb = sampleBuffer {
-                outputBuffer = sb
-            }
-            sem.signal()
-        }
+        )
 
         guard status == noErr else {
-            NSLog("[H264Encoder] VTCompressionSessionEncodeFrame failed: \(status)")
+            NSLog("[H264Encoder] EncodeFrame failed: \(status)")
             return nil
         }
 
         frameCount += 1
 
-        // Wait for output handler with short timeout (200ms).
-        // Real-time mode fires synchronously; timeout is a safety net.
-        let waitResult = sem.wait(timeout: .now() + 0.2)
-        guard waitResult == .success, let sampleBuffer = outputBuffer else {
-            if frameCount <= 3 || frameCount % 100 == 0 {
-                NSLog("[H264Encoder] No output: timedOut frame=\(frameCount)")
-            }
+        // Wait for callback to fire (up to 500ms)
+        let waitResult = callbackSemaphore.wait(timeout: .now() + 0.5)
+
+        if waitResult == .timedOut {
+            NSLog("[H264Encoder] Callback timed out frame=\(frameCount)")
             return nil
         }
 
+        guard callbackStatus == noErr, let sampleBuffer = callbackSampleBuffer else {
+            NSLog("[H264Encoder] Callback error: status=\(callbackStatus), hasBuffer=\(callbackSampleBuffer != nil)")
+            return nil
+        }
+
+        callbackSampleBuffer = nil
         return extractNALUnits(from: sampleBuffer, isKeyframe: needsKeyframe, inputWidth: width, inputHeight: height)
     }
 
@@ -170,7 +174,6 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
                     nalUnitHeaderLengthOut: nil
                 )
                 guard paramStatus == noErr, let ptr = pointer, size > 0 else { break }
-
                 parameterSets.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
                 parameterSets.append(ptr, count: size)
                 index += 1
@@ -205,20 +208,16 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     private func convertAVCCToAnnexB(_ avccData: Data) -> Data {
         var result = Data()
         var offset = 0
-
         while offset + 4 <= avccData.count {
             let nalLength = avccData.withUnsafeBytes { ptr in
                 ptr.loadUnaligned(fromByteOffset: offset, as: UInt32.self).bigEndian
             }
             offset += 4
-
             guard offset + Int(nalLength) <= avccData.count else { break }
-
             result.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
             result.append(avccData[offset..<(offset + Int(nalLength))])
             offset += Int(nalLength)
         }
-
         return result
     }
 
@@ -233,6 +232,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         session = nil
         frameCount = 0
         keyframeRequested = false
+        callbackSampleBuffer = nil
     }
 }
 
