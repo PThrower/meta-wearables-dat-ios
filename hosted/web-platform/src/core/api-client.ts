@@ -93,6 +93,59 @@ export async function apiGet<T>(url: string): Promise<T | null> {
   }
 }
 
+/** Typed POST request */
+export async function apiPost<T>(url: string, body: unknown): Promise<T | null> {
+  try {
+    const res = await authFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.warn(`[api] POST ${url} returned ${res.status}`);
+      return null;
+    }
+    return await res.json() as T;
+  } catch (err) {
+    console.warn(`[api] POST ${url} failed:`, err);
+    return null;
+  }
+}
+
+/** Typed PUT request */
+export async function apiPut<T>(url: string, body: unknown): Promise<T | null> {
+  try {
+    const res = await authFetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.warn(`[api] PUT ${url} returned ${res.status}`);
+      return null;
+    }
+    return await res.json() as T;
+  } catch (err) {
+    console.warn(`[api] PUT ${url} failed:`, err);
+    return null;
+  }
+}
+
+/** Typed DELETE request */
+export async function apiDelete<T>(url: string): Promise<T | null> {
+  try {
+    const res = await authFetch(url, { method: "DELETE" });
+    if (!res.ok) {
+      console.warn(`[api] DELETE ${url} returned ${res.status}`);
+      return null;
+    }
+    return await res.json() as T;
+  } catch (err) {
+    console.warn(`[api] DELETE ${url} failed:`, err);
+    return null;
+  }
+}
+
 /** Fetch platform stats and flatten from nested server response */
 export async function fetchStats(): Promise<StatsResponse | null> {
   const raw = await apiGet<Record<string, unknown>>("/stats");
@@ -202,4 +255,93 @@ export function formatBytes(bytes: number): string {
   if (mb > 1024) return `${(mb / 1024).toFixed(1)} GB`;
   if (mb > 1) return `${mb.toFixed(0)} MB`;
   return `${(bytes / 1024).toFixed(0)} KB`;
+}
+
+// --- Workflow types ---
+
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  description: string;
+  status: "draft" | "published" | "archived";
+  ownerId: string | null;
+  nodeCount: number;
+  updatedAt: string;
+}
+
+export interface WorkflowNodeDef {
+  id: string;
+  type: "camera-source" | "s2s-live" | "s2s-rest" | "output";
+  label: string;
+  config: Record<string, unknown>;
+  positionX: number;
+  positionY: number;
+}
+
+export interface WorkflowEdgeDef {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+}
+
+export interface WorkflowDetail {
+  id: string;
+  name: string;
+  description: string;
+  status: "draft" | "published" | "archived";
+  ownerId: string | null;
+  nodes: WorkflowNodeDef[];
+  edges: WorkflowEdgeDef[];
+  canvasViewport: { x: number; y: number; zoom: number };
+  createdAt: string;
+  updatedAt: string;
+}
+
+// --- Workflow API ---
+
+/** Fetch all workflows */
+export function fetchWorkflows(): Promise<WorkflowSummary[]> {
+  return apiGet<WorkflowSummary[]>("/workflows").then(r => r ?? []);
+}
+
+/** Fetch a single workflow */
+export function fetchWorkflow(id: string): Promise<WorkflowDetail | null> {
+  return apiGet<WorkflowDetail>(`/workflows/${id}`);
+}
+
+/** Create a new workflow */
+export function createWorkflow(data: {
+  name: string;
+  description?: string;
+  nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+  edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+}): Promise<WorkflowDetail | null> {
+  return apiPost<WorkflowDetail>("/workflows", data);
+}
+
+/** Update a workflow */
+export function updateWorkflow(id: string, data: {
+  name?: string;
+  description?: string;
+  status?: string;
+  canvasViewport?: string;
+  nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+  edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+}): Promise<WorkflowDetail | null> {
+  return apiPut<WorkflowDetail>(`/workflows/${id}`, data);
+}
+
+/** Delete a workflow */
+export function deleteWorkflow(id: string): Promise<{ ok: boolean } | null> {
+  return apiDelete<{ ok: boolean }>(`/workflows/${id}`);
+}
+
+/** Activate a workflow against a session */
+export function activateWorkflow(workflowId: string, sessionId: string): Promise<{ appId: string; status: string } | null> {
+  return apiPost<{ appId: string; status: string }>(`/workflows/${workflowId}/activate`, { sessionId });
+}
+
+/** Fetch available primitives */
+export function fetchPrimitives(): Promise<Array<{ id: string; name: string; icon: string }>> {
+  return apiGet<Array<{ id: string; name: string; icon: string }>>("/primitives").then(r => r ?? []);
 }

@@ -203,3 +203,40 @@ export const alerts = sqliteTable("alerts", {
   index("idx_alerts_severity").on(t.severity),
   index("idx_alerts_created").on(t.createdAt),
 ]);
+
+// --- Workflows ---
+
+export const workflows = sqliteTable("workflows", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  ownerId: text("owner_id"),
+  status: text("status").notNull().default("draft"),  // draft, published, archived
+  canvasViewport: text("canvas_viewport").default('{"x":0,"y":0,"zoom":1}'),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  index("idx_workflows_owner").on(t.ownerId),
+  index("idx_workflows_status").on(t.status),
+]);
+
+export const workflowNodes = sqliteTable("workflow_nodes", {
+  id: text("id").primaryKey(),
+  workflowId: text("workflow_id").notNull().references(() => workflows.id),
+  type: text("type").notNull(),  // camera-source, s2s-live, s2s-rest, output
+  label: text("label").notNull().default(""),
+  config: text("config").notNull().default("{}"),
+  positionX: real("position_x").notNull().default(0),
+  positionY: real("position_y").notNull().default(0),
+}, (t) => [
+  index("idx_wf_nodes").on(t.workflowId),
+]);
+
+export const workflowEdges = sqliteTable("workflow_edges", {
+  id: text("id").primaryKey(),
+  workflowId: text("workflow_id").notNull().references(() => workflows.id),
+  sourceNodeId: text("source_node_id").notNull(),
+  targetNodeId: text("target_node_id").notNull(),
+}, (t) => [
+  index("idx_wf_edges").on(t.workflowId),
+]);

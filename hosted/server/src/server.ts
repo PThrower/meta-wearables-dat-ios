@@ -49,7 +49,7 @@ import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
-import { AppRegistry } from "./app-registry.js";
+import { AppRegistry, resolveWorkflowToApp } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -636,6 +636,215 @@ const server = Bun.serve<WsData>({
       return Response.json(appRegistry.listApps());
     }
 
+    // --- Primitives (for workflow node palette metadata) ---
+
+    if (url.pathname === "/primitives") {
+      return Response.json(appRegistry.listApps().flatMap(a => ({
+        id: a.binding,
+        name: a.name,
+        icon: a.icon,
+      })));
+    }
+
+    // --- Workflow CRUD ---
+
+    // List workflows
+    if (url.pathname === "/workflows" && req.method === "GET") {
+      const rows = q.listWorkflows();
+      return Response.json(rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        status: r.status,
+        ownerId: r.ownerId,
+        nodeCount: r.nodeCount,
+        updatedAt: r.updatedAt,
+      })));
+    }
+
+    // Create workflow
+    if (url.pathname === "/workflows" && req.method === "POST") {
+      try {
+        const body = await req.json() as {
+          name?: string;
+          description?: string;
+          nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+          edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+        };
+        if (!body.name) return Response.json({ error: "name required" }, { status: 400 });
+
+        const id = `wf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const nodes = body.nodes ?? [];
+        const edges = body.edges ?? [];
+
+        // Validate: exactly 1 source, 1 AI node, 1 output
+        const sourceCount = nodes.filter(n => n.type === "camera-source").length;
+        const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest").length;
+        const outputCount = nodes.filter(n => n.type === "output").length;
+        if (nodes.length > 0 && (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1)) {
+          return Response.json({ error: "Must have exactly 1 camera-source, 1 AI node, and 1 output" }, { status: 400 });
+        }
+
+        dbWriter.enqueue(q.insertWorkflow({
+          id,
+          name: body.name,
+          description: body.description,
+          nodes,
+          edges,
+        }));
+        dbWriter.flushNow();
+
+        const wf = q.getWorkflow(id);
+        return Response.json({
+          id: wf!.id,
+          name: wf!.name,
+          description: wf!.description,
+          status: wf!.status,
+          ownerId: wf!.ownerId,
+          nodes: q.getWorkflowNodes(id).map(n => ({
+            id: n.id, type: n.type, label: n.label,
+            config: JSON.parse(n.config), positionX: n.positionX, positionY: n.positionY,
+          })),
+          edges: q.getWorkflowEdges(id).map(e => ({
+            id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
+          })),
+          canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+          createdAt: wf!.createdAt,
+          updatedAt: wf!.updatedAt,
+        }, { status: 201 });
+      } catch (e) {
+        return Response.json({ error: "Invalid JSON" }, { status: 400 });
+      }
+    }
+
+    // Workflow detail / update / delete (prefix match)
+    const wfMatch = url.pathname.match(/^\/workflows\/([^/]+)$/);
+    if (wfMatch) {
+      const wfId = wfMatch[1];
+
+      if (req.method === "GET") {
+        const wf = q.getWorkflow(wfId);
+        if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
+        return Response.json({
+          id: wf.id, name: wf.name, description: wf.description,
+          status: wf.status, ownerId: wf.ownerId,
+          nodes: q.getWorkflowNodes(wfId).map(n => ({
+            id: n.id, type: n.type, label: n.label,
+            config: JSON.parse(n.config), positionX: n.positionX, positionY: n.positionY,
+          })),
+          edges: q.getWorkflowEdges(wfId).map(e => ({
+            id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
+          })),
+          canvasViewport: JSON.parse(wf.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+          createdAt: wf.createdAt, updatedAt: wf.updatedAt,
+        });
+      }
+
+      if (req.method === "PUT") {
+        try {
+          const body = await req.json() as {
+            name?: string; description?: string; status?: string;
+            canvasViewport?: string;
+            nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+            edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+          };
+          const existing = q.getWorkflow(wfId);
+          if (!existing) return Response.json({ error: "Workflow not found" }, { status: 404 });
+
+          // Validate if nodes provided
+          if (body.nodes) {
+            const sourceCount = body.nodes.filter(n => n.type === "camera-source").length;
+            const aiCount = body.nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest").length;
+            const outputCount = body.nodes.filter(n => n.type === "output").length;
+            if (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1) {
+              return Response.json({ error: "Must have exactly 1 camera-source, 1 AI node, and 1 output" }, { status: 400 });
+            }
+          }
+
+          dbWriter.enqueue(q.updateWorkflow(wfId, {
+            name: body.name,
+            description: body.description,
+            status: body.status,
+            canvasViewport: body.canvasViewport,
+            nodes: body.nodes?.map(n => ({ ...n, config: n.config ?? "{}" })),
+            edges: body.edges,
+          }));
+          dbWriter.flushNow();
+
+          const wf = q.getWorkflow(wfId);
+          return Response.json({
+            id: wf!.id, name: wf!.name, description: wf!.description,
+            status: wf!.status, ownerId: wf!.ownerId,
+            nodes: q.getWorkflowNodes(wfId).map(n => ({
+              id: n.id, type: n.type, label: n.label,
+              config: JSON.parse(n.config), positionX: n.positionX, positionY: n.positionY,
+            })),
+            edges: q.getWorkflowEdges(wfId).map(e => ({
+              id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
+            })),
+            canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+            createdAt: wf!.createdAt, updatedAt: wf!.updatedAt,
+          });
+        } catch (e) {
+          return Response.json({ error: "Invalid JSON" }, { status: 400 });
+        }
+      }
+
+      if (req.method === "DELETE") {
+        dbWriter.enqueue(q.deleteWorkflow(wfId));
+        dbWriter.flushNow();
+        return Response.json({ ok: true });
+      }
+    }
+
+    // Activate workflow against a session
+    const wfActivateMatch = url.pathname.match(/^\/workflows\/([^/]+)\/activate$/);
+    if (wfActivateMatch && req.method === "POST") {
+      try {
+        const wfId = wfActivateMatch[1];
+        const body = await req.json() as { sessionId?: string };
+        if (!body.sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+
+        const wf = q.getWorkflow(wfId);
+        if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
+
+        const nodes = q.getWorkflowNodes(wfId).map(n => ({
+          ...n, config: JSON.parse(n.config),
+        }));
+        const edges = q.getWorkflowEdges(wfId);
+
+        // Validate chain
+        const sourceCount = nodes.filter(n => n.type === "camera-source").length;
+        const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest").length;
+        const outputCount = nodes.filter(n => n.type === "output").length;
+        if (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1) {
+          return Response.json({ error: "Invalid workflow: must have 1 source, 1 AI node, 1 output" }, { status: 400 });
+        }
+
+        const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
+        appRegistry.registerTransientApp(virtualApp);
+
+        const session = registry.get(body.sessionId);
+        if (session) {
+          session.activeAppId = virtualApp.id;
+          session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+        }
+
+        await orchestrator.activateWithConfig(body.sessionId, virtualApp);
+
+        // Send cached frame to AI for immediate context
+        const cachedFrame = registry.getLastFrame(body.sessionId);
+        if (cachedFrame) {
+          const jpegPayload = cachedFrame.slice(HEADER_SIZE);
+          orchestrator.sendVideoFrame(body.sessionId, jpegPayload);
+        }
+
+        return Response.json({ appId: virtualApp.id, status: "active" });
+      } catch (e) {
+        return Response.json({ error: String(e) }, { status: 500 });
+      }
+    }
+
     // --- Guidance History ---
 
     const guidanceMatch = url.pathname.match(/^\/session\/([^/]+)\/guidance$/);
@@ -982,6 +1191,25 @@ const server = Bun.serve<WsData>({
               ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
               // Notify orchestrator
               orchestrator.deactivateApp(sessionId).catch(() => {});
+            } else if (cmd.type === "activate_workflow") {
+              // Activate a workflow for this session
+              const workflowId = cmd.workflowId as string;
+              try {
+                const wf = q.getWorkflow(workflowId);
+                if (!wf) { ws.send(JSON.stringify({ type: "workflow_error", error: "Workflow not found" })); return; }
+                const nodes = q.getWorkflowNodes(workflowId).map(n => ({ ...n, config: JSON.parse(n.config) }));
+                const edges = q.getWorkflowEdges(workflowId);
+                const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: workflowId, name: wf.name });
+                appRegistry.registerTransientApp(virtualApp);
+                session.activeAppId = virtualApp.id;
+                session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+                await orchestrator.activateWithConfig(sessionId, virtualApp);
+                ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
+                const cachedFrame = registry.getLastFrame(sessionId);
+                if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+              } catch (e) {
+                ws.send(JSON.stringify({ type: "workflow_error", error: String(e) }));
+              }
             } else if (cmd.type === "set_vision_fps" && typeof cmd.fps === "number") {
               const fps = Math.max(0.1, Math.min(cmd.fps, 5));
               orchestrator.setVisionFps(sessionId, fps);

@@ -4,11 +4,12 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline } from "./app-types.js";
+import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig } from "./app-types.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
   private apps = new Map<string, AppDefinition>();
+  private transientApps = new Map<string, AppDefinition>();
 
   constructor() {
     this.load();
@@ -38,9 +39,9 @@ export class AppRegistry {
     return [...this.apps.values()];
   }
 
-  /** Get a specific app definition */
+  /** Get a specific app definition (checks static + transient) */
   getApp(id: string): AppDefinition | undefined {
-    return this.apps.get(id);
+    return this.apps.get(id) ?? this.transientApps.get(id);
   }
 
   /** Get a primitive definition */
@@ -48,9 +49,20 @@ export class AppRegistry {
     return this.primitives.get(id);
   }
 
-  /** Resolve an app to its pipeline spec (binding → primitive) */
+  /** Register a transient app (from workflow activation, in-memory only) */
+  registerTransientApp(app: AppDefinition): void {
+    this.transientApps.set(app.id, app);
+    console.log(`[app-registry] Registered transient app: ${app.id}`);
+  }
+
+  /** Remove a transient app */
+  removeTransientApp(id: string): void {
+    this.transientApps.delete(id);
+  }
+
+  /** Resolve an app to its pipeline spec (binding -> primitive) */
   resolvePipeline(appId: string): AppPipeline | null {
-    const app = this.apps.get(appId);
+    const app = this.getApp(appId);
     if (!app) return null;
 
     const primitive = this.primitives.get(app.binding);
@@ -71,4 +83,33 @@ export class AppRegistry {
     }
     return null;
   }
+}
+
+/** Resolve workflow nodes + edges into a virtual AppDefinition for activation */
+export function resolveWorkflowToApp(
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+  workflow: { id: string; name: string },
+): AppDefinition {
+  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest");
+  if (!aiNode) throw new Error("No AI node found in workflow");
+
+  const binding = aiNode.type === "s2s-live" ? "s2s-gemini-live" : "s2s-gemma4-rest";
+
+  const config: AppConfig = {
+    model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
+    voice: aiNode.config.voice as string | undefined,
+    visionFps: aiNode.config.visionFps as number | undefined,
+    temperature: aiNode.config.temperature as number | undefined,
+  };
+
+  return {
+    id: `wf-${workflow.id}`,
+    name: workflow.name,
+    description: `Workflow: ${workflow.name}`,
+    icon: "workflow",
+    binding,
+    systemPrompt: (aiNode.config.systemPrompt as string) ?? "",
+    config,
+  };
 }

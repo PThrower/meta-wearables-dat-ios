@@ -303,6 +303,146 @@ export function isTokenRevoked(tokenJti: string): boolean {
   return row !== null && row !== undefined;
 }
 
+// --- Workflows ---
+
+/** Insert a new workflow with its nodes and edges */
+export function insertWorkflow(params: {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId?: string;
+  status?: string;
+  canvasViewport?: string;
+  nodes: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+  edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+}) {
+  return () => {
+    const db = getDbRaw();
+    const ts = now();
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO workflows (id, name, description, owner_id, status, canvas_viewport, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        params.id,
+        params.name,
+        params.description ?? "",
+        params.ownerId ?? null,
+        params.status ?? "draft",
+        params.canvasViewport ?? '{"x":0,"y":0,"zoom":1}',
+        ts,
+        ts,
+      );
+      const nodeStmt = db.prepare(
+        "INSERT INTO workflow_nodes (id, workflow_id, type, label, config, position_x, position_y) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      );
+      for (const n of params.nodes) {
+        nodeStmt.run(n.id, params.id, n.type, n.label ?? "", n.config ?? "{}", n.positionX ?? 0, n.positionY ?? 0);
+      }
+      const edgeStmt = db.prepare(
+        "INSERT INTO workflow_edges (id, workflow_id, source_node_id, target_node_id) VALUES (?, ?, ?, ?)"
+      );
+      for (const e of params.edges) {
+        edgeStmt.run(e.id, params.id, e.sourceNodeId, e.targetNodeId);
+      }
+    })();
+  };
+}
+
+/** Update workflow metadata and replace nodes/edges atomically */
+export function updateWorkflow(id: string, params: {
+  name?: string;
+  description?: string;
+  status?: string;
+  canvasViewport?: string;
+  nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
+  edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
+}) {
+  return () => {
+    const db = getDbRaw();
+    const ts = now();
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE workflows SET
+          name = COALESCE(?, name),
+          description = COALESCE(?, description),
+          status = COALESCE(?, status),
+          canvas_viewport = COALESCE(?, canvas_viewport),
+          updated_at = ?
+        WHERE id = ?
+      `).run(params.name ?? null, params.description ?? null, params.status ?? null, params.canvasViewport ?? null, ts, id);
+
+      if (params.nodes) {
+        db.prepare("DELETE FROM workflow_nodes WHERE workflow_id = ?").run(id);
+        const nodeStmt = db.prepare(
+          "INSERT INTO workflow_nodes (id, workflow_id, type, label, config, position_x, position_y) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+        for (const n of params.nodes) {
+          nodeStmt.run(n.id, id, n.type, n.label ?? "", n.config ?? "{}", n.positionX ?? 0, n.positionY ?? 0);
+        }
+      }
+      if (params.edges) {
+        db.prepare("DELETE FROM workflow_edges WHERE workflow_id = ?").run(id);
+        const edgeStmt = db.prepare(
+          "INSERT INTO workflow_edges (id, workflow_id, source_node_id, target_node_id) VALUES (?, ?, ?, ?)"
+        );
+        for (const e of params.edges) {
+          edgeStmt.run(e.id, id, e.sourceNodeId, e.targetNodeId);
+        }
+      }
+    })();
+  };
+}
+
+/** Delete a workflow (CASCADE removes nodes + edges) */
+export function deleteWorkflow(id: string) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare("DELETE FROM workflows WHERE id = ?").run(id);
+  };
+}
+
+/** Get a single workflow by ID */
+export function getWorkflow(id: string): {
+  id: string; name: string; description: string; ownerId: string | null;
+  status: string; canvasViewport: string; createdAt: string; updatedAt: string;
+} | null {
+  const db = getDbRaw();
+  return db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as any ?? null;
+}
+
+/** List all workflows with node counts */
+export function listWorkflows(): Array<{
+  id: string; name: string; description: string; status: string;
+  ownerId: string | null; nodeCount: number; updatedAt: string;
+}> {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT w.*, COUNT(n.id) as node_count
+    FROM workflows w
+    LEFT JOIN workflow_nodes n ON n.workflow_id = w.id
+    GROUP BY w.id
+    ORDER BY w.updated_at DESC
+  `).all() as any[];
+}
+
+/** Get all nodes for a workflow */
+export function getWorkflowNodes(workflowId: string): Array<{
+  id: string; workflowId: string; type: string; label: string;
+  config: string; positionX: number; positionY: number;
+}> {
+  const db = getDbRaw();
+  return db.prepare("SELECT * FROM workflow_nodes WHERE workflow_id = ?").all(workflowId) as any[];
+}
+
+/** Get all edges for a workflow */
+export function getWorkflowEdges(workflowId: string): Array<{
+  id: string; workflowId: string; sourceNodeId: string; targetNodeId: string;
+}> {
+  const db = getDbRaw();
+  return db.prepare("SELECT * FROM workflow_edges WHERE workflow_id = ?").all(workflowId) as any[];
+}
+
 // --- Session stats update (periodic) ---
 
 /** Update running session stats from in-memory counters */

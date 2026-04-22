@@ -62,3 +62,35 @@ export interface AppsConfig {
   primitives: PrimitiveDefinition[];
   apps: AppDefinition[];
 }
+
+// --- Workflow Builder ---
+
+export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "output";
+
+export interface WorkflowNodeDef {
+  id: string;
+  type: WorkflowNodeType;
+  label: string;
+  config: Record<string, unknown>;
+  positionX: number;
+  positionY: number;
+}
+
+export interface WorkflowEdgeDef {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  description: string;
+  ownerId: string | null;
+  status: "draft" | "published" | "archived";
+  nodes: WorkflowNodeDef[];
+  edges: WorkflowEdgeDef[];
+  canvasViewport: { x: number; y: number; zoom: number };
+  createdAt: string;
+  updatedAt: string;
+}

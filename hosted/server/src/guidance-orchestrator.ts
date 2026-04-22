@@ -14,7 +14,7 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
@@ -188,9 +188,6 @@ export class GuidanceOrchestrator {
 
   /** Activate an app for a session (from viewer or publisher gesture). */
   async activateApp(sessionId: string, appId: string): Promise<void> {
-    // Disconnect existing AI service for this session if any
-    this.disconnectAI(sessionId);
-
     const pipeline = this.appRegistry.resolvePipeline(appId);
     const app = this.appRegistry.getApp(appId);
     if (!pipeline || !app) {
@@ -205,6 +202,17 @@ export class GuidanceOrchestrator {
       this.broadcastStatus(sessionId);
       return;
     }
+    await this.activateWithConfig(sessionId, app);
+  }
+
+  /** Activate with a pre-resolved AppDefinition (used by workflow activation). */
+  async activateWithConfig(sessionId: string, app: AppDefinition): Promise<void> {
+    const appId = app.id;
+
+    // Disconnect existing AI service for this session if any
+    this.disconnectAI(sessionId);
+
+    const pipeline = this.appRegistry.resolvePipeline(appId);
 
     this.setStatus(sessionId, {
       appId,
@@ -218,7 +226,7 @@ export class GuidanceOrchestrator {
 
     // Resolve the AI provider from the primitive binding
     // Default to gemini-live if no explicit provider hint
-    const provider = this.resolveProvider(pipeline.primitiveId);
+    const provider = this.resolveProvider(pipeline?.primitiveId ?? app.binding);
     const service = createAIService(provider);
 
     if (!service) {

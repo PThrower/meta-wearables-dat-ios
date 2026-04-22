@@ -2222,3 +2222,331 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* === WORKFLOW EDITOR === */
+
+.wf-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 0 24px 24px;
+}
+
+.wf-card {
+  background: #141414;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 16px;
+  transition: border-color 0.15s;
+}
+.wf-card:hover { border-color: rgba(255,255,255,0.16); }
+
+.wf-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.wf-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.wf-card-status {
+  font-size: 9px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.wf-status-draft {
+  background: rgba(168,85,247,0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168,85,247,0.25);
+}
+
+.wf-status-published {
+  background: rgba(34,197,94,0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.25);
+}
+
+.wf-status-archived {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.35);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.wf-card-desc {
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.wf-card-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: rgba(255,255,255,0.3);
+  margin-bottom: 12px;
+}
+
+.wf-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Editor layout */
+.workflow-editor-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 60px);
+}
+
+.wf-editor-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wf-palette {
+  width: 180px;
+  background: #111;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-palette-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: rgba(255,255,255,0.3);
+  margin-bottom: 4px;
+}
+
+.wf-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.03);
+  cursor: pointer;
+  font-size: 11px;
+  color: #e0e0e0;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.wf-palette-item:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.wf-palette-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wf-palette-label {
+  text-transform: capitalize;
+}
+
+.wf-canvas-wrap {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #0a0a0a;
+}
+
+.wf-canvas-svg {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  user-select: none;
+}
+
+.wf-canvas-svg:active { cursor: grabbing; }
+
+.wf-node { cursor: move; }
+.wf-node:hover .wf-node-bg { filter: brightness(1.15); }
+.wf-node-bg { transition: filter 0.1s; }
+
+.wf-port { cursor: crosshair; }
+.wf-port:hover { r: 8; filter: brightness(1.4); }
+
+.wf-edge {
+  cursor: pointer;
+  transition: stroke 0.15s;
+}
+.wf-edge:hover { stroke: #94a3b3; stroke-width: 3; }
+
+/* Config panel */
+.wf-config-panel {
+  width: 240px;
+  background: #111;
+  border-left: 1px solid rgba(255,255,255,0.08);
+  padding: 16px 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-config-header {
+  padding-left: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.wf-config-type {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.wf-config-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+}
+
+.wf-config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-config-field > label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.wf-config-input {
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #e0e0e0;
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.wf-config-input:focus { border-color: rgba(255,255,255,0.25); }
+
+select.wf-config-input {
+  appearance: none;
+  cursor: pointer;
+}
+
+.wf-config-textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.4;
+}
+
+.wf-config-info {
+  font-size: 10px;
+  color: rgba(255,255,255,0.3);
+  padding: 8px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+}
+
+.wf-config-radio {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wf-config-radio label {
+  font-size: 11px;
+  color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.wf-config-radio input[type="radio"] {
+  accent-color: #22c55e;
+}
+
+/* Toolbar */
+.wf-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: #111;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+.wf-toolbar-input {
+  background: #1a1a1a;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 6px 10px;
+  color: #e0e0e0;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  max-width: 200px;
+}
+
+.wf-toolbar-input:focus { border-color: rgba(255,255,255,0.25); }
+
+.wf-toolbar-desc {
+  max-width: 300px;
+  font-size: 11px;
+}
+
+/* Buttons (reused) */
+.btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.06);
+  color: #e0e0e0;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover { background: rgba(255,255,255,0.1); }
+
+.btn-primary {
+  background: rgba(34,197,94,0.15);
+  border-color: rgba(34,197,94,0.25);
+  color: #22c55e;
+}
+
+.btn-primary:hover { background: rgba(34,197,94,0.25); }
+
+.btn-danger {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.2);
+  color: #ef4444;
+}
+
+.btn-danger:hover { background: rgba(239,68,68,0.2); }
+
+.btn-sm { padding: 4px 10px; font-size: 11px; }
