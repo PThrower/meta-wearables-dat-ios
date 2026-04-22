@@ -39,6 +39,11 @@ export class AppRegistry {
     return [...this.apps.values()];
   }
 
+  /** List all available primitives */
+  listPrimitives(): PrimitiveDefinition[] {
+    return [...this.primitives.values()];
+  }
+
   /** Get a specific app definition (checks static + transient) */
   getApp(id: string): AppDefinition | undefined {
     return this.apps.get(id) ?? this.transientApps.get(id);

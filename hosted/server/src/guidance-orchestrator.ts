@@ -439,6 +439,7 @@ export class GuidanceOrchestrator {
 
   /** Remove all state for an expired session. */
   cleanup(sessionId: string): void {
+    this.disconnectAI(sessionId);
     this.status.delete(sessionId);
     this.telemetry.delete(sessionId);
     this.eventHistory.delete(sessionId);

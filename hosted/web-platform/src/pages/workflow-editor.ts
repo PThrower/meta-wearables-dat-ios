@@ -21,10 +21,17 @@ export const page: PageModule = {
   },
   destroy() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    document.removeEventListener("keydown", onKeyDown);
     _container = null;
     _dirty = false;
     _workflow = null;
     _selectedNodeId = null;
+    _viewX = 0;
+    _viewY = 0;
+    _zoom = 1;
+    _dragState = null;
+    _edgeState = null;
+    _panState = null;
   },
 };
 
@@ -460,6 +467,24 @@ function wireSVGEvents(): void {
   }, { passive: false });
 }
 
+/** Update SVG edge paths connected to a moved node without full rebuild */
+function updateEdgesForNode(svgEl: Element, node: WorkflowNodeDef, edges: WorkflowEdgeDef[], nodes: WorkflowNodeDef[]): void {
+  for (const e of edges) {
+    if (e.sourceNodeId !== node.id && e.targetNodeId !== node.id) continue;
+    const pathEl = svgEl.querySelector(`[data-id="${e.id}"]`);
+    if (!pathEl) continue;
+    const src = nodes.find(n => n.id === e.sourceNodeId);
+    const tgt = nodes.find(n => n.id === e.targetNodeId);
+    if (!src || !tgt) continue;
+    const sx = src.positionX + NODE_W;
+    const sy = src.positionY + NODE_H / 2;
+    const tx = tgt.positionX;
+    const ty = tgt.positionY + NODE_H / 2;
+    const mx = (sx + tx) / 2;
+    pathEl.setAttribute("d", `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}`);
+  }
+}
+
 function startNodeDrag(me: MouseEvent, nodeId: string): void {
   if (!_workflow) return;
   const node = _workflow.nodes.find(n => n.id === nodeId);
@@ -481,7 +506,14 @@ function startNodeDrag(me: MouseEvent, nodeId: string): void {
       node.positionX = Math.round(_dragState.nodeStartX + dx);
       node.positionY = Math.round(_dragState.nodeStartY + dy);
       _dirty = true;
-      refreshSVG();
+      // Update node position directly in DOM instead of full rebuild
+      const svgEl = _container?.querySelector("#wf-svg");
+      const g = svgEl?.querySelector(`[data-id="${_dragState.nodeId}"]`);
+      if (g) {
+        g.setAttribute("transform", `translate(${node.positionX}, ${node.positionY})`);
+        // Update edges connected to this node
+        updateEdgesForNode(svgEl!, node, _workflow.edges, _workflow.nodes);
+      }
     }
   };
 
@@ -489,6 +521,7 @@ function startNodeDrag(me: MouseEvent, nodeId: string): void {
     _dragState = null;
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
+    refreshSVG();
   };
 
   document.addEventListener("mousemove", onMove);

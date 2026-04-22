@@ -639,10 +639,10 @@ const server = Bun.serve<WsData>({
     // --- Primitives (for workflow node palette metadata) ---
 
     if (url.pathname === "/primitives") {
-      return Response.json(appRegistry.listApps().flatMap(a => ({
-        id: a.binding,
-        name: a.name,
-        icon: a.icon,
+      return Response.json(appRegistry.listPrimitives().map(p => ({
+        id: p.id,
+        inputs: p.inputs,
+        outputs: p.outputs,
       })));
     }
 
