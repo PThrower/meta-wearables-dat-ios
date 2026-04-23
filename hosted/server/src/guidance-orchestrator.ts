@@ -14,7 +14,7 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, OutputConfig } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
@@ -104,6 +104,7 @@ const MAX_EVENT_HISTORY = 100;
 interface SessionAIState {
   service: AIService;
   appId: string;
+  input: InputConfig;
   output: OutputConfig;
   lastAudioAt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
@@ -245,9 +246,11 @@ export class GuidanceOrchestrator {
     }
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
+    const input: InputConfig = (app.config.input as InputConfig) ?? { audio: "phone-mic", codec: "jpeg", visionFps: app.config.visionFps ?? 1 };
     const state: SessionAIState = {
       service,
       appId,
+      input,
       output,
       lastAudioAt: 0,
       reconnectTimer: null,
@@ -389,6 +392,7 @@ export class GuidanceOrchestrator {
   sendAudio(sessionId: string, pcm: Uint8Array): void {
     const state = this.aiState.get(sessionId);
     if (!state || state.service.status !== "connected") return;
+    if (state.input.audio === "none") return;
     state.service.sendAudio(pcm);
   }
 
@@ -407,6 +411,11 @@ export class GuidanceOrchestrator {
   }
 
   // --- Status / telemetry ---
+
+  /** Get the input config for an active session (used to configure publisher) */
+  getInputConfig(sessionId: string): InputConfig | null {
+    return this.aiState.get(sessionId)?.input ?? null;
+  }
 
   getStatus(sessionId: string): AIStatus {
     return this.status.get(sessionId) ?? {
