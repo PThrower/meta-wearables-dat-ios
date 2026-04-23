@@ -311,11 +311,6 @@ function wireEditorEvents(): void {
     btn.addEventListener("click", () => {
       if (!_workflow) return;
       const type = (btn as HTMLElement).dataset.type as WorkflowNodeDef["type"];
-      // Only allow 1 source, 1 output, 1 AI node total
-      if (type === "stream-input" && _workflow.nodes.some(n => n.type === "stream-input")) return;
-      if (type === "output" && _workflow.nodes.some(n => n.type === "output")) return;
-      const isAI = (t: string) => t === "s2s-live" || t === "s2s-rest" || t === "s2s-e4b";
-      if (isAI(type) && _workflow.nodes.some(n => isAI(n.type))) return;
       const id = nanoid();
       const offset = _workflow.nodes.length * 30;
       const config = type === "s2s-live" ? { model: "gemini-2.5-flash-native-audio-latest" }
