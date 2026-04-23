@@ -246,7 +246,7 @@ export class GuidanceOrchestrator {
     }
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
-    const input: InputConfig = (app.config.input as InputConfig) ?? { audio: "phone-mic", visionFps: app.config.visionFps ?? 1 };
+    const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, audio: "phone-mic", gestures: true, visionFps: app.config.visionFps ?? 1 };
     const state: SessionAIState = {
       service,
       appId,
@@ -385,6 +385,7 @@ export class GuidanceOrchestrator {
   sendVideoFrame(sessionId: string, jpeg: Uint8Array): void {
     const state = this.aiState.get(sessionId);
     if (!state || state.service.status !== "connected") return;
+    if (!state.input.video) return;
     state.service.sendVideoFrame(jpeg);
   }
 
@@ -400,6 +401,8 @@ export class GuidanceOrchestrator {
   sendTrigger(sessionId: string, text: string): void {
     const state = this.aiState.get(sessionId);
     if (!state || state.service.status !== "connected") return;
+    // Gesture triggers are gated by input.gestures; other triggers pass through
+    if (text.startsWith("[Gesture detected:") && !state.input.gestures) return;
     state.service.sendText(text);
   }
 

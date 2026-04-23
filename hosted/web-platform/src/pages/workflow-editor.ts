@@ -181,7 +181,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { audio: "phone-mic", visionFps: 1 }, positionX: 100, positionY: 150 },
+        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, audio: "phone-mic", gestures: true, visionFps: 1 }, positionX: 100, positionY: 150 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 150 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 150 },
       ],
@@ -249,7 +249,7 @@ function buildSVG(): string {
             .map(([l]) => l)
             .join(", ") || "all"
         : n.type === "camera-source"
-          ? `${n.config.audio ?? "phone-mic"} | ${n.config.visionFps ?? 1}fps`
+          ? [n.config.video !== false ? "vid" : "", n.config.audio !== "none" && n.config.audio ? String(n.config.audio ?? "phone-mic") : "", n.config.gestures !== false ? "gest" : ""].filter(Boolean).join(" | ") || "none"
           : "Live feed";
     const selected = _selectedNodeId === n.id;
     return `
@@ -641,6 +641,8 @@ function renderConfigPanel(): void {
   if (node.type === "camera-source") {
     const audio = (node.config.audio as string) ?? "phone-mic";
     const fps = (node.config.visionFps as number) ?? 1;
+    const video = node.config.video !== false;
+    const gestures = node.config.gestures !== false;
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
         <span class="wf-config-type">Input</span>
@@ -650,6 +652,13 @@ function renderConfigPanel(): void {
         <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
       </div>
       <div class="wf-config-info">Device and codec selection are set by the publisher stream</div>
+      <div class="wf-config-field">
+        <label>Modalities</label>
+        <div class="wf-config-checks">
+          <label><input type="checkbox" data-field="config.video" ${video ? "checked" : ""} /> Video (frames to AI)</label>
+          <label><input type="checkbox" data-field="config.gestures" ${gestures ? "checked" : ""} /> Gestures (triggers AI)</label>
+        </div>
+      </div>
       <div class="wf-config-field">
         <label>Audio</label>
         <select class="wf-config-input" data-field="config.audio">

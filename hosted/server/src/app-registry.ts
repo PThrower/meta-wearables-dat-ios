@@ -117,7 +117,9 @@ export function resolveWorkflowToApp(
   // Read input node config for modality selection (device selection is stream-level)
   const inputNode = nodes.find(n => n.type === "camera-source");
   const input: InputConfig = {
+    video: inputNode?.config.video !== false,
     audio: (inputNode?.config.audio as InputConfig["audio"]) ?? "phone-mic",
+    gestures: inputNode?.config.gestures !== false,
     visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
   };
   config.visionFps = input.visionFps;
