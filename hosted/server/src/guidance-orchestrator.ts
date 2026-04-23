@@ -246,7 +246,7 @@ export class GuidanceOrchestrator {
     }
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
-    const input: InputConfig = (app.config.input as InputConfig) ?? { audio: "phone-mic", codec: "jpeg", visionFps: app.config.visionFps ?? 1 };
+    const input: InputConfig = (app.config.input as InputConfig) ?? { audio: "phone-mic", visionFps: app.config.visionFps ?? 1 };
     const state: SessionAIState = {
       service,
       appId,

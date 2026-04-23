@@ -181,7 +181,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { audio: "phone-mic", codec: "jpeg", visionFps: 1 }, positionX: 100, positionY: 150 },
+        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { audio: "phone-mic", visionFps: 1 }, positionX: 100, positionY: 150 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 150 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 150 },
       ],
@@ -249,7 +249,7 @@ function buildSVG(): string {
             .map(([l]) => l)
             .join(", ") || "all"
         : n.type === "camera-source"
-          ? `${n.config.audio ?? "phone-mic"} | ${n.config.codec ?? "jpeg"}`
+          ? `${n.config.audio ?? "phone-mic"} | ${n.config.visionFps ?? 1}fps`
           : "Live feed";
     const selected = _selectedNodeId === n.id;
     return `
@@ -640,7 +640,6 @@ function renderConfigPanel(): void {
 
   if (node.type === "camera-source") {
     const audio = (node.config.audio as string) ?? "phone-mic";
-    const codec = (node.config.codec as string) ?? "jpeg";
     const fps = (node.config.visionFps as number) ?? 1;
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
@@ -650,7 +649,7 @@ function renderConfigPanel(): void {
         <label>Label</label>
         <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
       </div>
-      <div class="wf-config-info">Device selection (glasses/phone) is set by the publisher stream</div>
+      <div class="wf-config-info">Device and codec selection are set by the publisher stream</div>
       <div class="wf-config-field">
         <label>Audio</label>
         <select class="wf-config-input" data-field="config.audio">
@@ -658,13 +657,6 @@ function renderConfigPanel(): void {
           <option value="glasses-mic" ${audio === "glasses-mic" ? "selected" : ""}>Glasses HFP mic (8kHz)</option>
           <option value="all" ${audio === "all" ? "selected" : ""}>All devices</option>
           <option value="none" ${audio === "none" ? "selected" : ""}>None</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Video Codec</label>
-        <select class="wf-config-input" data-field="config.codec">
-          <option value="jpeg" ${codec === "jpeg" ? "selected" : ""}>JPEG (AI-ready)</option>
-          <option value="h264" ${codec === "h264" ? "selected" : ""}>H.264 (no AI)</option>
         </select>
       </div>
       <div class="wf-config-field">
