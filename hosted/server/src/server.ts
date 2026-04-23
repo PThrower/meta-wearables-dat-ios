@@ -908,6 +908,13 @@ const server = Bun.serve<WsData>({
         session.activeAppId = primaryApp.id;
         session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
 
+        // Request codec change from publisher if workflow specifies one
+        const inputCodec = (nodes as any[]).find((n: any) => n.type === "stream-input")?.config?.codec as string | undefined;
+        if (inputCodec && ["jpeg", "h264"].includes(inputCodec) && session.publisher?.ws?.readyState === WebSocket.OPEN) {
+          session.publisher.ws.send(JSON.stringify({ type: "set_codec", codec: inputCodec }));
+          console.log(`[relay] Codec change from workflow: codec=${inputCodec} session=${body.sessionId}`);
+        }
+
         // Audit log: record activation for the primary app
         const activationId = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         dbWriter.enqueue(q.insertActivation({

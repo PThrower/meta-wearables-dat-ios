@@ -724,6 +724,13 @@ function renderConfigPanel(): void {
         <label>Vision FPS: ${fps}</label>
         <input type="range" min="0.2" max="2" step="0.1" data-field="config.visionFps" value="${fps}" />
       </div>
+      <div class="wf-config-field">
+        <label>Video Codec</label>
+        <select class="wf-config-input" data-field="config.codec">
+          <option value="jpeg" ${(node.config.codec as string ?? "jpeg") === "jpeg" ? "selected" : ""}>JPEG (lower bandwidth, AI-friendly)</option>
+          <option value="h264" ${(node.config.codec as string) === "h264" ? "selected" : ""}>H.264 (higher quality, lower latency)</option>
+        </select>
+      </div>
       <div class="wf-config-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
         <label style="font-weight: 600; margin-bottom: 6px; display: block;">Lifecycle Policy</label>
         <div class="wf-config-field">
