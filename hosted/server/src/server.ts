@@ -1506,6 +1506,10 @@ const server = Bun.serve<WsData>({
             }
           } else if (isVideoFrame(buf)) {
             // Video frame (FRLY) — codec-aware routing
+            // Auto-activate standby publisher on first frame if not yet activated
+            if (session.publisher?.standby) {
+              registry.activatePublisher(sessionId).catch(() => {});
+            }
             session.publisher.frameCount++;
             session.publisher.totalBytes += buf.length;
             registry.fanout(sessionId, buf);
