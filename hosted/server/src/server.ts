@@ -51,6 +51,7 @@ import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
+import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
   getSessionExportMeta,
@@ -110,6 +111,52 @@ const registry = new SessionRegistry(store);
 // Add custom taps via: audioTapBus.subscribe()
 
 const audioTapBus = new AudioTapBus();
+
+// --- H.264 Decoders (per-session, lazy-created) ---
+const h264Decoders = new Map<string, H264ToJpegDecoder>();
+
+/** Get or create an H.264 decoder for a session */
+function getH264Decoder(sessionId: string): H264ToJpegDecoder {
+  let decoder = h264Decoders.get(sessionId);
+  if (!decoder) {
+    decoder = new H264ToJpegDecoder(sessionId);
+    decoder.onJpeg = (jpeg: Uint8Array) => {
+      orchestrator.sendVideoFrame(sessionId, jpeg);
+    };
+    h264Decoders.set(sessionId, decoder);
+  }
+  return decoder;
+}
+
+/** Stop and remove H.264 decoder for a session */
+function stopH264Decoder(sessionId: string): void {
+  const decoder = h264Decoders.get(sessionId);
+  if (decoder) {
+    decoder.stop();
+    h264Decoders.delete(sessionId);
+  }
+}
+
+/** Check if a cached FRLY frame is H.264 (codecType 1) */
+function isCachedFrameH264(frame: Uint8Array): boolean {
+  if (frame.length < 26) return false;
+  const codecFlags = frame[25];
+  return ((codecFlags >> 4) & 0x0F) === 1;
+}
+
+/** Send cached frame to AI, handling both JPEG and H.264 codecs */
+function sendCachedFrameToAI(sessionId: string, frame: Uint8Array): void {
+  if (isCachedFrameH264(frame)) {
+    // H.264: feed through decoder (async, JPEG arrives via onJpeg callback)
+    const decoder = h264Decoders.get(sessionId);
+    if (decoder?.active) {
+      decoder.feed(frame.slice(HEADER_SIZE));
+    }
+  } else {
+    // JPEG: send directly
+    orchestrator.sendVideoFrame(sessionId, frame.slice(HEADER_SIZE));
+  }
+}
 
 // --- Control Event Bus ---
 // Pub/sub for gesture/control events from iOS publisher.
@@ -913,6 +960,8 @@ const server = Bun.serve<WsData>({
         if (inputCodec && ["jpeg", "h264"].includes(inputCodec) && session.publisher?.ws?.readyState === WebSocket.OPEN) {
           session.publisher.ws.send(JSON.stringify({ type: "set_codec", codec: inputCodec }));
           console.log(`[relay] Codec change from workflow: codec=${inputCodec} session=${body.sessionId}`);
+          // Start H.264 decoder if needed
+          if (inputCodec === "h264") getH264Decoder(body.sessionId).start();
         }
 
         // Audit log: record activation for the primary app
@@ -936,10 +985,7 @@ const server = Bun.serve<WsData>({
 
         // Send cached frame to AI for immediate context
         const cachedFrame = registry.getLastFrame(body.sessionId);
-        if (cachedFrame) {
-          const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-          orchestrator.sendVideoFrame(body.sessionId, jpegPayload);
-        }
+        if (cachedFrame) sendCachedFrameToAI(body.sessionId, cachedFrame);
 
         dbWriter.flushNow();
 
@@ -1278,10 +1324,7 @@ const server = Bun.serve<WsData>({
                 orchestrator.activateApp(sessionId, gesturePipeline.appId).catch(() => {});
                 // Send cached frame to AI for immediate context
                 const cachedFrame = registry.getLastFrame(sessionId);
-                if (cachedFrame) {
-                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
-                }
+                if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
               }
               // Forward gesture as text trigger to active AI service
               if (session.activeAppId) {
@@ -1308,7 +1351,7 @@ const server = Bun.serve<WsData>({
                   const ic = orchestrator.getInputConfig(sessionId);
                   if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
@@ -1321,10 +1364,7 @@ const server = Bun.serve<WsData>({
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
                   orchestrator.activateApp(sessionId, appId).catch(() => {});
                   const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) {
-                    const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                    orchestrator.sendVideoFrame(sessionId, jpegPayload);
-                  }
+                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                 } else {
                   console.warn(`[relay] App activation failed: ${appId} not found`);
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
@@ -1360,7 +1400,7 @@ const server = Bun.serve<WsData>({
                 const ic = orchestrator.getInputConfig(sessionId);
                 if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                 const cachedFrame = registry.getLastFrame(sessionId);
-                if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+                if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
               } catch (e) {
                 ws.send(JSON.stringify({ type: "workflow_error", error: String(e) }));
               }
@@ -1451,10 +1491,18 @@ const server = Bun.serve<WsData>({
             const codecFlags = buf[25];
             const codecType = (codecFlags >> 4) & 0x0F;
 
-            // Forward payload to AI service (JPEG only — H.264 requires server-side decode)
-            if (session.activeAppId && codecType === 0) {
-              const jpegPayload = buf.slice(HEADER_SIZE);
-              orchestrator.sendVideoFrame(sessionId, jpegPayload);
+            // Forward payload to AI service — codec-aware routing
+            if (session.activeAppId) {
+              if (codecType === 0) {
+                // JPEG: send directly
+                const jpegPayload = buf.slice(HEADER_SIZE);
+                orchestrator.sendVideoFrame(sessionId, jpegPayload);
+              } else if (codecType === 1) {
+                // H.264: feed through server-side ffmpeg decoder
+                const decoder = getH264Decoder(sessionId);
+                if (!decoder.active) decoder.start();
+                decoder.feed(buf.slice(HEADER_SIZE));
+              }
             }
           }
         }
@@ -1513,7 +1561,7 @@ const server = Bun.serve<WsData>({
                   const ic = orchestrator.getInputConfig(sessionId);
                   if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
+                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
@@ -1526,10 +1574,7 @@ const server = Bun.serve<WsData>({
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "active" }));
                   orchestrator.activateApp(sessionId, appId).catch(() => {});
                   const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) {
-                    const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                    orchestrator.sendVideoFrame(sessionId, jpegPayload);
-                  }
+                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                 } else {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: "App not found" }));
                 }
@@ -1561,10 +1606,7 @@ const server = Bun.serve<WsData>({
                 orchestrator.activateApp(sessionId, viewerPipeline.appId).catch(() => {});
                 // Send cached frame to AI for immediate context
                 const cachedFrame = registry.getLastFrame(sessionId);
-                if (cachedFrame) {
-                  const jpegPayload = cachedFrame.slice(HEADER_SIZE);
-                  orchestrator.sendVideoFrame(sessionId, jpegPayload);
-                }
+                if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
               }
             } else if (cmd.type === "set_vision_fps" && typeof cmd.fps === "number") {
               // Viewer updates vision FPS at runtime
@@ -1668,6 +1710,12 @@ const server = Bun.serve<WsData>({
               const codec = (cmd.codec as string).toLowerCase();
               if (["jpeg", "h264"].includes(codec)) {
                 console.log(`[relay] Codec change from viewer: codec=${codec} session=${sessionId}`);
+                // Start/stop H.264 decoder based on new codec
+                if (codec === "h264" && session.activeAppId) {
+                  getH264Decoder(sessionId).start();
+                } else {
+                  stopH264Decoder(sessionId);
+                }
                 const publisherWs = session.publisher?.ws;
                 if (publisherWs && publisherWs.readyState === WebSocket.OPEN) {
                   publisherWs.send(JSON.stringify({ type: "set_codec", codec }));
@@ -1751,6 +1799,8 @@ const server = Bun.serve<WsData>({
         }
         // Notify viewers that publisher dropped
         broadcastToViewers(session, { type: "publisher_status", status: "dropped" });
+        // Stop H.264 decoder if running
+        stopH264Decoder(sessionId);
         await registry.releasePublisher(sessionId);
         try {
           const meta = await sessionStore.getMeta(sessionId);
