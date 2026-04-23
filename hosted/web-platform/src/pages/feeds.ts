@@ -253,7 +253,7 @@ function buildExpandedContent(s: SessionInfo): string {
   return `<div class="feed-expanded-inner" id="feed-expanded-${esc(s.sessionId)}">
     ${hasVideo ? `<div class="feed-video-wrap">
       <video class="feed-inline-video" controls preload="metadata">
-        <source src="/session/${esc(s.sessionId)}/video.mp4" type="video/mp4" />
+        <source src="/session/${esc(s.sessionId)}/video.mp4?audio" type="video/mp4" />
       </video>
     </div>` : ""}
     <div class="feed-expanded-details" id="feed-details-${esc(s.sessionId)}">
@@ -269,7 +269,7 @@ function buildExpandedContent(s: SessionInfo): string {
         <div class="feed-detail-row"><span class="feed-detail-label">Access</span><span class="feed-detail-value">${esc(s.access || "private")}</span></div>
       </div>
       <div class="feed-expanded-actions">
-        ${hasVideo ? `<a class="action-btn" href="${authUrl("/session/" + s.sessionId + "/video.mp4")}" target="_blank" rel="noopener">Download MP4</a>
+        ${hasVideo ? `<a class="action-btn" href="${authUrl("/session/" + s.sessionId + "/video.mp4?audio")}" target="_blank" rel="noopener">Download MP4</a>
         <button class="action-btn" data-action="play-overlay" data-session-id="${esc(s.sessionId)}">Open in Player</button>` : ""}
         <button class="action-btn" data-action="share" data-session-id="${esc(s.sessionId)}">Share</button>
       </div>

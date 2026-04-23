@@ -60,8 +60,10 @@ export { getSessionThumbnail } from "./thumbnail.js";
  * Check if a cached MP4 export exists in R2.
  * Returns a signed URL if found, null otherwise.
  */
-export async function getCachedMp4Url(sessionId: string, store: ObjectStore): Promise<string | null> {
-  const key = `sessions/${sessionId}/export.mp4`;
+export async function getCachedMp4Url(sessionId: string, store: ObjectStore, includeAudio: boolean): Promise<string | null> {
+  const key = includeAudio
+    ? `sessions/${sessionId}/export-audio.mp4`
+    : `sessions/${sessionId}/export.mp4`;
   if (!await store.exists(key)) return null;
 
   try {
@@ -162,7 +164,9 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   const mp4Size = mp4File.size;
 
   // Persist to R2 in background (read file separately to avoid consuming the stream)
-  const cacheKey = `sessions/${sessionId}/export.mp4`;
+  const cacheKey = includeAudio
+    ? `sessions/${sessionId}/export-audio.mp4`
+    : `sessions/${sessionId}/export.mp4`;
   readFile(mp4Path).then(mp4Data => {
     store.put(cacheKey, mp4Data).then(() => {
       console.log(`[export] MP4 cached for ${sessionId.slice(0, 8)}: ${(mp4Data.length / 1048576).toFixed(2)} MB`);
@@ -243,7 +247,7 @@ export async function getGalleryData(
 ): Promise<GallerySession[]> {
   const keys = await store.list("sessions/") as string[];
   const metaKeys = keys.filter(k => k.endsWith("/meta.json"));
-  const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4")));
+  const exportKeys = new Set(keys.filter(k => k.endsWith("/export.mp4") || k.endsWith("/export-audio.mp4")));
   const thumbKeys = new Set(keys.filter(k => k.endsWith("/thumb.jpg")));
   const videoKeys = keys.filter(k => k.includes("/video/") && k.endsWith(".mjpeg"));
   const sessionsWithVideo = new Set<string>();
@@ -296,7 +300,7 @@ export async function getGalleryData(
         },
         segments: meta.recording?.segmentsWritten || 0,
         audioChunks: meta.recording?.audioChunks || 0,
-        exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`),
+        exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`) || exportKeys.has(`sessions/${sessionId}/export-audio.mp4`),
         hasThumbnail: thumbKeys.has(`sessions/${sessionId}/thumb.jpg`) || sessionsWithVideo.has(sessionId),
         thumbnailUrl: `/session/${sessionId}/thumbnail`,
         videoUrl: `/session/${sessionId}/video.mp4?audio`,

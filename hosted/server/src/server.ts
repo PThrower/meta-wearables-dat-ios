@@ -508,7 +508,7 @@ const server = Bun.serve<WsData>({
       try {
         // Serve from R2 cache if available — proxy through server to avoid
         // cross-origin redirect issues (R2 signed URLs are different origin).
-        const cachedUrl = await getCachedMp4Url(sessionId, store);
+        const cachedUrl = await getCachedMp4Url(sessionId, store, includeAudio);
         if (cachedUrl) {
           console.log(`[export] Proxying cached MP4 for ${sessionId.slice(0, 8)}`);
           const abortCtrl = new AbortController();
