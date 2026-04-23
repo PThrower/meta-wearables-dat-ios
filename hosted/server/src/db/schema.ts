@@ -223,7 +223,7 @@ export const workflows = sqliteTable("workflows", {
 export const workflowNodes = sqliteTable("workflow_nodes", {
   id: text("id").primaryKey(),
   workflowId: text("workflow_id").notNull().references(() => workflows.id),
-  type: text("type").notNull(),  // camera-source, s2s-live, s2s-rest, output
+  type: text("type").notNull(),  // stream-input, text, s2s-live, s2s-rest, s2s-e4b, output
   label: text("label").notNull().default(""),
   config: text("config").notNull().default("{}"),
   positionX: real("position_x").notNull().default(0),

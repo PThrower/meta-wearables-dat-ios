@@ -52,7 +52,7 @@ let _viewY = 0;
 let _zoom = 1;
 
 const NODE_COLORS: Record<string, { fill: string; header: string; stroke: string }> = {
-  "camera-source": { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+  "stream-input": { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
   "text": { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" },
   "s2s-live": { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
   "s2s-rest": { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
@@ -182,7 +182,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 200 },
+        { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 200 },
         { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 400, positionY: 80 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 250 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 250 },
@@ -212,7 +212,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
           ${Object.entries(NODE_COLORS).map(([type, c]) => `
             <button class="wf-palette-item" data-type="${type}">
               <span class="wf-palette-dot" style="background:${c.header}"></span>
-              <span class="wf-palette-label">${type.replace("-", " ")}</span>
+              <span class="wf-palette-label">${({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " ")}</span>
             </button>
           `).join("")}
         </div>
@@ -253,7 +253,7 @@ function buildSVG(): string {
             .filter(([, k]) => n.config[k] !== false)
             .map(([l]) => l)
             .join(", ") || "all"
-        : n.type === "camera-source"
+        : n.type === "stream-input"
           ? [n.config.video !== false ? "video" : "", n.config.phoneMic !== false ? "phone-mic" : "", n.config.glassesMic === true ? "glasses-mic" : "", n.config.gestures !== false ? "gestures" : ""].filter(Boolean).join(", ") || "none"
           : "Live feed";
     const selected = _selectedNodeId === n.id;
@@ -312,7 +312,7 @@ function wireEditorEvents(): void {
       if (!_workflow) return;
       const type = (btn as HTMLElement).dataset.type as WorkflowNodeDef["type"];
       // Only allow 1 source, 1 output, 1 AI node total
-      if (type === "camera-source" && _workflow.nodes.some(n => n.type === "camera-source")) return;
+      if (type === "stream-input" && _workflow.nodes.some(n => n.type === "stream-input")) return;
       if (type === "output" && _workflow.nodes.some(n => n.type === "output")) return;
       const isAI = (t: string) => t === "s2s-live" || t === "s2s-rest" || t === "s2s-e4b";
       if (isAI(type) && _workflow.nodes.some(n => isAI(n.type))) return;
@@ -327,7 +327,7 @@ function wireEditorEvents(): void {
       _workflow.nodes.push({
         id,
         type,
-        label: type.replace(/-/g, " "),
+        label: ({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " "),
         config,
         positionX: 200 + offset,
         positionY: 150 + offset,
@@ -644,7 +644,7 @@ function renderConfigPanel(): void {
 
   const c = NODE_COLORS[node.type] ?? NODE_COLORS["output"];
 
-  if (node.type === "camera-source") {
+  if (node.type === "stream-input") {
     const fps = (node.config.visionFps as number) ?? 1;
     const video = node.config.video !== false;
     const phoneMic = node.config.phoneMic !== false;

@@ -15,7 +15,7 @@ import type { WorkflowNodeDef, WorkflowEdgeDef } from "../src/app-types.js";
 
 describe("resolveWorkflowToApp", () => {
   const defaultNodes: WorkflowNodeDef[] = [
-    { id: "src1", type: "camera-source", label: "Camera", config: {}, positionX: 0, positionY: 0 },
+    { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
     { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 300, positionY: 0 },
     { id: "out1", type: "output", label: "Output", config: { outputTarget: "guidance" }, positionX: 600, positionY: 0 },
   ];
@@ -94,7 +94,7 @@ describe("resolveWorkflowToApp", () => {
 
   test("throws when no AI node present", () => {
     const nodes: WorkflowNodeDef[] = [
-      { id: "src1", type: "camera-source", label: "Camera", config: {}, positionX: 0, positionY: 0 },
+      { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
       { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
     ];
     expect(() => resolveWorkflowToApp(nodes, [], { id: "wf_bad", name: "Bad" })).toThrow("No AI node found");
@@ -102,7 +102,7 @@ describe("resolveWorkflowToApp", () => {
 
   test("uses first AI node when multiple exist", () => {
     const nodes: WorkflowNodeDef[] = [
-      { id: "src1", type: "camera-source", label: "Camera", config: {}, positionX: 0, positionY: 0 },
+      { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
       { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash" }, positionX: 200, positionY: 0 },
       { id: "ai2", type: "s2s-rest", label: "Gemma", config: { model: "gemma-4-27b" }, positionX: 400, positionY: 0 },
       { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
