@@ -106,7 +106,12 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
     const buf = await store.get(key);
     if (buf) videoParts.push(buf);
   }
-  await writeFile(videoPath, Buffer.concat(videoParts));
+  const videoData = Buffer.concat(videoParts);
+  if (videoData.length < 4 || videoData[0] !== 0xFF || videoData[1] !== 0xD8) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    throw new ExportError(`Video data invalid: ${videoData.length} bytes, starts with ${videoData.length >= 2 ? `0x${videoData[0].toString(16)}${videoData[1].toString(16)}` : "empty"} (expected JPEG SOI 0xFFD8)`, 500);
+  }
+  await writeFile(videoPath, videoData);
 
   const hasAudio = audioKeys.length > 0;
   if (hasAudio) {
@@ -149,15 +154,17 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   // Write to file (not pipe) so we can upload the complete MP4 afterward
   args.push("-f", "mp4", "-movflags", "frag_keyframe+empty_moov", mp4Path);
 
-  console.log(`[export] ffmpeg (cached) ${args.join(" ")}`);
+  console.log(`[export] ffmpeg ${args.join(" ")}`);
+  console.log(`[export] video=${videoPath} (${videoData.length} bytes from ${segKeys.length} segs) audio=${hasAudio ? `${audioKeys.length} chunks` : "none"} fps=${actualFps} rate=${audioSampleRate}`);
   const proc = Bun.spawn([ffmpegPath, ...args], { stdout: "pipe", stderr: "pipe" });
   const code = await proc.exited;
   const stderr = await new Response(proc.stderr).text();
 
   if (code !== 0) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
-    console.error(`[export] ffmpeg exited ${code}: ${stderr.slice(0, 500)}`);
-    throw new ExportError("FFmpeg encoding failed", 500);
+    const detail = stderr.slice(0, 300).replace(/\n/g, " | ");
+    console.error(`[export] ffmpeg exited ${code}: ${detail}`);
+    throw new ExportError(`FFmpeg encoding failed (exit ${code}): ${detail}`, 500);
   }
 
   const mp4File = Bun.file(mp4Path);
