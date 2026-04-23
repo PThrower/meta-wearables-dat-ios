@@ -727,8 +727,8 @@ function renderConfigPanel(): void {
       <div class="wf-config-field">
         <label>Video Codec</label>
         <select class="wf-config-input" data-field="config.codec">
-          <option value="jpeg" ${(node.config.codec as string ?? "jpeg") === "jpeg" ? "selected" : ""}>JPEG (lower bandwidth, AI-friendly)</option>
-          <option value="h264" ${(node.config.codec as string) === "h264" ? "selected" : ""}>H.264 (higher quality, lower latency)</option>
+          <option value="jpeg" ${(node.config.codec as string ?? "jpeg") === "jpeg" ? "selected" : ""}>JPEG (compatible with AI models)</option>
+          <option value="h264" ${(node.config.codec as string) === "h264" ? "selected" : ""}>H.264 (lower bandwidth, viewer-only)</option>
         </select>
       </div>
       <div class="wf-config-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
