@@ -700,6 +700,9 @@ function renderConfigPanel(): void {
     const phoneMic = node.config.phoneMic !== false;
     const glassesMic = node.config.glassesMic === true;
     const gestures = node.config.gestures !== false;
+    const onDisconnect = (node.config.onDisconnect as string) ?? "stop";
+    const onReconnect = (node.config.onReconnect as string) ?? "restart";
+    const autoDeactivateMin = (node.config.autoDeactivateMin as number | null) ?? null;
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
         <span class="wf-config-type">Input</span>
@@ -720,6 +723,29 @@ function renderConfigPanel(): void {
       <div class="wf-config-field">
         <label>Vision FPS: ${fps}</label>
         <input type="range" min="0.2" max="2" step="0.1" data-field="config.visionFps" value="${fps}" />
+      </div>
+      <div class="wf-config-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
+        <label style="font-weight: 600; margin-bottom: 6px; display: block;">Lifecycle Policy</label>
+        <div class="wf-config-field">
+          <label>On publisher disconnect</label>
+          <select class="wf-config-input" data-field="config.onDisconnect">
+            <option value="stop" ${onDisconnect === "stop" ? "selected" : ""}>Stop AI</option>
+            <option value="pause" ${onDisconnect === "pause" ? "selected" : ""}>Pause AI</option>
+            <option value="continue" ${onDisconnect === "continue" ? "selected" : ""}>Continue until timeout</option>
+          </select>
+        </div>
+        <div class="wf-config-field">
+          <label>On publisher reconnect</label>
+          <select class="wf-config-input" data-field="config.onReconnect">
+            <option value="restart" ${onReconnect === "restart" ? "selected" : ""}>Restart AI</option>
+            <option value="resume" ${onReconnect === "resume" ? "selected" : ""}>Resume AI</option>
+            <option value="noop" ${onReconnect === "noop" ? "selected" : ""}>No-op</option>
+          </select>
+        </div>
+        <div class="wf-config-field">
+          <label>Auto-deactivate after (min, 0 = never)</label>
+          <input type="number" class="wf-config-input" data-field="config.autoDeactivateMin" min="0" max="480" step="5" value="${autoDeactivateMin ?? 0}" />
+        </div>
       </div>
       <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
     `;

@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig } from "./app-types.js";
+import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -182,6 +182,16 @@ function findPromptForAiNode(aiNodeId: string, nodes: WorkflowNodeDef[], edges: 
   return (anyTextNode?.config.text as string) ?? "";
 }
 
+/** Extract lifecycle policy from the stream-input node config */
+export function extractLifecyclePolicy(inputNode: WorkflowNodeDef | undefined): LifecyclePolicy {
+  if (!inputNode) return { onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null };
+  return {
+    onDisconnect: (inputNode.config.onDisconnect as LifecyclePolicy["onDisconnect"]) ?? "stop",
+    onReconnect: (inputNode.config.onReconnect as LifecyclePolicy["onReconnect"]) ?? "restart",
+    autoDeactivateMin: (inputNode.config.autoDeactivateMin as number | null) ?? null,
+  };
+}
+
 /**
  * Resolve workflow into a multi-AI pipeline.
  * Each AI node becomes its own AppDefinition with per-node prompt and config.
@@ -203,6 +213,7 @@ export function resolveWorkflowToPipeline(
 
   // Shared input config from stream-input node
   const inputNode = nodes.find(n => n.type === "stream-input");
+  const lifecycle = extractLifecyclePolicy(inputNode);
   const baseInput: InputConfig = {
     video: inputNode?.config.video !== false,
     phoneMic: inputNode?.config.phoneMic !== false,
@@ -251,6 +262,7 @@ export function resolveWorkflowToPipeline(
       temperature: aiNode.config.temperature as number | undefined,
       input,
       output,
+      lifecycle,
     };
 
     // Use AI node label in the app name if available

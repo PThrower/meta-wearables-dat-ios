@@ -1120,6 +1120,25 @@ const server = Bun.serve<WsData>({
         }
         // Tell the publisher what session it's on
         ws.send(JSON.stringify({ type: "session_assigned", sessionId }));
+
+        // Check lifecycle policy: on reconnect, should we resume AI?
+        const session = registry.get(sessionId);
+        const aiStatus = orchestrator.getStatus(sessionId);
+        if (session?.activeAppId && aiStatus.status !== "idle") {
+          const lifecycleConfig = aiStatus.config?.lifecycle as { onReconnect?: string } | undefined;
+          const onReconnect = lifecycleConfig?.onReconnect ?? "restart";
+          if (onReconnect === "noop") {
+            // Do nothing — AI continues as-is
+          }
+          // Note: "resume" and "restart" are handled by the orchestrator state.
+          // For "restart", the server could trigger re-activation here, but
+          // that requires the workflow ID. For now, the orchestrator keeps
+          // the AI running on "continue" policy, and "pause" was already handled
+          // on disconnect. A full restart would require storing the workflow ID
+          // in the session metadata.
+          console.log(`[relay] Publisher reconnected: AI policy=${onReconnect} session=${sessionId}`);
+        }
+
         // Notify viewers that publisher is in standby (connected but not streaming)
         broadcastToViewers(registry.get(sessionId), { type: "publisher_status", status: "standby" });
       } else {
@@ -1689,10 +1708,39 @@ const server = Bun.serve<WsData>({
       }
 
       if (role === "publish") {
-        // Deactivate AI app before releasing publisher
+        // Check lifecycle policy before deciding AI behavior on disconnect
         const session = registry.get(sessionId);
         if (session?.activeAppId) {
-          orchestrator.deactivateApp(sessionId).catch(() => {});
+          const aiStatus = orchestrator.getStatus(sessionId);
+          const lifecycleConfig = aiStatus.config?.lifecycle as { onDisconnect?: string; autoDeactivateMin?: number | null } | undefined;
+          const onDisconnect = lifecycleConfig?.onDisconnect ?? "stop";
+
+          if (onDisconnect === "stop") {
+            // Default: deactivate AI on publisher disconnect
+            orchestrator.deactivateApp(sessionId).catch(() => {});
+            dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher_disconnect"));
+            dbWriter.flushNow();
+          } else if (onDisconnect === "pause") {
+            // Pause: disconnect AI services but keep session state
+            orchestrator.forceDeactivate(sessionId);
+            console.log(`[relay] AI paused (publisher disconnect) session=${sessionId}`);
+          } else {
+            // Continue: AI keeps running. Schedule auto-deactivation if configured.
+            const autoMin = lifecycleConfig?.autoDeactivateMin;
+            if (autoMin && autoMin > 0) {
+              setTimeout(() => {
+                // Only auto-deactivate if no publisher has reconnected
+                const current = registry.get(sessionId);
+                if (!current?.publisher?.ws || current.publisher.standby) {
+                  console.log(`[relay] Auto-deactivating AI (timeout ${autoMin}min) session=${sessionId}`);
+                  orchestrator.deactivateApp(sessionId).catch(() => {});
+                  dbWriter.enqueue(q.deactivateActivation(sessionId, "auto_timeout"));
+                  dbWriter.flushNow();
+                }
+              }, autoMin * 60 * 1000);
+            }
+            console.log(`[relay] AI continuing (publisher disconnect, policy=continue) session=${sessionId}`);
+          }
         }
         // Notify viewers that publisher dropped
         broadcastToViewers(session, { type: "publisher_status", status: "dropped" });
