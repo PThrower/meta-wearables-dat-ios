@@ -204,6 +204,7 @@ export class SessionRegistry {
         try { await session.recorder.finish(); } catch { /* non-critical */ }
         session.recorder = null;
       }
+      session.recordingId = undefined;
       session.publisher = null;
     }
 
@@ -217,6 +218,7 @@ export class SessionRegistry {
     if (session.recorder) {
       try { await session.recorder.finish(); } catch { /* non-critical */ }
       session.recorder = null;
+      session.recordingId = undefined;
     }
 
     // Track reconnects — session already existed with a disconnected publisher
@@ -236,6 +238,7 @@ export class SessionRegistry {
         if (otherSession.recorder) {
           orphanedRecorders.push(otherSession.recorder);
           otherSession.recorder = null;
+          otherSession.recordingId = undefined;
         }
         otherSession.lastActivityAt = Date.now();
       }
@@ -342,6 +345,7 @@ export class SessionRegistry {
       await session.recorder.finish();
       session.recorder = null;
     }
+    session.recordingId = undefined;  // Next activation gets a fresh recording
     session.publisher = null;
     session.lastFrame = null;  // Clear cached frame — no live source
     session.lastActivityAt = Date.now();
@@ -356,7 +360,9 @@ export class SessionRegistry {
     if (!session.publisher.standby) return; // Already active
     session.publisher.standby = false;
 
-    // Start recorder — reuse stable recordingId so reconnects append to same R2 prefix
+    // Start recorder — always creates a new recording per publisher connection.
+    // recordingId is cleared on publisher release so reconnects get fresh recordings
+    // instead of appending to old ones (which produces gap artifacts in MP4 exports).
     if (!session.recordingId) {
       session.recordingId = crypto.randomUUID();
     }
@@ -594,6 +600,7 @@ export class SessionRegistry {
             recordersToFinish.push(session.recorder);
             session.recorder = null;
           }
+          session.recordingId = undefined;
           session.lastActivityAt = Date.now();
           continue;
         }
@@ -618,6 +625,7 @@ export class SessionRegistry {
             recordersToFinish.push(session.recorder);
             session.recorder = null;
           }
+          session.recordingId = undefined;
           session.lastActivityAt = Date.now();
         }
       }
