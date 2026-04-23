@@ -226,6 +226,7 @@ export class SessionRegistry {
     }
 
     // Evict this publisher from any OTHER session it may still be registered in
+    const orphanedRecorders: SessionRecorder[] = [];
     for (const [otherId, otherSession] of this.sessions) {
       if (otherId === sessionId) continue;
       if (otherSession.publisher && otherSession.publisher.ws === ws) {
@@ -233,12 +234,14 @@ export class SessionRegistry {
         this.totalDroppedFrames += otherSession.publisher.timing.droppedFrames;
         otherSession.publisher = null;
         if (otherSession.recorder) {
-          otherSession.recorder.finish().catch(() => {});
+          orphanedRecorders.push(otherSession.recorder);
           otherSession.recorder = null;
         }
         otherSession.lastActivityAt = Date.now();
       }
     }
+    // Await orphaned recorders after session state is updated
+    await Promise.all(orphanedRecorders.map(r => r.finish().catch(() => {})));
 
     this.sessionsStarted++;
     dbWriter.incrementCounter("sessions_started");
@@ -570,10 +573,13 @@ export class SessionRegistry {
   // --- Stale connection cleanup ---
 
   /** Evict stale publishers (15s timeout) and viewers (30s timeout) */
-  cleanupStale() {
+  async cleanupStale() {
     const now = Date.now();
     const PUBLISHER_TIMEOUT_MS = 15_000;
     const VIEWER_TIMEOUT_MS = 30_000;
+
+    // Collect recorders that need finishing so we can await them after mutating the session map
+    const recordersToFinish: SessionRecorder[] = [];
 
     for (const [sessionId, session] of this.sessions) {
       // Check publisher staleness
@@ -585,7 +591,7 @@ export class SessionRegistry {
           try { session.publisher.ws.close(4002, "publisher dead ws"); } catch {}
           session.publisher = null;
           if (session.recorder) {
-            session.recorder.finish().catch(() => {});
+            recordersToFinish.push(session.recorder);
             session.recorder = null;
           }
           session.lastActivityAt = Date.now();
@@ -609,7 +615,7 @@ export class SessionRegistry {
           try { session.publisher.ws.close(4002, "publisher stale"); } catch {}
           session.publisher = null;
           if (session.recorder) {
-            session.recorder.finish().catch(() => {});
+            recordersToFinish.push(session.recorder);
             session.recorder = null;
           }
           session.lastActivityAt = Date.now();
@@ -647,6 +653,9 @@ export class SessionRegistry {
         }
       }
     }
+
+    // Await all recorder finishes after session state is consistent
+    await Promise.all(recordersToFinish.map(r => r.finish().catch(() => {})));
   }
 
   // --- Helpers ---

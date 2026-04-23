@@ -1859,24 +1859,26 @@ console.log(`[relay] API:      http://${wifiIp}:${PORT}/api/config`);
 
 // --- Graceful shutdown ---
 
-function shutdown() {
+async function shutdown() {
   console.log("[relay] Shutting down...");
   clearInterval(staleCleanupTimer);
   sessionStore.stopBackgroundTimers();
   orchestrator.stop();
-  // Finish all active recorders
+  // Finish all active recorders — await to prevent data loss
+  const finishes: Promise<void>[] = [];
   for (const entry of registry.listActive()) {
     const s = registry.get(entry.id);
     if (s?.recorder) {
-      s.recorder.finish().catch(() => {});
+      finishes.push(s.recorder.finish());
     }
   }
+  await Promise.all(finishes).catch(() => {});
   server.stop(true);
   process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => { shutdown(); });
+process.on("SIGINT", () => { shutdown(); });
 process.on("unhandledRejection", (err) => {
   console.error("[relay] Unhandled rejection (not crashing):", err);
 });
