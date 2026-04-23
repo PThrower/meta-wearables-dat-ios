@@ -14,7 +14,7 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline, AppDefinition } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, OutputConfig } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
@@ -104,6 +104,7 @@ const MAX_EVENT_HISTORY = 100;
 interface SessionAIState {
   service: AIService;
   appId: string;
+  output: OutputConfig;
   lastAudioAt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   consecutiveReconnects: number;
@@ -243,9 +244,11 @@ export class GuidanceOrchestrator {
       return;
     }
 
+    const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
     const state: SessionAIState = {
       service,
       appId,
+      output,
       lastAudioAt: 0,
       reconnectTimer: null,
       consecutiveReconnects: 0,
@@ -502,7 +505,7 @@ export class GuidanceOrchestrator {
     t.triggers++;
 
     // Push audio to relay's audio-in path (which fans out to publisher + viewers)
-    if (this.audioPushFn && pcm.length > 0) {
+    if (this.audioPushFn && pcm.length > 0 && state.output.speaker) {
       this.audioPushFn(sessionId, pcm);
     }
 
@@ -542,7 +545,8 @@ export class GuidanceOrchestrator {
       });
 
       // Push guidance text to publisher for client-side TTS
-      if (this.guidanceTextPushFn && content) {
+      const state = this.aiState.get(sessionId);
+      if (this.guidanceTextPushFn && content && state?.output.speaker) {
         this.guidanceTextPushFn(sessionId, content);
       }
 
@@ -574,7 +578,8 @@ export class GuidanceOrchestrator {
       });
 
       // Record bbox annotation to session JSONL
-      if (this.bboxAnnotationFn) {
+      const bState = this.aiState.get(sessionId);
+      if (this.bboxAnnotationFn && bState?.output.recording) {
         this.bboxAnnotationFn(sessionId, {
           timestampMs: Date.now(),
           sessionId,
@@ -583,7 +588,7 @@ export class GuidanceOrchestrator {
       }
 
       // Push full event to publisher WebSocket (for iOS client bounding box overlay)
-      if (this.guidanceEventPushFn) {
+      if (this.guidanceEventPushFn && bState?.output.overlays) {
         this.guidanceEventPushFn(sessionId, {
           type: "guidance.bbox",
           content: `Detected ${objects.length} object${objects.length > 1 ? "s" : ""}: ${labels}`,
@@ -864,13 +869,16 @@ export class GuidanceOrchestrator {
     history.push(event);
 
     // Persist to R2 via callback (buffered by session-recorder)
-    if (this.guidancePersistFn) {
+    const evtState = this.aiState.get(sessionId);
+    if (this.guidancePersistFn && evtState?.output.recording) {
       this.guidancePersistFn(sessionId, event);
     }
 
     const t = this.getOrCreateTelemetry(sessionId);
     t.guidanceEvents++;
 
+    // Fan out to viewer WebSockets
+    if (!evtState?.output.viewers) return;
     const subs = this.subscribers.get(sessionId);
     if (subs) {
       const msg = { type: "guidance_event", event };

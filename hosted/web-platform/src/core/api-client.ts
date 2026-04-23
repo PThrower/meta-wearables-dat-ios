@@ -271,7 +271,7 @@ export interface WorkflowSummary {
 
 export interface WorkflowNodeDef {
   id: string;
-  type: "camera-source" | "s2s-live" | "s2s-rest" | "output";
+  type: "camera-source" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
   label: string;
   config: Record<string, unknown>;
   positionX: number;

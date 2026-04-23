@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig } from "./app-types.js";
+import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, OutputConfig } from "./app-types.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -96,10 +96,16 @@ export function resolveWorkflowToApp(
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
 ): AppDefinition {
-  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest");
+  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b");
   if (!aiNode) throw new Error("No AI node found in workflow");
 
-  const binding = aiNode.type === "s2s-live" ? "s2s-gemini-live" : "s2s-gemma4-rest";
+  // Map node type to primitive binding
+  const bindingMap: Record<string, string> = {
+    "s2s-live": "s2s-gemini-live",
+    "s2s-rest": "s2s-gemma4-rest",
+    "s2s-e4b": "s2s-gemma4-e4b-rest",
+  };
+  const binding = bindingMap[aiNode.type] ?? "s2s-gemini-live";
 
   const config: AppConfig = {
     model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
@@ -107,6 +113,16 @@ export function resolveWorkflowToApp(
     visionFps: aiNode.config.visionFps as number | undefined,
     temperature: aiNode.config.temperature as number | undefined,
   };
+
+  // Read output node config for channel gating
+  const outputNode = nodes.find(n => n.type === "output");
+  const output: OutputConfig = {
+    viewers: outputNode?.config.viewers !== false,
+    overlays: outputNode?.config.overlays !== false,
+    speaker: outputNode?.config.speaker !== false,
+    recording: outputNode?.config.recording !== false,
+  };
+  config.output = output;
 
   return {
     id: `wf-${workflow.id}`,

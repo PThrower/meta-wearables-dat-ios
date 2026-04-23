@@ -65,7 +65,15 @@ export interface AppsConfig {
 
 // --- Workflow Builder ---
 
-export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "output";
+export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
+
+/** Output channel routing for workflow output nodes */
+export interface OutputConfig {
+  viewers: boolean;   // Fan out guidance events to viewer WebSockets
+  overlays: boolean;  // Render bbox annotations on viewer video canvas
+  speaker: boolean;   // Push AI audio to publisher (glasses/phone speakers)
+  recording: boolean; // Persist guidance events + annotations to R2/S3
+}
 
 export interface WorkflowNodeDef {
   id: string;
