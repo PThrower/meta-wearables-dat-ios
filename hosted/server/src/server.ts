@@ -482,7 +482,7 @@ const server = Bun.serve<WsData>({
 
     const thumbMatch = url.pathname.match(/^\/session\/([^/]+)\/thumbnail$/);
     if (thumbMatch) {
-      const sessionId = thumbMatch[1];
+      const sessionId = registry.resolveRecordingId(thumbMatch[1]);
 
       try {
         const jpeg = await getSessionThumbnail(sessionId, store);
@@ -503,7 +503,8 @@ const server = Bun.serve<WsData>({
 
     const mp4Match = url.pathname.match(/^\/session\/([^/]+)\/video\.mp4$/);
     if (mp4Match) {
-      const sessionId = mp4Match[1];
+      // Resolve sessionId → recordingId (R2 prefix may differ from session ID)
+      const sessionId = registry.resolveRecordingId(mp4Match[1]);
       const includeAudio = url.searchParams.has("audio");
       try {
         // Serve from R2 cache if available — proxy through server to avoid
@@ -542,7 +543,7 @@ const server = Bun.serve<WsData>({
 
     const exportMetaMatch = url.pathname.match(/^\/session\/([^/]+)\/export$/);
     if (exportMetaMatch) {
-      const sessionId = exportMetaMatch[1];
+      const sessionId = registry.resolveRecordingId(exportMetaMatch[1]);
       const meta = await getSessionExportMeta(sessionId, store);
       return Response.json(meta);
     }

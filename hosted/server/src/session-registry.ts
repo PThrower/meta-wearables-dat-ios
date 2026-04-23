@@ -595,6 +595,12 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.lastFrame ?? null;
   }
 
+  /** Resolve a sessionId to its recordingId (R2 prefix). Returns the ID itself if not found. */
+  resolveRecordingId(sessionId: string): string {
+    const session = this.sessions.get(sessionId);
+    return session?.recordingId ?? sessionId;
+  }
+
   // --- Server-to-publisher audio push ---
 
   /** Send binary data (FRAU frame) to a session's publisher. Returns true if sent. */
