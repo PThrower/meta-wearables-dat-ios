@@ -350,6 +350,14 @@ export class SessionRegistry {
     session.lastFrame = null;  // Clear cached frame — no live source
     session.lastActivityAt = Date.now();
     console.log(`[registry] Publisher disconnected from session=${sessionId}`);
+
+    // No viewers left — no reason to keep the session in memory.
+    // Recording is already persisted to R2; viewers find it via the gallery.
+    if (session.viewers.size === 0) {
+      this.sessions.delete(sessionId);
+      console.log(`[registry] Session ${sessionId} removed (no viewers after publisher disconnect)`);
+      this.onSessionDestroy?.(sessionId);
+    }
   }
 
   /** Activate a standby publisher — starts recorder, marks as active */
@@ -367,7 +375,23 @@ export class SessionRegistry {
       session.recordingId = crypto.randomUUID();
     }
     session.recorder = new SessionRecorder(session.recordingId, this.store);
-    session.recorder.start({});
+    // Pass device metadata from session so the recording's meta.json is populated
+    // (hello arrives before activation, so publisher already set session.metadata)
+    const pub = session.publisher;
+    session.recorder.start({
+      deviceId: pub.deviceId ?? session.metadata.deviceId,
+      deviceName: pub.deviceName ?? session.metadata.deviceName,
+      deviceModel: pub.deviceModel ?? session.metadata.deviceModel,
+      wearableId: pub.wearableId ?? null,
+      wearableType: pub.wearableType ?? session.metadata.wearableType,
+      systemVersion: pub.systemVersion ?? session.metadata.systemVersion,
+      appVersion: pub.appVersion ?? session.metadata.appVersion,
+      buildNumber: pub.buildNumber ?? session.metadata.buildNumber,
+    });
+    session.recorder.accessLevel = session.accessLevel;
+    session.recorder.acl = session.acl;
+    session.recorder.ownerId = session.ownerId;
+    session.recorder.ownerEmail = session.ownerEmail;
 
     // Shadow write: session activated with recording ID
     dbWriter.enqueue(q.activateSession(sessionId, session.recordingId));
