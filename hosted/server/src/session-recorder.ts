@@ -16,6 +16,30 @@ import type { GuidanceEvent } from "./guidance-orchestrator.js";
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
 const MAX_MANIFEST_ENTRIES = 1000; // cap manifest growth
+const TARGET_SAMPLE_RATE = 48000; // all audio resampled to this rate for uniform concatenation
+
+/**
+ * Resample 16-bit LE PCM from fromRate to toRate via linear interpolation.
+ * Passthrough when rates match. Handles 8kHz/16kHz/22050Hz/48kHz → 48kHz.
+ */
+function resamplePcm(pcm: Uint8Array, fromRate: number, toRate: number): Uint8Array {
+  if (fromRate === toRate || pcm.length < 4) return pcm;
+  const srcSamples = pcm.length >> 1; // 2 bytes per sample
+  const dstSamples = Math.round(srcSamples * toRate / fromRate);
+  const out = new Uint8Array(dstSamples * 2);
+  const src = new DataView(pcm.buffer, pcm.byteOffset, pcm.length);
+  const dst = new DataView(out.buffer, out.byteOffset, out.length);
+  for (let i = 0; i < dstSamples; i++) {
+    const srcPos = i * (srcSamples - 1) / (dstSamples - 1 || 1);
+    const lo = Math.floor(srcPos);
+    const hi = Math.min(lo + 1, srcSamples - 1);
+    const frac = srcPos - lo;
+    const sLo = src.getInt16(lo * 2, true);
+    const sHi = src.getInt16(hi * 2, true);
+    dst.setInt16(i * 2, Math.round(sLo + (sHi - sLo) * frac), true);
+  }
+  return out;
+}
 
 export interface BboxAnnotation {
   timestampMs: number;
@@ -226,16 +250,22 @@ export class SessionRecorder {
     // (unless resuming — audio can flow alongside existing video)
     if (!this._active && !this.resumedFromExisting) return;
     if (this.resumedFromExisting) this.ensureResumed();
-    const pcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
-    this.audioParts.push(Buffer.from(pcm));
 
-    // Extract FRAU header metadata for sample rate / channels
     const header = parseAudioHeader(frame);
+    const rawPcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
+
     if (header) {
-      this.chunkSampleRate = header.sampleRate;
+      // Resample to 48kHz so all sources produce uniform PCM for concatenation
+      const resampled = resamplePcm(rawPcm, header.sampleRate, TARGET_SAMPLE_RATE);
+      this.audioParts.push(Buffer.from(resampled));
+      this.chunkSampleRate = TARGET_SAMPLE_RATE;
       this.chunkChannels = header.channels;
-      // PCM 16-bit LE: 2 bytes per sample per channel
-      this.chunkSampleCount += Math.floor(pcm.length / (this.chunkChannels * 2));
+      this.chunkSampleCount += Math.floor(resampled.length / (this.chunkChannels * 2));
+    } else {
+      // No FRAU header — assume already at target rate, push as-is
+      this.audioParts.push(Buffer.from(rawPcm));
+      this.chunkSampleRate = TARGET_SAMPLE_RATE;
+      this.chunkSampleCount += Math.floor(rawPcm.length / 2);
     }
   }
 
@@ -311,7 +341,7 @@ export class SessionRecorder {
   private flushAudio() {
     if (this.audioParts.length === 0) return;
     const data = Buffer.concat(this.audioParts);
-    const sampleRate = this.chunkSampleRate;
+    const sampleRate = this.chunkSampleRate || TARGET_SAMPLE_RATE;
     const channels = this.chunkChannels;
     const totalSamples = this.chunkSampleCount;
 

@@ -142,6 +142,7 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   );
   if (hasAudio) {
     args.push("-c:a", "aac", "-b:a", "128k");
+    args.push("-shortest"); // prevent frozen frames when one stream outlasts the other
   }
   // Write to file (not pipe) so we can upload the complete MP4 afterward
   args.push("-f", "mp4", "-movflags", "frag_keyframe+empty_moov", mp4Path);

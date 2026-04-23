@@ -50,8 +50,8 @@ describe("SessionRecorder", () => {
   // --- Audio recording ---
 
   describe("appendAudio", () => {
-    test("stores PCM payload stripped of FRAU header", async () => {
-      const pcmData = new Uint8Array(2048);
+    test("stores PCM payload stripped of FRAU header (resampled to 48kHz)", async () => {
+      const pcmData = new Uint8Array(2048); // 1024 samples at 8kHz
       const frame = buildFRAUFrame({
         sampleRate: 8000,
         channels: 1,
@@ -66,7 +66,8 @@ describe("SessionRecorder", () => {
 
       const chunk = await store.get(keys[0]);
       expect(chunk).not.toBeNull();
-      expect(chunk!.length).toBe(2048);
+      // 1024 samples at 8kHz resampled to 48kHz: 1024 * 6 = 6144 samples * 2 = 12288 bytes
+      expect(chunk!.length).toBe(12288);
       // Should NOT start with FRAU magic
       expect(chunk![0]).not.toBe(0x46);
     });
@@ -109,8 +110,8 @@ describe("SessionRecorder", () => {
       expect(manifest.totalFrames).toBe(23);
     });
 
-    test("captures sample rate from FRAU header", async () => {
-      // All frames in one flush cycle → single chunk with last frame's sample rate
+    test("captures sample rate from FRAU header (always 48000 after resampling)", async () => {
+      // All frames in one flush cycle → single chunk with resampled rate
       recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(buildFRAUFrame({
         sampleRate: 8000,
@@ -127,8 +128,8 @@ describe("SessionRecorder", () => {
       const manifestBuf = await store.get("sessions/test-session-001/manifest.json");
       expect(manifestBuf).not.toBeNull();
       const manifest = JSON.parse(new TextDecoder().decode(manifestBuf!));
-      // Single chunk captures the last appended sample rate
-      expect(manifest.audioSampleRate).toBe(8000);
+      // Resampled to 48kHz regardless of source rate
+      expect(manifest.audioSampleRate).toBe(48000);
     });
 
     test("defaults to 48000 when no audio chunks", async () => {
@@ -166,7 +167,7 @@ describe("SessionRecorder", () => {
       expect(seg.bytes).toBeGreaterThan(0);
     });
 
-    test("records audio chunk metadata with sample rate", async () => {
+    test("records audio chunk metadata with resampled sample rate", async () => {
       recorder.appendVideo(buildFRLYFrame({})); // activate recorder
       recorder.appendAudio(buildFRAUFrame({
         sampleRate: 16000,
@@ -180,7 +181,7 @@ describe("SessionRecorder", () => {
       expect(manifest.audioChunks.length).toBeGreaterThanOrEqual(1);
 
       const chunk = manifest.audioChunks[0];
-      expect(chunk.sampleRate).toBe(16000);
+      expect(chunk.sampleRate).toBe(48000); // resampled from 16kHz → 48kHz
       expect(chunk.channels).toBe(1);
     });
   });
@@ -262,8 +263,8 @@ describe("SessionRecorder", () => {
       expect(manifest.actualFps).toBeGreaterThan(20);
       expect(manifest.actualFps).toBeLessThan(25);
 
-      // Audio sample rate should be 8000, not the old hardcoded 48000
-      expect(manifest.audioSampleRate).toBe(8000);
+      // Audio resampled to 48kHz regardless of source rate
+      expect(manifest.audioSampleRate).toBe(48000);
 
       expect(manifest.totalFrames).toBe(69);
     });
@@ -293,6 +294,94 @@ describe("SessionRecorder", () => {
 
       expect(manifest.actualFps).toBeGreaterThan(20);
       expect(manifest.audioSampleRate).toBe(48000);
+    });
+  });
+
+  // --- Resampling tests ---
+
+  describe("PCM resampling", () => {
+    test("resamples 8kHz to 48kHz (6x expansion)", async () => {
+      recorder.appendVideo(buildFRLYFrame({}));
+      // 512 bytes of PCM at 8kHz = 256 samples
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 8000,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+      await recorder.finish();
+
+      const keys = await store.list("sessions/test-session-001/audio/");
+      const chunk = await store.get(keys[0]);
+      // 256 samples * 6 = 1536 samples * 2 bytes = 3072 bytes
+      expect(chunk!.length).toBe(3072);
+
+      const manifestBuf = await store.get("sessions/test-session-001/manifest.json");
+      const manifest = JSON.parse(new TextDecoder().decode(manifestBuf!));
+      expect(manifest.audioSampleRate).toBe(48000);
+    });
+
+    test("resamples 16kHz to 48kHz (3x expansion)", async () => {
+      recorder.appendVideo(buildFRLYFrame({}));
+      // 512 bytes of PCM at 16kHz = 256 samples
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 16000,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+      await recorder.finish();
+
+      const keys = await store.list("sessions/test-session-001/audio/");
+      const chunk = await store.get(keys[0]);
+      // 256 samples * 3 = 768 samples * 2 bytes = 1536 bytes
+      expect(chunk!.length).toBe(1536);
+    });
+
+    test("passes through 48kHz unchanged", async () => {
+      recorder.appendVideo(buildFRLYFrame({}));
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 48000,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+      await recorder.finish();
+
+      const keys = await store.list("sessions/test-session-001/audio/");
+      const chunk = await store.get(keys[0]);
+      expect(chunk!.length).toBe(512); // passthrough, no expansion
+    });
+
+    test("mixed-rate session always records 48000", async () => {
+      recorder.appendVideo(buildFRLYFrame({}));
+
+      // Phone mic at 48kHz
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 48000,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+      // Glasses HFP at 8kHz
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 8000,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+      // TTS at 22050Hz
+      recorder.appendAudio(buildFRAUFrame({
+        sampleRate: 22050,
+        channels: 1,
+        pcmPayload: new Uint8Array(512),
+      }));
+
+      await recorder.finish();
+
+      const manifestBuf = await store.get("sessions/test-session-001/manifest.json");
+      const manifest = JSON.parse(new TextDecoder().decode(manifestBuf!));
+      expect(manifest.audioSampleRate).toBe(48000);
+
+      // All chunks should have sampleRate 48000
+      for (const chunk of manifest.audioChunks) {
+        expect(chunk.sampleRate).toBe(48000);
+      }
     });
   });
 });
