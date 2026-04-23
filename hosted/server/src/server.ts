@@ -698,8 +698,8 @@ const server = Bun.serve<WsData>({
         const sourceCount = nodes.filter(n => n.type === "stream-input").length;
         const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
         const outputCount = nodes.filter(n => n.type === "output").length;
-        if (nodes.length > 0 && (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1)) {
-          return Response.json({ error: "Must have exactly 1 stream-input, 1 AI node, and 1 output" }, { status: 400 });
+        if (nodes.length > 0 && (sourceCount !== 1 || aiCount < 1 || outputCount !== 1)) {
+          return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
         }
 
         dbWriter.enqueue(q.insertWorkflow({
@@ -773,8 +773,8 @@ const server = Bun.serve<WsData>({
             const sourceCount = body.nodes.filter(n => n.type === "stream-input").length;
             const aiCount = body.nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
             const outputCount = body.nodes.filter(n => n.type === "output").length;
-            if (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1) {
-              return Response.json({ error: "Must have exactly 1 stream-input, 1 AI node, and 1 output" }, { status: 400 });
+            if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
+              return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
             }
           }
 
@@ -834,7 +834,7 @@ const server = Bun.serve<WsData>({
         const sourceCount = nodes.filter(n => n.type === "stream-input").length;
         const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
         const outputCount = nodes.filter(n => n.type === "output").length;
-        if (sourceCount !== 1 || aiCount !== 1 || outputCount !== 1) {
+        if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
           return Response.json({ error: "Invalid workflow: must have 1 source, 1 AI node, 1 output" }, { status: 400 });
         }
 
