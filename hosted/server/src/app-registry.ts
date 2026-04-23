@@ -163,3 +163,108 @@ export function resolveWorkflowToApp(
     config,
   };
 }
+
+/** Find the text node specifically connected to a given AI node via edges */
+function findPromptForAiNode(aiNodeId: string, nodes: WorkflowNodeDef[], edges: WorkflowEdgeDef[]): string {
+  // Check for a text node connected to this specific AI node
+  const textEdge = edges.find(e => {
+    const src = nodes.find(n => n.id === e.sourceNodeId);
+    const tgt = nodes.find(n => n.id === e.targetNodeId);
+    return (src?.type === "text" && tgt?.id === aiNodeId) || (tgt?.type === "text" && src?.id === aiNodeId);
+  });
+  if (textEdge) {
+    const textNodeId = nodes.find(n => n.id === textEdge.sourceNodeId)?.type === "text" ? textEdge.sourceNodeId : textEdge.targetNodeId;
+    const textNode = nodes.find(n => n.id === textNodeId);
+    if (textNode) return (textNode.config.text as string) ?? "";
+  }
+  // Fallback: any text node (backward compat)
+  const anyTextNode = nodes.find(n => n.type === "text");
+  return (anyTextNode?.config.text as string) ?? "";
+}
+
+/**
+ * Resolve workflow into a multi-AI pipeline.
+ * Each AI node becomes its own AppDefinition with per-node prompt and config.
+ * For single-AI workflows, returns an array of one (backward compat with resolveWorkflowToApp).
+ */
+export function resolveWorkflowToPipeline(
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+  workflow: { id: string; name: string },
+): AppDefinition[] {
+  const aiNodes = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b");
+  if (aiNodes.length === 0) throw new Error("No AI node found in workflow");
+
+  const bindingMap: Record<string, string> = {
+    "s2s-live": "s2s-gemini-live",
+    "s2s-rest": "s2s-gemma4-rest",
+    "s2s-e4b": "s2s-gemma4-e4b-rest",
+  };
+
+  // Shared input config from stream-input node
+  const inputNode = nodes.find(n => n.type === "stream-input");
+  const baseInput: InputConfig = {
+    video: inputNode?.config.video !== false,
+    phoneMic: inputNode?.config.phoneMic !== false,
+    glassesMic: inputNode?.config.glassesMic === true,
+    gestures: inputNode?.config.gestures !== false,
+    visionFps: (inputNode?.config.visionFps as number) ?? 1,
+  };
+
+  // Shared output config from output node
+  const outputNode = nodes.find(n => n.type === "output");
+  const baseOutput: OutputConfig = {
+    viewers: outputNode?.config.viewers !== false,
+    overlays: outputNode?.config.overlays !== false,
+    speaker: outputNode?.config.speaker !== false,
+    recording: outputNode?.config.recording !== false,
+  };
+
+  return aiNodes.map((aiNode, idx) => {
+    const binding = bindingMap[aiNode.type] ?? "s2s-gemini-live";
+    const systemPrompt = findPromptForAiNode(aiNode.id, nodes, edges);
+    const visionFps = (aiNode.config.visionFps as number) ?? baseInput.visionFps;
+
+    // Per-AI input config: each AI node can override the shared input
+    const input: InputConfig = {
+      video: aiNode.config.video !== undefined ? aiNode.config.video as boolean : baseInput.video,
+      phoneMic: aiNode.config.phoneMic !== undefined ? aiNode.config.phoneMic as boolean : baseInput.phoneMic,
+      glassesMic: aiNode.config.glassesMic !== undefined ? aiNode.config.glassesMic as boolean : baseInput.glassesMic,
+      gestures: aiNode.config.gestures !== undefined ? aiNode.config.gestures as boolean : baseInput.gestures,
+      visionFps,
+    };
+
+    // Per-AI output config: each AI node can route to different channels
+    // First AI gets speaker, subsequent AIs default to overlays + recording only
+    const isPrimary = idx === 0;
+    const output: OutputConfig = {
+      viewers: aiNode.config.viewers !== undefined ? aiNode.config.viewers as boolean : baseOutput.viewers,
+      overlays: aiNode.config.overlays !== undefined ? aiNode.config.overlays as boolean : baseOutput.overlays,
+      speaker: aiNode.config.speaker !== undefined ? aiNode.config.speaker as boolean : (isPrimary && baseOutput.speaker),
+      recording: aiNode.config.recording !== undefined ? aiNode.config.recording as boolean : baseOutput.recording,
+    };
+
+    const config: AppConfig = {
+      model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
+      voice: aiNode.config.voice as string | undefined,
+      visionFps,
+      temperature: aiNode.config.temperature as number | undefined,
+      input,
+      output,
+    };
+
+    // Use AI node label in the app name if available
+    const aiLabel = aiNode.label ? ` - ${aiNode.label}` : "";
+    const suffix = aiNodes.length > 1 ? ` [${idx + 1}]` : "";
+
+    return {
+      id: aiNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
+      name: `${workflow.name}${aiLabel}${suffix}`,
+      description: `Workflow: ${workflow.name} (${aiNode.type})`,
+      icon: "workflow",
+      binding,
+      systemPrompt,
+      config,
+    };
+  });
+}

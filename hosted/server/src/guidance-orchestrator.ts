@@ -132,7 +132,7 @@ export class GuidanceOrchestrator {
   private telemetry = new Map<string, AITelemetry>();
   private eventHistory = new Map<string, GuidanceEvent[]>();
   private subscribers = new Map<string, Set<(msg: any) => void>>();
-  private aiState = new Map<string, SessionAIState>();
+  private aiState = new Map<string, Map<string, SessionAIState>>();  // sessionId -> appId -> state
 
   /** Callback to push AI audio response to relay's audio-in path */
   private audioPushFn: AudioPushFn | null = null;
@@ -234,24 +234,28 @@ export class GuidanceOrchestrator {
     this.disconnectAI(sessionId);
   }
 
-  /** Activate with a pre-resolved AppDefinition (used by workflow activation). */
+  /** Activate with a pre-resolved AppDefinition (used by workflow activation). Supports multi-app. */
   async activateWithConfig(sessionId: string, app: AppDefinition): Promise<void> {
     const appId = app.id;
 
-    // Disconnect existing AI service for this session if any
-    this.disconnectAI(sessionId);
+    // Disconnect only this specific app if it's already running (re-activation)
+    this.disconnectApp(sessionId, appId);
 
     const pipeline = this.appRegistry.resolvePipeline(appId);
 
-    this.setStatus(sessionId, {
-      appId,
-      status: "activating",
-      config: app.config,
-      activatedAt: Date.now(),
-      triggerCount: this.getStatus(sessionId).triggerCount,
-      lastResponseMs: undefined,
-    });
-    this.broadcastStatus(sessionId);
+    // Use primary app for the session-level status display
+    const currentStatus = this.getStatus(sessionId);
+    if (currentStatus.status === "idle" || currentStatus.status === "error") {
+      this.setStatus(sessionId, {
+        appId,
+        status: "activating",
+        config: app.config,
+        activatedAt: Date.now(),
+        triggerCount: currentStatus.triggerCount,
+        lastResponseMs: undefined,
+      });
+      this.broadcastStatus(sessionId);
+    }
 
     // Resolve the AI provider from the primitive binding
     // Default to gemini-live if no explicit provider hint
@@ -261,11 +265,11 @@ export class GuidanceOrchestrator {
     if (!service) {
       console.error(`[orchestrator] No AI provider "${provider}" registered`);
       this.setStatus(sessionId, {
-        appId,
+        appId: currentStatus.appId,
         status: "error",
         config: app.config,
-        activatedAt: this.getStatus(sessionId).activatedAt,
-        triggerCount: this.getStatus(sessionId).triggerCount,
+        activatedAt: currentStatus.activatedAt,
+        triggerCount: currentStatus.triggerCount,
         lastResponseMs: undefined,
       });
       this.broadcastStatus(sessionId);
@@ -283,12 +287,19 @@ export class GuidanceOrchestrator {
       reconnectTimer: null,
       consecutiveReconnects: 0,
     };
-    this.aiState.set(sessionId, state);
+
+    // Store in multi-map: sessionId -> appId -> state
+    let sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) {
+      sessionApps = new Map();
+      this.aiState.set(sessionId, sessionApps);
+    }
+    sessionApps.set(appId, state);
 
     // Wire AI service callbacks
     const callbacks: AIServiceCallbacks = {
       onAudio: (pcm) => {
-        this.handleAIAudio(sessionId, pcm);
+        this.handleAIAudio(sessionId, appId, pcm);
       },
       onText: (text) => {
         this.handleAIText(sessionId, appId, text);
@@ -300,14 +311,13 @@ export class GuidanceOrchestrator {
         this.handleAIStatusChange(sessionId, appId, aiStatus, context);
       },
       onUsage: (usage) => {
-        // Could track token usage per session in telemetry
-        console.log(`[orchestrator] Token usage: prompt=${usage.promptTokens} response=${usage.responseTokens} session=${sessionId}`);
+        console.log(`[orchestrator] Token usage: prompt=${usage.promptTokens} response=${usage.responseTokens} session=${sessionId} app=${appId}`);
       },
       onError: (error) => {
-        console.error(`[orchestrator] AI error: ${error.message} session=${sessionId}`);
+        console.error(`[orchestrator] AI error: ${error.message} session=${sessionId} app=${appId}`);
         this.emitGuidanceEvent(sessionId, {
           type: "guidance.alert",
-          content: `AI error: ${error.message}`,
+          content: `AI error (${app.name}): ${error.message}`,
           confidence: 1.0,
           source: appId,
           trigger: "ai_error",
@@ -331,12 +341,12 @@ export class GuidanceOrchestrator {
 
       // Successfully connected
       this.setStatus(sessionId, {
-        appId,
+        appId: currentStatus.appId ?? appId,
         status: "active",
-        config: app.config,
-        activatedAt: this.getStatus(sessionId).activatedAt,
-        triggerCount: this.getStatus(sessionId).triggerCount,
-        lastResponseMs: Date.now() - (this.getStatus(sessionId).activatedAt ?? Date.now()),
+        config: currentStatus.config ?? app.config,
+        activatedAt: currentStatus.activatedAt ?? Date.now(),
+        triggerCount: currentStatus.triggerCount,
+        lastResponseMs: Date.now() - (currentStatus.activatedAt ?? Date.now()),
       });
       this.addLatency(sessionId, this.getStatus(sessionId).lastResponseMs ?? 0);
 
@@ -352,24 +362,24 @@ export class GuidanceOrchestrator {
       this.broadcastStatus(sessionId);
 
       console.log(`[orchestrator] App activated: ${appId} provider=${provider} model=${app.config.model} session=${sessionId}`);
-      // Reset reconnect counter on successful activation
       state.consecutiveReconnects = 0;
     } catch (err) {
       console.error(`[orchestrator] AI connect failed:`, err);
-      this.aiState.delete(sessionId);
+      sessionApps.delete(appId);
+      if (sessionApps.size === 0) this.aiState.delete(sessionId);
       this.setStatus(sessionId, {
-        appId,
+        appId: currentStatus.appId ?? appId,
         status: "error",
         config: app.config,
-        activatedAt: this.getStatus(sessionId).activatedAt,
-        triggerCount: this.getStatus(sessionId).triggerCount,
+        activatedAt: currentStatus.activatedAt,
+        triggerCount: currentStatus.triggerCount,
         lastResponseMs: undefined,
       });
       this.broadcastStatus(sessionId);
 
       this.emitGuidanceEvent(sessionId, {
         type: "guidance.alert",
-        content: `Failed to activate AI: ${err instanceof Error ? err.message : String(err)}`,
+        content: `Failed to activate AI (${app.name}): ${err instanceof Error ? err.message : String(err)}`,
         confidence: 1.0,
         source: appId,
         trigger: "activate_app_error",
@@ -408,45 +418,57 @@ export class GuidanceOrchestrator {
 
   // --- Frame / audio forwarding ---
 
-  /** Forward a JPEG frame from the relay to the active AI service for this session */
+  /** Forward a JPEG frame from the relay to all active AI services for this session */
   sendVideoFrame(sessionId: string, jpeg: Uint8Array): void {
-    const state = this.aiState.get(sessionId);
-    if (!state || state.service.status !== "connected") return;
-    if (!state.input.video) return;
-    state.service.sendVideoFrame(jpeg);
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    for (const state of sessionApps.values()) {
+      if (state.service.status !== "connected") continue;
+      if (!state.input.video) continue;
+      state.service.sendVideoFrame(jpeg);
+    }
   }
 
-  /** Forward PCM audio from the relay to the active AI service for this session */
+  /** Forward PCM audio from the relay to all active AI services for this session */
   sendAudio(sessionId: string, pcm: Uint8Array, codecType?: number): void {
-    const state = this.aiState.get(sessionId);
-    if (!state || state.service.status !== "connected") return;
-    // Gate by codecType: 0=phoneMic, 1=glassesMic, 2=TTS passthrough
-    if (codecType === 0 && !state.input.phoneMic) return;
-    if (codecType === 1 && !state.input.glassesMic) return;
-    state.service.sendAudio(pcm);
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    for (const state of sessionApps.values()) {
+      if (state.service.status !== "connected") continue;
+      if (codecType === 0 && !state.input.phoneMic) continue;
+      if (codecType === 1 && !state.input.glassesMic) continue;
+      state.service.sendAudio(pcm);
+    }
   }
 
-  /** Send a text trigger (e.g., gesture description) to the active AI service */
+  /** Send a text trigger (e.g., gesture description) to all active AI services */
   sendTrigger(sessionId: string, text: string): void {
-    const state = this.aiState.get(sessionId);
-    if (!state || state.service.status !== "connected") return;
-    // Gesture triggers are gated by input.gestures; other triggers pass through
-    if (text.startsWith("[Gesture detected:") && !state.input.gestures) return;
-    state.service.sendText(text);
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    for (const state of sessionApps.values()) {
+      if (state.service.status !== "connected") continue;
+      if (text.startsWith("[Gesture detected:") && !state.input.gestures) continue;
+      state.service.sendText(text);
+    }
   }
 
-  /** Update vision FPS for the active AI service at runtime */
+  /** Update vision FPS for all active AI services at runtime */
   setVisionFps(sessionId: string, fps: number): void {
-    const state = this.aiState.get(sessionId);
-    if (!state) return;
-    state.service.setVisionFps?.(fps);
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    for (const state of sessionApps.values()) {
+      state.service.setVisionFps?.(fps);
+    }
   }
 
   // --- Status / telemetry ---
 
-  /** Get the input config for an active session (used to configure publisher) */
+  /** Get the input config for an active session (returns primary app's config) */
   getInputConfig(sessionId: string): InputConfig | null {
-    return this.aiState.get(sessionId)?.input ?? null;
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps || sessionApps.size === 0) return null;
+    // Return primary app's input config (first entry)
+    return sessionApps.values().next().value?.input ?? null;
   }
 
   getStatus(sessionId: string): AIStatus {
@@ -526,19 +548,38 @@ export class GuidanceOrchestrator {
     return "gemini-live";
   }
 
-  private disconnectAI(sessionId: string): void {
-    const state = this.aiState.get(sessionId);
+  /** Disconnect a specific app for a session */
+  private disconnectApp(sessionId: string, appId: string): void {
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    const state = sessionApps.get(appId);
     if (state) {
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
       try {
         state.service.disconnect();
       } catch {}
-      this.aiState.delete(sessionId);
+      sessionApps.delete(appId);
+      if (sessionApps.size === 0) this.aiState.delete(sessionId);
     }
   }
 
-  private handleAIAudio(sessionId: string, pcm: Uint8Array): void {
-    const state = this.aiState.get(sessionId);
+  /** Disconnect all AI services for a session */
+  private disconnectAI(sessionId: string): void {
+    const sessionApps = this.aiState.get(sessionId);
+    if (!sessionApps) return;
+    for (const state of sessionApps.values()) {
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      try {
+        state.service.disconnect();
+      } catch {}
+    }
+    sessionApps.clear();
+    this.aiState.delete(sessionId);
+  }
+
+  private handleAIAudio(sessionId: string, appId: string, pcm: Uint8Array): void {
+    const sessionApps = this.aiState.get(sessionId);
+    const state = sessionApps?.get(appId);
     if (!state) return;
 
     state.lastAudioAt = Date.now();
@@ -586,7 +627,7 @@ export class GuidanceOrchestrator {
       });
 
       // Push guidance text to publisher for client-side TTS
-      const state = this.aiState.get(sessionId);
+      const state = this.aiState.get(sessionId)?.get(appId);
       if (this.guidanceTextPushFn && content && state?.output.speaker) {
         this.guidanceTextPushFn(sessionId, content);
       }
@@ -619,7 +660,7 @@ export class GuidanceOrchestrator {
       });
 
       // Record bbox annotation to session JSONL
-      const bState = this.aiState.get(sessionId);
+      const bState = this.aiState.get(sessionId)?.get(appId);
       if (this.bboxAnnotationFn && bState?.output.recording) {
         this.bboxAnnotationFn(sessionId, {
           timestampMs: Date.now(),
@@ -725,7 +766,7 @@ export class GuidanceOrchestrator {
       }
 
       // --- Transient: everything else (network blip, session deadline) ---
-      const state = this.aiState.get(sessionId);
+      const state = this.aiState.get(sessionId)?.get(appId);
       const retries = state ? state.consecutiveReconnects : 0;
       const maxRetries = 10;
 
@@ -758,7 +799,7 @@ export class GuidanceOrchestrator {
 
   /** Handle a rate-limit disconnect with longer backoff (5s * 3^n, cap 120s, max 15 retries). */
   private handleRateLimitDisconnect(sessionId: string, appId: string, code: number, reason: string): void {
-    const state = this.aiState.get(sessionId);
+    const state = this.aiState.get(sessionId)?.get(appId);
     if (!state) return;
 
     const maxRateLimitRetries = 15;
@@ -807,7 +848,7 @@ export class GuidanceOrchestrator {
 
   /** Schedule a reconnect after `delayMs` milliseconds. Shared by transient and rate-limit paths. */
   private scheduleReconnectWithDelay(sessionId: string, appId: string, delayMs: number, attempt: number, interimStatus: "rate_limited" | "activating"): void {
-    const state = this.aiState.get(sessionId);
+    const state = this.aiState.get(sessionId)?.get(appId);
     if (!state) return;
 
     if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -836,7 +877,7 @@ export class GuidanceOrchestrator {
   }
 
   private scheduleReconnect(sessionId: string, appId: string): void {
-    const state = this.aiState.get(sessionId);
+    const state = this.aiState.get(sessionId)?.get(appId);
     if (!state) return;
 
     const attempt = state.consecutiveReconnects + 1;
@@ -892,8 +933,10 @@ export class GuidanceOrchestrator {
     history.push(event);
 
     // Persist to R2 via callback (buffered by session-recorder)
-    const evtState = this.aiState.get(sessionId);
-    if (this.guidancePersistFn && evtState?.output.recording) {
+    // Check if any app has recording enabled
+    const evtSession = this.aiState.get(sessionId);
+    const anyRecording = evtSession && [...evtSession.values()].some(s => s.output.recording);
+    if (this.guidancePersistFn && anyRecording) {
       this.guidancePersistFn(sessionId, event);
     }
 
@@ -901,7 +944,8 @@ export class GuidanceOrchestrator {
     t.guidanceEvents++;
 
     // Fan out to viewer WebSockets
-    if (!evtState?.output.viewers) return;
+    const anyViewers = evtSession && [...evtSession.values()].some(s => s.output.viewers);
+    if (!anyViewers) return;
     const subs = this.subscribers.get(sessionId);
     if (subs) {
       const msg = { type: "guidance_event", event };

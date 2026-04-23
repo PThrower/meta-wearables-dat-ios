@@ -49,7 +49,7 @@ import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
-import { AppRegistry, resolveWorkflowToApp } from "./app-registry.js";
+import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -895,29 +895,37 @@ const server = Bun.serve<WsData>({
           orchestrator.forceDeactivate(body.sessionId);
         }
 
-        const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
-        appRegistry.registerTransientApp(virtualApp);
+        const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+        const primaryApp = pipelineApps[0];
+        for (const app of pipelineApps) {
+          appRegistry.registerTransientApp(app);
+        }
 
         const session = registry.get(body.sessionId);
         if (!session) {
           return Response.json({ error: "Session not found or not active" }, { status: 404 });
         }
-        session.activeAppId = virtualApp.id;
-        session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
+        session.activeAppId = primaryApp.id;
+        session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
 
-        // Audit log: record activation
+        // Audit log: record activation for the primary app
         const activationId = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         dbWriter.enqueue(q.insertActivation({
           id: activationId,
           sessionId: body.sessionId,
           workflowId: wfId,
-          appId: virtualApp.id,
+          appId: primaryApp.id,
           activatedBy: session.activeAppId ?? "api",
           overrodeAppId: conflict.hasConflict ? conflict.appId ?? undefined : undefined,
           reason: body.reason ?? (conflict.hasConflict ? "Override" : "Activate"),
         }));
 
-        await orchestrator.activateWithConfig(body.sessionId, virtualApp);
+        // Activate all AI apps in the pipeline (multi-AI support)
+        const activatedAppIds: string[] = [];
+        for (const app of pipelineApps) {
+          await orchestrator.activateWithConfig(body.sessionId, app);
+          activatedAppIds.push(app.id);
+        }
 
         // Send cached frame to AI for immediate context
         const cachedFrame = registry.getLastFrame(body.sessionId);
@@ -931,7 +939,7 @@ const server = Bun.serve<WsData>({
         // Check actual activation status from orchestrator
         const aiStatus = orchestrator.getStatus(body.sessionId);
         const finalStatus = aiStatus.status === "error" ? "error" : "active";
-        return Response.json({ appId: virtualApp.id, status: finalStatus });
+        return Response.json({ appId: primaryApp.id, status: finalStatus, apps: activatedAppIds });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }
