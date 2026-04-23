@@ -4,7 +4,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, OutputConfig } from "./app-types.js";
+import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig } from "./app-types.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -110,9 +110,21 @@ export function resolveWorkflowToApp(
   const config: AppConfig = {
     model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
     voice: aiNode.config.voice as string | undefined,
-    visionFps: aiNode.config.visionFps as number | undefined,
+    visionFps: (aiNode.config.visionFps as number) ?? 1,
     temperature: aiNode.config.temperature as number | undefined,
   };
+
+  // Read input node config for publisher source selection
+  const inputNode = nodes.find(n => n.type === "camera-source");
+  const input: InputConfig = {
+    camera: (inputNode?.config.camera as InputConfig["camera"]) ?? "glasses",
+    audio: (inputNode?.config.audio as InputConfig["audio"]) ?? "phone-mic",
+    codec: (inputNode?.config.codec as InputConfig["codec"]) ?? "jpeg",
+    visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
+  };
+  // Override AI node visionFps if input node specifies it
+  config.visionFps = input.visionFps;
+  config.input = input;
 
   // Read output node config for channel gating
   const outputNode = nodes.find(n => n.type === "output");

@@ -1199,6 +1199,9 @@ const server = Bun.serve<WsData>({
                   session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
                   await orchestrator.activateWithConfig(sessionId, virtualApp);
                   ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
+                  // Push source config to publisher
+                  const ic = orchestrator.getInputConfig(sessionId);
+                  if (ic && session.publisher) session.publisher.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
                   if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
                 } catch (e) {
@@ -1244,6 +1247,11 @@ const server = Bun.serve<WsData>({
                 session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
                 await orchestrator.activateWithConfig(sessionId, virtualApp);
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
+                // Push source config to publisher so it adjusts its pipeline
+                const inputConfig = orchestrator.getInputConfig(sessionId);
+                if (inputConfig && session.publisher) {
+                  session.publisher.send(JSON.stringify({ type: "configure_sources", input: inputConfig }));
+                }
                 const cachedFrame = registry.getLastFrame(sessionId);
                 if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
               } catch (e) {
@@ -1395,6 +1403,9 @@ const server = Bun.serve<WsData>({
                   await orchestrator.activateWithConfig(sessionId, virtualApp);
                   console.log(`[relay] Viewer activated workflow app: ${virtualApp.id} session=${sessionId}`);
                   ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
+                  // Push source config to publisher
+                  const ic2 = orchestrator.getInputConfig(sessionId);
+                  if (ic2 && session.publisher) session.publisher.send(JSON.stringify({ type: "configure_sources", input: ic2 }));
                   const cachedFrame = registry.getLastFrame(sessionId);
                   if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
                 } catch (e) {
