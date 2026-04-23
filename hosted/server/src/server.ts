@@ -582,11 +582,35 @@ const server = Bun.serve<WsData>({
       });
     }
 
-    // --- List devices with APNs tokens ---
+    // --- Fleet: list all known devices with online status ---
 
     if (url.pathname === "/api/registered-devices" && req.method === "GET") {
-      const devices = q.listDevicesWithTokens();
-      return Response.json(devices);
+      const dbDevices = q.listAllDevices();
+
+      // Cross-reference with active sessions to determine online status + lastSeen
+      const activeSessions = registry.listActive();
+      const onlineDeviceIds = new Set<string>();
+      const deviceLastSeen = new Map<string, string>();
+      for (const s of activeSessions) {
+        if (s.publisherConnected && s.metadata.deviceId) {
+          onlineDeviceIds.add(s.metadata.deviceId);
+          deviceLastSeen.set(s.metadata.deviceId, new Date().toISOString());
+        }
+      }
+
+      const devices = dbDevices.map(d => ({
+        device_id: d.id,
+        deviceName: d.name,
+        deviceModel: d.model,
+        systemVersion: d.systemVersion,
+        wearableType: d.wearableType,
+        appVersion: d.appVersion,
+        battery: d.batteryLevel,
+        online: onlineDeviceIds.has(d.id),
+        lastSeen: deviceLastSeen.get(d.id) ?? d.lastSeenAt,
+        apnsToken: d.hasApnsToken ? "registered" : null,
+      }));
+      return Response.json({ devices });
     }
 
     // --- APNs Device Token Registration ---

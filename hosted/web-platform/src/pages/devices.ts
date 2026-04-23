@@ -69,7 +69,9 @@ async function loadDevices(container: HTMLElement): Promise<void> {
 
   if (!_pollTimer) {
     _pollTimer = setInterval(async () => {
+      if (!container.isConnected) { clearInterval(_pollTimer!); _pollTimer = null; return; }
       const [d, s] = await Promise.all([fetchDevices(), fetchSessions()]);
+      if (!container.isConnected) return;
       _allDevices = d;
       _allSessions = s;
       renderStats(container, d);
@@ -97,7 +99,8 @@ function renderStats(container: HTMLElement, devices: DeviceInfo[]): void {
 }
 
 function renderGrid(container: HTMLElement, devices: DeviceInfo[], sessions: SessionInfo[]): void {
-  const grid = container.querySelector("#devices-grid")!;
+  const grid = container.querySelector("#devices-grid");
+  if (!grid) return;
   let filtered = devices;
 
   // Apply filter

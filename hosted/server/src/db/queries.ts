@@ -209,6 +209,29 @@ export function listDevicesWithTokens(): { id: string; name: string | null; mode
   ).all() as { id: string; name: string | null; model: string | null; hasToken: true }[];
 }
 
+/** List all known devices with full metadata for the fleet dashboard */
+export function listAllDevices(): Array<{
+  id: string;
+  name: string | null;
+  model: string | null;
+  systemVersion: string | null;
+  wearableType: string | null;
+  appVersion: string | null;
+  batteryLevel: number | null;
+  status: string | null;
+  lastSeenAt: string | null;
+  hasApnsToken: boolean;
+}> {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT id, name, model, system_version, wearable_type, app_version,
+      battery_level, status, last_seen_at,
+      CASE WHEN apns_device_token IS NOT NULL AND length(apns_device_token) > 10 THEN 1 ELSE 0 END as hasApnsToken
+    FROM devices
+    ORDER BY updated_at DESC
+  `).all() as any[];
+}
+
 /** Find a device ID by its last known session ID (DB fallback for wake after restart) */
 export function findDeviceBySessionDb(sessionId: string): string | null {
   const db = getDbRaw();
