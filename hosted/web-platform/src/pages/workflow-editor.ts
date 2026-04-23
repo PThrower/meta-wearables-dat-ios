@@ -53,6 +53,7 @@ let _zoom = 1;
 
 const NODE_COLORS: Record<string, { fill: string; header: string; stroke: string }> = {
   "camera-source": { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+  "text": { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" },
   "s2s-live": { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
   "s2s-rest": { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
   "s2s-e4b": { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" },
@@ -181,13 +182,15 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 150 },
-        { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 150 },
-        { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 150 },
+        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 200 },
+        { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 400, positionY: 80 },
+        { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 250 },
+        { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 250 },
       ],
       edges: [
         { id: `e_1_${now}`, sourceNodeId: `n_src_${now}`, targetNodeId: `n_ai_${now}` },
-        { id: `e_2_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_out_${now}` },
+        { id: `e_2_${now}`, sourceNodeId: `n_txt_${now}`, targetNodeId: `n_ai_${now}` },
+        { id: `e_3_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_out_${now}` },
       ],
       canvasViewport: { x: 0, y: 0, zoom: 1 },
       createdAt: new Date().toISOString(),
@@ -243,7 +246,9 @@ function buildSVG(): string {
     const c = NODE_COLORS[n.type] ?? NODE_COLORS["output"];
     const configSummary = n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b"
       ? (n.config.model as string ?? "").slice(0, 20)
-      : n.type === "output"
+      : n.type === "text"
+        ? ((n.config.text as string) ?? "").slice(0, 22) || "Empty"
+        : n.type === "output"
         ? Object.entries({ viewers: "view", overlays: "overlay", speaker: "speaker", recording: "rec" })
             .filter(([, k]) => n.config[k] !== false)
             .map(([l]) => l)
@@ -316,6 +321,7 @@ function wireEditorEvents(): void {
       const config = type === "s2s-live" ? { model: "gemini-2.5-flash-native-audio-latest" }
         : type === "s2s-rest" ? { model: "gemma-4-27b" }
         : type === "s2s-e4b" ? { model: "gemma-4-e4b-it" }
+        : type === "text" ? { text: "" }
         : type === "output" ? { viewers: true, overlays: true, speaker: true, recording: true }
         : {};
       _workflow.nodes.push({
@@ -667,6 +673,22 @@ function renderConfigPanel(): void {
       </div>
       <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
     `;
+  } else if (node.type === "text") {
+    const text = (node.config.text as string) ?? "";
+    panel.innerHTML = `
+      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
+        <span class="wf-config-type">Text / Prompt</span>
+      </div>
+      <div class="wf-config-field">
+        <label>Label</label>
+        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
+      </div>
+      <div class="wf-config-field">
+        <label>System Prompt</label>
+        <textarea class="wf-config-input wf-config-textarea" data-field="config.text" rows="10" placeholder="Enter system prompt...">${esc(text)}</textarea>
+      </div>
+      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
+    `;
   } else if (node.type === "s2s-live") {
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
@@ -682,10 +704,6 @@ function renderConfigPanel(): void {
           <option value="gemini-2.5-flash-native-audio-latest" ${node.config.model === "gemini-2.5-flash-native-audio-latest" ? "selected" : ""}>gemini-2.5-flash-native-audio</option>
           <option value="gemini-2.0-flash" ${node.config.model === "gemini-2.0-flash" ? "selected" : ""}>gemini-2.0-flash</option>
         </select>
-      </div>
-      <div class="wf-config-field">
-        <label>System Prompt</label>
-        <textarea class="wf-config-input wf-config-textarea" data-field="config.systemPrompt" rows="6">${esc((node.config.systemPrompt as string) ?? "")}</textarea>
       </div>
       <div class="wf-config-field">
         <label>Voice</label>
@@ -722,10 +740,6 @@ function renderConfigPanel(): void {
         </select>
       </div>
       <div class="wf-config-field">
-        <label>System Prompt</label>
-        <textarea class="wf-config-input wf-config-textarea" data-field="config.systemPrompt" rows="6">${esc((node.config.systemPrompt as string) ?? "")}</textarea>
-      </div>
-      <div class="wf-config-field">
         <label>Vision FPS: ${(node.config.visionFps as number) ?? 1}</label>
         <input type="range" min="0.5" max="2" step="0.5" data-field="config.visionFps" value="${(node.config.visionFps as number) ?? 1}" />
       </div>
@@ -749,10 +763,6 @@ function renderConfigPanel(): void {
         <select class="wf-config-input" data-field="config.model">
           <option value="gemma-4-e4b-it" ${node.config.model === "gemma-4-e4b-it" ? "selected" : ""}>gemma-4-e4b-it</option>
         </select>
-      </div>
-      <div class="wf-config-field">
-        <label>System Prompt</label>
-        <textarea class="wf-config-input wf-config-textarea" data-field="config.systemPrompt" rows="6">${esc((node.config.systemPrompt as string) ?? "")}</textarea>
       </div>
       <div class="wf-config-field">
         <label>Voice</label>

@@ -65,7 +65,7 @@ export interface AppsConfig {
 
 // --- Workflow Builder ---
 
-export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
+export type WorkflowNodeType = "camera-source" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
 
 /** Input modality config — each publisher stream is a toggleable modality */
 export interface InputConfig {

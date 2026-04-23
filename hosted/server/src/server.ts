@@ -1201,7 +1201,7 @@ const server = Bun.serve<WsData>({
                   ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
                   // Push input config to publisher
                   const ic = orchestrator.getInputConfig(sessionId);
-                  if (ic && session.publisher) session.publisher.send(JSON.stringify({ type: "configure_sources", input: ic }));
+                  if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
                   if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
                 } catch (e) {
@@ -1248,7 +1248,7 @@ const server = Bun.serve<WsData>({
                 await orchestrator.activateWithConfig(sessionId, virtualApp);
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
                 const ic = orchestrator.getInputConfig(sessionId);
-                if (ic && session.publisher) session.publisher.send(JSON.stringify({ type: "configure_sources", input: ic }));
+                if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                 const cachedFrame = registry.getLastFrame(sessionId);
                 if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
               } catch (e) {
@@ -1401,7 +1401,7 @@ const server = Bun.serve<WsData>({
                   console.log(`[relay] Viewer activated workflow app: ${virtualApp.id} session=${sessionId}`);
                   ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
                   const ic = orchestrator.getInputConfig(sessionId);
-                  if (ic && session.publisher) session.publisher.send(JSON.stringify({ type: "configure_sources", input: ic }));
+                  if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
                   if (cachedFrame) orchestrator.sendVideoFrame(sessionId, cachedFrame.slice(HEADER_SIZE));
                 } catch (e) {

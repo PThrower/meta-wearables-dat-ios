@@ -136,13 +136,30 @@ export function resolveWorkflowToApp(
   };
   config.output = output;
 
+  // Read system prompt from text node (connected to AI node via edges)
+  const textNode = nodes.find(n => n.type === "text");
+  // Fallback: check edges for a text node connected to the AI node
+  let promptSource = textNode;
+  if (!promptSource) {
+    const textEdge = edges.find(e => {
+      const src = nodes.find(n => n.id === e.sourceNodeId);
+      const tgt = nodes.find(n => n.id === e.targetNodeId);
+      return (src?.type === "text" && tgt?.id === aiNode.id) || (tgt?.type === "text" && src?.id === aiNode.id);
+    });
+    if (textEdge) {
+      const textNodeId = nodes.find(n => n.id === textEdge.sourceNodeId)?.type === "text" ? textEdge.sourceNodeId : textEdge.targetNodeId;
+      promptSource = nodes.find(n => n.id === textNodeId);
+    }
+  }
+  const systemPrompt = (promptSource?.config.text as string) ?? (aiNode.config.systemPrompt as string) ?? "";
+
   return {
     id: `wf-${workflow.id}`,
     name: workflow.name,
     description: `Workflow: ${workflow.name}`,
     icon: "workflow",
     binding,
-    systemPrompt: (aiNode.config.systemPrompt as string) ?? "",
+    systemPrompt,
     config,
   };
 }
