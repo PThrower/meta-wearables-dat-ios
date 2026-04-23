@@ -64,6 +64,15 @@ const NODE_W = 180;
 const NODE_H = 80;
 const NODE_R = 8;
 
+/** Allowed source -> target connections */
+const ALLOWED_TARGETS: Record<string, Set<string>> = {
+  "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+  "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
+  "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+  "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+  "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+};
+
 function nanoid(): string {
   return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -394,22 +403,41 @@ function wireEditorEvents(): void {
     location.hash = "/workflows";
   });
 
-  // Toolbar: activate
+  // Toolbar: activate — inline session dropdown
   _container?.querySelector("#wf-activate-btn")?.addEventListener("click", async () => {
     if (!_workflow?.id) return;
+    // Remove existing dropdown if open
+    const existing = _container?.querySelector(".wf-activate-dropdown");
+    if (existing) { existing.remove(); return; }
+
     const sessions = await fetchSessions();
     const liveSessions = sessions.filter(s => s.live);
     if (liveSessions.length === 0) { alert("No live sessions available"); return; }
 
-    const sessionList = liveSessions.map(s => `${s.sessionId.slice(0, 8)} (${s.device?.deviceName ?? "unknown"})`).join("\n");
-    const choice = prompt(`Activate against which session?\n${sessionList}`);
-    if (!choice) return;
-    const match = liveSessions.find(s => s.sessionId.startsWith(choice) || s.sessionId === choice);
-    if (!match) { alert("Session not found"); return; }
+    const dd = document.createElement("div");
+    dd.className = "wf-activate-dropdown";
+    dd.innerHTML = `
+      <select class="wf-activate-select">
+        ${liveSessions.map(s => `<option value="${s.sessionId}">${s.device?.deviceName ?? "unknown"} (${s.sessionId.slice(0, 8)})</option>`).join("")}
+      </select>
+      <button class="wf-activate-go">Go</button>
+    `;
+    (_container?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
 
-    const result = await activateWorkflow(_workflow.id, match.sessionId);
-    if (result) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
-    else alert("Activation failed");
+    dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
+      const sessionId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
+      if (!sessionId) return;
+      dd.remove();
+      const result = await activateWorkflow(_workflow!.id, sessionId);
+      if (result) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
+      else alert("Activation failed");
+    });
+
+    // Dismiss on click outside
+    const dismiss = (ev: MouseEvent) => {
+      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
+    };
+    setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
   // Keyboard: delete selected node
@@ -602,6 +630,11 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
     );
 
     if (target && _workflow) {
+      // Validate edge compatibility
+      const sourceNode = _workflow.nodes.find(n => n.id === _edgeState!.sourceNodeId);
+      const allowed = sourceNode ? ALLOWED_TARGETS[sourceNode.type]?.has(target.type) : false;
+      if (!allowed) { _edgeState = null; return; }
+
       const exists = _workflow.edges.some(e =>
         e.sourceNodeId === _edgeState!.sourceNodeId && e.targetNodeId === target.id
       );

@@ -222,7 +222,7 @@ export const workflows = sqliteTable("workflows", {
 
 export const workflowNodes = sqliteTable("workflow_nodes", {
   id: text("id").primaryKey(),
-  workflowId: text("workflow_id").notNull().references(() => workflows.id),
+  workflowId: text("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
   type: text("type").notNull(),  // stream-input, text, s2s-live, s2s-rest, s2s-e4b, output
   label: text("label").notNull().default(""),
   config: text("config").notNull().default("{}"),
@@ -234,7 +234,7 @@ export const workflowNodes = sqliteTable("workflow_nodes", {
 
 export const workflowEdges = sqliteTable("workflow_edges", {
   id: text("id").primaryKey(),
-  workflowId: text("workflow_id").notNull().references(() => workflows.id),
+  workflowId: text("workflow_id").notNull().references(() => workflows.id, { onDelete: "cascade" }),
   sourceNodeId: text("source_node_id").notNull(),
   targetNodeId: text("target_node_id").notNull(),
 }, (t) => [

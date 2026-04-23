@@ -665,6 +665,34 @@ const server = Bun.serve<WsData>({
 
     // --- Workflow CRUD ---
 
+    /** Validate workflow edges — returns error string or null */
+    function validateEdges(
+      nodes: Array<{ id: string; type: string }>,
+      edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+    ): string | null {
+      const allowed: Record<string, Set<string>> = {
+        "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+        "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
+        "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+        "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+        "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+      };
+      const nodeMap = new Map(nodes.map(n => [n.id, n.type]));
+      const nodeIds = new Set(nodes.map(n => n.id));
+
+      for (const e of edges) {
+        if (!nodeIds.has(e.sourceNodeId) || !nodeIds.has(e.targetNodeId)) {
+          return "Edge references unknown node";
+        }
+        const srcType = nodeMap.get(e.sourceNodeId)!;
+        const tgtType = nodeMap.get(e.targetNodeId)!;
+        if (!allowed[srcType]?.has(tgtType)) {
+          return `Invalid edge: ${srcType} -> ${tgtType}`;
+        }
+      }
+      return null;
+    }
+
     // List workflows
     if (url.pathname === "/workflows" && req.method === "GET") {
       const rows = q.listWorkflows();
@@ -701,6 +729,8 @@ const server = Bun.serve<WsData>({
         if (nodes.length > 0 && (sourceCount !== 1 || aiCount < 1 || outputCount !== 1)) {
           return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
         }
+        const edgeErr = validateEdges(nodes, edges);
+        if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
 
         dbWriter.enqueue(q.insertWorkflow({
           id,
@@ -776,6 +806,8 @@ const server = Bun.serve<WsData>({
             if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
               return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
             }
+            const edgeErr = validateEdges(body.nodes, body.edges ?? q.getWorkflowEdges(wfId));
+            if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
           }
 
           dbWriter.enqueue(q.updateWorkflow(wfId, {
@@ -837,6 +869,8 @@ const server = Bun.serve<WsData>({
         if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
           return Response.json({ error: "Invalid workflow: must have 1 source, 1 AI node, 1 output" }, { status: 400 });
         }
+        const edgeErr = validateEdges(nodes, edges);
+        if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
 
         const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
         appRegistry.registerTransientApp(virtualApp);

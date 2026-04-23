@@ -820,24 +820,6 @@ export class GuidanceOrchestrator {
     this.scheduleReconnectWithDelay(sessionId, appId, delayMs, attempt, "activating");
   }
 
-  /** Simple heuristic to classify AI text responses into guidance event types */
-  private classifyText(text: string): GuidanceEventType {
-    const lower = text.toLowerCase();
-    if (lower.includes("warning") || lower.includes("danger") || lower.includes("stop") || lower.includes("hazard")) {
-      return "guidance.alert";
-    }
-    if (lower.includes("correction") || lower.includes("wrong") || lower.includes("instead") || lower.includes("not quite")) {
-      return "guidance.correction";
-    }
-    if (lower.includes("step") || lower.includes("next") || lower.includes("then") || lower.includes("now")) {
-      return "guidance.step";
-    }
-    if (lower.includes("this is") || lower.includes("that is") || lower.includes("i see") || lower.includes("recognized")) {
-      return "guidance.identification";
-    }
-    return "guidance.step";
-  }
-
   private setStatus(sessionId: string, s: AIStatus): void {
     this.status.set(sessionId, s);
   }
