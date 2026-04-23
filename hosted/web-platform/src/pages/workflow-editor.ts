@@ -181,7 +181,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, audio: "phone-mic", gestures: true, visionFps: 1 }, positionX: 100, positionY: 150 },
+        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 150 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 150 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 150 },
       ],
@@ -249,7 +249,7 @@ function buildSVG(): string {
             .map(([l]) => l)
             .join(", ") || "all"
         : n.type === "camera-source"
-          ? [n.config.video !== false ? "vid" : "", n.config.audio !== "none" && n.config.audio ? String(n.config.audio ?? "phone-mic") : "", n.config.gestures !== false ? "gest" : ""].filter(Boolean).join(" | ") || "none"
+          ? [n.config.video !== false ? "video" : "", n.config.phoneMic !== false ? "phone-mic" : "", n.config.glassesMic === true ? "glasses-mic" : "", n.config.gestures !== false ? "gestures" : ""].filter(Boolean).join(", ") || "none"
           : "Live feed";
     const selected = _selectedNodeId === n.id;
     return `
@@ -639,9 +639,10 @@ function renderConfigPanel(): void {
   const c = NODE_COLORS[node.type] ?? NODE_COLORS["output"];
 
   if (node.type === "camera-source") {
-    const audio = (node.config.audio as string) ?? "phone-mic";
     const fps = (node.config.visionFps as number) ?? 1;
     const video = node.config.video !== false;
+    const phoneMic = node.config.phoneMic !== false;
+    const glassesMic = node.config.glassesMic === true;
     const gestures = node.config.gestures !== false;
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
@@ -651,22 +652,14 @@ function renderConfigPanel(): void {
         <label>Label</label>
         <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
       </div>
-      <div class="wf-config-info">Device and codec selection are set by the publisher stream</div>
       <div class="wf-config-field">
         <label>Modalities</label>
         <div class="wf-config-checks">
-          <label><input type="checkbox" data-field="config.video" ${video ? "checked" : ""} /> Video (frames to AI)</label>
-          <label><input type="checkbox" data-field="config.gestures" ${gestures ? "checked" : ""} /> Gestures (triggers AI)</label>
+          <label><input type="checkbox" data-field="config.video" ${video ? "checked" : ""} /> Video (frames)</label>
+          <label><input type="checkbox" data-field="config.phoneMic" ${phoneMic ? "checked" : ""} /> Phone mic (48kHz)</label>
+          <label><input type="checkbox" data-field="config.glassesMic" ${glassesMic ? "checked" : ""} /> Glasses HFP mic (8kHz)</label>
+          <label><input type="checkbox" data-field="config.gestures" ${gestures ? "checked" : ""} /> Gestures</label>
         </div>
-      </div>
-      <div class="wf-config-field">
-        <label>Audio</label>
-        <select class="wf-config-input" data-field="config.audio">
-          <option value="phone-mic" ${audio === "phone-mic" ? "selected" : ""}>Phone mic (48kHz)</option>
-          <option value="glasses-mic" ${audio === "glasses-mic" ? "selected" : ""}>Glasses HFP mic (8kHz)</option>
-          <option value="all" ${audio === "all" ? "selected" : ""}>All devices</option>
-          <option value="none" ${audio === "none" ? "selected" : ""}>None</option>
-        </select>
       </div>
       <div class="wf-config-field">
         <label>Vision FPS: ${fps}</label>

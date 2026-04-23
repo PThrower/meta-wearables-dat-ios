@@ -118,7 +118,8 @@ export function resolveWorkflowToApp(
   const inputNode = nodes.find(n => n.type === "camera-source");
   const input: InputConfig = {
     video: inputNode?.config.video !== false,
-    audio: (inputNode?.config.audio as InputConfig["audio"]) ?? "phone-mic",
+    phoneMic: inputNode?.config.phoneMic !== false,
+    glassesMic: inputNode?.config.glassesMic === true,
     gestures: inputNode?.config.gestures !== false,
     visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
   };

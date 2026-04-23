@@ -1328,7 +1328,7 @@ const server = Bun.serve<WsData>({
             // Forward PCM payload to AI service (if active)
             if (audioHdr && session.activeAppId) {
               const pcmPayload = buf.slice(AUDIO_HEADER_SIZE);
-              orchestrator.sendAudio(sessionId, pcmPayload);
+              orchestrator.sendAudio(sessionId, pcmPayload, audioHdr.codecType);
             }
           } else if (isVideoFrame(buf)) {
             // Video frame (FRLY) — codec-aware routing

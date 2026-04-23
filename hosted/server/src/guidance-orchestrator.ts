@@ -246,7 +246,7 @@ export class GuidanceOrchestrator {
     }
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
-    const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, audio: "phone-mic", gestures: true, visionFps: app.config.visionFps ?? 1 };
+    const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: app.config.visionFps ?? 1 };
     const state: SessionAIState = {
       service,
       appId,
@@ -390,10 +390,12 @@ export class GuidanceOrchestrator {
   }
 
   /** Forward PCM audio from the relay to the active AI service for this session */
-  sendAudio(sessionId: string, pcm: Uint8Array): void {
+  sendAudio(sessionId: string, pcm: Uint8Array, codecType?: number): void {
     const state = this.aiState.get(sessionId);
     if (!state || state.service.status !== "connected") return;
-    if (state.input.audio === "none") return;
+    // Gate by codecType: 0=phoneMic, 1=glassesMic, 2=TTS passthrough
+    if (codecType === 0 && !state.input.phoneMic) return;
+    if (codecType === 1 && !state.input.glassesMic) return;
     state.service.sendAudio(pcm);
   }
 

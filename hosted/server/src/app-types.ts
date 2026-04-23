@@ -67,10 +67,11 @@ export interface AppsConfig {
 
 export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
 
-/** Input modality config — device selection is stream-level, this is workflow-level */
+/** Input modality config — each publisher stream is a toggleable modality */
 export interface InputConfig {
   video: boolean;                        // Forward video frames to AI
-  audio: "phone-mic" | "glasses-mic" | "all" | "none";  // Audio input mode to request from publisher
+  phoneMic: boolean;                     // Forward phone mic audio (codecType 0, 48kHz)
+  glassesMic: boolean;                   // Forward glasses HFP mic audio (codecType 1, 8kHz)
   gestures: boolean;                     // Forward gesture triggers to AI
   visionFps: number;                     // Frames/sec forwarded to AI
 }
