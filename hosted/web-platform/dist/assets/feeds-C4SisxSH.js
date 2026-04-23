@@ -1,4 +1,4 @@
-import{b as k,o as A,w as T,h as u,e as i,i as I,j as E}from"./main-Cc8g3gSL.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const V={init(e){e.innerHTML=`
+import{b as k,o as A,w as T,h as u,e as i,i as I,j as E}from"./main-CH8lqoXj.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const V={init(e){e.innerHTML=`
       <div class="page feeds-page">
         <div class="page-header">
           <h1 class="page-title">Feeds</h1>

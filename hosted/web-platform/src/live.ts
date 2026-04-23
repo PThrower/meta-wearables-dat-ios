@@ -775,7 +775,7 @@ export function closeLive(): void {
   currentDeviceId = null;
   currentSessionId = null;
   if (player) { player.destroy(); player = null; }
-  guidancePanel = null;
+  if (guidancePanel) { guidancePanel.destroy(); guidancePanel = null; }
 
   // Reset telemetry
   ["t-relay-fps", "t-encode-ema", "t-relay-dropped"].forEach(id => {

@@ -136,6 +136,7 @@ export class GuidancePanel {
   private events: GuidanceEvent[] = [];
   private collapsed = true;
   private appsLoaded = false;
+  private _appRefreshTimer: ReturnType<typeof setInterval> | null = null;
   private visionFps = 0.5;
   private showOverlays = true;
   private onBboxEvent: ((boxes: GuidanceEvent["boundingBoxes"]) => void) | null = null;
@@ -167,6 +168,27 @@ export class GuidancePanel {
       this.appsLoaded = true;
       this.render();
     }
+
+    // Refresh app list every 15s to pick up newly published workflows
+    if (!this._appRefreshTimer) {
+      this._appRefreshTimer = setInterval(async () => {
+        try {
+          const res = await fetch("/apps");
+          if (!res.ok) return;
+          const data = await res.json();
+          const updated = Array.isArray(data) ? data : data.apps ?? [];
+          if (JSON.stringify(updated.map((a: any) => a.id)) !== JSON.stringify(this.apps.map(a => a.id))) {
+            this.apps = updated;
+            this.render();
+            this.bindEvents();
+          }
+        } catch { /* ignore */ }
+      }, 15_000);
+    }
+  }
+
+  destroy(): void {
+    if (this._appRefreshTimer) { clearInterval(this._appRefreshTimer); this._appRefreshTimer = null; }
   }
 
   handleMessage(msg: Record<string, unknown>): void {

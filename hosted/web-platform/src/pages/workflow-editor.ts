@@ -318,34 +318,38 @@ function wireEditorEvents(): void {
     });
   });
 
-  // Toolbar: save
+  // Toolbar: save (auto-publishes draft workflows)
   _container?.querySelector("#wf-save-btn")?.addEventListener("click", async () => {
     if (!_workflow) return;
     _workflow.name = (_container?.querySelector("#wf-name") as HTMLInputElement)?.value ?? _workflow.name;
     _workflow.description = (_container?.querySelector("#wf-desc") as HTMLInputElement)?.value ?? _workflow.description;
+    const nodesPayload = _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) }));
 
     if (_workflow.id) {
       const result = await updateWorkflow(_workflow.id, {
         name: _workflow.name,
         description: _workflow.description,
-        nodes: _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) })),
+        nodes: nodesPayload,
         edges: _workflow.edges,
         canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
+        status: "published",
       });
       if (result) _workflow = result;
     } else {
       const result = await createWorkflow({
         name: _workflow.name,
         description: _workflow.description,
-        nodes: _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) })),
+        nodes: nodesPayload,
         edges: _workflow.edges,
       });
       if (result) {
-        _workflow = result;
-        history.replaceState(null, "", `#/workflows/${result.id}`);
+        const published = await updateWorkflow(result.id, { status: "published" });
+        _workflow = published ?? result;
+        history.replaceState(null, "", `#/workflows/${_workflow.id}`);
       }
     }
     _dirty = false;
+    renderEditor(false);
   });
 
   // Toolbar: publish
