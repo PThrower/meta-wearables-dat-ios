@@ -111,3 +111,27 @@ export interface WorkflowDefinition {
   createdAt: string;
   updatedAt: string;
 }
+
+// --- Activation Guard ---
+
+export interface ActivationConflict {
+  activeAppId: string | null;
+  activeAppName: string | null;
+  activatedBy: string | null;
+  activatedAt: string | null;
+  locked: boolean;
+}
+
+export interface ActivationResult {
+  appId: string;
+  status: string;
+  conflict?: ActivationConflict;
+}
+
+export type ActivationPolicy = "allow" | "reject" | "override";
+
+export interface LifecyclePolicy {
+  onDisconnect: "stop" | "pause" | "continue";
+  onReconnect: "resume" | "restart" | "noop";
+  autoDeactivateMin: number | null;  // null = never
+}

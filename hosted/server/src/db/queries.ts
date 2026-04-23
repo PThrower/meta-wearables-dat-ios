@@ -488,3 +488,81 @@ export function updateSessionStats(sessionId: string, params: {
     );
   };
 }
+
+// --- Activation Audit Log ---
+
+/** Get the current active activation for a session (for conflict detection) */
+export function getActiveActivation(sessionId: string): {
+  id: string;
+  sessionId: string;
+  workflowId: string | null;
+  appId: string | null;
+  activatedBy: string | null;
+  activatedAt: string;
+} | null {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT id, session_id as sessionId, workflow_id as workflowId,
+      app_id as appId, activated_by as activatedBy, activated_at as activatedAt
+    FROM activation_log
+    WHERE session_id = ? AND status = 'active'
+    ORDER BY activated_at DESC LIMIT 1
+  `).get(sessionId) as any ?? null;
+}
+
+/** Insert a new activation log entry */
+export function insertActivation(params: {
+  id: string;
+  sessionId: string;
+  workflowId?: string;
+  appId?: string;
+  activatedBy?: string;
+  overrodeAppId?: string;
+  reason?: string;
+}) {
+  return () => {
+    const db = getDbRaw();
+    const ts = now();
+    db.prepare(`
+      INSERT INTO activation_log (id, session_id, workflow_id, app_id, activated_by, overrode_app_id, reason, status, activated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+    `).run(
+      params.id,
+      params.sessionId,
+      params.workflowId ?? null,
+      params.appId ?? null,
+      params.activatedBy ?? null,
+      params.overrodeAppId ?? null,
+      params.reason ?? null,
+      ts,
+    );
+  };
+}
+
+/** Mark previous activation as overridden (for override flow) */
+export function overrideActivation(activationId: string, deactivatedBy: string) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare(`
+      UPDATE activation_log SET
+        status = 'overridden',
+        deactivated_by = ?,
+        deactivated_at = ?
+      WHERE id = ?
+    `).run(deactivatedBy, now(), activationId);
+  };
+}
+
+/** Deactivate the current activation for a session (normal deactivation) */
+export function deactivateActivation(sessionId: string, deactivatedBy: string) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare(`
+      UPDATE activation_log SET
+        status = 'deactivated',
+        deactivated_by = ?,
+        deactivated_at = ?
+      WHERE session_id = ? AND status = 'active'
+    `).run(deactivatedBy, now(), sessionId);
+  };
+}

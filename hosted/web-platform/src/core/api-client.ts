@@ -336,9 +336,28 @@ export function deleteWorkflow(id: string): Promise<{ ok: boolean } | null> {
   return apiDelete<{ ok: boolean }>(`/workflows/${id}`);
 }
 
-/** Activate a workflow against a session */
-export function activateWorkflow(workflowId: string, sessionId: string): Promise<{ appId: string; status: string } | null> {
-  return apiPost<{ appId: string; status: string }>(`/workflows/${workflowId}/activate`, { sessionId });
+/** Activate a workflow against a session (with conflict detection) */
+export async function activateWorkflow(
+  workflowId: string,
+  sessionId: string,
+  options?: { override?: boolean; reason?: string },
+): Promise<{ appId: string; status: string; conflict?: { activeAppId: string | null; status: string; activatedAt: number | undefined } } | null> {
+  try {
+    const res = await authFetch(`/workflows/${workflowId}/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, override: options?.override, reason: options?.reason }),
+    });
+    const data = await res.json() as any;
+    if (res.status === 409) {
+      return { appId: "", status: "conflict", conflict: data.conflict };
+    }
+    if (!res.ok) return null;
+    return data;
+  } catch (err) {
+    console.warn("[api] activateWorkflow failed:", err);
+    return null;
+  }
 }
 
 /** Fetch available primitives */

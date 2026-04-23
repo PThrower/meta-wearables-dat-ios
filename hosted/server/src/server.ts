@@ -851,7 +851,7 @@ const server = Bun.serve<WsData>({
     if (wfActivateMatch && req.method === "POST") {
       try {
         const wfId = wfActivateMatch[1];
-        const body = await req.json() as { sessionId?: string };
+        const body = await req.json() as { sessionId?: string; override?: boolean; reason?: string };
         if (!body.sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
 
         const wf = q.getWorkflow(wfId);
@@ -872,6 +872,29 @@ const server = Bun.serve<WsData>({
         const edgeErr = validateEdges(nodes, edges);
         if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
 
+        // --- Activation Guard: check for conflicts ---
+        const conflict = orchestrator.checkConflict(body.sessionId);
+        if (conflict.hasConflict && !body.override) {
+          // Return 409 with conflict details so the client can prompt for override
+          return Response.json({
+            error: "Session has active AI",
+            conflict: {
+              activeAppId: conflict.appId,
+              status: conflict.status,
+              activatedAt: conflict.activatedAt,
+            },
+          }, { status: 409 });
+        }
+
+        // If overriding, mark the previous activation as overridden in the audit log
+        if (conflict.hasConflict && body.override) {
+          const prevActivation = q.getActiveActivation(body.sessionId);
+          if (prevActivation) {
+            dbWriter.enqueue(q.overrideActivation(prevActivation.id, "override"));
+          }
+          orchestrator.forceDeactivate(body.sessionId);
+        }
+
         const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
         appRegistry.registerTransientApp(virtualApp);
 
@@ -882,6 +905,18 @@ const server = Bun.serve<WsData>({
         session.activeAppId = virtualApp.id;
         session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
 
+        // Audit log: record activation
+        const activationId = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        dbWriter.enqueue(q.insertActivation({
+          id: activationId,
+          sessionId: body.sessionId,
+          workflowId: wfId,
+          appId: virtualApp.id,
+          activatedBy: session.activeAppId ?? "api",
+          overrodeAppId: conflict.hasConflict ? conflict.appId ?? undefined : undefined,
+          reason: body.reason ?? (conflict.hasConflict ? "Override" : "Activate"),
+        }));
+
         await orchestrator.activateWithConfig(body.sessionId, virtualApp);
 
         // Send cached frame to AI for immediate context
@@ -890,6 +925,8 @@ const server = Bun.serve<WsData>({
           const jpegPayload = cachedFrame.slice(HEADER_SIZE);
           orchestrator.sendVideoFrame(body.sessionId, jpegPayload);
         }
+
+        dbWriter.flushNow();
 
         // Check actual activation status from orchestrator
         const aiStatus = orchestrator.getStatus(body.sessionId);
@@ -1264,6 +1301,11 @@ const server = Bun.serve<WsData>({
               session.activeAppId = null;
               session.appPipeline = null;
               console.log(`[relay] App deactivated: ${prevApp} session=${sessionId}`);
+              // Audit log: record deactivation
+              if (prevApp) {
+                dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
+                dbWriter.flushNow();
+              }
               ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
               // Notify orchestrator
               orchestrator.deactivateApp(sessionId).catch(() => {});
@@ -1464,6 +1506,11 @@ const server = Bun.serve<WsData>({
               session.activeAppId = null;
               session.appPipeline = null;
               console.log(`[relay] Viewer deactivated app: ${prevApp} session=${sessionId}`);
+              // Audit log: record deactivation
+              if (prevApp) {
+                dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
+                dbWriter.flushNow();
+              }
               ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
               orchestrator.deactivateApp(sessionId).catch(() => {});
             } else if (cmd.type === "trigger_gesture" && cmd.gesture) {

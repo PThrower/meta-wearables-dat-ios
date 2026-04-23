@@ -240,3 +240,24 @@ export const workflowEdges = sqliteTable("workflow_edges", {
 }, (t) => [
   index("idx_wf_edges").on(t.workflowId),
 ]);
+
+// --- Activation Audit Log ---
+
+export const activationLog = sqliteTable("activation_log", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  workflowId: text("workflow_id").references(() => workflows.id),
+  appId: text("app_id"),                    // Virtual app ID (wf-*)
+  activatedBy: text("activated_by"),        // User ID or "system"
+  deactivatedBy: text("deactivated_by"),    // User ID or "system" (set on deactivation)
+  overrodeAppId: text("overrode_app_id"),   // Previous app ID if this was an override
+  reason: text("reason"),                   // Human-readable reason
+  status: text("status").notNull().default("active"),  // active, deactivated, overridden, error
+  activatedAt: text("activated_at").notNull(),
+  deactivatedAt: text("deactivated_at"),
+}, (t) => [
+  index("idx_activation_log_session").on(t.sessionId),
+  index("idx_activation_log_workflow").on(t.workflowId),
+  index("idx_activation_log_activated_by").on(t.activatedBy),
+  index("idx_activation_log_status").on(t.status),
+]);

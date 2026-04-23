@@ -428,8 +428,30 @@ function wireEditorEvents(): void {
       const sessionId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
       if (!sessionId) return;
       dd.remove();
-      const result = await activateWorkflow(_workflow!.id, sessionId);
-      if (result) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
+
+      // First attempt — may return 409 conflict
+      let result = await activateWorkflow(_workflow!.id, sessionId);
+      if (!result) { alert("Activation failed"); return; }
+
+      // Handle conflict: prompt user for override
+      if (result.status === "conflict" && result.conflict) {
+        const c = result.conflict;
+        const activeApp = c.activeAppId ?? "unknown";
+        const activeSince = c.activatedAt ? new Date(c.activatedAt).toLocaleTimeString() : "unknown";
+        const ok = confirm(
+          `Session already has active AI:\n` +
+          `  App: ${activeApp}\n` +
+          `  Active since: ${activeSince}\n\n` +
+          `Override and activate this workflow instead?`
+        );
+        if (!ok) return;
+
+        // Second attempt with override=true
+        result = await activateWorkflow(_workflow!.id, sessionId, { override: true, reason: "Manual override" });
+        if (!result) { alert("Override failed"); return; }
+      }
+
+      if (result.appId) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
       else alert("Activation failed");
     });
 

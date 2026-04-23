@@ -101,6 +101,17 @@ const MAX_EVENT_HISTORY = 100;
 
 // --- Per-session AI state ---
 
+/** Result of an activation attempt — includes conflict info if blocked */
+export interface ActivationAttemptResult {
+  success: boolean;
+  conflict?: {
+    appId: string;
+    status: string;
+    activatedAt: number | undefined;
+  };
+  error?: string;
+}
+
 interface SessionAIState {
   service: AIService;
   appId: string;
@@ -205,6 +216,22 @@ export class GuidanceOrchestrator {
       return;
     }
     await this.activateWithConfig(sessionId, app);
+  }
+
+  /** Check if a session has an active AI that would conflict with a new activation. */
+  checkConflict(sessionId: string): { hasConflict: boolean; appId: string | null; status: string; activatedAt: number | undefined } {
+    const current = this.getStatus(sessionId);
+    return {
+      hasConflict: current.status === "active" || current.status === "activating" || current.status === "rate_limited",
+      appId: current.appId,
+      status: current.status,
+      activatedAt: current.activatedAt,
+    };
+  }
+
+  /** Force-deactivate any running AI for a session (used during override flow). */
+  forceDeactivate(sessionId: string): void {
+    this.disconnectAI(sessionId);
   }
 
   /** Activate with a pre-resolved AppDefinition (used by workflow activation). */
