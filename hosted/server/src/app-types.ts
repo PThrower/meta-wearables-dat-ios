@@ -67,14 +67,6 @@ export interface AppsConfig {
 
 export type WorkflowNodeType = "camera-source" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
 
-/** Input source configuration for workflow input nodes */
-export interface InputConfig {
-  camera: "glasses" | "phone" | "both";  // Which camera feed to use
-  audio: "phone-mic" | "glasses-mic" | "all" | "none";  // Audio input mode
-  codec: "jpeg" | "h264";                // Video encoding
-  visionFps: number;                     // Frames/sec forwarded to AI
-}
-
 /** Output channel routing for workflow output nodes */
 export interface OutputConfig {
   viewers: boolean;   // Fan out guidance events to viewer WebSockets

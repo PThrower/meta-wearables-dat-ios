@@ -181,7 +181,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: { camera: "glasses", audio: "phone-mic", codec: "jpeg", visionFps: 1 }, positionX: 100, positionY: 150 },
+        { id: `n_src_${now}`, type: "camera-source", label: "Input", config: {}, positionX: 100, positionY: 150 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 150 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 150 },
       ],
@@ -249,7 +249,7 @@ function buildSVG(): string {
             .map(([l]) => l)
             .join(", ") || "all"
         : n.type === "camera-source"
-          ? `${n.config.camera ?? "glasses"} | ${n.config.audio ?? "phone-mic"}`
+          ? "Live feed"
           : "Live feed";
     const selected = _selectedNodeId === n.id;
     return `
@@ -639,46 +639,15 @@ function renderConfigPanel(): void {
   const c = NODE_COLORS[node.type] ?? NODE_COLORS["output"];
 
   if (node.type === "camera-source") {
-    const cam = (node.config.camera as string) ?? "glasses";
-    const audio = (node.config.audio as string) ?? "phone-mic";
-    const codec = (node.config.codec as string) ?? "jpeg";
-    const fps = (node.config.visionFps as number) ?? 1;
     panel.innerHTML = `
       <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">Input Sources</span>
+        <span class="wf-config-type">Input</span>
       </div>
       <div class="wf-config-field">
         <label>Label</label>
         <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
       </div>
-      <div class="wf-config-field">
-        <label>Camera</label>
-        <select class="wf-config-input" data-field="config.camera">
-          <option value="glasses" ${cam === "glasses" ? "selected" : ""}>Glasses (DAT SDK)</option>
-          <option value="phone" ${cam === "phone" ? "selected" : ""}>iPhone back camera</option>
-          <option value="both" ${cam === "both" ? "selected" : ""}>Both</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Audio</label>
-        <select class="wf-config-input" data-field="config.audio">
-          <option value="phone-mic" ${audio === "phone-mic" ? "selected" : ""}>Phone mic (48kHz)</option>
-          <option value="glasses-mic" ${audio === "glasses-mic" ? "selected" : ""}>Glasses HFP mic (8kHz)</option>
-          <option value="all" ${audio === "all" ? "selected" : ""}>All devices</option>
-          <option value="none" ${audio === "none" ? "selected" : ""}>None</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Video Codec</label>
-        <select class="wf-config-input" data-field="config.codec">
-          <option value="jpeg" ${codec === "jpeg" ? "selected" : ""}>JPEG (AI-ready)</option>
-          <option value="h264" ${codec === "h264" ? "selected" : ""}>H.264 (no AI)</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Vision FPS: ${fps}</label>
-        <input type="range" min="0.2" max="2" step="0.1" data-field="config.visionFps" value="${fps}" />
-      </div>
+      <div class="wf-config-info">Stream from publisher session (camera + audio decided by publisher)</div>
       <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
     `;
   } else if (node.type === "s2s-live") {
