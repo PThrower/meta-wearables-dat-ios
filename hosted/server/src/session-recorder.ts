@@ -242,6 +242,14 @@ export class SessionRecorder {
 
   appendVideo(frame: Uint8Array) {
     if (this.resumedFromExisting) this.ensureResumed(); else this.ensureActive();
+
+    // Detect codec from byte[25] top nibble: 0=JPEG, 1=H.264
+    // Only store JPEG frames — H.264 requires decoding first (handled by AI pipeline)
+    if (frame.length > 25) {
+      const codecType = (frame[25] >> 4) & 0x0F;
+      if (codecType === 1) return; // Skip H.264 frames for recording
+    }
+
     const jpeg = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
     this.videoParts.push(Buffer.from(jpeg));
 

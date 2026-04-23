@@ -104,13 +104,20 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   const videoParts: Buffer[] = [];
   for (const key of segKeys) {
     const buf = await store.get(key);
-    if (buf) videoParts.push(buf);
+    if (buf && buf.length >= 2) {
+      // Filter out non-JPEG segments (e.g. H.264 NAL units starting with 0x00 0x00)
+      if (buf[0] === 0xFF && buf[1] === 0xD8) {
+        videoParts.push(buf);
+      } else {
+        console.warn(`[export] Skipping non-JPEG segment ${key}: starts with 0x${buf[0].toString(16)}${buf[1].toString(16)}`);
+      }
+    }
+  }
+  if (videoParts.length === 0) {
+    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    throw new ExportError("No valid JPEG segments found (all segments are non-JPEG codec, likely H.264)", 404);
   }
   const videoData = Buffer.concat(videoParts);
-  if (videoData.length < 4 || videoData[0] !== 0xFF || videoData[1] !== 0xD8) {
-    await rm(tmp, { recursive: true, force: true }).catch(() => {});
-    throw new ExportError(`Video data invalid: ${videoData.length} bytes, starts with ${videoData.length >= 2 ? `0x${videoData[0].toString(16)}${videoData[1].toString(16)}` : "empty"} (expected JPEG SOI 0xFFD8)`, 500);
-  }
   await writeFile(videoPath, videoData);
 
   const hasAudio = audioKeys.length > 0;
