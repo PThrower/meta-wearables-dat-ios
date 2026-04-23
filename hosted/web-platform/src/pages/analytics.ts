@@ -75,7 +75,9 @@ async function loadAnalytics(container: HTMLElement): Promise<void> {
 
   if (!_pollTimer) {
     _pollTimer = setInterval(async () => {
+      if (!container.isConnected) { clearInterval(_pollTimer!); _pollTimer = null; return; }
       const [s, sess] = await Promise.all([fetchStats(), fetchGallery()]);
+      if (!container.isConnected) return;
       _sessions = sess;
       renderKPIs(container, s, sess);
       renderLineChartSection(container, sess);
@@ -152,7 +154,8 @@ function renderDonutSection(container: HTMLElement, sessions: SessionInfo[]): vo
 }
 
 function renderTable(container: HTMLElement, sessions: SessionInfo[]): void {
-  const tableEl = container.querySelector("#an-table")!;
+  const tableEl = container.querySelector("#an-table");
+  if (!tableEl) return;
   const sorted = sortSessions(sessions);
   const recent = sorted.slice(0, 50);
 
