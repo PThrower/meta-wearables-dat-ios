@@ -631,7 +631,15 @@ export class SessionRegistry {
             session.recorder = null;
           }
           session.recordingId = undefined;
-          session.lastActivityAt = Date.now();
+          // No publisher and no viewers — delete immediately, don't wait for expiry
+          if (session.viewers.size === 0) {
+            for (const [devId, sessId] of this.deviceSessionMap) {
+              if (sessId === sessionId) this.deviceSessionMap.delete(devId);
+            }
+            this.sessions.delete(sessionId);
+            this.onSessionDestroy?.(sessionId);
+            console.log(`[registry] Session ${sessionId} removed (dead ws, no viewers)`);
+          }
           continue;
         }
 
@@ -656,7 +664,16 @@ export class SessionRegistry {
             session.recorder = null;
           }
           session.recordingId = undefined;
-          session.lastActivityAt = Date.now();
+          // No publisher and no viewers — delete immediately, don't wait for expiry
+          if (session.viewers.size === 0) {
+            for (const [devId, sessId] of this.deviceSessionMap) {
+              if (sessId === sessionId) this.deviceSessionMap.delete(devId);
+            }
+            this.sessions.delete(sessionId);
+            this.onSessionDestroy?.(sessionId);
+            console.log(`[registry] Session ${sessionId} removed (stale publisher, no viewers)`);
+            continue;
+          }
         }
       }
 
