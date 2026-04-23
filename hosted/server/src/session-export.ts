@@ -97,27 +97,34 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   }
 
   const tmp = await mkdtemp(join(tmpdir(), `export-${sessionId.slice(0, 8)}-`));
-  const videoPath = join(tmp, "video.mjpeg");
+  const videoPath = join(tmp, "video.raw");
   const audioPath = join(tmp, "audio.pcm");
   const mp4Path = join(tmp, "output.mp4");
 
-  const videoParts: Buffer[] = [];
+  // Read all segments and detect codec: JPEG (0xFFD8) or H.264 NAL (0x00000001/0x000001)
+  const jpegParts: Buffer[] = [];
+  const h264Parts: Buffer[] = [];
   for (const key of segKeys) {
     const buf = await store.get(key);
-    if (buf && buf.length >= 2) {
-      // Filter out non-JPEG segments (e.g. H.264 NAL units starting with 0x00 0x00)
-      if (buf[0] === 0xFF && buf[1] === 0xD8) {
-        videoParts.push(buf);
-      } else {
-        console.warn(`[export] Skipping non-JPEG segment ${key}: starts with 0x${buf[0].toString(16)}${buf[1].toString(16)}`);
-      }
+    if (!buf || buf.length < 4) continue;
+    if (buf[0] === 0xFF && buf[1] === 0xD8) {
+      jpegParts.push(buf);
+    } else if (buf[0] === 0x00 && buf[1] === 0x00 && (buf[2] === 0x00 || buf[2] === 0x01)) {
+      h264Parts.push(buf);
+    } else {
+      console.warn(`[export] Unknown segment format ${key}: starts with 0x${buf[0].toString(16)}${buf[1].toString(16)}`);
     }
   }
-  if (videoParts.length === 0) {
+
+  const totalFrames = jpegParts.length + h264Parts.length;
+  if (totalFrames === 0) {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
-    throw new ExportError("No valid JPEG segments found (all segments are non-JPEG codec, likely H.264)", 404);
+    throw new ExportError("No valid video segments found", 404);
   }
-  const videoData = Buffer.concat(videoParts);
+
+  // Prefer JPEG segments; fall back to H.264 if no JPEGs available
+  const isH264 = jpegParts.length === 0 && h264Parts.length > 0;
+  const videoData = isH264 ? Buffer.concat(h264Parts) : Buffer.concat(jpegParts);
   await writeFile(videoPath, videoData);
 
   const hasAudio = audioKeys.length > 0;
@@ -141,13 +148,25 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
       if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
     }
   } catch (err) { console.warn(`[export] Manifest parse error for ${sessionId}:`, err); }
-  const args: string[] = [
-    "-probesize", "100M",
-    "-analyzeduration", "100M",
-    "-framerate", String(actualFps),
-    "-f", "image2pipe", "-vcodec", "mjpeg",
-    "-i", videoPath,
-  ];
+
+  // Build ffmpeg args — different input format for H.264 vs MJPEG
+  const args: string[] = ["-y"];
+  if (isH264) {
+    args.push(
+      "-probesize", "100M",
+      "-analyzeduration", "100M",
+      "-f", "h264",
+      "-i", videoPath,
+    );
+  } else {
+    args.push(
+      "-probesize", "100M",
+      "-analyzeduration", "100M",
+      "-framerate", String(actualFps),
+      "-f", "image2pipe", "-vcodec", "mjpeg",
+      "-i", videoPath,
+    );
+  }
   if (hasAudio) {
     args.push("-f", "s16le", "-ar", String(audioSampleRate), "-ac", "1", "-i", audioPath);
   }
