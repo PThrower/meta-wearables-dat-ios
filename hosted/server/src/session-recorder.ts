@@ -247,7 +247,7 @@ export class SessionRecorder {
     // Only store JPEG frames — H.264 requires decoding first (handled by AI pipeline)
     if (frame.length > 25) {
       const codecType = (frame[25] >> 4) & 0x0F;
-      if (codecType === 1) return; // Skip H.264 frames for recording
+      if (codecType === 1) return; // Skip H.264 frames — decoded JPEGs arrive via appendDecodedVideo()
     }
 
     const jpeg = frame.length > HEADER_SIZE ? frame.subarray(HEADER_SIZE) : frame;
@@ -260,6 +260,18 @@ export class SessionRecorder {
       if (this.segFrameCount === 1) this.segFirstTimestampMs = header.timestampMs;
       this.segLastTimestampMs = header.timestampMs;
     }
+  }
+
+  /** Append a decoded JPEG frame (from H.264 decoder). No FRLY header to strip. */
+  appendDecodedVideo(jpeg: Uint8Array) {
+    if (!this._active && !this.resumedFromExisting) return;
+    if (this.resumedFromExisting) this.ensureResumed();
+    this.videoParts.push(Buffer.from(jpeg));
+    this.segFrameCount++;
+    // Use wall clock for timing since decoded frames have no FRLY timestamps
+    const nowMs = Date.now();
+    if (this.segFrameCount === 1) this.segFirstTimestampMs = nowMs;
+    this.segLastTimestampMs = nowMs;
   }
 
   appendAudio(frame: Uint8Array) {

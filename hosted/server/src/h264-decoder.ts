@@ -52,7 +52,7 @@ export class H264ToJpegDecoder {
           "-f", "image2pipe",
           "-vcodec", "mjpeg",
           "-q:v", "5",               // JPEG quality (2=best, 31=worst)
-          "-vf", "fps=fps=2",        // Cap output at 2fps for AI
+          "-vf", "fps=fps=8",        // Output at 8fps — sufficient for recording + AI
           "pipe:1",                  // JPEG output to stdout
         ],
         stdin: "pipe",

@@ -122,6 +122,9 @@ function getH264Decoder(sessionId: string): H264ToJpegDecoder {
     decoder = new H264ToJpegDecoder(sessionId);
     decoder.onJpeg = (jpeg: Uint8Array) => {
       orchestrator.sendVideoFrame(sessionId, jpeg);
+      // Feed decoded JPEG to recorder so H.264 sessions get video recordings
+      const session = registry.get(sessionId);
+      session?.recorder?.appendDecodedVideo(jpeg);
     };
     h264Decoders.set(sessionId, decoder);
   }
@@ -1528,18 +1531,18 @@ const server = Bun.serve<WsData>({
             const codecFlags = buf[25];
             const codecType = (codecFlags >> 4) & 0x0F;
 
-            // Forward payload to AI service — codec-aware routing
-            if (session.activeAppId) {
-              if (codecType === 0) {
-                // JPEG: send directly
+            if (codecType === 0) {
+              // JPEG: forward directly to AI (if active)
+              if (session.activeAppId) {
                 const jpegPayload = buf.slice(HEADER_SIZE);
                 orchestrator.sendVideoFrame(sessionId, jpegPayload);
-              } else if (codecType === 1) {
-                // H.264: feed through server-side ffmpeg decoder
-                const decoder = getH264Decoder(sessionId);
-                if (!decoder.active) decoder.start();
-                decoder.feed(buf.slice(HEADER_SIZE));
               }
+            } else if (codecType === 1) {
+              // H.264: feed through server-side ffmpeg decoder
+              // Always decode so the recorder gets JPEGs via appendDecodedVideo callback
+              const decoder = getH264Decoder(sessionId);
+              if (!decoder.active) decoder.start();
+              decoder.feed(buf.slice(HEADER_SIZE));
             }
           }
         }
