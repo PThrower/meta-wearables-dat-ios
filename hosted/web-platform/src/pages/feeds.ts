@@ -184,7 +184,7 @@ function liveRow(s: SessionInfo): string {
         <div class="feed-row-placeholder feed-row-placeholder-live"></div>
       </div>
       <div class="feed-row-info">
-        <span class="feed-row-device">${esc(s.device?.deviceName || "Unknown")}</span>
+        <span class="feed-row-device">${esc(s.device?.deviceName || "Unknown")}${s.wearable?.wearableType ? ` + ${esc(s.wearable.wearableType)}` : ""}</span>
         <span class="feed-row-meta">Live &middot; ${fmtDur(s.durationMs || 0)}</span>
       </div>
       <div class="feed-row-actions">
@@ -264,7 +264,8 @@ function buildExpandedContent(s: SessionInfo): string {
         ${syncHtml}
         ${streamDriftHtml}
         <div class="feed-detail-row"><span class="feed-detail-label">Segments</span><span class="feed-detail-value">${s.segments || 0}</span></div>
-        <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}</span></div>
+        <div class="feed-detail-row"><span class="feed-detail-label">Device</span><span class="feed-detail-value">${esc(s.device?.deviceName || "Unknown")}${s.device?.deviceModel ? ` (${esc(s.device.deviceModel)})` : ""}</span></div>
+        ${s.wearable?.wearableType ? `<div class="feed-detail-row"><span class="feed-detail-label">Camera</span><span class="feed-detail-value">${esc(s.wearable.wearableType)}${s.wearable.wearableId ? ` &middot; ${esc(s.wearable.wearableId.slice(0, 8))}` : ""}</span></div>` : ""}
         <div class="feed-detail-row"><span class="feed-detail-label">Started</span><span class="feed-detail-value">${fmtSessionTime(s.startedAt)}</span></div>
         <div class="feed-detail-row"><span class="feed-detail-label">Access</span><span class="feed-detail-value">${esc(s.access || "private")}</span></div>
       </div>

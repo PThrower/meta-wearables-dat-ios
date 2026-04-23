@@ -26,6 +26,10 @@ export interface SessionMeta {
     wearableType?: string;
     systemVersion?: string;
   };
+  wearable?: {
+    wearableId?: string;
+    wearableType?: string;
+  };
   accessLevel?: AccessLevel;
   acl?: AclEntry[];
   ownerId?: string;
@@ -244,6 +248,10 @@ export class SessionStore {
           deviceModel: meta.device?.deviceModel || null,
           wearableType: meta.device?.wearableType || null,
         },
+        wearable: meta.wearable ? {
+          wearableId: meta.wearable.wearableId || null,
+          wearableType: meta.wearable.wearableType || null,
+        } : null,
         segments,
         audioChunks: meta.recording?.audioChunks || 0,
         exportCached: entry.exportCached,

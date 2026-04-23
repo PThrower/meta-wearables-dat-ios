@@ -225,6 +225,10 @@ export interface GallerySession {
     deviceModel: string | null;
     wearableType: string | null;
   };
+  wearable: {
+    wearableId: string | null;
+    wearableType: string | null;
+  } | null;
   segments: number;
   audioChunks: number;
   exportCached: boolean;
@@ -298,6 +302,10 @@ export async function getGalleryData(
           deviceModel: meta.device?.deviceModel || null,
           wearableType: meta.device?.wearableType || null,
         },
+        wearable: meta.wearable ? {
+          wearableId: meta.wearable.wearableId || null,
+          wearableType: meta.wearable.wearableType || null,
+        } : null,
         segments: meta.recording?.segmentsWritten || 0,
         audioChunks: meta.recording?.audioChunks || 0,
         exportCached: exportKeys.has(`sessions/${sessionId}/export.mp4`) || exportKeys.has(`sessions/${sessionId}/export-audio.mp4`),

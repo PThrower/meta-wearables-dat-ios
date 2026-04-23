@@ -378,16 +378,22 @@ export class SessionRegistry {
     // Pass device metadata from session so the recording's meta.json is populated
     // (hello arrives before activation, so publisher already set session.metadata)
     const pub = session.publisher;
+    // Phone/mobile client device info
     session.recorder.start({
       deviceId: pub.deviceId ?? session.metadata.deviceId,
       deviceName: pub.deviceName ?? session.metadata.deviceName,
       deviceModel: pub.deviceModel ?? session.metadata.deviceModel,
-      wearableId: pub.wearableId ?? null,
-      wearableType: pub.wearableType ?? session.metadata.wearableType,
       systemVersion: pub.systemVersion ?? session.metadata.systemVersion,
       appVersion: pub.appVersion ?? session.metadata.appVersion,
       buildNumber: pub.buildNumber ?? session.metadata.buildNumber,
     });
+    // Camera/wearable device info (separate from phone)
+    if (pub.wearableId || pub.wearableType) {
+      session.recorder.wearableInfo = {
+        wearableId: pub.wearableId ?? null,
+        wearableType: pub.wearableType ?? session.metadata.wearableType ?? null,
+      };
+    }
     session.recorder.accessLevel = session.accessLevel;
     session.recorder.acl = session.acl;
     session.recorder.ownerId = session.ownerId;

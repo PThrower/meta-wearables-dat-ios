@@ -85,10 +85,10 @@ describe("AudioTapBus + SessionRegistry integration", () => {
     const pcmKeys = audioKeys.filter(k => k.endsWith(".pcm"));
     expect(pcmKeys.length).toBeGreaterThanOrEqual(1);
 
-    // Verify manifest has 8000 Hz sample rate
+    // Verify manifest has 48000 Hz (resampled from 8000 Hz input)
     const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);
     const manifest = JSON.parse(new TextDecoder().decode(manifestBuf!));
-    expect(manifest.audioSampleRate).toBe(8000);
+    expect(manifest.audioSampleRate).toBe(48000);
   });
 
   test("multiple custom taps all receive same frames", async () => {

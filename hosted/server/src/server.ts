@@ -1322,11 +1322,16 @@ const server = Bun.serve<WsData>({
                 session.recorder.deviceInfo = {
                   deviceId: strField(cmd.deviceId),
                   deviceName: strField(cmd.deviceName),
-                  wearableId: strField(cmd.wearableId),
-                  wearableType: strField(cmd.wearableType),
                   deviceModel: strField(cmd.deviceModel),
                   systemVersion: strField(cmd.systemVersion),
                 };
+                // Camera/wearable device info (separate from phone)
+                if (cmd.wearableId || cmd.wearableType) {
+                  session.recorder.wearableInfo = {
+                    wearableId: strField(cmd.wearableId),
+                    wearableType: strField(cmd.wearableType),
+                  };
+                }
                 // Sync access control to recorder
                 session.recorder.accessLevel = session.accessLevel;
                 session.recorder.acl = session.acl;
@@ -1491,7 +1496,10 @@ const server = Bun.serve<WsData>({
           const buf = message as Uint8Array;
 
           if (isAudioFrame(buf)) {
-            // Audio frame (FRAU)
+            // Audio frame (FRAU) — auto-activate standby publisher on first frame
+            if (session.publisher?.standby) {
+              registry.activatePublisher(sessionId).catch(() => {});
+            }
             session.publisher.audioCount++;
             session.publisher.audioBytes += buf.length;
             const audioHdr = parseAudioHeader(buf);

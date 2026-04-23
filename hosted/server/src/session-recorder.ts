@@ -83,6 +83,7 @@ export class SessionRecorder {
   private bytesToBucket = 0;
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private _deviceInfo: Record<string, string | null> = {};
+  private _wearableInfo: Record<string, string | null> = {};
   private _active = false;
   private _accessLevel: string = "link";
   private _acl: Array<{ userId: string; email: string; role: string }> = [];
@@ -118,6 +119,14 @@ export class SessionRecorder {
 
   set deviceInfo(info: Record<string, string | null>) {
     this._deviceInfo = info;
+  }
+
+  get wearableInfo(): Record<string, string | null> {
+    return this._wearableInfo;
+  }
+
+  set wearableInfo(info: Record<string, string | null>) {
+    this._wearableInfo = info;
   }
 
   set accessLevel(level: string) {
@@ -480,6 +489,7 @@ export class SessionRecorder {
       startedAt: new Date(this.startedAt).toISOString(),
       ...(final ? { finishedAt: new Date().toISOString(), durationMs: Date.now() - this.startedAt } : {}),
       device: this._deviceInfo,
+      wearable: Object.keys(this._wearableInfo).length > 0 ? this._wearableInfo : undefined,
       accessLevel: this._accessLevel,
       acl: this._acl,
       ownerId: this._ownerId,

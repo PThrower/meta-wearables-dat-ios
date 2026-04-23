@@ -37,6 +37,10 @@ export interface SessionInfo {
     deviceModel?: string;
     wearableType?: string;
   };
+  wearable?: {
+    wearableId?: string;
+    wearableType?: string;
+  } | null;
   access?: string;
   owner?: string;
   viewerCount?: number;

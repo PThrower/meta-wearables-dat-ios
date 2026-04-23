@@ -18,8 +18,11 @@ describe("E2E pipeline: iOS app → recorder → manifest", () => {
     recorder.start({
       deviceName: "iPhone 16 Pro",
       deviceModel: "iPhone17,1",
-      wearableType: "mock-glasses",
     });
+    recorder.wearableInfo = {
+      wearableId: null,
+      wearableType: "mock-glasses",
+    };
 
     const baseTs = Date.now();
 
@@ -70,8 +73,8 @@ describe("E2E pipeline: iOS app → recorder → manifest", () => {
     expect(manifest.actualFps).toBeGreaterThan(18);
     expect(manifest.actualFps).toBeLessThan(22);
 
-    // Audio sample rate should be 8000, NOT hardcoded 48000
-    expect(manifest.audioSampleRate).toBe(8000);
+    // Audio sample rate should be 48000 (all PCM resampled to 48kHz)
+    expect(manifest.audioSampleRate).toBe(48000);
 
     expect(manifest.totalFrames).toBe(50);
     expect(manifest.sessionId).toBe(sessionId);
@@ -80,7 +83,7 @@ describe("E2E pipeline: iOS app → recorder → manifest", () => {
     const metaBuf = await store.get(`sessions/${sessionId}/meta.json`);
     const meta = JSON.parse(new TextDecoder().decode(metaBuf!));
     expect(meta.device.deviceName).toBe("iPhone 16 Pro");
-    expect(meta.device.wearableType).toBe("mock-glasses");
+    expect(meta.wearable.wearableType).toBe("mock-glasses");
     expect(meta.recording.segmentsWritten).toBeGreaterThanOrEqual(1);
     expect(meta.recording.audioChunks).toBeGreaterThanOrEqual(1);
     expect(meta.durationMs).toBeGreaterThanOrEqual(0);
@@ -161,8 +164,8 @@ describe("E2E pipeline: iOS app → recorder → manifest", () => {
     const manifestBuf = await store.get(`sessions/${sessionId}/manifest.json`);
     const manifest = JSON.parse(new TextDecoder().decode(manifestBuf!));
 
-    // Dominant rate should be 8000 (20 chunks vs 10 at 48000)
-    expect(manifest.audioSampleRate).toBe(8000);
+    // All audio resampled to 48000 regardless of source rate
+    expect(manifest.audioSampleRate).toBe(48000);
   });
 
   test("handles session with no frames (never activated)", async () => {
