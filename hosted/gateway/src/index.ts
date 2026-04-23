@@ -65,6 +65,7 @@ function serveStatic(baseDir: string, filePath: string): Response | null {
 interface WsBridgeData {
   targetUrl: string;
   upstream?: WebSocket | null;
+  pending: (string | ArrayBuffer | Buffer)[];
 }
 
 // --- Route handler (exported for testing) ---
@@ -266,7 +267,7 @@ export function createFetchHandler(config?: {
 
     if (pathname === "/publish" || pathname === "/view" || pathname === "/tap/audio" || pathname === "/telemetry/ai/log") {
       const targetUrl = `ws://127.0.0.1:${RELAY_PORT}${pathname}${url.search}`;
-      server.upgrade(req, { data: { targetUrl } satisfies WsBridgeData });
+      server.upgrade(req, { data: { targetUrl, pending: [] } satisfies WsBridgeData });
       return new Response(null, { status: 204 });
     }
 
@@ -288,7 +289,15 @@ export const wsHandler = {
 
     upstream.addEventListener("open", () => {
       ws.data.upstream = upstream;
-      console.log(`[gateway:ws] bridge open → ${targetUrl}`);
+      // Flush any messages that arrived before upstream was ready
+      const pending = ws.data.pending as WsBridgeData["pending"];
+      ws.data.pending = [];
+      for (const msg of pending) {
+        if (upstream.readyState === WebSocket.OPEN) {
+          upstream.send(msg);
+        }
+      }
+      console.log(`[gateway:ws] bridge open → ${targetUrl} (${pending.length} buffered)`);
     });
 
     upstream.addEventListener("message", (ev) => {
@@ -302,14 +311,15 @@ export const wsHandler = {
     upstream.addEventListener("error", () => {
       try { ws.close(1011, "upstream error"); } catch {}
     });
-
-    ws.data.upstream = upstream;
   },
 
   message(ws: any, message: string | ArrayBuffer | Buffer) {
-    const { upstream } = ws.data as WsBridgeData;
-    if (upstream && upstream.readyState === WebSocket.OPEN) {
-      upstream.send(message);
+    const data = ws.data as WsBridgeData;
+    if (data.upstream && data.upstream.readyState === WebSocket.OPEN) {
+      data.upstream.send(message);
+    } else {
+      // Buffer until upstream connects
+      data.pending.push(message);
     }
   },
 
