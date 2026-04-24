@@ -103,6 +103,10 @@ initDb();
 runMigrations(getDbRaw());
 dbWriter.start();
 
+// --- Seed pre-built apps as published workflows ---
+import { seedAppsAsWorkflows } from "./seed-apps.js";
+seedAppsAsWorkflows();
+
 // --- Session Registry ---
 
 const registry = new SessionRegistry(store);
@@ -742,8 +746,7 @@ const server = Bun.serve<WsData>({
     // --- App Registry ---
 
     if (url.pathname === "/apps") {
-      const staticApps = appRegistry.listApps();
-      // Include published workflows as selectable apps
+      // All apps are now published workflows (seeded from apps.json on startup)
       const publishedWorkflows = q.listWorkflows()
         .filter(w => w.status === "published")
         .map(w => {
@@ -759,7 +762,7 @@ const server = Bun.serve<WsData>({
           } catch { return null; }
         })
         .filter(Boolean);
-      return Response.json([...staticApps, ...publishedWorkflows]);
+      return Response.json(publishedWorkflows);
     }
 
     // --- Primitives (for workflow node palette metadata) ---
