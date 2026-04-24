@@ -312,23 +312,37 @@ function bindSelectMode(container: HTMLElement): void {
     if (_selectedIds.size === 0) return;
     const bar = container.querySelector("#device-confirm-bar") as HTMLElement;
     const countEl = container.querySelector("#confirm-count") as HTMLElement;
+    const btn = container.querySelector("#device-delete-btn") as HTMLElement;
     if (countEl) countEl.textContent = String(_selectedIds.size);
+    if (btn) btn.classList.add("hidden");
     if (bar) bar.classList.remove("hidden");
   });
 
   confirmYes?.addEventListener("click", async () => {
     const ids = Array.from(_selectedIds);
     if (ids.length === 0) return;
-    const result = await apiDeleteDevices(ids);
-    if (result?.ok) {
-      exitSelectMode(container);
-      await loadDevices(container);
+    const yesBtn = container.querySelector("#confirm-yes") as HTMLElement;
+    if (yesBtn) { yesBtn.textContent = "Deleting..."; yesBtn.setAttribute("disabled", "true"); }
+    try {
+      const result = await apiDeleteDevices(ids);
+      if (result?.ok) {
+        exitSelectMode(container);
+        await loadDevices(container);
+      } else {
+        console.error("[fleet] Delete failed:", result);
+        if (yesBtn) { yesBtn.textContent = "Delete"; yesBtn.removeAttribute("disabled"); }
+      }
+    } catch (err) {
+      console.error("[fleet] Delete error:", err);
+      if (yesBtn) { yesBtn.textContent = "Delete"; yesBtn.removeAttribute("disabled"); }
     }
   });
 
   confirmNo?.addEventListener("click", () => {
     const bar = container.querySelector("#device-confirm-bar") as HTMLElement;
+    const btn = container.querySelector("#device-delete-btn") as HTMLElement;
     if (bar) bar.classList.add("hidden");
+    if (btn) btn.classList.toggle("hidden", _selectedIds.size === 0);
   });
 
   // Escape key exits select mode
