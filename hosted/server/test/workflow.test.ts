@@ -3,12 +3,15 @@
  *
  * Covers:
  *   1. resolveWorkflowToApp — maps workflow nodes → virtual AppDefinition
- *   2. AppRegistry — listPrimitives, transient app registration/lifecycle
- *   3. Validation rules — 1 source, 1 AI, 1 output, connected chain
+ *   2. resolveWorkflowToPipeline — multi-node pipeline resolution
+ *   3. AppRegistry — listPrimitives, transient app registration/lifecycle
+ *   4. Node definitions — completeness, structure, edge rules
+ *   5. validateStructure — DAG structure validation
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
-import { resolveWorkflowToApp, AppRegistry } from "../src/app-registry.js";
+import { resolveWorkflowToApp, resolveWorkflowToPipeline, AppRegistry } from "../src/app-registry.js";
+import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure } from "../src/node-definitions.js";
 import type { WorkflowNodeDef, WorkflowEdgeDef } from "../src/app-types.js";
 
 // --- resolveWorkflowToApp ---
@@ -97,7 +100,7 @@ describe("resolveWorkflowToApp", () => {
       { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
       { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
     ];
-    expect(() => resolveWorkflowToApp(nodes, [], { id: "wf_bad", name: "Bad" })).toThrow("No AI node found");
+    expect(() => resolveWorkflowToApp(nodes, [], { id: "wf_bad", name: "Bad" })).toThrow("No processable node found");
   });
 
   test("uses first AI node when multiple exist", () => {
@@ -236,5 +239,351 @@ describe("AppRegistry", () => {
 
   test("resolveByGesture returns null for unknown gesture", () => {
     expect(registry.resolveByGesture("unknown_gesture")).toBeNull();
+  });
+});
+
+// --- Node Definitions ---
+
+describe("NODE_DEFINITIONS", () => {
+  test("defines all 7 node types", () => {
+    const types = NODE_DEFINITIONS.map(d => d.type);
+    expect(types).toEqual([
+      "stream-input", "text", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output",
+    ]);
+  });
+
+  test("each definition has required fields", () => {
+    for (const def of NODE_DEFINITIONS) {
+      expect(def.type).toBeTruthy();
+      expect(def.label).toBeTruthy();
+      expect(def.subtitle).toBeTruthy();
+      expect(def.color).toBeDefined();
+      expect(def.color.fill).toBeTruthy();
+      expect(def.color.header).toBeTruthy();
+      expect(def.color.stroke).toBeTruthy();
+      expect(Array.isArray(def.allowedTargets)).toBe(true);
+      expect(["source", "processor", "reference", "sink"]).toContain(def.role);
+      expect(Array.isArray(def.configSchema)).toBe(true);
+      expect(def.defaultConfig).toBeDefined();
+      expect(def.defaultLabel).toBeTruthy();
+    }
+  });
+
+  test("NODE_DEF_MAP matches NODE_DEFINITIONS", () => {
+    expect(NODE_DEF_MAP.size).toBe(NODE_DEFINITIONS.length);
+    for (const def of NODE_DEFINITIONS) {
+      expect(NODE_DEF_MAP.get(def.type)).toBe(def);
+    }
+  });
+
+  test("exactly 1 source node (stream-input)", () => {
+    const sources = NODE_DEFINITIONS.filter(d => d.role === "source");
+    expect(sources.length).toBe(1);
+    expect(sources[0].type).toBe("stream-input");
+  });
+
+  test("exactly 1 sink node (output)", () => {
+    const sinks = NODE_DEFINITIONS.filter(d => d.role === "sink");
+    expect(sinks.length).toBe(1);
+    expect(sinks[0].type).toBe("output");
+    expect(sinks[0].allowedTargets).toEqual([]);
+  });
+
+  test("exactly 1 reference node (text)", () => {
+    const refs = NODE_DEFINITIONS.filter(d => d.role === "reference");
+    expect(refs.length).toBe(1);
+    expect(refs[0].type).toBe("text");
+  });
+
+  test("4 processor nodes (s2s-live, s2s-rest, s2s-e4b, jepa-vision)", () => {
+    const processors = NODE_DEFINITIONS.filter(d => d.role === "processor");
+    expect(processors.length).toBe(4);
+    expect(processors.map(p => p.type).sort()).toEqual(["jepa-vision", "s2s-e4b", "s2s-live", "s2s-rest"]);
+  });
+
+  test("processable nodes have activationMode and binding", () => {
+    const processable = NODE_DEFINITIONS.filter(d => d.activationMode !== null);
+    for (const def of processable) {
+      expect(def.binding).toBeTruthy();
+      expect(def.defaultModel).toBeTruthy();
+      expect(["ai", "jepa"]).toContain(def.activationMode);
+    }
+  });
+
+  test("non-processable nodes have null activationMode and binding", () => {
+    const structural = NODE_DEFINITIONS.filter(d => d.activationMode === null);
+    for (const def of structural) {
+      expect(def.binding).toBeNull();
+    }
+  });
+
+  test("jepa-vision has activationMode jepa", () => {
+    const jepa = NODE_DEF_MAP.get("jepa-vision")!;
+    expect(jepa.activationMode).toBe("jepa");
+    expect(jepa.binding).toBe("jepa-vjepa2");
+    expect(jepa.defaultModel).toBe("vjepa2-vit-l");
+    expect(jepa.allowedTargets).toEqual(["output"]);
+  });
+
+  test("AI nodes have activationMode ai", () => {
+    for (const type of ["s2s-live", "s2s-rest", "s2s-e4b"]) {
+      const def = NODE_DEF_MAP.get(type)!;
+      expect(def.activationMode).toBe("ai");
+      expect(def.binding).toBeTruthy();
+    }
+  });
+});
+
+// --- Edge Map ---
+
+describe("buildAllowedEdgeMap", () => {
+  const edgeMap = buildAllowedEdgeMap();
+
+  test("has entry for every node type", () => {
+    for (const def of NODE_DEFINITIONS) {
+      expect(edgeMap.has(def.type)).toBe(true);
+    }
+  });
+
+  test("stream-input can target processors and output", () => {
+    const targets = edgeMap.get("stream-input")!;
+    expect(targets.has("s2s-live")).toBe(true);
+    expect(targets.has("s2s-rest")).toBe(true);
+    expect(targets.has("s2s-e4b")).toBe(true);
+    expect(targets.has("jepa-vision")).toBe(true);
+    expect(targets.has("output")).toBe(true);
+    expect(targets.has("text")).toBe(false);
+    expect(targets.has("stream-input")).toBe(false);
+  });
+
+  test("text can only target AI processors", () => {
+    const targets = edgeMap.get("text")!;
+    expect(targets.has("s2s-live")).toBe(true);
+    expect(targets.has("s2s-rest")).toBe(true);
+    expect(targets.has("s2s-e4b")).toBe(true);
+    expect(targets.has("jepa-vision")).toBe(false);
+    expect(targets.has("output")).toBe(false);
+  });
+
+  test("jepa-vision can only target output", () => {
+    const targets = edgeMap.get("jepa-vision")!;
+    expect(targets.has("output")).toBe(true);
+    expect(targets.size).toBe(1);
+  });
+
+  test("output has no outgoing edges", () => {
+    const targets = edgeMap.get("output")!;
+    expect(targets.size).toBe(0);
+  });
+
+  test("processors can target other processors and output", () => {
+    for (const type of ["s2s-live", "s2s-rest", "s2s-e4b"]) {
+      const targets = edgeMap.get(type)!;
+      expect(targets.has("s2s-live")).toBe(true);
+      expect(targets.has("s2s-rest")).toBe(true);
+      expect(targets.has("s2s-e4b")).toBe(true);
+      expect(targets.has("jepa-vision")).toBe(true);
+      expect(targets.has("output")).toBe(true);
+    }
+  });
+});
+
+// --- validateStructure ---
+
+describe("validateStructure", () => {
+  test("valid minimal workflow passes", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with jepa-vision processor", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "jepa-vision" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with multiple processors", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "jepa-vision" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("fails with no source node", () => {
+    const nodes = [
+      { type: "s2s-live" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
+  });
+
+  test("fails with multiple source nodes", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
+  });
+
+  test("fails with no processor nodes", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "text" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toMatch(/at least 1 processor/);
+  });
+
+  test("fails with no output node", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+    ];
+    expect(validateStructure(nodes)).toMatch(/exactly 1 output/);
+  });
+
+  test("fails with multiple output nodes", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output" },
+      { type: "output" },
+    ];
+    expect(validateStructure(nodes)).toMatch(/exactly 1 output/);
+  });
+});
+
+// --- resolveWorkflowToPipeline ---
+
+describe("resolveWorkflowToPipeline", () => {
+  test("single AI node produces one app", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf1", name: "Single" });
+    expect(pipeline.length).toBe(1);
+    expect(pipeline[0].id).toBe("wf-wf1");
+    expect(pipeline[0].binding).toBe("s2s-gemini-live");
+  });
+
+  test("multiple AI nodes produce multiple apps", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "ai2", type: "s2s-rest", label: "Gemma", config: { model: "gemma-4-27b" }, positionX: 300, positionY: 200 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf2", name: "Multi" });
+    expect(pipeline.length).toBe(2);
+    expect(pipeline[0].id).toBe("wf-wf2-0");
+    expect(pipeline[1].id).toBe("wf-wf2-1");
+    expect(pipeline[0].binding).toBe("s2s-gemini-live");
+    expect(pipeline[1].binding).toBe("s2s-gemma4-rest");
+  });
+
+  test("JEPA node gets jepa config and binding", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "jepa", type: "jepa-vision", label: "JEPA", config: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf3", name: "JEPA" });
+    expect(pipeline.length).toBe(1);
+    expect(pipeline[0].binding).toBe("jepa-vjepa2");
+    expect(pipeline[0].config.jepa).toBeDefined();
+    expect((pipeline[0].config as any).jepa.provider).toBe("modal");
+    // Model is at config.model (top level), not inside jepa sub-object
+    expect(pipeline[0].config.model).toBe("vjepa2-vit-l");
+  });
+
+  test("JEPA node gets speaker=false", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "jepa", type: "jepa-vision", label: "JEPA", config: {}, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf4", name: "JEPA" });
+    expect((pipeline[0].config as any).output.speaker).toBe(false);
+  });
+
+  test("primary AI node gets speaker=true by default", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf5", name: "AI" });
+    expect((pipeline[0].config as any).output.speaker).toBe(true);
+  });
+
+  test("extracts text node prompt via edges", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "txt", type: "text", label: "Prompt", config: { text: "Be helpful" }, positionX: 100, positionY: -100 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const edges: WorkflowEdgeDef[] = [
+      { id: "e1", sourceNodeId: "src", targetNodeId: "ai" },
+      { id: "e2", sourceNodeId: "txt", targetNodeId: "ai" },
+      { id: "e3", sourceNodeId: "ai", targetNodeId: "out" },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, edges, { id: "wf6", name: "WithPrompt" });
+    expect(pipeline[0].systemPrompt).toBe("Be helpful");
+  });
+
+  test("JEPA node gets systemPrompt 'jepa-vision'", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "jepa", type: "jepa-vision", label: "JEPA", config: {}, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf7", name: "JEPA" });
+    expect(pipeline[0].systemPrompt).toBe("jepa-vision");
+  });
+
+  test("throws when no processable node present", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    expect(() => resolveWorkflowToPipeline(nodes, [], { id: "bad", name: "Bad" })).toThrow("No processable node found");
+  });
+
+  test("extracts input config from stream-input node", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: { video: true, phoneMic: false, glassesMic: true }, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf8", name: "InputCfg" });
+    expect((pipeline[0].config as any).input.video).toBe(true);
+    expect((pipeline[0].config as any).input.phoneMic).toBe(false);
+    expect((pipeline[0].config as any).input.glassesMic).toBe(true);
+  });
+
+  test("extracts output config from output node", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Out", config: { viewers: false, recording: false }, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf9", name: "OutCfg" });
+    expect((pipeline[0].config as any).output.viewers).toBe(false);
+    expect((pipeline[0].config as any).output.recording).toBe(false);
   });
 });

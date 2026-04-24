@@ -1027,10 +1027,31 @@ const server = Bun.serve<WsData>({
           reason: body.reason ?? (conflict.hasConflict ? "Override" : "Activate"),
         }));
 
-        // Activate all AI apps in the pipeline (multi-AI support)
+        // Activate all apps in the pipeline, routing by activationMode
         const activatedAppIds: string[] = [];
-        for (const app of pipelineApps) {
-          await orchestrator.activateWithConfig(body.sessionId, app);
+        const processableNodes = (nodes as any[]).filter((n: any) => {
+          const d = NODE_DEF_MAP.get(n.type);
+          return d && d.activationMode !== null;
+        });
+        for (let i = 0; i < pipelineApps.length; i++) {
+          const app = pipelineApps[i];
+          const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
+
+          if (pDef?.activationMode === "jepa" && app.config?.jepa) {
+            const jc = app.config.jepa as any;
+            await jepaOrchestrator.activate(body.sessionId, {
+              provider: jc.provider,
+              model: jc.model ?? app.config.model,
+              gpu: jc.gpu,
+              clipLength: jc.clipLength,
+              sampleFps: jc.sampleFps,
+              resolution: jc.resolution,
+              tasks: jc.tasks,
+              sessionId: body.sessionId,
+            });
+          } else {
+            await orchestrator.activateWithConfig(body.sessionId, app);
+          }
           activatedAppIds.push(app.id);
         }
 
@@ -1645,7 +1666,27 @@ const server = Bun.serve<WsData>({
                   appRegistry.registerTransientApp(virtualApp);
                   session.activeAppId = virtualApp.id;
                   session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
-                  await orchestrator.activateWithConfig(sessionId, virtualApp);
+                  // Route to correct orchestrator based on activationMode
+                  const aiNode = (nodes as any[]).find((n: any) => {
+                    const d = NODE_DEF_MAP.get(n.type);
+                    return d && d.activationMode !== null;
+                  });
+                  const aiDef = aiNode ? NODE_DEF_MAP.get(aiNode.type) : null;
+                  if (aiDef?.activationMode === "jepa" && virtualApp.config?.jepa) {
+                    const jc = virtualApp.config.jepa as any;
+                    await jepaOrchestrator.activate(sessionId, {
+                      provider: jc.provider,
+                      model: jc.model ?? virtualApp.config.model,
+                      gpu: jc.gpu,
+                      clipLength: jc.clipLength,
+                      sampleFps: jc.sampleFps,
+                      resolution: jc.resolution,
+                      tasks: jc.tasks,
+                      sessionId,
+                    });
+                  } else {
+                    await orchestrator.activateWithConfig(sessionId, virtualApp);
+                  }
                   console.log(`[relay] Viewer activated workflow app: ${virtualApp.id} session=${sessionId}`);
                   ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
                   const ic = orchestrator.getInputConfig(sessionId);
