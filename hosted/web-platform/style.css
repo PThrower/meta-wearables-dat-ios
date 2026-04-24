@@ -30,13 +30,13 @@
   --accent-yellow: #facc15;
   --accent-orange: #fb923c;
 
-  /* Player — stays dark in both themes */
+  /* Player — follows theme */
   --player-bg: #000;
-  --player-bar: rgba(0,0,0,0.7);
-  --player-panel: rgba(8,8,8,0.92);
-  --player-text: #fff;
-  --player-text-muted: rgba(255,255,255,0.5);
-  --player-border: rgba(255,255,255,0.08);
+  --player-bar: rgba(255,255,255,0.85);
+  --player-panel: rgba(255,255,255,0.94);
+  --player-text: #111;
+  --player-text-muted: rgba(0,0,0,0.5);
+  --player-border: rgba(0,0,0,0.08);
 
   /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.08);
@@ -67,6 +67,13 @@
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.4);
   --shadow-md: 0 8px 24px rgba(0,0,0,0.6);
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+
+  --player-bg: #000;
+  --player-bar: rgba(0,0,0,0.7);
+  --player-panel: rgba(8,8,8,0.92);
+  --player-text: #fff;
+  --player-text-muted: rgba(255,255,255,0.5);
+  --player-border: rgba(255,255,255,0.08);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
