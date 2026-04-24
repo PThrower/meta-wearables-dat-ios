@@ -79,14 +79,12 @@ export function seedAppsAsWorkflows(): void {
       continue;
     }
 
-    const now = Date.now();
-    const suffix = now.toString(36);
-
-    // Build the 4-node DAG: stream-input → text(prompt) → processor → output
-    const srcId = `n_src_${suffix}`;
-    const txtId = `n_txt_${suffix}`;
-    const aiId = `n_ai_${suffix}`;
-    const outId = `n_out_${suffix}`;
+    // Use app ID as suffix to guarantee unique node IDs across workflows
+    const s = app.id;
+    const srcId = `n_src_${s}`;
+    const txtId = `n_txt_${s}`;
+    const aiId = `n_ai_${s}`;
+    const outId = `n_out_${s}`;
 
     const processorConfig: Record<string, unknown> = {
       ...nodeInfo.extraConfig,
@@ -124,9 +122,9 @@ export function seedAppsAsWorkflows(): void {
         { id: outId, type: "output", label: "Output", config: JSON.stringify(outputConfig), positionX: 700, positionY: 250 },
       ],
       edges: [
-        { id: `e_src_ai_${suffix}`, sourceNodeId: srcId, targetNodeId: aiId },
-        { id: `e_txt_ai_${suffix}`, sourceNodeId: txtId, targetNodeId: aiId },
-        { id: `e_ai_out_${suffix}`, sourceNodeId: aiId, targetNodeId: outId },
+        { id: `e_src_ai_${s}`, sourceNodeId: srcId, targetNodeId: aiId },
+        { id: `e_txt_ai_${s}`, sourceNodeId: txtId, targetNodeId: aiId },
+        { id: `e_ai_out_${s}`, sourceNodeId: aiId, targetNodeId: outId },
       ],
     })();
 
