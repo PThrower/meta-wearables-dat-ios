@@ -82,7 +82,7 @@ final class PushNotificationService: ObservableObject {
   // MARK: - Server Communication
 
   private func sendTokenToServer(_ token: String) {
-    let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+    let deviceId = DeviceIdentity.shared.stableDeviceId
 
     guard let relayURL = getRelayURL() else {
       NSLog("[PushNotification] No relay URL configured — skipping token registration")

@@ -426,10 +426,9 @@ class StreamSessionViewModel: ObservableObject {
     var url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
 
     // Append device identifier for stable session binding
-    if let deviceId = UIDevice.current.identifierForVendor?.uuidString {
-      let separator = url.contains("?") ? "&" : "?"
-      url += "\(separator)device=\(deviceId)"
-    }
+    let stableDeviceId = DeviceIdentity.shared.stableDeviceId
+    let separator = url.contains("?") ? "&" : "?"
+    url += "\(separator)device=\(stableDeviceId)"
     guard !url.isEmpty else {
       errorMessage = "Enter a relay URL (e.g. ws://192.168.1.x:3000/publish)"
       showError = true
@@ -516,10 +515,9 @@ class StreamSessionViewModel: ObservableObject {
     guard relayMode == .disconnected else { return }
 
     var url = relayURL.trimmingCharacters(in: .whitespacesAndNewlines)
-    if let deviceId = UIDevice.current.identifierForVendor?.uuidString {
-      let separator = url.contains("?") ? "&" : "?"
-      url += "\(separator)device=\(deviceId)"
-    }
+    let stableDeviceId = DeviceIdentity.shared.stableDeviceId
+    let separator = url.contains("?") ? "&" : "?"
+    url += "\(separator)device=\(stableDeviceId)"
     guard !url.isEmpty else { return }
 
     do {

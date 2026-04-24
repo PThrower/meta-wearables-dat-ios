@@ -4,8 +4,8 @@
  */
 
 import type { PageModule } from "../router/router.js";
-import { fetchDevices, fetchSessions, esc, formatTime } from "../core/api-client.js";
-import type { DeviceInfo, SessionInfo } from "../core/api-client.js";
+import { fetchDevices, fetchSessions, fetchDeviceBuildHistory, esc, formatTime } from "../core/api-client.js";
+import type { DeviceInfo, SessionInfo, BuildHistoryEntry } from "../core/api-client.js";
 
 export const page: PageModule = {
   init(container) {
@@ -154,6 +154,12 @@ function renderGrid(container: HTMLElement, devices: DeviceInfo[], sessions: Ses
             <span class="device-meta-label">APNs</span>
             <span class="device-meta-value">${d.apnsToken ? "Registered" : "None"}</span>
           </div>
+          ${d.appVersion || d.buildNumber ? `
+          <div class="device-meta">
+            <span class="device-meta-label">Build</span>
+            <span class="device-meta-value">${esc(d.appVersion || "--")}${d.buildNumber ? ` (${d.buildNumber})` : ""}</span>
+          </div>
+          ` : ""}
           <div class="device-meta">
             <span class="device-meta-label">Last Seen</span>
             <span class="device-meta-value">${d.lastSeen ? formatTime(d.lastSeen) : "--"}</span>
@@ -231,10 +237,16 @@ function openDeviceModal(container: HTMLElement, deviceId: string): void {
       <div class="modal-rows">
         <div class="modal-row"><span class="modal-label">Device ID</span><span class="modal-value">${esc(device.device_id)}</span></div>
         <div class="modal-row"><span class="modal-label">Model</span><span class="modal-value">${esc(device.deviceModel || device.device_model || "--")}</span></div>
+        ${device.systemVersion ? `<div class="modal-row"><span class="modal-label">iOS</span><span class="modal-value">${esc(device.systemVersion)}</span></div>` : ""}
         <div class="modal-row"><span class="modal-label">Status</span><span class="modal-value"><span class="device-status-dot ${device.online ? "online" : "offline"}"></span> ${device.online ? "Online" : "Offline"}</span></div>
+        <div class="modal-row"><span class="modal-label">Build</span><span class="modal-value">${esc(device.appVersion || "--")}${device.buildNumber ? ` (${device.buildNumber})` : ""}</span></div>
         <div class="modal-row"><span class="modal-label">APNs Token</span><span class="modal-value">${device.apnsToken ? "Registered" : "None"}</span></div>
         <div class="modal-row"><span class="modal-label">Last Seen</span><span class="modal-value">${device.lastSeen ? formatTime(device.lastSeen) : "--"}</span></div>
         ${device.battery != null ? `<div class="modal-row"><span class="modal-label">Battery</span><span class="modal-value">${device.battery}%</span></div>` : ""}
+      </div>
+      <div class="modal-section">
+        <h4 class="section-title">Build History</h4>
+        <div id="modal-build-history"><p class="empty-state">Loading...</p></div>
       </div>
       <div class="modal-section">
         <h4 class="section-title">Session History</h4>
@@ -251,6 +263,23 @@ function openDeviceModal(container: HTMLElement, deviceId: string): void {
         }
       </div>
     `;
+
+    // Fetch build history asynchronously
+    fetchDeviceBuildHistory(deviceId).then(builds => {
+      const el = bodyEl.querySelector("#modal-build-history");
+      if (!el) return;
+      if (builds.length === 0) {
+        el.innerHTML = '<p class="empty-state">No build history</p>';
+        return;
+      }
+      el.innerHTML = `<div class="modal-sessions">${builds.map(b => `
+        <div class="modal-session-row">
+          <span class="modal-session-id">${esc(b.appVersion)} (${esc(b.buildNumber)})</span>
+          <span class="modal-session-time">First: ${formatTime(b.firstSeenAt)}</span>
+          <span class="modal-session-status text-muted">Last: ${formatTime(b.lastSeenAt)}</span>
+        </div>
+      `).join("")}</div>`;
+    });
   }
 }
 

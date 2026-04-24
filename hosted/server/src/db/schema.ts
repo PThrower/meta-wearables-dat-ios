@@ -261,3 +261,18 @@ export const activationLog = sqliteTable("activation_log", {
   index("idx_activation_log_activated_by").on(t.activatedBy),
   index("idx_activation_log_status").on(t.status),
 ]);
+
+// --- Device Build History ---
+
+export const deviceBuildHistory = sqliteTable("device_build_history", {
+  id: text("id").primaryKey(),
+  deviceId: text("device_id").notNull().references(() => devices.id),
+  appVersion: text("app_version").notNull(),
+  buildNumber: text("build_number").notNull(),
+  firstSeenAt: text("first_seen_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull(),
+}, (t) => [
+  uniqueIndex("idx_build_history_unique").on(t.deviceId, t.appVersion, t.buildNumber),
+  index("idx_build_history_device").on(t.deviceId),
+  index("idx_build_history_last_seen").on(t.lastSeenAt),
+]);

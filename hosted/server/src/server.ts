@@ -44,6 +44,7 @@ import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 
 import type { WsData, QualityPreset, AccessLevel, AclEntry, Session } from "./types.js";
 import { QUALITY_PRESETS, createTokenBucket } from "./types.js";
+import { dropReasonFromCloseCode } from "./session-state.js";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, isAudioFrame, isVideoFrame, parseAudioHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
 import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
@@ -355,7 +356,7 @@ function broadcastToViewers(session: Session | undefined, msg: object): void {
 }
 
 /** Build session_info payload for viewer info strip */
-function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any; linkState?: string }) {
+function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; recorder: any; createdAt: number; publisher: any; linkState?: string; state?: string; dropReason?: string }) {
   const publisherStatus = session.publisher
     ? (session.publisher.standby ? "standby" : "live")
     : "offline";
@@ -373,6 +374,8 @@ function buildSessionInfo(session: { metadata: any; viewers: Map<any, any>; reco
     publisherStatus,
     sessionAge: Date.now() - session.createdAt,
     connectedAt: session.createdAt,
+    state: session.state || null,
+    dropReason: session.dropReason || null,
   };
 }
 
@@ -431,7 +434,12 @@ const server = Bun.serve<WsData>({
       // Merge live sessions that aren't in R2 yet (apply same visibility rules)
       const r2Ids = new Set(recorded.map(s => s.sessionId));
       const liveEntries = registry.listActive()
-        .filter(s => (s.publisherConnected || s.metadata.deviceName) && !r2Ids.has(s.id))
+        .filter(s => !r2Ids.has(s.id))
+        // Only show non-terminal, non-ephemeral sessions as live
+        .filter(s => {
+          const session = registry.get(s.id);
+          return session && ["active", "standby", "paused", "orphaned"].includes(session.state) && !session.flags.ephemeral;
+        })
         .map(s => {
           return {
             sessionId: s.id,
@@ -647,12 +655,21 @@ const server = Bun.serve<WsData>({
         systemVersion: d.systemVersion,
         wearableType: d.wearableType,
         appVersion: d.appVersion,
+        buildNumber: d.buildNumber,
         battery: d.batteryLevel,
         online: onlineDeviceIds.has(d.id),
         lastSeen: deviceLastSeen.get(d.id) ?? d.lastSeenAt,
         apnsToken: d.hasApnsToken ? "registered" : null,
       }));
       return Response.json({ devices });
+    }
+
+    // --- Fleet: build history for a specific device ---
+    if (url.pathname.startsWith("/api/devices/") && url.pathname.endsWith("/build-history") && req.method === "GET") {
+      const deviceId = url.pathname.split("/")[3];
+      if (!deviceId) return Response.json({ error: "Device ID required" }, { status: 400 });
+      const history = q.getDeviceBuildHistory(decodeURIComponent(deviceId));
+      return Response.json({ builds: history });
     }
 
     // --- APNs Device Token Registration ---
@@ -1359,6 +1376,14 @@ const server = Bun.serve<WsData>({
                   status: session.publisher.standby ? "standby" : "online",
                   lastSessionId: sessionId,
                 }));
+                // Record build sighting for build history audit trail
+                if (session.publisher.appVersion && session.publisher.buildNumber) {
+                  dbWriter.enqueue(q.recordBuildSighting({
+                    deviceId: session.publisher.deviceId,
+                    appVersion: session.publisher.appVersion,
+                    buildNumber: session.publisher.buildNumber,
+                  }));
+                }
                 dbWriter.enqueue(q.upsertSession({
                   id: sessionId,
                   publisherDeviceId: session.publisher.deviceId,
@@ -1526,14 +1551,17 @@ const server = Bun.serve<WsData>({
               broadcastToViewers(session, { type: "recording_changed", recording: !!cmd.recording });
             } else if (cmd.type === "stream_changed") {
               // Toggle publisher standby state on stream change
-              if (session.publisher) {
-                if (cmd.streaming) {
-                  // Publisher went active — start recorder
-                  registry.activatePublisher(sessionId).catch(() => {});
+              if (cmd.streaming) {
+                // Publisher went active — resume or activate
+                const sess = registry.get(sessionId);
+                if (sess?.state === "paused") {
+                  registry.resumeSession(sessionId).catch(() => {});
                 } else {
-                  // Publisher went back to standby
-                  session.publisher.standby = true;
+                  registry.activatePublisher(sessionId).catch(() => {});
                 }
+              } else {
+                // Publisher went back to standby — pause releases resources
+                registry.pauseSession(sessionId).catch(() => {});
               }
               broadcastToViewers(session, { type: "stream_changed", streaming: !!cmd.streaming });
             } else if (cmd.type === "publisher_telemetry") {
@@ -1879,7 +1907,7 @@ const server = Bun.serve<WsData>({
         }
       }
     },
-    async close(ws) {
+    async close(ws, code, _reason) {
       const { role, sessionId } = ws.data;
 
       if (role === "audio-tap") {
@@ -1931,11 +1959,21 @@ const server = Bun.serve<WsData>({
             console.log(`[relay] AI continuing (publisher disconnect, policy=continue) session=${sessionId}`);
           }
         }
-        // Notify viewers that publisher dropped
-        broadcastToViewers(session, { type: "publisher_status", status: "dropped" });
+        // Notify viewers that publisher dropped (enriched with reason and reconnect hint)
+        const dropReason = dropReasonFromCloseCode(code);
+        const isDeviceBound = !!session.metadata.deviceId || !!registry.findByDevice(sessionId);
+        broadcastToViewers(session, {
+          type: "publisher_status",
+          status: "dropped",
+          reason: dropReason,
+          reconnectHint: {
+            deviceBound: isDeviceBound,
+            estimatedResumeMs: isDeviceBound ? 30_000 : undefined,
+          },
+        });
         // Stop H.264 decoder if running
         stopH264Decoder(sessionId);
-        await registry.releasePublisher(sessionId);
+        await registry.releasePublisher(sessionId, dropReason);
         try {
           const meta = await sessionStore.getMeta(sessionId);
           if (meta) {

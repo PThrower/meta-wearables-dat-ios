@@ -52,12 +52,22 @@ export interface DeviceInfo {
   deviceName?: string;
   deviceModel?: string;
   device_model?: string;
+  systemVersion?: string;
+  appVersion?: string;
+  buildNumber?: string;
   apnsToken?: string;
   lastSeen?: string;
   online?: boolean;
   battery?: number;
   storage?: { used: number; total: number };
   signalStrength?: number;
+}
+
+export interface BuildHistoryEntry {
+  appVersion: string;
+  buildNumber: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
 }
 
 export interface AppInfo {
@@ -201,6 +211,12 @@ export function fetchDevices(): Promise<DeviceInfo[]> {
       if (!r) return [];
       return Array.isArray(r) ? r : r.devices ?? [];
     });
+}
+
+/** Fetch build history for a specific device */
+export function fetchDeviceBuildHistory(deviceId: string): Promise<BuildHistoryEntry[]> {
+  return apiGet<{ builds: BuildHistoryEntry[] }>(`/api/devices/${encodeURIComponent(deviceId)}/build-history`)
+    .then(r => r?.builds ?? []);
 }
 
 /** Fetch AI apps */

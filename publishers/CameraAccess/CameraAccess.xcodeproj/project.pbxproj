@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		2B91A102B3169469B14BC1C4 /* AppPickerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED96E78FFA3F17CBBE7BA3E3 /* AppPickerSheet.swift */; };
 		PN001PN002EB918740097D0E1 /* PushNotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = PN002PN002EB918740097D0E1 /* PushNotificationService.swift */; };
+		DI001DI002EB918740097D0E1 /* DeviceIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */; };
 		8F2D23802E856711002D0588 /* DebugMenuViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */; };
 		8F8F00782E8ACB4600A4BDAF /* WearablesViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */; };
 		8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */; };
@@ -135,6 +136,7 @@
 		E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NonStreamView.swift; sourceTree = "<group>"; };
 		ED96E78FFA3F17CBBE7BA3E3 /* AppPickerSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppPickerSheet.swift; sourceTree = "<group>"; };
 		PN002PN002EB918740097D0E1 /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
+		DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		PCMAP00000001 /* PCMAudioProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMAudioProcessing.swift; sourceTree = "<group>"; };
 		PCMCRC0000001 /* CRC16.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRC16.swift; sourceTree = "<group>"; };
 		PCMPCV0000001 /* PCMConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConvert.swift; sourceTree = "<group>"; };
@@ -377,6 +379,7 @@
 				TELE00042EB918740097D0E1 /* TelemetryLogger.swift */,
 				TELE00062EB918740097D0E1 /* TelemetryService.swift */,
 				PN002PN002EB918740097D0E1 /* PushNotificationService.swift */,
+				DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -575,6 +578,7 @@
 				TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */,
 				TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */,
 				PN001PN002EB918740097D0E1 /* PushNotificationService.swift in Sources */,
+				DI001DI002EB918740097D0E1 /* DeviceIdentity.swift in Sources */,
 				TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */,
 				PIPE00102E91PIPE01 /* FramePipelineTypes.swift in Sources */,
 				PIPE00302E91PIPE01 /* FramePipelineManager.swift in Sources */,

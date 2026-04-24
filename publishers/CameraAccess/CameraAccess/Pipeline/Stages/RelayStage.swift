@@ -660,7 +660,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // No await back to self — the captured references are all we need.
         let capturedCodec = encoder.codec.rawValue
         Task { @MainActor in
-            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
+            let deviceId = DeviceIdentity.shared.stableDeviceId
             let deviceName = UIDevice.current.name
             let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
             let systemVersion = UIDevice.current.systemVersion

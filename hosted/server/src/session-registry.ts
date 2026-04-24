@@ -9,6 +9,9 @@
 import type { ServerWebSocket } from "bun";
 import type { ObjectStore } from "@ebowwa/object-store";
 import type { WsData, Publisher, Viewer, Session, SessionMetadata, AccessLevel, AclEntry } from "./types.js";
+import type { PublisherDropReason } from "./session-state.js";
+import { stateToLegacyStatus, dropReasonFromCloseCode } from "./session-state.js";
+import { stateMachine } from "./session-state-machine.js";
 import { SessionRecorder } from "./session-recorder.js";
 import { DEFAULT_QUALITY, createTokenBucket, bucketTryConsume } from "./types.js";
 import { freshTiming, updateTiming, parseHeader, formatTiming } from "./protocol.js";
@@ -37,6 +40,9 @@ export class SessionRegistry {
   private framesThrottledQuality = 0;
 
   private onSessionDestroy?: (id: string) => void;
+
+  // Orphan timers: sessionId -> timeout handle
+  private orphanTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(store: ObjectStore) {
     this.store = store;
@@ -82,14 +88,16 @@ export class SessionRegistry {
   getOrCreate(id: string): Session {
     let session = this.sessions.get(id);
     if (!session) {
+      const now = Date.now();
+      const isDeviceBound = false; // will be set by bindDeviceToSession later
       session = {
         id,
         publisher: null,
         viewers: new Map(),
         recorder: null,
         wasmThrottle: null,
-        createdAt: Date.now(),
-        lastActivityAt: Date.now(),
+        createdAt: now,
+        lastActivityAt: now,
         metadata: {
           deviceName: null,
           deviceModel: null,
@@ -113,12 +121,24 @@ export class SessionRegistry {
         appPipeline: null,
         lastFrame: null,
         linkState: "unknown",
+        state: "created",
+        stateEnteredAt: now,
+        flags: {
+          ephemeral: false,
+          orphanGraceMs: 300_000, // 5 min default, adjusted on device bind
+        },
+        dropReason: undefined,
       };
       this.sessions.set(id, session);
+
+      // Emit created event
+      stateMachine.transition(id, "created" as any, "created" as any, undefined, { ephemeral: false });
       console.log(`[registry] Session created: ${id}`);
 
-      // Shadow write: session created
-      dbWriter.enqueue(q.upsertSession({ id, status: "active" }));
+      // Shadow write: session created (skip for ephemeral)
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.upsertSession({ id, status: "active" }));
+      }
     }
     return session;
   }
@@ -146,6 +166,9 @@ export class SessionRegistry {
       const sessionId = `dev-${deviceId.slice(0, 8)}`;
       this.deviceSessionMap.set(deviceId, sessionId);
       console.log(`[registry] Device ${deviceId.slice(0, 8)} assigned session=${sessionId}`);
+      // Device-bound sessions get longer orphan grace
+      const session = this.sessions.get(sessionId);
+      if (session) session.flags.orphanGraceMs = 300_000;
       return sessionId;
     }
 
@@ -161,6 +184,11 @@ export class SessionRegistry {
   /** Bind a device to a session (called when publisher hello provides deviceId) */
   bindDeviceToSession(deviceId: string, sessionId: string): void {
     this.deviceSessionMap.set(deviceId, sessionId);
+    // Device-bound sessions get longer orphan grace (5 min) for reconnect
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.flags.orphanGraceMs = 300_000;
+    }
   }
 
   /** Look up session ID by device ID. Returns undefined if device not connected. */
@@ -279,6 +307,25 @@ export class SessionRegistry {
     session.publisherClaiming = false;
     session.lastActivityAt = Date.now();
 
+    // State machine transition: created|orphaned -> standby
+    const prevState = session.state;
+    if (prevState === "created" || prevState === "orphaned") {
+      stateMachine.transition(sessionId, prevState, "standby", undefined, {
+        publisherId: id,
+        viewerCount: session.viewers.size,
+      });
+      session.state = "standby";
+      session.stateEnteredAt = Date.now();
+      session.dropReason = undefined;
+      // Clear orphan timer on reconnect
+      if (prevState === "orphaned") {
+        this.clearOrphanTimer(sessionId);
+      }
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.updateSessionState(sessionId, "standby"));
+      }
+    }
+
     // Set session ownership on first publisher claim
     if (userId && !session.ownerId) {
       session.ownerId = userId;
@@ -311,7 +358,7 @@ export class SessionRegistry {
   }
 
   /** Release publisher when it disconnects */
-  async releasePublisher(sessionId: string) {
+  async releasePublisher(sessionId: string, dropReason?: PublisherDropReason) {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
@@ -349,14 +396,36 @@ export class SessionRegistry {
     session.publisher = null;
     session.lastFrame = null;  // Clear cached frame — no live source
     session.lastActivityAt = Date.now();
-    console.log(`[registry] Publisher disconnected from session=${sessionId}`);
+    session.dropReason = dropReason;
+    console.log(`[registry] Publisher disconnected from session=${sessionId} reason=${dropReason ?? "unknown"}`);
 
-    // No viewers left — no reason to keep the session in memory.
-    // Recording is already persisted to R2; viewers find it via the gallery.
+    // No viewers left — end the session immediately
     if (session.viewers.size === 0) {
+      const prevState = session.state;
+      stateMachine.transition(sessionId, prevState, "ended", dropReason, {
+        viewerCount: 0,
+      });
+      session.state = "ended";
+      session.stateEnteredAt = Date.now();
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.updateSessionState(sessionId, "ended", dropReason));
+      }
       this.sessions.delete(sessionId);
       console.log(`[registry] Session ${sessionId} removed (no viewers after publisher disconnect)`);
       this.onSessionDestroy?.(sessionId);
+    } else {
+      // Viewers remain — enter orphaned state with grace timer
+      const prevState = session.state;
+      stateMachine.transition(sessionId, prevState, "orphaned", dropReason, {
+        viewerCount: session.viewers.size,
+      });
+      session.state = "orphaned";
+      session.stateEnteredAt = Date.now();
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.updateSessionState(sessionId, "orphaned", dropReason));
+      }
+      this.startOrphanTimer(sessionId, session.flags.orphanGraceMs);
+      console.log(`[registry] Session ${sessionId} orphaned (${session.viewers.size} viewers, grace=${session.flags.orphanGraceMs}ms)`);
     }
   }
 
@@ -367,6 +436,20 @@ export class SessionRegistry {
 
     if (!session.publisher.standby) return; // Already active
     session.publisher.standby = false;
+
+    // State machine transition: standby|paused -> active
+    const prevState = session.state;
+    if (prevState === "standby" || prevState === "paused") {
+      stateMachine.transition(sessionId, prevState, "active", undefined, {
+        publisherId: session.publisher.id,
+        viewerCount: session.viewers.size,
+      });
+      session.state = "active";
+      session.stateEnteredAt = Date.now();
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.updateSessionState(sessionId, "active"));
+      }
+    }
 
     // Start recorder — always creates a new recording per publisher connection.
     // recordingId is cleared on publisher release so reconnects get fresh recordings
@@ -406,6 +489,108 @@ export class SessionRegistry {
     }
 
     console.log(`[registry] Publisher activated: ${session.publisher.id.slice(0, 8)} session=${sessionId}`);
+  }
+
+  // --- Pause / Resume ---
+
+  /** Pause session: active -> paused. Releases recorder, keeps publisher + viewers connected. */
+  async pauseSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (session.state !== "active") return;
+
+    // State machine transition
+    stateMachine.transition(sessionId, "active", "paused", undefined, {
+      publisherId: session.publisher?.id,
+      viewerCount: session.viewers.size,
+    });
+    session.state = "paused";
+    session.stateEnteredAt = Date.now();
+    if (session.publisher) session.publisher.standby = true;
+
+    // Release recorder
+    if (session.recorder) {
+      session.recorder.framesRelayed = session.framesRelayed;
+      await session.recorder.finish();
+      session.recorder = null;
+    }
+    session.recordingId = undefined;
+
+    // Write DB state
+    if (!session.flags.ephemeral) {
+      dbWriter.enqueue(q.updateSessionState(sessionId, "paused"));
+    }
+    if (session.publisher?.deviceId) {
+      dbWriter.enqueue(q.updateDeviceStatus(session.publisher.deviceId, "standby"));
+    }
+
+    console.log(`[registry] Session paused: ${sessionId}`);
+  }
+
+  /** Resume session: paused -> active. Re-creates recorder, re-activates AI if activeAppId set. */
+  async resumeSession(sessionId: string) {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (session.state !== "paused") return;
+
+    // State machine transition
+    stateMachine.transition(sessionId, "paused", "active", undefined, {
+      publisherId: session.publisher?.id,
+      viewerCount: session.viewers.size,
+    });
+    session.state = "active";
+    session.stateEnteredAt = Date.now();
+    if (session.publisher) session.publisher.standby = false;
+
+    // Re-create recorder
+    await this.activatePublisher(sessionId);
+
+    console.log(`[registry] Session resumed: ${sessionId}`);
+  }
+
+  // --- Orphan timer ---
+
+  /** Start orphan grace timer. Fires after graceMs, transitioning to expired if still orphaned. */
+  private startOrphanTimer(sessionId: string, graceMs: number) {
+    this.clearOrphanTimer(sessionId);
+    const handle = setTimeout(() => {
+      const session = this.sessions.get(sessionId);
+      if (!session || session.state !== "orphaned") return;
+
+      console.log(`[registry] Orphan grace expired for session=${sessionId}, evicting ${session.viewers.size} viewers`);
+      // Evict viewers
+      for (const [viewerId, viewer] of session.viewers) {
+        try { viewer.ws.close(4004, "session expired (orphan timeout)"); } catch {}
+      }
+      session.viewers.clear();
+
+      // Transition to expired
+      stateMachine.transition(sessionId, "orphaned", "expired", undefined, {
+        viewerCount: 0,
+      });
+      session.state = "expired";
+      session.stateEnteredAt = Date.now();
+      if (!session.flags.ephemeral) {
+        dbWriter.enqueue(q.updateSessionState(sessionId, "expired"));
+      }
+
+      // Clean up
+      for (const [devId, sid] of this.deviceSessionMap) {
+        if (sid === sessionId) this.deviceSessionMap.delete(devId);
+      }
+      this.sessions.delete(sessionId);
+      this.onSessionDestroy?.(sessionId);
+    }, graceMs);
+    this.orphanTimers.set(sessionId, handle);
+  }
+
+  /** Clear orphan timer for a session (e.g. on publisher reconnect) */
+  private clearOrphanTimer(sessionId: string) {
+    const handle = this.orphanTimers.get(sessionId);
+    if (handle) {
+      clearTimeout(handle);
+      this.orphanTimers.delete(sessionId);
+    }
   }
 
   // --- Viewer management ---
@@ -637,21 +822,40 @@ export class SessionRegistry {
             session.recorder = null;
           }
           session.recordingId = undefined;
-          // No publisher and no viewers — delete immediately, don't wait for expiry
+          // No publisher and no viewers — end immediately
           if (session.viewers.size === 0) {
+            stateMachine.transition(sessionId, session.state, "ended", "dead_ws");
+            session.state = "ended";
+            session.stateEnteredAt = Date.now();
+            session.dropReason = "dead_ws";
+            if (!session.flags.ephemeral) {
+              dbWriter.enqueue(q.updateSessionState(sessionId, "ended", "dead_ws"));
+            }
             for (const [devId, sessId] of this.deviceSessionMap) {
               if (sessId === sessionId) this.deviceSessionMap.delete(devId);
             }
             this.sessions.delete(sessionId);
             this.onSessionDestroy?.(sessionId);
             console.log(`[registry] Session ${sessionId} removed (dead ws, no viewers)`);
+          } else {
+            // Viewers remain — orphan
+            stateMachine.transition(sessionId, session.state, "orphaned", "dead_ws", {
+              viewerCount: session.viewers.size,
+            });
+            session.state = "orphaned";
+            session.stateEnteredAt = Date.now();
+            session.dropReason = "dead_ws";
+            if (!session.flags.ephemeral) {
+              dbWriter.enqueue(q.updateSessionState(sessionId, "orphaned", "dead_ws"));
+            }
+            this.startOrphanTimer(sessionId, session.flags.orphanGraceMs);
           }
           continue;
         }
 
-        // Standby publishers: skip frame-based stale eviction entirely.
+        // Standby or paused publishers: skip frame-based stale eviction entirely.
         // The WebSocket ping keepalive handles transport liveness; Bun's idleTimeout (120s) handles transport cleanup.
-        if (session.publisher.standby) {
+        if (session.state === "standby" || session.state === "paused") {
           continue;
         }
 
@@ -670,8 +874,14 @@ export class SessionRegistry {
             session.recorder = null;
           }
           session.recordingId = undefined;
-          // No publisher and no viewers — delete immediately, don't wait for expiry
           if (session.viewers.size === 0) {
+            stateMachine.transition(sessionId, session.state, "ended", "stale_timeout");
+            session.state = "ended";
+            session.stateEnteredAt = Date.now();
+            session.dropReason = "stale_timeout";
+            if (!session.flags.ephemeral) {
+              dbWriter.enqueue(q.updateSessionState(sessionId, "ended", "stale_timeout"));
+            }
             for (const [devId, sessId] of this.deviceSessionMap) {
               if (sessId === sessionId) this.deviceSessionMap.delete(devId);
             }
@@ -679,6 +889,18 @@ export class SessionRegistry {
             this.onSessionDestroy?.(sessionId);
             console.log(`[registry] Session ${sessionId} removed (stale publisher, no viewers)`);
             continue;
+          } else {
+            // Viewers remain — orphan with stale reason
+            stateMachine.transition(sessionId, session.state, "orphaned", "stale_timeout", {
+              viewerCount: session.viewers.size,
+            });
+            session.state = "orphaned";
+            session.stateEnteredAt = Date.now();
+            session.dropReason = "stale_timeout";
+            if (!session.flags.ephemeral) {
+              dbWriter.enqueue(q.updateSessionState(sessionId, "orphaned", "stale_timeout"));
+            }
+            this.startOrphanTimer(sessionId, session.flags.orphanGraceMs);
           }
         }
       }
@@ -699,12 +921,18 @@ export class SessionRegistry {
 
       // Expire sessions with no publisher AND no viewers
       // Device-bound sessions get 5 min grace (expect reconnect), others 60s
-      if (!session.publisher && session.viewers.size === 0) {
+      if (!session.publisher && session.viewers.size === 0 && !stateMachine.isTerminal(session.state)) {
         const idleMs = now - session.lastActivityAt;
         const isDeviceBound = [...this.deviceSessionMap.values()].includes(sessionId);
         const expiry = isDeviceBound ? 300_000 : SESSION_EXPIRY_MS;
         if (idleMs > expiry) {
           console.log(`[registry] Session expired: ${sessionId} (idle ${Math.round(idleMs / 1000)}s)`);
+          stateMachine.transition(sessionId, session.state, "expired");
+          session.state = "expired";
+          session.stateEnteredAt = Date.now();
+          if (!session.flags.ephemeral) {
+            dbWriter.enqueue(q.updateSessionState(sessionId, "expired"));
+          }
           // Clean device map entries pointing to this session
           for (const [devId, sessId] of this.deviceSessionMap) {
             if (sessId === sessionId) this.deviceSessionMap.delete(devId);

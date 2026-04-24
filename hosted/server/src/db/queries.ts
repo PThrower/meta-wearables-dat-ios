@@ -217,6 +217,7 @@ export function listAllDevices(): Array<{
   systemVersion: string | null;
   wearableType: string | null;
   appVersion: string | null;
+  buildNumber: string | null;
   batteryLevel: number | null;
   status: string | null;
   lastSeenAt: string | null;
@@ -224,7 +225,7 @@ export function listAllDevices(): Array<{
 }> {
   const db = getDbRaw();
   return db.prepare(`
-    SELECT id, name, model, system_version, wearable_type, app_version,
+    SELECT id, name, model, system_version, wearable_type, app_version, build_number,
       battery_level, status, last_seen_at,
       CASE WHEN apns_device_token IS NOT NULL AND length(apns_device_token) > 10 THEN 1 ELSE 0 END as hasApnsToken
     FROM devices
@@ -479,6 +480,25 @@ export function getWorkflowEdges(workflowId: string): Array<{
   `).all(workflowId) as any[];
 }
 
+// --- Session State Machine ---
+
+/** Update session state (new state machine). Maps to legacy status column too. */
+export function updateSessionState(sessionId: string, state: string, dropReason?: string) {
+  return () => {
+    const db = getDbRaw();
+    const ts = now();
+    // Map new state to legacy status
+    const legacyStatus = state === "paused" ? "standby"
+      : state === "ended" ? "ended"
+      : state === "expired" ? "expired"
+      : "active";
+    db.prepare(`
+      UPDATE sessions SET state = ?, state_entered_at = ?, drop_reason = ?, status = ?, updated_at = ?
+      WHERE id = ?
+    `).run(state, ts, dropReason ?? null, legacyStatus, ts, sessionId);
+  };
+}
+
 // --- Session stats update (periodic) ---
 
 /** Update running session stats from in-memory counters */
@@ -588,4 +608,42 @@ export function deactivateActivation(sessionId: string, deactivatedBy: string) {
       WHERE session_id = ? AND status = 'active'
     `).run(deactivatedBy, now(), sessionId);
   };
+}
+
+// --- Device Build History ---
+
+/** Record a build sighting — upsert on (device_id, app_version, build_number) */
+export function recordBuildSighting(params: {
+  deviceId: string;
+  appVersion: string;
+  buildNumber: string;
+}) {
+  return () => {
+    const db = getDbRaw();
+    const ts = now();
+    const id = `${params.deviceId}-${params.appVersion}-${params.buildNumber}`;
+    db.prepare(`
+      INSERT INTO device_build_history (id, device_id, app_version, build_number, first_seen_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(device_id, app_version, build_number) DO UPDATE SET
+        last_seen_at = excluded.last_seen_at
+    `).run(id, params.deviceId, params.appVersion, params.buildNumber, ts, ts);
+  };
+}
+
+/** Get build history for a specific device */
+export function getDeviceBuildHistory(deviceId: string): Array<{
+  appVersion: string;
+  buildNumber: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}> {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT app_version as appVersion, build_number as buildNumber,
+      first_seen_at as firstSeenAt, last_seen_at as lastSeenAt
+    FROM device_build_history
+    WHERE device_id = ?
+    ORDER BY last_seen_at DESC
+  `).all(deviceId) as any[];
 }

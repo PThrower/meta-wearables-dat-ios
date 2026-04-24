@@ -7,6 +7,7 @@
 import type { ServerWebSocket } from "bun";
 import type { FrameTiming as FrameTimingType, QualityPreset as QualityPresetType } from "@ebowwa/relay-protocol";
 import type { AppPipeline } from "./app-types.js";
+import type { SessionState, PublisherDropReason, SessionFlags } from "./session-state.js";
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "@ebowwa/relay-protocol";
 
 // --- Token Bucket Rate Limiter ---
@@ -175,4 +176,8 @@ export interface Session {
   appPipeline: AppPipeline | null; // Runtime pipeline for active app
   lastFrame: Uint8Array | null;  // Cached latest FRLY frame for instant viewer/AI delivery
   linkState: string;             // "connected" | "disconnected" | "unknown"
+  state: SessionState;           // Single source of truth for lifecycle state
+  stateEnteredAt: number;        // Date.now() when current state was entered
+  flags: SessionFlags;           // Ephemeral, orphan timeout config
+  dropReason?: PublisherDropReason; // Why publisher dropped
 }
