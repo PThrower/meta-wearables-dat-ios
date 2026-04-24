@@ -100,9 +100,9 @@ function resolveSinkOutput(nodes: WorkflowNodeDef[]): OutputConfig {
     speaker: sinkNodes.some(n => n.config.speaker === true),
     recording: sinkNodes.some(n => n.config.recording === true),
   };
-  // Fallback: if no explicit channel, apply output-full's all-true defaults
+  // Fallback: if no explicit channel, apply output's all-true defaults
   if (!output.viewers && !output.overlays && !output.speaker && !output.recording && sinkNodes.length > 0) {
-    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
+    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output");
     if (fullNode) {
       output.viewers = fullNode.config.viewers !== false;
       output.overlays = fullNode.config.overlays !== false;

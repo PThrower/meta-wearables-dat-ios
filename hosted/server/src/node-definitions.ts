@@ -246,7 +246,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "JEPA Vision",
   },
   {
-    type: "output-full",
+    type: "output",
     label: "Output",
     subtitle: "${_channels}",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
@@ -296,9 +296,8 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
   return null;
 }
 
-/** Resolve legacy node types to their current equivalent */
+/** Resolve node types — passthrough, extensible for future renames */
 export function resolveNodeType(type: string): string {
-  if (type === "output") return "output-full";
   return type;
 }
 
