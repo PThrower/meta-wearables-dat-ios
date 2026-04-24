@@ -57,6 +57,7 @@ const NODE_COLORS: Record<string, { fill: string; header: string; stroke: string
   "s2s-live": { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
   "s2s-rest": { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
   "s2s-e4b": { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" },
+  "jepa-vision": { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" },
   "output": { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
 };
 
@@ -66,11 +67,12 @@ const NODE_R = 8;
 
 /** Allowed source -> target connections */
 const ALLOWED_TARGETS: Record<string, Set<string>> = {
-  "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+  "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
   "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
-  "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
-  "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
-  "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+  "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+  "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+  "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+  "jepa-vision": new Set(["output"]),
 };
 
 function nanoid(): string {
@@ -221,7 +223,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
           ${Object.entries(NODE_COLORS).map(([type, c]) => `
             <button class="wf-palette-item" data-type="${type}">
               <span class="wf-palette-dot" style="background:${c.header}"></span>
-              <span class="wf-palette-label">${({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " ")}</span>
+              <span class="wf-palette-label">${({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "jepa-vision": "JEPA Vision", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " ")}</span>
             </button>
           `).join("")}
         </div>
@@ -255,6 +257,8 @@ function buildSVG(): string {
     const c = NODE_COLORS[n.type] ?? NODE_COLORS["output"];
     const configSummary = n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b"
       ? (n.config.model as string ?? "").slice(0, 20)
+      : n.type === "jepa-vision"
+      ? `${(n.config.model as string ?? "vjepa2-vit-l").slice(0, 14)} | ${(n.config.provider as string ?? "modal")}`
       : n.type === "text"
         ? ((n.config.text as string) ?? "").slice(0, 22) || "Empty"
         : n.type === "output"
@@ -325,13 +329,14 @@ function wireEditorEvents(): void {
       const config = type === "s2s-live" ? { model: "gemini-2.5-flash-native-audio-latest" }
         : type === "s2s-rest" ? { model: "gemma-4-27b" }
         : type === "s2s-e4b" ? { model: "gemma-4-e4b-it" }
+        : type === "jepa-vision" ? { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }
         : type === "text" ? { text: "" }
         : type === "output" ? { viewers: true, overlays: true, speaker: true, recording: true }
         : {};
       _workflow.nodes.push({
         id,
         type,
-        label: ({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " "),
+        label: ({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "jepa-vision": "JEPA Vision", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " "),
         config,
         positionX: 200 + offset,
         positionY: 150 + offset,
@@ -860,6 +865,68 @@ function renderConfigPanel(): void {
       <div class="wf-config-field">
         <label>Vision FPS: ${(node.config.visionFps as number) ?? 1}</label>
         <input type="range" min="0.5" max="2" step="0.5" data-field="config.visionFps" value="${(node.config.visionFps as number) ?? 1}" />
+      </div>
+      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
+    `;
+  } else if (node.type === "jepa-vision") {
+    const provider = (node.config.provider as string) ?? "modal";
+    const tier = (node.config.tier as string) ?? "cloud";
+    const gpu = (node.config.gpu as string) ?? "A100-80GB";
+    const clipLength = (node.config.clipLength as number) ?? 16;
+    const sampleFps = (node.config.sampleFps as number) ?? 2;
+    const resolution = (node.config.resolution as number) ?? 224;
+    panel.innerHTML = `
+      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
+        <span class="wf-config-type">JEPA Vision</span>
+      </div>
+      <div class="wf-config-field">
+        <label>Label</label>
+        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
+      </div>
+      <div class="wf-config-field">
+        <label>Model</label>
+        <select class="wf-config-input" data-field="config.model">
+          <option value="vjepa2-vit-l" ${(node.config.model as string ?? "vjepa2-vit-l") === "vjepa2-vit-l" ? "selected" : ""}>V-JEPA 2 ViT-L (1.2B)</option>
+          <option value="lewm-small" ${(node.config.model as string) === "lewm-small" ? "selected" : ""}>LeWorldModel (15M)</option>
+        </select>
+      </div>
+      <div class="wf-config-field">
+        <label>Tier</label>
+        <select class="wf-config-input" data-field="config.tier">
+          <option value="cloud" ${tier === "cloud" ? "selected" : ""}>Cloud (Modal GPU)</option>
+          <option value="mobile" ${tier === "mobile" ? "selected" : ""}>Mobile (On-device)</option>
+        </select>
+      </div>
+      <div class="wf-config-field">
+        <label>Provider</label>
+        <select class="wf-config-input" data-field="config.provider">
+          <option value="modal" ${provider === "modal" ? "selected" : ""}>Modal (cloud)</option>
+          <option value="coreml" ${provider === "coreml" ? "selected" : ""}>CoreML (iOS)</option>
+          <option value="onnx" ${provider === "onnx" ? "selected" : ""}>ONNX (Android)</option>
+        </select>
+      </div>
+      <div class="wf-config-field">
+        <label>GPU</label>
+        <select class="wf-config-input" data-field="config.gpu">
+          <option value="A100-80GB" ${gpu === "A100-80GB" ? "selected" : ""}>A100 80GB ($2.10/hr)</option>
+          <option value="H100" ${gpu === "H100" ? "selected" : ""}>H100 ($3.95/hr)</option>
+          <option value="A10G" ${gpu === "A10G" ? "selected" : ""}>A10G ($1.10/hr)</option>
+        </select>
+      </div>
+      <div class="wf-config-field">
+        <label>Clip Length: ${clipLength} frames</label>
+        <input type="range" min="4" max="64" step="4" data-field="config.clipLength" value="${clipLength}" />
+      </div>
+      <div class="wf-config-field">
+        <label>Sample FPS: ${sampleFps}</label>
+        <input type="range" min="0.5" max="5" step="0.5" data-field="config.sampleFps" value="${sampleFps}" />
+      </div>
+      <div class="wf-config-field">
+        <label>Resolution: ${resolution}px</label>
+        <select class="wf-config-input" data-field="config.resolution">
+          <option value="224" ${resolution === 224 ? "selected" : ""}>224x224</option>
+          <option value="384" ${resolution === 384 ? "selected" : ""}>384x384</option>
+        </select>
       </div>
       <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
     `;
