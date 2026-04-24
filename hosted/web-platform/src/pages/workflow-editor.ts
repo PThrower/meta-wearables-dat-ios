@@ -95,8 +95,11 @@ const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST", runtime: ["server"] },
   { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B", runtime: ["server"] },
   { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["<sink>"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision", runtime: ["server", "mobile"] },
-  { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: ["speaker", "viewers", "overlays", "recording"], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Output", runtime: ["server", "mobile"] },
-  { type: "speaker", label: "Speaker", subtitle: "audio out", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Speaker", runtime: ["mobile"] },
+  { type: "output", label: "Output", subtitle: "hub", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: ["tts", "tones", "phone-speaker", "glasses-speaker", "viewers", "overlays", "recording"], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Output", runtime: ["server", "mobile"] },
+  { type: "tts", label: "TTS", subtitle: "text to speech", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "TTS", runtime: ["mobile"] },
+  { type: "tones", label: "Tones", subtitle: "alert sounds", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Tones", runtime: ["mobile"] },
+  { type: "phone-speaker", label: "Phone Speaker", subtitle: "phone audio out", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Phone Speaker", runtime: ["mobile"] },
+  { type: "glasses-speaker", label: "Glasses Speaker", subtitle: "HFP/A2DP audio", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Glasses Speaker", runtime: ["mobile"] },
   { type: "viewers", label: "Viewers", subtitle: "WS fanout", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Viewers", runtime: ["server"] },
   { type: "overlays", label: "Overlays", subtitle: "bbox annotations", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Overlays", runtime: ["mobile"] },
   { type: "recording", label: "Recording", subtitle: "R2 persist", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "channel", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Recording", runtime: ["server"] },
@@ -251,19 +254,25 @@ async function renderEditor(isNew: boolean): Promise<void> {
         { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 320, positionY: 100 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 320, positionY: 260 },
         { id: `n_out_${now}`, type: "output", label: "Output", config: {}, positionX: 590, positionY: 260 },
-        { id: `n_spk_${now}`, type: "speaker", label: "Speaker", config: {}, positionX: 830, positionY: 120 },
-        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 830, positionY: 210 },
-        { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 830, positionY: 300 },
-        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 830, positionY: 390 },
+        { id: `n_tts_${now}`, type: "tts", label: "TTS", config: {}, positionX: 830, positionY: 50 },
+        { id: `n_ton_${now}`, type: "tones", label: "Tones", config: {}, positionX: 830, positionY: 120 },
+        { id: `n_psp_${now}`, type: "phone-speaker", label: "Phone Speaker", config: {}, positionX: 830, positionY: 190 },
+        { id: `n_gsp_${now}`, type: "glasses-speaker", label: "Glasses Speaker", config: { profile: "hfp" }, positionX: 830, positionY: 260 },
+        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 830, positionY: 330 },
+        { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 830, positionY: 400 },
+        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 830, positionY: 470 },
       ],
       edges: [
         { id: `e_1_${now}`, sourceNodeId: `n_src_${now}`, targetNodeId: `n_ai_${now}` },
         { id: `e_2_${now}`, sourceNodeId: `n_txt_${now}`, targetNodeId: `n_ai_${now}` },
         { id: `e_3_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_out_${now}` },
-        { id: `e_4_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_spk_${now}` },
-        { id: `e_5_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_viw_${now}` },
-        { id: `e_6_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_ovl_${now}` },
-        { id: `e_7_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_rec_${now}` },
+        { id: `e_4_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_tts_${now}` },
+        { id: `e_5_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_ton_${now}` },
+        { id: `e_6_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_psp_${now}` },
+        { id: `e_7_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_gsp_${now}` },
+        { id: `e_8_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_viw_${now}` },
+        { id: `e_9_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_ovl_${now}` },
+        { id: `e_10_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_rec_${now}` },
       ],
       canvasViewport: { x: 0, y: 0, zoom: 1 },
       createdAt: new Date().toISOString(),
@@ -362,7 +371,7 @@ function buildSVG(): string {
     <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#wf-grid)" />
   `;
 
-  return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${_viewX} ${_viewY} ${1100 / _zoom} ${550 / _zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+  return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${_viewX} ${_viewY} ${1100 / _zoom} ${600 / _zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
 }
 
 function refreshSVG(): void {
