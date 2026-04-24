@@ -17,6 +17,7 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import type { ObjectStore } from "@ebowwa/object-store";
 import { canSeeInGallery } from "./permissions.js";
+import { resamplePcm, TARGET_SAMPLE_RATE } from "./pcm-resample.js";
 import type { AccessLevel, AclEntry } from "./types.js";
 
 export interface ExportOptions {
@@ -127,17 +128,7 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
   const videoData = isH264 ? Buffer.concat(h264Parts) : Buffer.concat(jpegParts);
   await writeFile(videoPath, videoData);
 
-  const hasAudio = audioKeys.length > 0;
-  if (hasAudio) {
-    const audioParts: Buffer[] = [];
-    for (const key of audioKeys) {
-      const buf = await store.get(key);
-      if (buf) audioParts.push(buf);
-    }
-    await writeFile(audioPath, Buffer.concat(audioParts));
-  }
-
-  // Read manifest for actual framerate and audio sample rate
+  // Read manifest for actual framerate and audio sample rate BEFORE writing audio
   let actualFps = 15;
   let audioSampleRate = 48000;
   try {
@@ -148,6 +139,25 @@ export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> 
       if (manifest.audioSampleRate && manifest.audioSampleRate > 0) audioSampleRate = manifest.audioSampleRate;
     }
   } catch (err) { console.warn(`[export] Manifest parse error for ${sessionId}:`, err); }
+
+  const hasAudio = audioKeys.length > 0;
+  if (hasAudio) {
+    const audioParts: Buffer[] = [];
+    for (const key of audioKeys) {
+      const buf = await store.get(key);
+      if (buf) audioParts.push(buf);
+    }
+    let rawAudio = Buffer.concat(audioParts);
+
+    // Resample legacy recordings that weren't normalized to 48kHz
+    if (audioSampleRate !== TARGET_SAMPLE_RATE) {
+      console.log(`[export] Resampling audio from ${audioSampleRate}Hz to ${TARGET_SAMPLE_RATE}Hz (${rawAudio.length} bytes)`);
+      rawAudio = Buffer.from(resamplePcm(new Uint8Array(rawAudio), audioSampleRate, TARGET_SAMPLE_RATE));
+      audioSampleRate = TARGET_SAMPLE_RATE; // ffmpeg gets 48kHz after resampling
+    }
+
+    await writeFile(audioPath, rawAudio);
+  }
 
   // Build ffmpeg args — different input format for H.264 vs MJPEG
   const args: string[] = ["-y"];
