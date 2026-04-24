@@ -62,6 +62,17 @@ const NODE_R = 8;
 /** Fallback colors for unknown node types */
 const FALLBACK_COLOR = { fill: "#1a1a1a", header: "#666", stroke: "#666" };
 
+/** Static fallback palette — used when the /api/node-definitions fetch fails */
+const FALLBACK_PALETTE: NodeDefinition[] = [
+  { type: "stream-input", label: "Stream Input", subtitle: "${_modalities}", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, defaultLabel: "Stream Input" },
+  { type: "text", label: "Text", subtitle: "${text}", color: { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b"], role: "reference", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { text: "" }, defaultLabel: "Text" },
+  { type: "s2s-live", label: "S2S Live", subtitle: "${model}", color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemini-live", defaultModel: "gemini-2.5-flash-native-audio-latest", configSchema: [], defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" }, defaultLabel: "S2S Live" },
+  { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST" },
+  { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B" },
+  { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["output"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision" },
+  { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output" },
+];
+
 function nanoid(): string {
   return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -174,6 +185,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
   // Fetch node definitions from server (single source of truth)
   if (_nodeDefs.length === 0) {
     _nodeDefs = await fetchNodeDefinitions();
+    if (_nodeDefs.length === 0) _nodeDefs = FALLBACK_PALETTE;
     _nodeDefMap = new Map(_nodeDefs.map(d => [d.type, d]));
   }
 
