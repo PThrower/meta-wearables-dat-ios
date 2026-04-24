@@ -26,6 +26,8 @@ export type StructuralRole = "source" | "processor" | "reference" | "sink";
 
 export type ActivationMode = "ai" | "jepa" | "passthrough";
 
+export type RuntimeTarget = "mobile" | "server";
+
 // --- Node Definition ---
 
 export interface NodeDefinition {
@@ -53,6 +55,8 @@ export interface NodeDefinition {
   defaultConfig: Record<string, unknown>;
   /** Default label for new nodes */
   defaultLabel: string;
+  /** Where this node executes at runtime */
+  runtime: RuntimeTarget[];
 }
 
 // --- Sentinel ---
@@ -108,6 +112,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1, codec: "jpeg", onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null },
     defaultLabel: "Stream Input",
+    runtime: ["mobile"],
   },
   {
     type: "text",
@@ -125,6 +130,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { text: "" },
     defaultLabel: "Text",
+    runtime: ["server"],
   },
   {
     type: "s2s-live",
@@ -157,6 +163,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" },
     defaultLabel: "S2S Live",
+    runtime: ["server"],
   },
   {
     type: "s2s-rest",
@@ -180,6 +187,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { model: "gemma-4-27b" },
     defaultLabel: "S2S REST",
+    runtime: ["server"],
   },
   {
     type: "s2s-e4b",
@@ -209,6 +217,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { model: "gemma-4-e4b-it" },
     defaultLabel: "S2S E4B",
+    runtime: ["server"],
   },
   {
     type: "jepa-vision",
@@ -249,6 +258,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] },
     defaultLabel: "JEPA Vision",
+    runtime: ["server", "mobile"],
   },
   {
     type: "output",
@@ -271,6 +281,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true },
     defaultLabel: "Output",
+    runtime: ["server", "mobile"],
   },
 ];
 

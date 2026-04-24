@@ -429,6 +429,7 @@ export interface NodeDefinition {
   configSchema: ConfigFieldSchema[];
   defaultConfig: Record<string, unknown>;
   defaultLabel: string;
+  runtime: ("mobile" | "server")[];
 }
 
 export async function fetchNodeDefinitions(): Promise<NodeDefinition[]> {

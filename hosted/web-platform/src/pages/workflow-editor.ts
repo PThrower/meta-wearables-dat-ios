@@ -59,18 +59,43 @@ const NODE_W = 180;
 const NODE_H = 80;
 const NODE_R = 8;
 
+/** Render runtime badge SVG for a node definition */
+function runtimeBadgeSVG(def: NodeDefinition | undefined): string {
+  const rt = def?.runtime;
+  if (!rt || rt.length === 0) return "";
+  const hasMobile = rt.includes("mobile");
+  const hasServer = rt.includes("server");
+  const mobileColor = "#06b6d4"; // cyan-500
+  const serverColor = "#8b5cf6"; // violet-500
+  if (hasMobile && hasServer) {
+    return `
+      <rect x="${NODE_W - 62}" y="${NODE_H - 15}" width="24" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W - 50}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">iOS</text>
+      <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
+      <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
+  }
+  if (hasMobile) {
+    return `
+      <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">iOS</text>`;
+  }
+  return `
+    <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
+    <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
+}
+
 /** Fallback colors for unknown node types */
 const FALLBACK_COLOR = { fill: "#1a1a1a", header: "#666", stroke: "#666" };
 
 /** Static fallback palette — used when the /api/node-definitions fetch fails */
 const FALLBACK_PALETTE: NodeDefinition[] = [
-  { type: "stream-input", label: "Stream Input", subtitle: "${_modalities}", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, defaultLabel: "Stream Input" },
-  { type: "text", label: "Text", subtitle: "${text}", color: { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b"], role: "reference", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { text: "" }, defaultLabel: "Text" },
-  { type: "s2s-live", label: "S2S Live", subtitle: "${model}", color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemini-live", defaultModel: "gemini-2.5-flash-native-audio-latest", configSchema: [], defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" }, defaultLabel: "S2S Live" },
-  { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST" },
-  { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B" },
-  { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["<sink>"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision" },
-  { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [{ kind: "checkbox-group", key: "channels", label: "Channels", fields: [{ key: "viewers", label: "Viewers (WS fanout)" }, { key: "overlays", label: "Overlays (bbox)" }, { key: "speaker", label: "Speaker (HFP)" }, { key: "recording", label: "Recording (R2)" }] }], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output" },
+  { type: "stream-input", label: "Stream Input", subtitle: "${_modalities}", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, defaultLabel: "Stream Input", runtime: ["mobile"] },
+  { type: "text", label: "Text", subtitle: "${text}", color: { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b"], role: "reference", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { text: "" }, defaultLabel: "Text", runtime: ["server"] },
+  { type: "s2s-live", label: "S2S Live", subtitle: "${model}", color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemini-live", defaultModel: "gemini-2.5-flash-native-audio-latest", configSchema: [], defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" }, defaultLabel: "S2S Live", runtime: ["server"] },
+  { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST", runtime: ["server"] },
+  { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B", runtime: ["server"] },
+  { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["<sink>"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision", runtime: ["server", "mobile"] },
+  { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [{ kind: "checkbox-group", key: "channels", label: "Channels", fields: [{ key: "viewers", label: "Viewers (WS fanout)" }, { key: "overlays", label: "Overlays (bbox)" }, { key: "speaker", label: "Speaker (HFP)" }, { key: "recording", label: "Recording (R2)" }] }], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output", runtime: ["server", "mobile"] },
 ];
 
 /** Map old node type names to their current equivalents */
@@ -245,12 +270,17 @@ async function renderEditor(isNew: boolean): Promise<void> {
       <div class="wf-editor-layout">
         <div class="wf-palette">
           <h3 class="wf-palette-title">Nodes</h3>
-          ${_nodeDefs.map(d => `
+          ${_nodeDefs.map(d => {
+            const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
+              ? `<span class="wf-rt-badge" style="background:#06b6d4">iOS</span>`
+              : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
+            return `
             <button class="wf-palette-item" data-type="${d.type}">
               <span class="wf-palette-dot" style="background:${d.color.header}"></span>
               <span class="wf-palette-label">${esc(d.label)}</span>
-            </button>
-          `).join("")}
+              <span class="wf-palette-runtime">${rtBadge}</span>
+            </button>`;
+          }).join("")}
         </div>
         <div class="wf-canvas-wrap" id="wf-canvas-wrap">
           ${buildSVG()}
@@ -291,6 +321,7 @@ function buildSVG(): string {
         <text x="${NODE_W / 2}" y="16" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${esc(n.type.replace("-", " "))}</text>
         <text x="12" y="44" fill="#ccc" font-size="11">${esc(n.label || n.type)}</text>
         <text x="12" y="60" fill="#888" font-size="9">${esc(configSummary)}</text>
+        ${runtimeBadgeSVG(def)}
         <circle class="wf-port wf-port-in" cx="0" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
         <circle class="wf-port wf-port-out" cx="${NODE_W}" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
       </g>

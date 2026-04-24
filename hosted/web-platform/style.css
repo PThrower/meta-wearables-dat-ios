@@ -2620,6 +2620,22 @@ body {
   text-transform: capitalize;
 }
 
+.wf-palette-runtime {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.wf-rt-badge {
+  font-size: 7px;
+  font-weight: 600;
+  color: #fff;
+  padding: 1px 3px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .wf-canvas-wrap {
   flex: 1;
   overflow: hidden;
