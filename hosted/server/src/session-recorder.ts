@@ -251,6 +251,8 @@ export class SessionRecorder {
     this.segLastTimestampMs = nowMs;
   }
 
+  private audioFrameCount = 0;
+
   appendAudio(frame: Uint8Array) {
     // Buffer audio silently until first video frame activates the recorder
     // (unless resuming — audio can flow alongside existing video)
@@ -259,6 +261,17 @@ export class SessionRecorder {
 
     const header = parseAudioHeader(frame);
     const rawPcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
+
+    // Diagnostic: log first 3 audio frames to verify PCM content
+    if (this.audioFrameCount < 3) {
+      this.audioFrameCount++;
+      let peak = 0;
+      const view = new DataView(rawPcm.buffer, rawPcm.byteOffset, rawPcm.length);
+      for (let i = 0; i < Math.min(rawPcm.length / 2, 500); i++) {
+        peak = Math.max(peak, Math.abs(view.getInt16(i * 2, true)));
+      }
+      console.log(`[recorder] Audio frame #${this.audioFrameCount}: ${frame.length}B total, ${rawPcm.length}B PCM, rate=${header?.sampleRate ?? 'null'}, codec=${header?.codecType ?? 'null'}, peak=${peak}`);
+    }
 
     if (header) {
       // Resample to 48kHz so all sources produce uniform PCM for concatenation
