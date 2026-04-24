@@ -850,11 +850,18 @@ export class SessionRegistry {
           continue;
         }
 
+        // Check staleness using both video frame timing AND audio activity
         const staleFromFrame = session.publisher.timing.lastReceivedAt > 0
           ? now - session.publisher.timing.lastReceivedAt
           : Infinity;
+        // Check latest audio tap activity as alternative liveness signal
+        let latestAudioAt = 0;
+        for (const tap of session.publisher.audioTaps.values()) {
+          if (tap.lastAt > latestAudioAt) latestAudioAt = tap.lastAt;
+        }
+        const staleFromAudio = latestAudioAt > 0 ? now - latestAudioAt : Infinity;
         const connectedMs = now - session.publisher.connected;
-        const stale = Math.min(staleFromFrame, connectedMs);
+        const stale = Math.min(staleFromFrame, staleFromAudio, connectedMs);
         if (stale > PUBLISHER_TIMEOUT_MS) {
           console.log(`[registry] Publisher ${session.publisher.id.slice(0, 8)} stale (${Math.round(stale / 1000)}s, frames=${session.publisher.frameCount}) in session=${sessionId}, evicting`);
           this.totalDroppedFrames += session.publisher.timing.droppedFrames;
