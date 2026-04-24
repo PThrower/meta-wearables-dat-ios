@@ -96,19 +96,21 @@ export function resolveWorkflowToApp(
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
 ): AppDefinition {
-  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b");
-  if (!aiNode) throw new Error("No AI node found in workflow");
+  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b" || n.type === "jepa-vision");
+  if (!aiNode) throw new Error("No AI or JEPA node found in workflow");
 
   // Map node type to primitive binding
   const bindingMap: Record<string, string> = {
     "s2s-live": "s2s-gemini-live",
     "s2s-rest": "s2s-gemma4-rest",
     "s2s-e4b": "s2s-gemma4-e4b-rest",
+    "jepa-vision": "jepa-vjepa2",
   };
+  const isJepa = aiNode.type === "jepa-vision";
   const binding = bindingMap[aiNode.type] ?? "s2s-gemini-live";
 
   const config: AppConfig = {
-    model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
+    model: (aiNode.config.model as string) ?? (isJepa ? "vjepa2-vit-l" : "gemini-2.5-flash-native-audio-latest"),
     voice: aiNode.config.voice as string | undefined,
     visionFps: (aiNode.config.visionFps as number) ?? 1,
     temperature: aiNode.config.temperature as number | undefined,
@@ -203,12 +205,14 @@ export function resolveWorkflowToPipeline(
   workflow: { id: string; name: string },
 ): AppDefinition[] {
   const aiNodes = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b");
-  if (aiNodes.length === 0) throw new Error("No AI node found in workflow");
+  const jepaNodes = nodes.filter(n => n.type === "jepa-vision");
+  if (aiNodes.length === 0 && jepaNodes.length === 0) throw new Error("No AI or JEPA node found in workflow");
 
   const bindingMap: Record<string, string> = {
     "s2s-live": "s2s-gemini-live",
     "s2s-rest": "s2s-gemma4-rest",
     "s2s-e4b": "s2s-gemma4-e4b-rest",
+    "jepa-vision": "jepa-vjepa2",
   };
 
   // Shared input config from stream-input node
@@ -231,48 +235,65 @@ export function resolveWorkflowToPipeline(
     recording: outputNode?.config.recording !== false,
   };
 
-  return aiNodes.map((aiNode, idx) => {
-    const binding = bindingMap[aiNode.type] ?? "s2s-gemini-live";
-    const systemPrompt = findPromptForAiNode(aiNode.id, nodes, edges);
-    const visionFps = (aiNode.config.visionFps as number) ?? baseInput.visionFps;
+  // Build pipeline entries from AI + JEPA nodes
+  const allProcessableNodes = [...aiNodes, ...jepaNodes];
 
-    // Per-AI input config: each AI node can override the shared input
+  return allProcessableNodes.map((node, idx) => {
+    const isJepa = node.type === "jepa-vision";
+    const binding = bindingMap[node.type] ?? "s2s-gemini-live";
+    const systemPrompt = isJepa ? "jepa-vision" : findPromptForAiNode(node.id, nodes, edges);
+    const visionFps = (node.config.visionFps as number) ?? baseInput.visionFps;
+
+    // Per-node input config: each node can override the shared input
     const input: InputConfig = {
-      video: aiNode.config.video !== undefined ? aiNode.config.video as boolean : baseInput.video,
-      phoneMic: aiNode.config.phoneMic !== undefined ? aiNode.config.phoneMic as boolean : baseInput.phoneMic,
-      glassesMic: aiNode.config.glassesMic !== undefined ? aiNode.config.glassesMic as boolean : baseInput.glassesMic,
-      gestures: aiNode.config.gestures !== undefined ? aiNode.config.gestures as boolean : baseInput.gestures,
+      video: node.config.video !== undefined ? node.config.video as boolean : baseInput.video,
+      phoneMic: node.config.phoneMic !== undefined ? node.config.phoneMic as boolean : baseInput.phoneMic,
+      glassesMic: node.config.glassesMic !== undefined ? node.config.glassesMic as boolean : baseInput.glassesMic,
+      gestures: node.config.gestures !== undefined ? node.config.gestures as boolean : baseInput.gestures,
       visionFps,
     };
 
-    // Per-AI output config: each AI node can route to different channels
-    // First AI gets speaker, subsequent AIs default to overlays + recording only
-    const isPrimary = idx === 0;
+    // Per-node output config: each node can route to different channels
+    // First AI gets speaker, subsequent nodes default to overlays + recording only
+    // JEPA nodes don't get speaker (they emit events, not audio)
+    const isPrimary = idx === 0 && !isJepa;
     const output: OutputConfig = {
-      viewers: aiNode.config.viewers !== undefined ? aiNode.config.viewers as boolean : baseOutput.viewers,
-      overlays: aiNode.config.overlays !== undefined ? aiNode.config.overlays as boolean : baseOutput.overlays,
-      speaker: aiNode.config.speaker !== undefined ? aiNode.config.speaker as boolean : (isPrimary && baseOutput.speaker),
-      recording: aiNode.config.recording !== undefined ? aiNode.config.recording as boolean : baseOutput.recording,
+      viewers: node.config.viewers !== undefined ? node.config.viewers as boolean : baseOutput.viewers,
+      overlays: node.config.overlays !== undefined ? node.config.overlays as boolean : baseOutput.overlays,
+      speaker: isJepa ? false : (node.config.speaker !== undefined ? node.config.speaker as boolean : (isPrimary && baseOutput.speaker)),
+      recording: node.config.recording !== undefined ? node.config.recording as boolean : baseOutput.recording,
     };
 
     const config: AppConfig = {
-      model: (aiNode.config.model as string) ?? "gemini-2.5-flash-native-audio-latest",
-      voice: aiNode.config.voice as string | undefined,
+      model: (node.config.model as string) ?? (isJepa ? "vjepa2-vit-l" : "gemini-2.5-flash-native-audio-latest"),
+      voice: node.config.voice as string | undefined,
       visionFps,
-      temperature: aiNode.config.temperature as number | undefined,
+      temperature: node.config.temperature as number | undefined,
       input,
       output,
       lifecycle,
+      // JEPA-specific config passed through for orchestrator activation
+      ...(isJepa ? {
+        jepa: {
+          provider: (node.config.provider as string) ?? "modal",
+          tier: (node.config.tier as string) ?? "cloud",
+          gpu: (node.config.gpu as string) ?? "A100-80GB",
+          clipLength: (node.config.clipLength as number) ?? 16,
+          sampleFps: (node.config.sampleFps as number) ?? 2,
+          resolution: (node.config.resolution as number) ?? 224,
+          tasks: node.config.tasks ?? [{ type: "anomaly" }, { type: "action" }],
+        },
+      } : {}),
     };
 
-    // Use AI node label in the app name if available
-    const aiLabel = aiNode.label ? ` - ${aiNode.label}` : "";
-    const suffix = aiNodes.length > 1 ? ` [${idx + 1}]` : "";
+    // Use node label in the app name if available
+    const nodeLabel = node.label ? ` - ${node.label}` : "";
+    const suffix = allProcessableNodes.length > 1 ? ` [${idx + 1}]` : "";
 
     return {
-      id: aiNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
-      name: `${workflow.name}${aiLabel}${suffix}`,
-      description: `Workflow: ${workflow.name} (${aiNode.type})`,
+      id: allProcessableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
+      name: `${workflow.name}${nodeLabel}${suffix}`,
+      description: `Workflow: ${workflow.name} (${node.type})`,
       icon: "workflow",
       binding,
       systemPrompt,

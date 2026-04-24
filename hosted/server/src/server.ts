@@ -779,11 +779,12 @@ const server = Bun.serve<WsData>({
       edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
     ): string | null {
       const allowed: Record<string, Set<string>> = {
-        "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+        "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
         "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
-        "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
-        "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
-        "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "output"]),
+        "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+        "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+        "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
+        "jepa-vision": new Set(["output"]),
       };
       const nodeMap = new Map(nodes.map(n => [n.id, n.type]));
       const nodeIds = new Set(nodes.map(n => n.id));
@@ -1462,6 +1463,21 @@ const server = Bun.serve<WsData>({
                 session.activeAppId = virtualApp.id;
                 session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
                 await orchestrator.activateWithConfig(sessionId, virtualApp);
+                // Activate JEPA node if present in workflow
+                const jepaNode = nodes.find((n: any) => n.type === "jepa-vision");
+                if (jepaNode && virtualApp.config?.jepa) {
+                  const jc = virtualApp.config.jepa;
+                  await jepaOrchestrator.activate(sessionId, {
+                    provider: jc.provider,
+                    model: jc.model ?? virtualApp.config.model,
+                    gpu: jc.gpu,
+                    clipLength: jc.clipLength,
+                    sampleFps: jc.sampleFps,
+                    resolution: jc.resolution,
+                    tasks: jc.tasks,
+                    sessionId,
+                  });
+                }
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
                 const ic = orchestrator.getInputConfig(sessionId);
                 if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
