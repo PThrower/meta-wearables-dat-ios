@@ -328,16 +328,37 @@ function _watchLiveInner(sessionId: string, shareToken?: string): boolean {
 
     // Publisher status
     if (msg.type === "publisher_status") {
-      const s = (msg as { status: string }).status;
+      const s = (msg as { status: string; reason?: string; reconnectHint?: { deviceBound?: boolean; estimatedResumeMs?: number } }).status;
+      const reason = (msg as { reason?: string }).reason;
+      const reconnectHint = (msg as { reconnectHint?: { deviceBound?: boolean; estimatedResumeMs?: number } }).reconnectHint;
       if (s === "live") {
         setPill(pubPill, "PUB LIVE", "status-live");
         showToast("Publisher streaming", "info");
       } else if (s === "standby") {
         setPill(pubPill, "PUB READY", "status-standby");
         showToast("Publisher ready (standby)", "info");
-      } else if (s === "dropped") {
-        setPill(pubPill, "PUB DROP", "status-error");
-        showToast("Publisher disconnected", "warn");
+      } else if (s === "paused") {
+        setPill(pubPill, "PAUSED", "status-standby");
+        showToast("Stream paused", "info");
+      } else if (s === "dropped" || s === "orphaned") {
+        if (reconnectHint?.deviceBound) {
+          setPill(pubPill, "RECONNECTING", "status-warn");
+          showToast("Publisher disconnected — reconnecting...", "warn");
+          connOverlay.classList.remove("hidden");
+          connSpinner.classList.remove("hidden");
+          connStatus.textContent = "Reconnecting...";
+          connStatus.className = "connection-status";
+          if (reconnectHint.estimatedResumeMs) {
+            const sec = Math.round(reconnectHint.estimatedResumeMs / 1000);
+            connDetail.textContent = `Device reconnecting (~${sec}s)`;
+          } else {
+            connDetail.textContent = "Waiting for device...";
+          }
+        } else {
+          setPill(pubPill, "PUB DROP", "status-error");
+          const detail = reason === "stale_timeout" ? "No frames received" : "Publisher disconnected";
+          showToast(detail, "warn");
+        }
       }
     }
 

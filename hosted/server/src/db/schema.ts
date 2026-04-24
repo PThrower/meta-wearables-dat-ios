@@ -111,6 +111,10 @@ export const sessions = sqliteTable("sessions", {
   audioSampleRate: integer("audio_sample_rate"),
   r2MetaWritten: integer("r2_meta_written").notNull().default(0),
   notes: text("notes"),
+  state: text("state").notNull().default("active"),  // created, standby, active, paused, orphaned, ended, expired
+  stateEnteredAt: text("state_entered_at"),
+  dropReason: text("drop_reason"),
+  ephemeral: integer("ephemeral").notNull().default(0),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [

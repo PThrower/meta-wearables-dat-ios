@@ -131,8 +131,7 @@ export class SessionRegistry {
       };
       this.sessions.set(id, session);
 
-      // Emit created event
-      stateMachine.transition(id, "created" as any, "created" as any, undefined, { ephemeral: false });
+      // Log session creation (no self-transition — created is the initial state)
       console.log(`[registry] Session created: ${id}`);
 
       // Shadow write: session created (skip for ephemeral)
@@ -533,16 +532,8 @@ export class SessionRegistry {
     if (!session) return;
     if (session.state !== "paused") return;
 
-    // State machine transition
-    stateMachine.transition(sessionId, "paused", "active", undefined, {
-      publisherId: session.publisher?.id,
-      viewerCount: session.viewers.size,
-    });
-    session.state = "active";
-    session.stateEnteredAt = Date.now();
-    if (session.publisher) session.publisher.standby = false;
-
-    // Re-create recorder
+    // activatePublisher handles: state transition, standby flag, recorder creation
+    // Publisher should still have standby=true from pauseSession
     await this.activatePublisher(sessionId);
 
     console.log(`[registry] Session resumed: ${sessionId}`);
