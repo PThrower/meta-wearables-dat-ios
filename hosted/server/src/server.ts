@@ -52,6 +52,7 @@ import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
+import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure } from "./node-definitions.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -774,18 +775,11 @@ const server = Bun.serve<WsData>({
     // --- Workflow CRUD ---
 
     /** Validate workflow edges — returns error string or null */
+    const ALLOWED_EDGE_MAP = buildAllowedEdgeMap();
     function validateEdges(
       nodes: Array<{ id: string; type: string }>,
       edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
     ): string | null {
-      const allowed: Record<string, Set<string>> = {
-        "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-        "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
-        "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-        "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-        "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-        "jepa-vision": new Set(["output"]),
-      };
       const nodeMap = new Map(nodes.map(n => [n.id, n.type]));
       const nodeIds = new Set(nodes.map(n => n.id));
 
@@ -795,11 +789,16 @@ const server = Bun.serve<WsData>({
         }
         const srcType = nodeMap.get(e.sourceNodeId)!;
         const tgtType = nodeMap.get(e.targetNodeId)!;
-        if (!allowed[srcType]?.has(tgtType)) {
+        if (!ALLOWED_EDGE_MAP.get(srcType)?.has(tgtType)) {
           return `Invalid edge: ${srcType} -> ${tgtType}`;
         }
       }
       return null;
+    }
+
+    // Node definitions (single source of truth for frontend)
+    if (url.pathname === "/api/node-definitions" && req.method === "GET") {
+      return Response.json(NODE_DEFINITIONS);
     }
 
     // List workflows
@@ -831,12 +830,10 @@ const server = Bun.serve<WsData>({
         const nodes = body.nodes ?? [];
         const edges = body.edges ?? [];
 
-        // Validate: exactly 1 source, 1 AI node, 1 output
-        const sourceCount = nodes.filter(n => n.type === "stream-input").length;
-        const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
-        const outputCount = nodes.filter(n => n.type === "output").length;
-        if (nodes.length > 0 && (sourceCount !== 1 || aiCount < 1 || outputCount !== 1)) {
-          return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
+        // Validate: exactly 1 source, at least 1 processor, 1 output
+        if (nodes.length > 0) {
+          const structErr = validateStructure(nodes);
+          if (structErr) return Response.json({ error: structErr }, { status: 400 });
         }
         const edgeErr = validateEdges(nodes, edges);
         if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
@@ -909,12 +906,8 @@ const server = Bun.serve<WsData>({
 
           // Validate if nodes provided
           if (body.nodes) {
-            const sourceCount = body.nodes.filter(n => n.type === "stream-input").length;
-            const aiCount = body.nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
-            const outputCount = body.nodes.filter(n => n.type === "output").length;
-            if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
-              return Response.json({ error: "Must have exactly 1 stream-input, at least 1 AI node, and 1 output" }, { status: 400 });
-            }
+            const structErr = validateStructure(body.nodes);
+            if (structErr) return Response.json({ error: structErr }, { status: 400 });
             const edgeErr = validateEdges(body.nodes, body.edges ?? q.getWorkflowEdges(wfId));
             if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
           }
@@ -972,12 +965,8 @@ const server = Bun.serve<WsData>({
         const edges = q.getWorkflowEdges(wfId);
 
         // Validate chain
-        const sourceCount = nodes.filter(n => n.type === "stream-input").length;
-        const aiCount = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b").length;
-        const outputCount = nodes.filter(n => n.type === "output").length;
-        if (sourceCount !== 1 || aiCount < 1 || outputCount !== 1) {
-          return Response.json({ error: "Invalid workflow: must have 1 source, 1 AI node, 1 output" }, { status: 400 });
-        }
+        const structErr = validateStructure(nodes);
+        if (structErr) return Response.json({ error: structErr }, { status: 400 });
         const edgeErr = validateEdges(nodes, edges);
         if (edgeErr) return Response.json({ error: edgeErr }, { status: 400 });
 
@@ -1463,20 +1452,27 @@ const server = Bun.serve<WsData>({
                 session.activeAppId = virtualApp.id;
                 session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
                 await orchestrator.activateWithConfig(sessionId, virtualApp);
-                // Activate JEPA node if present in workflow
-                const jepaNode = nodes.find((n: any) => n.type === "jepa-vision");
-                if (jepaNode && virtualApp.config?.jepa) {
-                  const jc = virtualApp.config.jepa;
-                  await jepaOrchestrator.activate(sessionId, {
-                    provider: jc.provider,
-                    model: jc.model ?? virtualApp.config.model,
-                    gpu: jc.gpu,
-                    clipLength: jc.clipLength,
-                    sampleFps: jc.sampleFps,
-                    resolution: jc.resolution,
-                    tasks: jc.tasks,
-                    sessionId,
-                  });
+                // Activate processable nodes by activationMode
+                const processableNodes = nodes.filter((n: any) => {
+                  const def = NODE_DEF_MAP.get(n.type);
+                  return def && def.activationMode !== null;
+                });
+                for (const pNode of processableNodes) {
+                  const def = NODE_DEF_MAP.get((pNode as any).type);
+                  if (def?.activationMode === "jepa" && virtualApp.config?.jepa) {
+                    const jc = virtualApp.config.jepa;
+                    await jepaOrchestrator.activate(sessionId, {
+                      provider: jc.provider,
+                      model: jc.model ?? virtualApp.config.model,
+                      gpu: jc.gpu,
+                      clipLength: jc.clipLength,
+                      sampleFps: jc.sampleFps,
+                      resolution: jc.resolution,
+                      tasks: jc.tasks,
+                      sessionId,
+                    });
+                  }
+                  // "ai" mode already handled by orchestrator.activateWithConfig above
                 }
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
                 const ic = orchestrator.getInputConfig(sessionId);

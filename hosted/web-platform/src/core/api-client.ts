@@ -275,7 +275,7 @@ export interface WorkflowSummary {
 
 export interface WorkflowNodeDef {
   id: string;
-  type: "stream-input" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
+  type: string;  // resolved from node-definitions registry
   label: string;
   config: Record<string, unknown>;
   positionX: number;
@@ -367,4 +367,36 @@ export async function activateWorkflow(
 /** Fetch available primitives */
 export function fetchPrimitives(): Promise<Array<{ id: string; name: string; icon: string }>> {
   return apiGet<Array<{ id: string; name: string; icon: string }>>("/primitives").then(r => r ?? []);
+}
+
+// --- Node Definitions (schema-driven workflow UI) ---
+
+export type ConfigFieldSchema =
+  | { kind: "text"; key: string; label: string; placeholder?: string }
+  | { kind: "textarea"; key: string; label: string; rows?: number; placeholder?: string }
+  | { kind: "select"; key: string; label: string; options: Array<{ value: string; label: string }> }
+  | { kind: "range"; key: string; label: string; min: number; max: number; step: number; unit?: string }
+  | { kind: "checkbox"; key: string; label: string }
+  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number }
+  | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
+  | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
+
+export interface NodeDefinition {
+  type: string;
+  label: string;
+  subtitle: string;
+  color: { fill: string; header: string; stroke: string };
+  allowedTargets: string[];
+  role: "source" | "processor" | "reference" | "sink";
+  activationMode: "ai" | "jepa" | "passthrough" | null;
+  binding: string | null;
+  defaultModel: string | null;
+  configSchema: ConfigFieldSchema[];
+  defaultConfig: Record<string, unknown>;
+  defaultLabel: string;
+}
+
+export async function fetchNodeDefinitions(): Promise<NodeDefinition[]> {
+  const defs = await apiGet<NodeDefinition[]>("/api/node-definitions");
+  return defs ?? [];
 }

@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
+import { NODE_DEF_MAP } from "./node-definitions.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -96,21 +97,18 @@ export function resolveWorkflowToApp(
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
 ): AppDefinition {
-  const aiNode = nodes.find(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b" || n.type === "jepa-vision");
-  if (!aiNode) throw new Error("No AI or JEPA node found in workflow");
+  const aiNode = nodes.find(n => {
+    const def = NODE_DEF_MAP.get(n.type);
+    return def && def.activationMode !== null;
+  });
+  if (!aiNode) throw new Error("No processable node found in workflow");
 
-  // Map node type to primitive binding
-  const bindingMap: Record<string, string> = {
-    "s2s-live": "s2s-gemini-live",
-    "s2s-rest": "s2s-gemma4-rest",
-    "s2s-e4b": "s2s-gemma4-e4b-rest",
-    "jepa-vision": "jepa-vjepa2",
-  };
-  const isJepa = aiNode.type === "jepa-vision";
-  const binding = bindingMap[aiNode.type] ?? "s2s-gemini-live";
+  const def = NODE_DEF_MAP.get(aiNode.type)!;
+  const binding = def.binding ?? "s2s-gemini-live";
+  const isJepa = def.activationMode === "jepa";
 
   const config: AppConfig = {
-    model: (aiNode.config.model as string) ?? (isJepa ? "vjepa2-vit-l" : "gemini-2.5-flash-native-audio-latest"),
+    model: (aiNode.config.model as string) ?? (def.defaultModel ?? "gemini-2.5-flash-native-audio-latest"),
     voice: aiNode.config.voice as string | undefined,
     visionFps: (aiNode.config.visionFps as number) ?? 1,
     temperature: aiNode.config.temperature as number | undefined,
@@ -195,25 +193,20 @@ export function extractLifecyclePolicy(inputNode: WorkflowNodeDef | undefined): 
 }
 
 /**
- * Resolve workflow into a multi-AI pipeline.
- * Each AI node becomes its own AppDefinition with per-node prompt and config.
- * For single-AI workflows, returns an array of one (backward compat with resolveWorkflowToApp).
+ * Resolve workflow into a multi-node pipeline.
+ * Each processable node becomes its own AppDefinition with per-node prompt and config.
+ * For single-node workflows, returns an array of one (backward compat with resolveWorkflowToApp).
  */
 export function resolveWorkflowToPipeline(
   nodes: WorkflowNodeDef[],
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
 ): AppDefinition[] {
-  const aiNodes = nodes.filter(n => n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b");
-  const jepaNodes = nodes.filter(n => n.type === "jepa-vision");
-  if (aiNodes.length === 0 && jepaNodes.length === 0) throw new Error("No AI or JEPA node found in workflow");
-
-  const bindingMap: Record<string, string> = {
-    "s2s-live": "s2s-gemini-live",
-    "s2s-rest": "s2s-gemma4-rest",
-    "s2s-e4b": "s2s-gemma4-e4b-rest",
-    "jepa-vision": "jepa-vjepa2",
-  };
+  const processableNodes = nodes.filter(n => {
+    const def = NODE_DEF_MAP.get(n.type);
+    return def && def.activationMode !== null;
+  });
+  if (processableNodes.length === 0) throw new Error("No processable node found in workflow");
 
   // Shared input config from stream-input node
   const inputNode = nodes.find(n => n.type === "stream-input");
@@ -235,12 +228,10 @@ export function resolveWorkflowToPipeline(
     recording: outputNode?.config.recording !== false,
   };
 
-  // Build pipeline entries from AI + JEPA nodes
-  const allProcessableNodes = [...aiNodes, ...jepaNodes];
-
-  return allProcessableNodes.map((node, idx) => {
-    const isJepa = node.type === "jepa-vision";
-    const binding = bindingMap[node.type] ?? "s2s-gemini-live";
+  return processableNodes.map((node, idx) => {
+    const def = NODE_DEF_MAP.get(node.type)!;
+    const isJepa = def.activationMode === "jepa";
+    const binding = def.binding ?? "s2s-gemini-live";
     const systemPrompt = isJepa ? "jepa-vision" : findPromptForAiNode(node.id, nodes, edges);
     const visionFps = (node.config.visionFps as number) ?? baseInput.visionFps;
 
@@ -253,9 +244,7 @@ export function resolveWorkflowToPipeline(
       visionFps,
     };
 
-    // Per-node output config: each node can route to different channels
-    // First AI gets speaker, subsequent nodes default to overlays + recording only
-    // JEPA nodes don't get speaker (they emit events, not audio)
+    // Per-node output config
     const isPrimary = idx === 0 && !isJepa;
     const output: OutputConfig = {
       viewers: node.config.viewers !== undefined ? node.config.viewers as boolean : baseOutput.viewers,
@@ -265,14 +254,13 @@ export function resolveWorkflowToPipeline(
     };
 
     const config: AppConfig = {
-      model: (node.config.model as string) ?? (isJepa ? "vjepa2-vit-l" : "gemini-2.5-flash-native-audio-latest"),
+      model: (node.config.model as string) ?? (def.defaultModel ?? "gemini-2.5-flash-native-audio-latest"),
       voice: node.config.voice as string | undefined,
       visionFps,
       temperature: node.config.temperature as number | undefined,
       input,
       output,
       lifecycle,
-      // JEPA-specific config passed through for orchestrator activation
       ...(isJepa ? {
         jepa: {
           provider: (node.config.provider as string) ?? "modal",
@@ -288,10 +276,10 @@ export function resolveWorkflowToPipeline(
 
     // Use node label in the app name if available
     const nodeLabel = node.label ? ` - ${node.label}` : "";
-    const suffix = allProcessableNodes.length > 1 ? ` [${idx + 1}]` : "";
+    const suffix = processableNodes.length > 1 ? ` [${idx + 1}]` : "";
 
     return {
-      id: allProcessableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
+      id: processableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
       name: `${workflow.name}${nodeLabel}${suffix}`,
       description: `Workflow: ${workflow.name} (${node.type})`,
       icon: "workflow",

@@ -10,9 +10,9 @@
 import type { PageModule } from "../router/router.js";
 import {
   fetchWorkflows, fetchWorkflow, createWorkflow, updateWorkflow, deleteWorkflow,
-  activateWorkflow, fetchSessions, esc, formatDateTime,
+  activateWorkflow, fetchSessions, fetchNodeDefinitions, esc, formatDateTime,
 } from "../core/api-client.js";
-import type { WorkflowSummary, WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef, SessionInfo } from "../core/api-client.js";
+import type { WorkflowSummary, WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef, SessionInfo, NodeDefinition, ConfigFieldSchema } from "../core/api-client.js";
 
 export const page: PageModule = {
   init(container) {
@@ -41,6 +41,10 @@ let _workflow: WorkflowDetail | null = null;
 let _dirty = false;
 let _selectedNodeId: string | null = null;
 
+// Node definitions (fetched from server, single source of truth)
+let _nodeDefs: NodeDefinition[] = [];
+let _nodeDefMap = new Map<string, NodeDefinition>();
+
 // SVG drag state
 let _dragState: { nodeId: string; startX: number; startY: number; nodeStartX: number; nodeStartY: number } | null = null;
 let _edgeState: { sourceNodeId: string; tempLine: SVGLineElement } | null = null;
@@ -51,29 +55,12 @@ let _viewX = 0;
 let _viewY = 0;
 let _zoom = 1;
 
-const NODE_COLORS: Record<string, { fill: string; header: string; stroke: string }> = {
-  "stream-input": { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-  "text": { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" },
-  "s2s-live": { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
-  "s2s-rest": { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
-  "s2s-e4b": { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" },
-  "jepa-vision": { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" },
-  "output": { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-};
-
 const NODE_W = 180;
 const NODE_H = 80;
 const NODE_R = 8;
 
-/** Allowed source -> target connections */
-const ALLOWED_TARGETS: Record<string, Set<string>> = {
-  "stream-input": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-  "text": new Set(["s2s-live", "s2s-rest", "s2s-e4b"]),
-  "s2s-live": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-  "s2s-rest": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-  "s2s-e4b": new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"]),
-  "jepa-vision": new Set(["output"]),
-};
+/** Fallback colors for unknown node types */
+const FALLBACK_COLOR = { fill: "#1a1a1a", header: "#666", stroke: "#666" };
 
 function nanoid(): string {
   return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -184,6 +171,12 @@ async function renderEditor(isNew: boolean): Promise<void> {
   _viewY = 0;
   _zoom = 1;
 
+  // Fetch node definitions from server (single source of truth)
+  if (_nodeDefs.length === 0) {
+    _nodeDefs = await fetchNodeDefinitions();
+    _nodeDefMap = new Map(_nodeDefs.map(d => [d.type, d]));
+  }
+
   if (isNew) {
     const now = Date.now();
     _workflow = {
@@ -220,10 +213,10 @@ async function renderEditor(isNew: boolean): Promise<void> {
       <div class="wf-editor-layout">
         <div class="wf-palette">
           <h3 class="wf-palette-title">Nodes</h3>
-          ${Object.entries(NODE_COLORS).map(([type, c]) => `
-            <button class="wf-palette-item" data-type="${type}">
-              <span class="wf-palette-dot" style="background:${c.header}"></span>
-              <span class="wf-palette-label">${({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "jepa-vision": "JEPA Vision", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " ")}</span>
+          ${_nodeDefs.map(d => `
+            <button class="wf-palette-item" data-type="${d.type}">
+              <span class="wf-palette-dot" style="background:${d.color.header}"></span>
+              <span class="wf-palette-label">${esc(d.label)}</span>
             </button>
           `).join("")}
         </div>
@@ -254,21 +247,9 @@ function buildSVG(): string {
   const edges = _workflow.edges;
 
   const nodeSVGs = nodes.map(n => {
-    const c = NODE_COLORS[n.type] ?? NODE_COLORS["output"];
-    const configSummary = n.type === "s2s-live" || n.type === "s2s-rest" || n.type === "s2s-e4b"
-      ? (n.config.model as string ?? "").slice(0, 20)
-      : n.type === "jepa-vision"
-      ? `${(n.config.model as string ?? "vjepa2-vit-l").slice(0, 14)} | ${(n.config.provider as string ?? "modal")}`
-      : n.type === "text"
-        ? ((n.config.text as string) ?? "").slice(0, 22) || "Empty"
-        : n.type === "output"
-        ? Object.entries({ viewers: "view", overlays: "overlay", speaker: "speaker", recording: "rec" })
-            .filter(([, k]) => n.config[k] !== false)
-            .map(([l]) => l)
-            .join(", ") || "all"
-        : n.type === "stream-input"
-          ? [n.config.video !== false ? "video" : "", n.config.phoneMic !== false ? "phone-mic" : "", n.config.glassesMic === true ? "glasses-mic" : "", n.config.gestures !== false ? "gestures" : ""].filter(Boolean).join(", ") || "none"
-          : "Live feed";
+    const def = _nodeDefMap.get(n.type);
+    const c = def?.color ?? FALLBACK_COLOR;
+    const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
     const selected = _selectedNodeId === n.id;
     return `
       <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX}, ${n.positionY})">
@@ -323,20 +304,15 @@ function wireEditorEvents(): void {
   _container?.querySelectorAll(".wf-palette-item").forEach(btn => {
     btn.addEventListener("click", () => {
       if (!_workflow) return;
-      const type = (btn as HTMLElement).dataset.type as WorkflowNodeDef["type"];
+      const type = (btn as HTMLElement).dataset.type as string;
+      const def = _nodeDefMap.get(type);
       const id = nanoid();
       const offset = _workflow.nodes.length * 30;
-      const config = type === "s2s-live" ? { model: "gemini-2.5-flash-native-audio-latest" }
-        : type === "s2s-rest" ? { model: "gemma-4-27b" }
-        : type === "s2s-e4b" ? { model: "gemma-4-e4b-it" }
-        : type === "jepa-vision" ? { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }
-        : type === "text" ? { text: "" }
-        : type === "output" ? { viewers: true, overlays: true, speaker: true, recording: true }
-        : {};
+      const config = def ? { ...def.defaultConfig } : {};
       _workflow.nodes.push({
         id,
         type,
-        label: ({ "stream-input": "Stream Input", "text": "Text", "s2s-live": "S2S Live", "s2s-rest": "S2S REST", "s2s-e4b": "S2S E4B", "jepa-vision": "JEPA Vision", "output": "Output" } as Record<string, string>)[type] ?? type.replace(/-/g, " "),
+        label: def?.defaultLabel ?? type.replace(/-/g, " "),
         config,
         positionX: 200 + offset,
         positionY: 150 + offset,
@@ -659,7 +635,8 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
     if (target && _workflow) {
       // Validate edge compatibility
       const sourceNode = _workflow.nodes.find(n => n.id === _edgeState!.sourceNodeId);
-      const allowed = sourceNode ? ALLOWED_TARGETS[sourceNode.type]?.has(target.type) : false;
+      const sourceDef = sourceNode ? _nodeDefMap.get(sourceNode.type) : null;
+      const allowed = sourceDef ? sourceDef.allowedTargets.includes(target.type) : false;
       if (!allowed) { _edgeState = null; return; }
 
       const exists = _workflow.edges.some(e =>
@@ -685,6 +662,76 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
   document.addEventListener("mouseup", onUp);
 }
 
+// --- Subtitle resolver ---
+
+function resolveSubtitle(template: string, config: Record<string, unknown>): string {
+  if (template === "${_channels}") {
+    return Object.entries({ viewers: "view", overlays: "overlay", speaker: "speaker", recording: "rec" })
+      .filter(([, k]) => config[k] !== false)
+      .map(([l]) => l)
+      .join(", ") || "all";
+  }
+  if (template === "${_modalities}") {
+    return [
+      config.video !== false ? "video" : "",
+      config.phoneMic !== false ? "phone-mic" : "",
+      config.glassesMic === true ? "glasses-mic" : "",
+      config.gestures !== false ? "gestures" : "",
+    ].filter(Boolean).join(", ") || "none";
+  }
+  return template.replace(/\$\{(\w+)\}/g, (_, key) => {
+    const val = config[key];
+    if (val === undefined || val === "") return "";
+    return String(val).slice(0, 22);
+  });
+}
+
+// --- Generic config field renderer ---
+
+function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDef): string {
+  switch (field.kind) {
+    case "text": {
+      const val = field.key === "label" ? node.label : String(node.config[field.key] ?? "");
+      const dataField = field.key === "label" ? "label" : `config.${field.key}`;
+      return `<div class="wf-config-field"><label>${esc(field.label)}</label><input type="text" class="wf-config-input" data-field="${dataField}" value="${esc(val)}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""} /></div>`;
+    }
+    case "textarea": {
+      const val = String(node.config[field.key] ?? "");
+      return `<div class="wf-config-field"><label>${esc(field.label)}</label><textarea class="wf-config-input wf-config-textarea" data-field="config.${field.key}" rows="${field.rows ?? 4}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""}>${esc(val)}</textarea></div>`;
+    }
+    case "select": {
+      const val = String(node.config[field.key] ?? "");
+      const options = field.options.map(o => `<option value="${esc(o.value)}" ${val === o.value ? "selected" : ""}>${esc(o.label)}</option>`).join("");
+      return `<div class="wf-config-field"><label>${esc(field.label)}</label><select class="wf-config-input" data-field="config.${field.key}">${options}</select></div>`;
+    }
+    case "range": {
+      const val = (node.config[field.key] as number) ?? field.min;
+      return `<div class="wf-config-field"><label>${esc(field.label)}: ${val}${field.unit ?? ""}</label><input type="range" min="${field.min}" max="${field.max}" step="${field.step}" data-field="config.${field.key}" value="${val}" /></div>`;
+    }
+    case "checkbox": {
+      const checked = node.config[field.key] === true;
+      return `<div class="wf-config-field"><label><input type="checkbox" data-field="config.${field.key}" ${checked ? "checked" : ""} /> ${esc(field.label)}</label></div>`;
+    }
+    case "checkbox-group": {
+      const checks = field.fields.map(f => {
+        const checked = node.config[f.key] !== false;
+        return `<label><input type="checkbox" data-field="config.${f.key}" ${checked ? "checked" : ""} /> ${esc(f.label)}</label>`;
+      }).join("");
+      return `<div class="wf-config-field"><label>${esc(field.label)}</label><div class="wf-config-checks">${checks}</div></div>`;
+    }
+    case "number": {
+      const val = (node.config[field.key] as number) ?? 0;
+      return `<div class="wf-config-field"><label>${esc(field.label)}</label><input type="number" class="wf-config-input" data-field="config.${field.key}" min="${field.min ?? ""}" max="${field.max ?? ""}" step="${field.step ?? 1}" value="${val}" /></div>`;
+    }
+    case "section": {
+      const inner = field.fields.map(f => renderConfigField(f, node)).join("");
+      return `<div class="wf-config-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"><label style="font-weight: 600; margin-bottom: 6px; display: block;">${esc(field.label)}</label>${inner}</div>`;
+    }
+  }
+}
+
+// --- Config panel (schema-driven) ---
+
 function renderConfigPanel(): void {
   const panel = _container?.querySelector("#wf-config-panel");
   if (!panel || !_workflow) return;
@@ -697,264 +744,18 @@ function renderConfigPanel(): void {
   const node = _workflow.nodes.find(n => n.id === _selectedNodeId);
   if (!node) { panel.innerHTML = '<p class="empty-state">Select a node</p>'; return; }
 
-  const c = NODE_COLORS[node.type] ?? NODE_COLORS["output"];
+  const def = _nodeDefMap.get(node.type);
+  if (!def) { panel.innerHTML = '<p class="empty-state">Unknown node type</p>'; return; }
 
-  if (node.type === "stream-input") {
-    const fps = (node.config.visionFps as number) ?? 1;
-    const video = node.config.video !== false;
-    const phoneMic = node.config.phoneMic !== false;
-    const glassesMic = node.config.glassesMic === true;
-    const gestures = node.config.gestures !== false;
-    const onDisconnect = (node.config.onDisconnect as string) ?? "stop";
-    const onReconnect = (node.config.onReconnect as string) ?? "restart";
-    const autoDeactivateMin = (node.config.autoDeactivateMin as number | null) ?? null;
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">Input</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Modalities</label>
-        <div class="wf-config-checks">
-          <label><input type="checkbox" data-field="config.video" ${video ? "checked" : ""} /> Video (frames)</label>
-          <label><input type="checkbox" data-field="config.phoneMic" ${phoneMic ? "checked" : ""} /> Phone mic (48kHz)</label>
-          <label><input type="checkbox" data-field="config.glassesMic" ${glassesMic ? "checked" : ""} /> Glasses HFP mic (8kHz)</label>
-          <label><input type="checkbox" data-field="config.gestures" ${gestures ? "checked" : ""} /> Gestures</label>
-        </div>
-      </div>
-      <div class="wf-config-field">
-        <label>Vision FPS: ${fps}</label>
-        <input type="range" min="0.2" max="2" step="0.1" data-field="config.visionFps" value="${fps}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Video Codec</label>
-        <select class="wf-config-input" data-field="config.codec">
-          <option value="jpeg" ${(node.config.codec as string ?? "jpeg") === "jpeg" ? "selected" : ""}>JPEG (compatible with AI models)</option>
-          <option value="h264" ${(node.config.codec as string) === "h264" ? "selected" : ""}>H.264 (lower bandwidth, viewer-only)</option>
-        </select>
-      </div>
-      <div class="wf-config-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
-        <label style="font-weight: 600; margin-bottom: 6px; display: block;">Lifecycle Policy</label>
-        <div class="wf-config-field">
-          <label>On publisher disconnect</label>
-          <select class="wf-config-input" data-field="config.onDisconnect">
-            <option value="stop" ${onDisconnect === "stop" ? "selected" : ""}>Stop AI</option>
-            <option value="pause" ${onDisconnect === "pause" ? "selected" : ""}>Pause AI</option>
-            <option value="continue" ${onDisconnect === "continue" ? "selected" : ""}>Continue until timeout</option>
-          </select>
-        </div>
-        <div class="wf-config-field">
-          <label>On publisher reconnect</label>
-          <select class="wf-config-input" data-field="config.onReconnect">
-            <option value="restart" ${onReconnect === "restart" ? "selected" : ""}>Restart AI</option>
-            <option value="resume" ${onReconnect === "resume" ? "selected" : ""}>Resume AI</option>
-            <option value="noop" ${onReconnect === "noop" ? "selected" : ""}>No-op</option>
-          </select>
-        </div>
-        <div class="wf-config-field">
-          <label>Auto-deactivate after (min, 0 = never)</label>
-          <input type="number" class="wf-config-input" data-field="config.autoDeactivateMin" min="0" max="480" step="5" value="${autoDeactivateMin ?? 0}" />
-        </div>
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "text") {
-    const text = (node.config.text as string) ?? "";
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">Text / Prompt</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>System Prompt</label>
-        <textarea class="wf-config-input wf-config-textarea" data-field="config.text" rows="10" placeholder="Enter system prompt...">${esc(text)}</textarea>
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "s2s-live") {
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">S2S Live (Gemini)</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Model</label>
-        <select class="wf-config-input" data-field="config.model">
-          <option value="gemini-2.5-flash-native-audio-latest" ${node.config.model === "gemini-2.5-flash-native-audio-latest" ? "selected" : ""}>gemini-2.5-flash-native-audio</option>
-          <option value="gemini-2.0-flash" ${node.config.model === "gemini-2.0-flash" ? "selected" : ""}>gemini-2.0-flash</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Voice</label>
-        <select class="wf-config-input" data-field="config.voice">
-          <option value="">Default</option>
-          <option value="Aoede" ${node.config.voice === "Aoede" ? "selected" : ""}>Aoede</option>
-          <option value="Puck" ${node.config.voice === "Puck" ? "selected" : ""}>Puck</option>
-          <option value="Charon" ${node.config.voice === "Charon" ? "selected" : ""}>Charon</option>
-          <option value="Fenchir" ${node.config.voice === "Fenchir" ? "selected" : ""}>Fenchir</option>
-          <option value="Kore" ${node.config.voice === "Kore" ? "selected" : ""}>Kore</option>
-          <option value="Leda" ${node.config.voice === "Leda" ? "selected" : ""}>Leda</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Vision FPS: ${(node.config.visionFps as number) ?? 1}</label>
-        <input type="range" min="0.5" max="2" step="0.5" data-field="config.visionFps" value="${(node.config.visionFps as number) ?? 1}" />
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "s2s-rest") {
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">S2S REST (Gemma)</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Model</label>
-        <select class="wf-config-input" data-field="config.model">
-          <option value="gemma-4-27b" ${node.config.model === "gemma-4-27b" ? "selected" : ""}>gemma-4-27b</option>
-          <option value="gemma-4-12b" ${node.config.model === "gemma-4-12b" ? "selected" : ""}>gemma-4-12b</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Vision FPS: ${(node.config.visionFps as number) ?? 1}</label>
-        <input type="range" min="0.5" max="2" step="0.5" data-field="config.visionFps" value="${(node.config.visionFps as number) ?? 1}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Temperature: ${(node.config.temperature as number) ?? 0.7}</label>
-        <input type="range" min="0" max="2" step="0.1" data-field="config.temperature" value="${(node.config.temperature as number) ?? 0.7}" />
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "s2s-e4b") {
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">S2S E4B (Gemma Voice)</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Model</label>
-        <select class="wf-config-input" data-field="config.model">
-          <option value="gemma-4-e4b-it" ${node.config.model === "gemma-4-e4b-it" ? "selected" : ""}>gemma-4-e4b-it</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Voice</label>
-        <select class="wf-config-input" data-field="config.voice">
-          <option value="">Default</option>
-          <option value="Aoede" ${node.config.voice === "Aoede" ? "selected" : ""}>Aoede</option>
-          <option value="Puck" ${node.config.voice === "Puck" ? "selected" : ""}>Puck</option>
-          <option value="Charon" ${node.config.voice === "Charon" ? "selected" : ""}>Charon</option>
-          <option value="Kore" ${node.config.voice === "Kore" ? "selected" : ""}>Kore</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Vision FPS: ${(node.config.visionFps as number) ?? 1}</label>
-        <input type="range" min="0.5" max="2" step="0.5" data-field="config.visionFps" value="${(node.config.visionFps as number) ?? 1}" />
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "jepa-vision") {
-    const provider = (node.config.provider as string) ?? "modal";
-    const tier = (node.config.tier as string) ?? "cloud";
-    const gpu = (node.config.gpu as string) ?? "A100-80GB";
-    const clipLength = (node.config.clipLength as number) ?? 16;
-    const sampleFps = (node.config.sampleFps as number) ?? 2;
-    const resolution = (node.config.resolution as number) ?? 224;
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">JEPA Vision</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Model</label>
-        <select class="wf-config-input" data-field="config.model">
-          <option value="vjepa2-vit-l" ${(node.config.model as string ?? "vjepa2-vit-l") === "vjepa2-vit-l" ? "selected" : ""}>V-JEPA 2 ViT-L (1.2B)</option>
-          <option value="lewm-small" ${(node.config.model as string) === "lewm-small" ? "selected" : ""}>LeWorldModel (15M)</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Tier</label>
-        <select class="wf-config-input" data-field="config.tier">
-          <option value="cloud" ${tier === "cloud" ? "selected" : ""}>Cloud (Modal GPU)</option>
-          <option value="mobile" ${tier === "mobile" ? "selected" : ""}>Mobile (On-device)</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Provider</label>
-        <select class="wf-config-input" data-field="config.provider">
-          <option value="modal" ${provider === "modal" ? "selected" : ""}>Modal (cloud)</option>
-          <option value="coreml" ${provider === "coreml" ? "selected" : ""}>CoreML (iOS)</option>
-          <option value="onnx" ${provider === "onnx" ? "selected" : ""}>ONNX (Android)</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>GPU</label>
-        <select class="wf-config-input" data-field="config.gpu">
-          <option value="A100-80GB" ${gpu === "A100-80GB" ? "selected" : ""}>A100 80GB ($2.10/hr)</option>
-          <option value="H100" ${gpu === "H100" ? "selected" : ""}>H100 ($3.95/hr)</option>
-          <option value="A10G" ${gpu === "A10G" ? "selected" : ""}>A10G ($1.10/hr)</option>
-        </select>
-      </div>
-      <div class="wf-config-field">
-        <label>Clip Length: ${clipLength} frames</label>
-        <input type="range" min="4" max="64" step="4" data-field="config.clipLength" value="${clipLength}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Sample FPS: ${sampleFps}</label>
-        <input type="range" min="0.5" max="5" step="0.5" data-field="config.sampleFps" value="${sampleFps}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Resolution: ${resolution}px</label>
-        <select class="wf-config-input" data-field="config.resolution">
-          <option value="224" ${resolution === 224 ? "selected" : ""}>224x224</option>
-          <option value="384" ${resolution === 384 ? "selected" : ""}>384x384</option>
-        </select>
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  } else if (node.type === "output") {
-    const viewers = node.config.viewers !== false;
-    const overlays = node.config.overlays !== false;
-    const speaker = node.config.speaker !== false;
-    const recording = node.config.recording !== false;
-    panel.innerHTML = `
-      <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-        <span class="wf-config-type">Output</span>
-      </div>
-      <div class="wf-config-field">
-        <label>Label</label>
-        <input type="text" class="wf-config-input" data-field="label" value="${esc(node.label)}" />
-      </div>
-      <div class="wf-config-field">
-        <label>Channels</label>
-        <div class="wf-config-checks">
-          <label><input type="checkbox" data-field="config.viewers" ${viewers ? "checked" : ""} /> Viewers (WS fanout)</label>
-          <label><input type="checkbox" data-field="config.overlays" ${overlays ? "checked" : ""} /> Overlays (bbox)</label>
-          <label><input type="checkbox" data-field="config.speaker" ${speaker ? "checked" : ""} /> Speaker (HFP)</label>
-          <label><input type="checkbox" data-field="config.recording" ${recording ? "checked" : ""} /> Recording (R2)</label>
-        </div>
-      </div>
-      <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-    `;
-  }
+  const c = def.color;
+  const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node)).join("");
+  panel.innerHTML = `
+    <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
+      <span class="wf-config-type">${esc(def.label)}</span>
+    </div>
+    ${fieldsHtml}
+    <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
+  `;
 
   // Wire config inputs
   panel.querySelectorAll("[data-field]").forEach(input => {
