@@ -219,6 +219,25 @@ export function fetchDeviceBuildHistory(deviceId: string): Promise<BuildHistoryE
     .then(r => r?.builds ?? []);
 }
 
+/** Bulk delete devices from fleet. Devices re-register on reconnect. */
+export async function deleteDevices(deviceIds: string[]): Promise<{ ok: boolean; deleted: number } | null> {
+  try {
+    const res = await authFetch("/api/devices", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceIds }),
+    });
+    if (!res.ok) {
+      console.warn(`[api] DELETE /api/devices returned ${res.status}`);
+      return null;
+    }
+    return await res.json() as { ok: boolean; deleted: number };
+  } catch (err) {
+    console.warn("[api] DELETE /api/devices failed:", err);
+    return null;
+  }
+}
+
 /** Fetch AI apps */
 export function fetchApps(): Promise<AppInfo[]> {
   return apiGet<{ apps: AppInfo[] } | AppInfo[]>("/apps")

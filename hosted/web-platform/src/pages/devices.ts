@@ -4,7 +4,7 @@
  */
 
 import type { PageModule } from "../router/router.js";
-import { fetchDevices, fetchSessions, fetchDeviceBuildHistory, esc, formatTime } from "../core/api-client.js";
+import { fetchDevices, fetchSessions, fetchDeviceBuildHistory, deleteDevices as apiDeleteDevices, esc, formatTime } from "../core/api-client.js";
 import type { DeviceInfo, SessionInfo, BuildHistoryEntry } from "../core/api-client.js";
 
 export const page: PageModule = {
@@ -22,6 +22,13 @@ export const page: PageModule = {
             <button class="filter-pill active" data-filter="all">All</button>
             <button class="filter-pill" data-filter="online">Online</button>
             <button class="filter-pill" data-filter="offline">Offline</button>
+          </div>
+          <button class="btn btn-sm btn-toggle" id="device-select-toggle">Select</button>
+          <button class="btn btn-sm btn-danger hidden" id="device-delete-btn">Delete (0)</button>
+          <div class="confirm-bar hidden" id="device-confirm-bar">
+            <span class="confirm-text">Remove <strong id="confirm-count">0</strong> devices? They can re-register on reconnect.</span>
+            <button class="btn btn-sm btn-danger" id="confirm-yes">Delete</button>
+            <button class="btn btn-sm" id="confirm-no">Cancel</button>
           </div>
         </div>
         <div id="devices-grid" class="devices-grid">
@@ -42,20 +49,27 @@ export const page: PageModule = {
     bindFilters(container);
     bindSearch(container);
     bindModal(container);
+    bindSelectMode(container);
   },
 
   destroy() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    if (_escHandler) { document.removeEventListener("keydown", _escHandler); _escHandler = null; }
   },
 };
 
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _escHandler: ((e: KeyboardEvent) => void) | null = null;
 let _allDevices: DeviceInfo[] = [];
 let _allSessions: SessionInfo[] = [];
 let _currentFilter = "all";
 let _searchQuery = "";
+let _selectMode = false;
+let _selectedIds = new Set<string>();
+let _container: HTMLElement | null = null;
 
 async function loadDevices(container: HTMLElement): Promise<void> {
+  _container = container;
   const [devices, sessions] = await Promise.all([
     fetchDevices(),
     fetchSessions(),
@@ -124,8 +138,10 @@ function renderGrid(container: HTMLElement, devices: DeviceInfo[], sessions: Ses
   grid.innerHTML = filtered.map(d => {
     const deviceSessions = sessions.filter(s => s.device?.deviceName === d.deviceName);
     const liveCount = deviceSessions.filter(s => s.live).length;
+    const selected = _selectedIds.has(d.device_id);
     return `
-      <div class="device-card" data-device-id="${esc(d.device_id)}">
+      <div class="device-card${_selectMode ? " select-mode" : ""}${selected ? " selected" : ""}" data-device-id="${esc(d.device_id)}">
+        ${_selectMode ? `<input type="checkbox" class="device-card-checkbox" ${selected ? "checked" : ""} />` : ""}
         <div class="device-card-header">
           <span class="device-name">${esc(d.deviceName || d.device_id || "Unknown")}</span>
           <div class="device-card-badges">
@@ -169,11 +185,29 @@ function renderGrid(container: HTMLElement, devices: DeviceInfo[], sessions: Ses
     `;
   }).join("");
 
-  // Bind card clicks to modal
+  // Bind card clicks
   grid.querySelectorAll(".device-card").forEach(card => {
-    card.addEventListener("click", () => {
+    card.addEventListener("click", (e) => {
       const deviceId = (card as HTMLElement).dataset.deviceId;
-      if (deviceId) openDeviceModal(container, deviceId);
+      if (!deviceId) return;
+      if (_selectMode) {
+        // Toggle selection — ignore if click was on checkbox (it handles itself)
+        if ((e.target as HTMLElement).classList.contains("device-card-checkbox")) return;
+        toggleSelection(deviceId);
+      } else {
+        openDeviceModal(container, deviceId);
+      }
+    });
+  });
+
+  // Bind checkbox changes
+  grid.querySelectorAll<HTMLInputElement>(".device-card-checkbox").forEach(cb => {
+    cb.addEventListener("change", (e) => {
+      const card = (cb.closest(".device-card") as HTMLElement);
+      const deviceId = card?.dataset.deviceId;
+      if (!deviceId) return;
+      e.stopPropagation();
+      toggleSelection(deviceId);
     });
   });
 }
@@ -215,6 +249,95 @@ function bindModal(container: HTMLElement): void {
   overlay?.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.classList.add("hidden");
   });
+}
+
+function toggleSelection(deviceId: string): void {
+  if (_selectedIds.has(deviceId)) {
+    _selectedIds.delete(deviceId);
+  } else {
+    _selectedIds.add(deviceId);
+  }
+  updateDeleteButton();
+  if (_container) renderGrid(_container, _allDevices, _allSessions);
+}
+
+function updateDeleteButton(): void {
+  const c = _container;
+  if (!c) return;
+  const btn = c.querySelector("#device-delete-btn") as HTMLElement;
+  const confirmBar = c.querySelector("#device-confirm-bar") as HTMLElement;
+  const countEl = c.querySelector("#confirm-count") as HTMLElement;
+  if (btn) {
+    btn.textContent = `Delete (${_selectedIds.size})`;
+    btn.classList.toggle("hidden", !_selectMode || _selectedIds.size === 0);
+  }
+  if (confirmBar) confirmBar.classList.add("hidden");
+  if (countEl) countEl.textContent = String(_selectedIds.size);
+}
+
+function enterSelectMode(container: HTMLElement): void {
+  _selectMode = true;
+  _selectedIds.clear();
+  const toggle = container.querySelector("#device-select-toggle") as HTMLElement;
+  if (toggle) { toggle.textContent = "Cancel"; toggle.classList.add("active"); }
+  updateDeleteButton();
+  renderGrid(container, _allDevices, _allSessions);
+}
+
+function exitSelectMode(container: HTMLElement): void {
+  _selectMode = false;
+  _selectedIds.clear();
+  const toggle = container.querySelector("#device-select-toggle") as HTMLElement;
+  if (toggle) { toggle.textContent = "Select"; toggle.classList.remove("active"); }
+  const btn = container.querySelector("#device-delete-btn") as HTMLElement;
+  const confirmBar = container.querySelector("#device-confirm-bar") as HTMLElement;
+  if (btn) btn.classList.add("hidden");
+  if (confirmBar) confirmBar.classList.add("hidden");
+  renderGrid(container, _allDevices, _allSessions);
+}
+
+function bindSelectMode(container: HTMLElement): void {
+  const toggle = container.querySelector("#device-select-toggle");
+  const deleteBtn = container.querySelector("#device-delete-btn");
+  const confirmBar = container.querySelector("#device-confirm-bar");
+  const confirmYes = container.querySelector("#confirm-yes");
+  const confirmNo = container.querySelector("#confirm-no");
+
+  toggle?.addEventListener("click", () => {
+    if (_selectMode) exitSelectMode(container);
+    else enterSelectMode(container);
+  });
+
+  deleteBtn?.addEventListener("click", () => {
+    if (_selectedIds.size === 0) return;
+    const bar = container.querySelector("#device-confirm-bar") as HTMLElement;
+    const countEl = container.querySelector("#confirm-count") as HTMLElement;
+    if (countEl) countEl.textContent = String(_selectedIds.size);
+    if (bar) bar.classList.remove("hidden");
+  });
+
+  confirmYes?.addEventListener("click", async () => {
+    const ids = Array.from(_selectedIds);
+    if (ids.length === 0) return;
+    const result = await apiDeleteDevices(ids);
+    if (result?.ok) {
+      exitSelectMode(container);
+      await loadDevices(container);
+    }
+  });
+
+  confirmNo?.addEventListener("click", () => {
+    const bar = container.querySelector("#device-confirm-bar") as HTMLElement;
+    if (bar) bar.classList.add("hidden");
+  });
+
+  // Escape key exits select mode
+  _escHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape" && _selectMode && _container) {
+      exitSelectMode(_container);
+    }
+  };
+  document.addEventListener("keydown", _escHandler);
 }
 
 function openDeviceModal(container: HTMLElement, deviceId: string): void {

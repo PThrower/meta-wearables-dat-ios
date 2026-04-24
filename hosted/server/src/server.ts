@@ -672,6 +672,23 @@ const server = Bun.serve<WsData>({
       return Response.json({ builds: history });
     }
 
+    // --- Fleet: bulk delete devices ---
+    if (url.pathname === "/api/devices" && req.method === "DELETE") {
+      try {
+        const body = await req.json() as { deviceIds?: string[] };
+        if (!body.deviceIds?.length) {
+          return Response.json({ error: "deviceIds required" }, { status: 400 });
+        }
+        dbWriter.enqueue(q.deleteDevices(body.deviceIds));
+        dbWriter.flushNow();
+        console.log(`[fleet] Deleted ${body.deviceIds.length} device(s): ${body.deviceIds.map(id => id.slice(0, 8)).join(", ")}`);
+        return Response.json({ ok: true, deleted: body.deviceIds.length });
+      } catch (e) {
+        console.error("[fleet] Device delete failed:", e);
+        return Response.json({ error: "Invalid request body" }, { status: 400 });
+      }
+    }
+
     // --- APNs Device Token Registration ---
 
     if (url.pathname === "/api/device-token" && req.method === "POST") {
@@ -1961,7 +1978,7 @@ const server = Bun.serve<WsData>({
         }
         // Notify viewers that publisher dropped (enriched with reason and reconnect hint)
         const dropReason = dropReasonFromCloseCode(code);
-        const isDeviceBound = !!session.metadata.deviceId || !!registry.findByDevice(sessionId);
+        const isDeviceBound = !!session?.metadata.deviceId || !!registry.findByDevice(sessionId);
         broadcastToViewers(session, {
           type: "publisher_status",
           status: "dropped",

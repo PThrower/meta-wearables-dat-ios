@@ -631,6 +631,36 @@ export function recordBuildSighting(params: {
   };
 }
 
+// --- Device Deletion ---
+
+/** Delete a single device and its build history. Nullifies FK references in sessions/alerts. */
+export function deleteDevice(deviceId: string) {
+  return () => {
+    const db = getDbRaw();
+    db.transaction(() => {
+      db.prepare("UPDATE sessions SET publisher_device_id = NULL WHERE publisher_device_id = ?").run(deviceId);
+      db.prepare("UPDATE alerts SET device_id = NULL WHERE device_id = ?").run(deviceId);
+      db.prepare("DELETE FROM device_build_history WHERE device_id = ?").run(deviceId);
+      db.prepare("DELETE FROM devices WHERE id = ?").run(deviceId);
+    })();
+  };
+}
+
+/** Bulk delete devices and their build history. */
+export function deleteDevices(deviceIds: string[]) {
+  return () => {
+    const db = getDbRaw();
+    db.transaction(() => {
+      for (const id of deviceIds) {
+        db.prepare("UPDATE sessions SET publisher_device_id = NULL WHERE publisher_device_id = ?").run(id);
+        db.prepare("UPDATE alerts SET device_id = NULL WHERE device_id = ?").run(id);
+        db.prepare("DELETE FROM device_build_history WHERE device_id = ?").run(id);
+        db.prepare("DELETE FROM devices WHERE id = ?").run(id);
+      }
+    })();
+  };
+}
+
 /** Get build history for a specific device */
 export function getDeviceBuildHistory(deviceId: string): Array<{
   appVersion: string;

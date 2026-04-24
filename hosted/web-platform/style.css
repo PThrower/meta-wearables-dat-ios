@@ -1648,6 +1648,24 @@ body {
 }
 .device-status-dot.online { background: #4ade80; }
 .device-status-dot.offline { background: var(--border); }
+
+/* Device card select mode */
+.device-card.select-mode { cursor: pointer; position: relative; }
+.device-card.select-mode:hover { border-color: rgba(99,102,241,0.4); }
+.device-card.selected { border-color: rgba(99,102,241,0.6); background: rgba(99,102,241,0.06); }
+.device-card-checkbox {
+  position: absolute; top: 12px; left: 12px;
+  width: 18px; height: 18px; accent-color: #6366f1; cursor: pointer; z-index: 1;
+}
+.device-card.select-mode .device-card-header { padding-left: 32px; }
+.btn-toggle { color: var(--text-secondary); }
+.btn-toggle.active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); color: #818cf8; }
+.confirm-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 6px;
+  background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.15);
+}
+.confirm-bar .confirm-text { font-size: 12px; color: var(--text-secondary); flex: 1; }
 .device-card-body {
   display: flex;
   flex-direction: column;
