@@ -134,6 +134,7 @@ export function resolveWorkflowToApp(
     voice: aiNode.config.voice as string | undefined,
     visionFps: (aiNode.config.visionFps as number) ?? 1,
     temperature: aiNode.config.temperature as number | undefined,
+    analysisIntervalSec: aiNode.config.analysisIntervalSec as number | undefined,
   };
 
   // Read input node config for modality selection (device selection is stream-level)
@@ -267,6 +268,7 @@ export function resolveWorkflowToPipeline(
       voice: node.config.voice as string | undefined,
       visionFps,
       temperature: node.config.temperature as number | undefined,
+      analysisIntervalSec: node.config.analysisIntervalSec as number | undefined,
       input,
       output,
       lifecycle,
