@@ -69,15 +69,15 @@ function runtimeBadgeSVG(def: NodeDefinition | undefined): string {
   const serverColor = "#8b5cf6"; // violet-500
   if (hasMobile && hasServer) {
     return `
-      <rect x="${NODE_W - 62}" y="${NODE_H - 15}" width="24" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
-      <text x="${NODE_W - 50}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">iOS</text>
-      <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
-      <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
+      <rect x="${NODE_W - 70}" y="${NODE_H - 15}" width="30" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W - 55}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">MOB</text>
+      <rect x="${NODE_W - 37}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
+      <text x="${NODE_W - 23}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
   }
   if (hasMobile) {
     return `
-      <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
-      <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">iOS</text>`;
+      <rect x="${NODE_W - 40}" y="${NODE_H - 15}" width="30" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W - 25}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">MOB</text>`;
   }
   return `
     <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
@@ -272,7 +272,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
           <h3 class="wf-palette-title">Nodes</h3>
           ${_nodeDefs.map(d => {
             const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
-              ? `<span class="wf-rt-badge" style="background:#06b6d4">iOS</span>`
+              ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
               : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
             return `
             <button class="wf-palette-item" data-type="${d.type}">
