@@ -155,9 +155,17 @@ export function createFetchHandler(config?: {
       if (resp) return resp;
     }
 
-    // --- APNs device token registration ---
+    // --- Fleet device management ---
 
     if (pathname === "/api/registered-devices" && req.method === "GET") {
+      return proxyRequest(req, pathname);
+    }
+
+    if (pathname === "/api/devices" && req.method === "DELETE") {
+      return proxyRequest(req, pathname);
+    }
+
+    if (pathname.startsWith("/api/devices/") && pathname.endsWith("/build-history") && req.method === "GET") {
       return proxyRequest(req, pathname);
     }
 
