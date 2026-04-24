@@ -22,7 +22,7 @@ export type ConfigFieldSchema =
 
 // --- Structural & Activation Types ---
 
-export type StructuralRole = "source" | "processor" | "reference" | "sink";
+export type StructuralRole = "source" | "processor" | "reference" | "sink" | "channel";
 
 export type ActivationMode = "ai" | "jepa" | "passthrough";
 
@@ -265,23 +265,86 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Output",
     subtitle: "${_channels}",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-    allowedTargets: [],
+    allowedTargets: ["speaker", "viewers", "overlays", "recording"],
     role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
     configSchema: [
       { kind: "text", key: "label", label: "Label" },
-      { kind: "checkbox-group", key: "channels", label: "Channels", fields: [
-        { key: "viewers", label: "Viewers (WS fanout)" },
-        { key: "overlays", label: "Overlays (bbox)" },
-        { key: "speaker", label: "Speaker (HFP)" },
-        { key: "recording", label: "Recording (R2)" },
-      ]},
     ],
-    defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true },
+    defaultConfig: {},
     defaultLabel: "Output",
     runtime: ["server", "mobile"],
+  },
+  // --- Output channel nodes (connect FROM output only) ---
+  {
+    type: "speaker",
+    label: "Speaker",
+    subtitle: "audio out",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "channel",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: {},
+    defaultLabel: "Speaker",
+    runtime: ["mobile"],
+  },
+  {
+    type: "viewers",
+    label: "Viewers",
+    subtitle: "WS fanout",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "channel",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: {},
+    defaultLabel: "Viewers",
+    runtime: ["server"],
+  },
+  {
+    type: "overlays",
+    label: "Overlays",
+    subtitle: "bbox annotations",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "channel",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: {},
+    defaultLabel: "Overlays",
+    runtime: ["mobile"],
+  },
+  {
+    type: "recording",
+    label: "Recording",
+    subtitle: "R2 persist",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "channel",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: {},
+    defaultLabel: "Recording",
+    runtime: ["server"],
   },
 ];
 
@@ -289,8 +352,8 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
 
 export const NODE_DEF_MAP = new Map(NODE_DEFINITIONS.map(d => [d.type, d]));
 
-/** All current sink type identifiers (derived from definitions) */
-const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink").map(d => d.type);
+/** All current sink + channel type identifiers (derived from definitions) */
+const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink" || d.role === "channel").map(d => d.type);
 
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
@@ -305,10 +368,13 @@ export function buildAllowedEdgeMap(): Map<string, Set<string>> {
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
   const sourceCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "source").length;
   const processorCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "processor").length;
-  const sinkCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "sink").length;
+  const sinkOrChannelCount = nodes.filter(n => {
+    const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
+    return role === "sink" || role === "channel";
+  }).length;
   if (sourceCount !== 1) return "Must have exactly 1 source (stream-input) node";
   if (processorCount < 1) return "Must have at least 1 processor (AI/JEPA) node";
-  if (sinkCount < 1) return "Must have at least 1 output node";
+  if (sinkOrChannelCount < 1) return "Must have at least 1 output or channel node";
   return null;
 }
 

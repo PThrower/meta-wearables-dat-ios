@@ -422,7 +422,7 @@ export interface NodeDefinition {
   subtitle: string;
   color: { fill: string; header: string; stroke: string };
   allowedTargets: string[];
-  role: "source" | "processor" | "reference" | "sink";
+  role: "source" | "processor" | "reference" | "sink" | "channel";
   activationMode: "ai" | "jepa" | "passthrough" | null;
   binding: string | null;
   defaultModel: string | null;
