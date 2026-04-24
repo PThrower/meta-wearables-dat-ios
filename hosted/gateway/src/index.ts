@@ -209,6 +209,12 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
+    // --- Node definitions (configSchema for workflow editor) ---
+
+    if (pathname === "/api/node-definitions" && req.method === "GET") {
+      return proxyRequest(req, pathname);
+    }
+
     // --- Workflow CRUD ---
 
     if (pathname === "/workflows") {
