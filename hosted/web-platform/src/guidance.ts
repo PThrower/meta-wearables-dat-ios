@@ -1,8 +1,8 @@
 /**
  * GuidancePanel -- AI Guidance Control Panel & Telemetry Display
  *
- * Renders the AI control panel (app selector, activate/deactivate, gesture triggers),
- * a scrollable color-coded guidance event log, and compact telemetry stats.
+ * Renders a tabbed panel where each published workflow/app gets its own tab
+ * showing full configuration (model, voice, inputs, outputs, system prompt).
  * Receives guidance events and status updates via handleMessage callback.
  * Sends control messages via the injected sendFn.
  */
@@ -57,12 +57,54 @@ export interface AITelemetry {
   uptimeMs: number;
 }
 
+export interface InputConfig {
+  video: boolean;
+  phoneMic: boolean;
+  glassesMic: boolean;
+  gestures: boolean;
+  visionFps: number;
+}
+
+export interface OutputConfig {
+  viewers: boolean;
+  overlays: boolean;
+  speaker: boolean;
+  recording: boolean;
+}
+
+export interface JepaConfig {
+  provider: string;
+  tier: string;
+  gpu: string;
+  clipLength: number;
+  sampleFps: number;
+  resolution: number;
+  tasks: Array<{ type: string; labels?: string[]; threshold?: number }>;
+}
+
 export interface AppInfo {
   id: string;
   name: string;
   description: string;
   icon: string;
-  config: { gestures?: string[]; model?: string; voice?: string };
+  binding: string;
+  systemPrompt: string;
+  config: {
+    gestures?: string[];
+    model?: string;
+    voice?: string;
+    visionFps?: number;
+    temperature?: number;
+    analysisIntervalSec?: number;
+    input?: InputConfig;
+    output?: OutputConfig;
+    lifecycle?: {
+      onDisconnect: string;
+      onReconnect: string;
+      autoDeactivateMin: number | null;
+    };
+    jepa?: JepaConfig;
+  };
 }
 
 const MAX_EVENTS = 50;
@@ -137,6 +179,8 @@ export class GuidancePanel {
   private collapsed = true;
   private appsLoaded = false;
   private _appRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  private activeTabId: string | null = null;
+  private expandedPrompts = new Set<string>();
   private visionFps = 0.5;
   private showOverlays = true;
   private onBboxEvent: ((boxes: GuidanceEvent["boundingBoxes"]) => void) | null = null;
@@ -161,6 +205,10 @@ export class GuidancePanel {
       const data = await res.json();
       this.apps = Array.isArray(data) ? data : data.apps ?? [];
       this.appsLoaded = true;
+      // Auto-select first tab
+      if (!this.activeTabId && this.apps.length > 0) {
+        this.activeTabId = this.apps[0].id;
+      }
       this.render();
       this.bindEvents();
     } catch {
@@ -179,6 +227,12 @@ export class GuidancePanel {
           const updated = Array.isArray(data) ? data : data.apps ?? [];
           if (JSON.stringify(updated.map((a: any) => a.id)) !== JSON.stringify(this.apps.map(a => a.id))) {
             this.apps = updated;
+            // Keep activeTabId if still valid, else select first
+            if (this.activeTabId && !updated.some((a: any) => a.id === this.activeTabId)) {
+              this.activeTabId = updated[0]?.id ?? null;
+            } else if (!this.activeTabId && updated.length > 0) {
+              this.activeTabId = updated[0].id;
+            }
             this.render();
             this.bindEvents();
           }
@@ -194,7 +248,12 @@ export class GuidancePanel {
   handleMessage(msg: Record<string, unknown>): void {
     if (msg.type === "ai_status") {
       this.status = msg as unknown as AIStatus;
-      this.renderControlSection();
+      // Auto-switch tab to active app
+      if (this.status.status === "active" && this.status.appId && this.activeTabId !== this.status.appId) {
+        this.activeTabId = this.status.appId;
+      }
+      this.renderTabBar();
+      this.renderTabBody();
       this.updateStatusDot();
     } else if (msg.type === "guidance_event") {
       const evt = (msg as { event: GuidanceEvent }).event;
@@ -253,16 +312,233 @@ export class GuidancePanel {
         <span id="guidanceStatusDot" class="guidance-status-dot" style="background:${STATUS_COLORS[this.status.status]}"></span>
       </button>
       <div id="guidanceContent" class="guidance-content">
-        <div id="guidanceControl" class="guidance-section">${this.renderControlInner()}</div>
-        <div id="guidanceLog" class="guidance-section guidance-log">${this.renderEventLogInner()}</div>
-        <div id="guidanceTelemetry" class="guidance-section">${this.renderTelemetryInner()}</div>
+        <div id="guidanceTabBar" class="guidance-tab-bar">${this.renderTabBarInner()}</div>
+        <div id="guidanceTabBody" class="guidance-tab-body">${this.renderTabBodyInner()}</div>
       </div>
     `;
   }
 
-  private renderControlSection(): void {
-    const el = document.getElementById("guidanceControl");
-    if (el) el.innerHTML = this.renderControlInner();
+  private renderTabBar(): void {
+    const el = document.getElementById("guidanceTabBar");
+    if (el) el.innerHTML = this.renderTabBarInner();
+  }
+
+  private renderTabBody(): void {
+    const el = document.getElementById("guidanceTabBody");
+    if (el) {
+      el.innerHTML = this.renderTabBodyInner();
+      // Re-bind controls inside tab body
+      this.bindTabBodyEvents();
+    }
+  }
+
+  private renderTabBarInner(): string {
+    if (!this.appsLoaded || this.apps.length === 0) return "";
+
+    return this.apps.map(app => {
+      const isSelected = this.activeTabId === app.id;
+      const isRunning = this.status.status === "active" && this.status.appId === app.id;
+      const isActivating = this.status.status === "activating" && this.status.appId === app.id;
+      const isRateLimited = this.status.status === "rate_limited" && this.status.appId === app.id;
+
+      let cls = "guidance-tab";
+      if (isSelected) cls += " selected";
+      if (isRunning) cls += " guidance-tab-running";
+      else if (isActivating) cls += " guidance-tab-activating";
+      else if (isRateLimited) cls += " guidance-tab-rate-limited";
+
+      return `<button class="${cls}" data-tab-id="${esc(app.id)}">${esc(app.name)}</button>`;
+    }).join("");
+  }
+
+  private renderTabBodyInner(): string {
+    if (!this.appsLoaded) {
+      return `<div class="guidance-section"><div class="guidance-hint">Loading apps...</div></div>`;
+    }
+    if (this.apps.length === 0) {
+      return `<div class="guidance-section"><div class="guidance-hint">No AI apps available</div></div>`;
+    }
+
+    const app = this.apps.find(a => a.id === this.activeTabId);
+    if (!app) {
+      return `<div class="guidance-section"><div class="guidance-hint">Select an app tab</div></div>`;
+    }
+
+    const isThisActive = this.status.status === "active" && this.status.appId === app.id;
+    const isThisActivating = this.status.status === "activating" && this.status.appId === app.id;
+    const isThisRateLimited = this.status.status === "rate_limited" && this.status.appId === app.id;
+
+    let html = "";
+
+    // Config summary
+    html += `<div class="guidance-section">${this.renderAppConfig(app)}</div>`;
+
+    // Status line (activating / rate-limited)
+    if (isThisActivating) {
+      html += `<div class="guidance-section"><div class="guidance-tab-status guidance-tab-status-activating">Activating...</div></div>`;
+    } else if (isThisRateLimited) {
+      const retryIn = this.status.retryInSec ?? "?";
+      const attempt = this.status.retryAttempt ?? "?";
+      html += `<div class="guidance-section"><div class="guidance-tab-status guidance-tab-status-rate-limited">Rate limited -- retry in ${retryIn}s (${attempt})</div></div>`;
+    }
+
+    // Action button
+    html += `<div class="guidance-section">${this.renderActionButton(app)}</div>`;
+
+    // Active controls (only when this app is active)
+    if (isThisActive) {
+      html += `<div class="guidance-section">${this.renderActiveControls(app)}</div>`;
+    }
+
+    // Event log (only when active)
+    if (isThisActive) {
+      html += `<div id="guidanceLog" class="guidance-section guidance-log">${this.renderEventLogInner()}</div>`;
+    }
+
+    // Telemetry (only when active)
+    if (isThisActive) {
+      html += `<div id="guidanceTelemetry" class="guidance-section">${this.renderTelemetryInner()}</div>`;
+    }
+
+    return html;
+  }
+
+  private renderAppConfig(app: AppInfo): string {
+    const config = app.config;
+    const input = config.input;
+    const output = config.output;
+    const isJepa = app.binding?.includes("jepa") || !!config.jepa;
+
+    const rows: string[] = [];
+
+    // Model
+    rows.push(configRow("Model", config.model ?? "default"));
+
+    // Voice
+    if (config.voice) {
+      rows.push(configRow("Voice", config.voice));
+    }
+
+    // Vision FPS
+    const fps = config.visionFps ?? 1;
+    rows.push(configRow("Vision", `${fps} FPS`));
+
+    // Temperature
+    if (config.temperature != null) {
+      rows.push(configRow("Temp", `${config.temperature}`));
+    }
+
+    // Analysis interval (for JEPA)
+    if (config.analysisIntervalSec != null) {
+      rows.push(configRow("Interval", `${config.analysisIntervalSec}s`));
+    }
+
+    // Input modalities
+    if (input) {
+      const pills: string[] = [];
+      if (input.video) pills.push(pillBadge("Video", "#60a5fa"));
+      if (input.phoneMic) pills.push(pillBadge("Phone Mic", "#a78bfa"));
+      if (input.glassesMic) pills.push(pillBadge("Glasses Mic", "#facc15"));
+      if (input.gestures) pills.push(pillBadge("Gestures", "#fb923c"));
+      if (pills.length > 0) {
+        rows.push(`<div class="guidance-config-row"><span class="guidance-config-key">Input</span><span class="guidance-config-val">${pills.join("")}</span></div>`);
+      }
+    }
+
+    // Output channels
+    if (output) {
+      const pills: string[] = [];
+      if (output.viewers) pills.push(pillBadge("Viewers", "#60a5fa"));
+      if (output.overlays) pills.push(pillBadge("Overlays", "#4ade80"));
+      if (output.speaker) pills.push(pillBadge("Speaker", "#a78bfa"));
+      if (output.recording) pills.push(pillBadge("Recording", "#fb923c"));
+      if (pills.length > 0) {
+        rows.push(`<div class="guidance-config-row"><span class="guidance-config-key">Output</span><span class="guidance-config-val">${pills.join("")}</span></div>`);
+      }
+    }
+
+    // JEPA details
+    if (isJepa && config.jepa) {
+      const j = config.jepa;
+      rows.push(configRow("Provider", `${j.provider} / ${j.tier}`));
+      rows.push(configRow("JEPA", `${j.clipLength} frames @ ${j.sampleFps} FPS, ${j.resolution}px`));
+      rows.push(configRow("GPU", j.gpu));
+      if (j.tasks?.length) {
+        const taskStr = j.tasks.map(t => t.type).join(", ");
+        rows.push(configRow("Tasks", taskStr));
+      }
+    }
+
+    // System prompt preview
+    if (app.systemPrompt && app.systemPrompt !== "jepa-vision") {
+      const promptId = app.id;
+      const isExpanded = this.expandedPrompts.has(promptId);
+      const maxLen = 120;
+      const truncated = app.systemPrompt.length > maxLen && !isExpanded;
+      const displayText = truncated ? app.systemPrompt.slice(0, maxLen) + "..." : app.systemPrompt;
+      const toggleLabel = isExpanded ? "Show less" : `Show all (${app.systemPrompt.length} chars)`;
+
+      rows.push(`<div class="guidance-prompt-preview ${isExpanded ? "expanded" : ""}" data-prompt-id="${esc(promptId)}">
+        <div class="guidance-config-key">System Prompt</div>
+        <div class="guidance-prompt-text">${esc(displayText)}</div>
+        ${app.systemPrompt.length > maxLen ? `<button class="guidance-prompt-toggle" data-prompt-toggle="${esc(promptId)}">${toggleLabel}</button>` : ""}
+      </div>`);
+    }
+
+    return `<div class="guidance-config-grid">${rows.join("")}</div>`;
+  }
+
+  private renderActionButton(app: AppInfo): string {
+    const s = this.status;
+    const isThisActive = s.status === "active" && s.appId === app.id;
+    const otherActive = s.status === "active" && s.appId !== app.id;
+
+    if (isThisActive) {
+      return `<button id="guidanceDeactivate" class="guidance-btn guidance-btn-deactivate" data-app-id="${esc(app.id)}">Deactivate</button>`;
+    }
+    if (otherActive) {
+      return `<button id="guidanceActivate" class="guidance-btn guidance-btn-activate" data-app-id="${esc(app.id)}">Activate (override)</button>`;
+    }
+    // Idle or error
+    return `<button id="guidanceActivate" class="guidance-btn guidance-btn-activate" data-app-id="${esc(app.id)}">Activate</button>`;
+  }
+
+  private renderActiveControls(app: AppInfo): string {
+    const gestures = app.config?.gestures ?? this.status.config?.gestures ?? [];
+
+    let html = "";
+
+    // Gesture trigger pills
+    if (gestures.length > 0) {
+      const pills = gestures
+        .map(g => `<button class="guidance-pill" data-gesture="${esc(g)}">${esc(g)}</button>`)
+        .join("");
+      html += `<div class="guidance-gestures">${pills}</div>`;
+    }
+
+    // Vision FPS slider
+    const fpsLabel = this.visionFps >= 1
+      ? `${this.visionFps} FPS`
+      : `${this.visionFps} FPS (~1 frame / ${Math.round(1 / this.visionFps)}s)`;
+    html += `<div class="guidance-fps-row">
+      <span class="guidance-fps-label">Vision</span>
+      <input id="guidanceFpsSlider" type="range" min="0.1" max="5" step="0.1" value="${this.visionFps}" class="guidance-slider">
+      <span id="guidanceFpsValue" class="guidance-fps-value">${fpsLabel}</span>
+    </div>`;
+
+    // Overlay toggle
+    html += `<div class="guidance-fps-row">
+      <span class="guidance-fps-label">Overlays</span>
+      <button id="guidanceOverlayToggle" class="guidance-pill" style="margin-left:auto">${this.showOverlays ? "ON" : "OFF"}</button>
+    </div>`;
+
+    // Text input to AI
+    html += `<div class="guidance-text-input-row">
+      <input id="guidanceTextInput" type="text" class="guidance-text-input" placeholder="Send text to AI..." maxlength="1000">
+      <button id="guidanceTextSend" class="guidance-btn guidance-btn-send">Send</button>
+    </div>`;
+
+    return html;
   }
 
   private renderEventLog(): void {
@@ -281,111 +557,6 @@ export class GuidancePanel {
   private updateStatusDot(): void {
     const dot = document.getElementById("guidanceStatusDot");
     if (dot) dot.style.background = STATUS_COLORS[this.status.status];
-  }
-
-  private renderControlInner(): string {
-    const s = this.status;
-    const isActive = s.status === "active";
-    const isActivating = s.status === "activating";
-    const isIdle = s.status === "idle";
-
-    // App selector
-    let appSelectHtml: string;
-    if (!this.appsLoaded) {
-      appSelectHtml = `<span class="guidance-hint">Loading apps...</span>`;
-    } else if (this.apps.length === 0) {
-      appSelectHtml = `<span class="guidance-hint">No AI apps available</span>`;
-    } else {
-      const options = this.apps
-        .map(
-          (a) =>
-            `<option value="${esc(a.id)}" ${s.appId === a.id ? "selected" : ""}>${esc(a.name)}</option>`
-        )
-        .join("");
-      appSelectHtml = `<select id="guidanceAppSelect" class="guidance-select">${options}</select>`;
-    }
-
-    // Activate / deactivate buttons
-    let actionHtml = "";
-    if (isIdle || s.status === "error") {
-      actionHtml = `<button id="guidanceActivate" class="guidance-btn guidance-btn-activate" ${this.apps.length === 0 ? "disabled" : ""}>Activate</button>`;
-    } else if (s.status === "rate_limited") {
-      const retryIn = s.retryInSec ?? "?";
-      const attempt = s.retryAttempt ?? "?";
-      actionHtml = `<button class="guidance-btn guidance-btn-pending" disabled style="background:#fb923c">Rate limited -- retry in ${retryIn}s (${attempt})</button>`;
-    } else if (isActivating) {
-      actionHtml = `<button class="guidance-btn guidance-btn-pending" disabled>Activating...</button>`;
-    } else if (isActive) {
-      actionHtml = `<button id="guidanceDeactivate" class="guidance-btn guidance-btn-deactivate">Deactivate</button>`;
-    }
-
-    // Gesture trigger pills (only when active)
-    let gesturesHtml = "";
-    const activeApp = this.apps.find((a) => a.id === s.appId);
-    const gestures = activeApp?.config?.gestures ?? s.config?.gestures ?? [];
-    if (isActive && gestures.length > 0) {
-      const pills = gestures
-        .map(
-          (g) =>
-            `<button class="guidance-pill" data-gesture="${esc(g)}">${esc(g)}</button>`
-        )
-        .join("");
-      gesturesHtml = `<div class="guidance-gestures">${pills}</div>`;
-    }
-
-    // App info line (model + voice)
-    let infoHtml = "";
-    if (s.config?.model) {
-      const parts = [`Model: ${esc(s.config.model)}`];
-      if (s.config.voice) parts.push(`Voice: ${esc(s.config.voice)}`);
-      infoHtml = `<div class="guidance-info">${parts.join(" · ")}</div>`;
-    }
-
-    // App description below selector
-    let descHtml = "";
-    const selectedApp = this.apps.find((a) => a.id === s.appId);
-    if (selectedApp?.description) {
-      descHtml = `<div class="guidance-app-desc">${esc(selectedApp.description)}</div>`;
-    }
-
-    // Vision FPS slider (only when active)
-    let fpsHtml = "";
-    if (isActive) {
-      const fpsLabel = this.visionFps >= 1 ? `${this.visionFps} FPS` : `${this.visionFps} FPS (~1 frame / ${Math.round(1 / this.visionFps)}s)`;
-      fpsHtml = `<div class="guidance-fps-row">
-        <span class="guidance-fps-label">Vision</span>
-        <input id="guidanceFpsSlider" type="range" min="0.1" max="5" step="0.1" value="${this.visionFps}" class="guidance-slider">
-        <span id="guidanceFpsValue" class="guidance-fps-value">${fpsLabel}</span>
-      </div>`;
-    }
-
-    // Overlay toggle (only when active)
-    let overlayHtml = "";
-    if (isActive) {
-      overlayHtml = `<div class="guidance-fps-row">
-        <span class="guidance-fps-label">Overlays</span>
-        <button id="guidanceOverlayToggle" class="guidance-pill" style="margin-left:auto">${this.showOverlays ? "ON" : "OFF"}</button>
-      </div>`;
-    }
-
-    // Text input to AI (only when active)
-    let textInputHtml = "";
-    if (isActive) {
-      textInputHtml = `<div class="guidance-text-input-row">
-        <input id="guidanceTextInput" type="text" class="guidance-text-input" placeholder="Send text to AI..." maxlength="1000">
-        <button id="guidanceTextSend" class="guidance-btn guidance-btn-send">Send</button>
-      </div>`;
-    }
-
-    return `
-      <div class="guidance-control-row">${appSelectHtml} ${actionHtml}</div>
-      ${descHtml}
-      ${gesturesHtml}
-      ${fpsHtml}
-      ${overlayHtml}
-      ${textInputHtml}
-      ${infoHtml}
-    `;
   }
 
   private renderEventLogInner(): string {
@@ -490,52 +661,80 @@ export class GuidancePanel {
       toggle.addEventListener("click", () => this.toggle());
     }
 
-    const activate = document.getElementById("guidanceActivate");
-    if (activate) {
-      activate.addEventListener("click", () => this.handleActivate());
-    }
-
-    const deactivate = document.getElementById("guidanceDeactivate");
-    if (deactivate) {
-      deactivate.addEventListener("click", () => this.handleDeactivate());
-    }
-
-    // Gesture pills (delegated)
-    const log = document.getElementById("guidanceLog");
-    if (log) {
-      log.addEventListener("click", (e) => {
-        const target = (e.target as HTMLElement).closest("[data-gesture]");
+    // Tab bar: delegated click on [data-tab-id]
+    const tabBar = document.getElementById("guidanceTabBar");
+    if (tabBar) {
+      tabBar.addEventListener("click", (e) => {
+        const target = (e.target as HTMLElement).closest("[data-tab-id]") as HTMLElement | null;
         if (target) {
-          this.handleGestureTrigger(
-            (target as HTMLElement).dataset.gesture!
-          );
+          this.activeTabId = target.dataset.tabId ?? null;
+          this.renderTabBar();
+          this.renderTabBody();
         }
       });
     }
 
-    // Gesture pills in control section too
-    const control = document.getElementById("guidanceControl");
-    if (control) {
-      control.addEventListener("click", (e) => {
-        const target = (e.target as HTMLElement).closest("[data-gesture]");
-        if (target) {
-          this.handleGestureTrigger(
-            (target as HTMLElement).dataset.gesture!
-          );
+    // Tab body: delegated events
+    this.bindTabBodyEvents();
+  }
+
+  /** Bind events inside the tab body (called on initial render and each tab body re-render) */
+  private bindTabBodyEvents(): void {
+    const tabBody = document.getElementById("guidanceTabBody");
+    if (!tabBody) return;
+
+    tabBody.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+
+      // Activate button
+      const activate = target.closest("#guidanceActivate") as HTMLElement | null;
+      if (activate) {
+        const appId = activate.dataset.appId;
+        if (appId) this.sendFn({ type: "activate_app", appId });
+        return;
+      }
+
+      // Deactivate button
+      const deactivate = target.closest("#guidanceDeactivate") as HTMLElement | null;
+      if (deactivate) {
+        this.sendFn({ type: "deactivate_app" });
+        return;
+      }
+
+      // Gesture pills
+      const gesture = target.closest("[data-gesture]") as HTMLElement | null;
+      if (gesture) {
+        this.sendFn({ type: "trigger_gesture", gesture: gesture.dataset.gesture! });
+        return;
+      }
+
+      // Prompt toggle
+      const promptToggle = target.closest("[data-prompt-toggle]") as HTMLElement | null;
+      if (promptToggle) {
+        const promptId = promptToggle.dataset.promptToggle!;
+        if (this.expandedPrompts.has(promptId)) {
+          this.expandedPrompts.delete(promptId);
+        } else {
+          this.expandedPrompts.add(promptId);
         }
-      });
-    }
+        this.renderTabBody();
+        return;
+      }
+
+      // Overlay toggle
+      const overlayToggle = target.closest("#guidanceOverlayToggle") as HTMLElement | null;
+      if (overlayToggle) {
+        this.showOverlays = !this.showOverlays;
+        if (this.onOverlayToggle) this.onOverlayToggle(this.showOverlays);
+        this.renderTabBody();
+        return;
+      }
+    });
 
     // Vision FPS slider
     const fpsSlider = document.getElementById("guidanceFpsSlider") as HTMLInputElement | null;
     if (fpsSlider) {
       fpsSlider.addEventListener("input", () => this.handleFpsChange(parseFloat(fpsSlider.value)));
-    }
-
-    // Overlay toggle
-    const overlayToggle = document.getElementById("guidanceOverlayToggle");
-    if (overlayToggle) {
-      overlayToggle.addEventListener("click", () => this.handleOverlayToggle());
     }
 
     // Text input to AI
@@ -552,33 +751,10 @@ export class GuidancePanel {
     }
   }
 
-  private handleActivate(): void {
-    const select = document.getElementById(
-      "guidanceAppSelect"
-    ) as HTMLSelectElement | null;
-    const appId = select?.value ?? this.apps[0]?.id;
-    if (!appId) return;
-    this.sendFn({ type: "activate_app", appId });
-  }
-
-  private handleDeactivate(): void {
-    this.sendFn({ type: "deactivate_app" });
-  }
-
-  private handleGestureTrigger(gesture: string): void {
-    this.sendFn({ type: "trigger_gesture", gesture });
-  }
-
   private handleFpsChange(fps: number): void {
     this.visionFps = fps;
     this.sendFn({ type: "set_vision_fps", fps });
     this.updateFpsDisplay();
-  }
-
-  private handleOverlayToggle(): void {
-    this.showOverlays = !this.showOverlays;
-    if (this.onOverlayToggle) this.onOverlayToggle(this.showOverlays);
-    this.renderControlSection();
   }
 
   private handleSendText(input: HTMLInputElement): void {
@@ -614,4 +790,12 @@ function formatUptime(ms: number): string {
   if (m < 60) return `${m}m ${s % 60}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
+}
+
+function configRow(key: string, value: string): string {
+  return `<div class="guidance-config-row"><span class="guidance-config-key">${esc(key)}</span><span class="guidance-config-val">${esc(value)}</span></div>`;
+}
+
+function pillBadge(label: string, color: string): string {
+  return `<span class="guidance-pill-static" style="border-color:${color}40;color:${color}">${esc(label)}</span>`;
 }

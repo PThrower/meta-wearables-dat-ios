@@ -780,22 +780,20 @@ const server = Bun.serve<WsData>({
     // --- App Registry ---
 
     if (url.pathname === "/apps") {
-      // All apps are now published workflows (seeded from apps.json on startup)
+      // All apps are now published workflows — each processable node becomes its own tab
       const publishedWorkflows = q.listWorkflows()
         .filter(w => w.status === "published")
-        .map(w => {
+        .flatMap(w => {
           const nodes = q.getWorkflowNodes(w.id);
           const edges = q.getWorkflowEdges(w.id);
           try {
-            const virtualApp = resolveWorkflowToApp(
+            return resolveWorkflowToPipeline(
               nodes.map(n => ({ ...n, config: JSON.parse(n.config) })) as any,
               edges as any,
               { id: w.id, name: w.name },
             );
-            return virtualApp;
-          } catch { return null; }
-        })
-        .filter(Boolean);
+          } catch { return []; }
+        });
       return Response.json(publishedWorkflows);
     }
 
