@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
-import { NODE_DEF_MAP } from "./node-definitions.js";
+import { NODE_DEF_MAP, resolveNodeType, isSinkType } from "./node-definitions.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -98,12 +98,12 @@ export function resolveWorkflowToApp(
   workflow: { id: string; name: string },
 ): AppDefinition {
   const aiNode = nodes.find(n => {
-    const def = NODE_DEF_MAP.get(n.type);
+    const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
     return def && def.activationMode !== null;
   });
   if (!aiNode) throw new Error("No processable node found in workflow");
 
-  const def = NODE_DEF_MAP.get(aiNode.type)!;
+  const def = NODE_DEF_MAP.get(resolveNodeType(aiNode.type))!;
   const binding = def.binding ?? "s2s-gemini-live";
   const isJepa = def.activationMode === "jepa";
 
@@ -126,14 +126,24 @@ export function resolveWorkflowToApp(
   config.visionFps = input.visionFps;
   config.input = input;
 
-  // Read output node config for channel gating
-  const outputNode = nodes.find(n => n.type === "output");
+  // Read output config from all sink nodes (OR-merge: if any sink enables a channel, it's on)
+  const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
   const output: OutputConfig = {
-    viewers: outputNode?.config.viewers !== false,
-    overlays: outputNode?.config.overlays !== false,
-    speaker: outputNode?.config.speaker !== false,
-    recording: outputNode?.config.recording !== false,
+    viewers: sinkNodes.some(n => n.config.viewers === true),
+    overlays: sinkNodes.some(n => n.config.overlays === true),
+    speaker: sinkNodes.some(n => n.config.speaker === true),
+    recording: sinkNodes.some(n => n.config.recording === true),
   };
+  // If no explicit channel is set, check legacy output-full with all-true defaults
+  if (!output.viewers && !output.overlays && !output.speaker && !output.recording && sinkNodes.length > 0) {
+    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
+    if (fullNode) {
+      output.viewers = fullNode.config.viewers !== false;
+      output.overlays = fullNode.config.overlays !== false;
+      output.speaker = fullNode.config.speaker !== false;
+      output.recording = fullNode.config.recording !== false;
+    }
+  }
   config.output = output;
 
   // Read system prompt from text node (connected to AI node via edges)
@@ -203,7 +213,7 @@ export function resolveWorkflowToPipeline(
   workflow: { id: string; name: string },
 ): AppDefinition[] {
   const processableNodes = nodes.filter(n => {
-    const def = NODE_DEF_MAP.get(n.type);
+    const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
     return def && def.activationMode !== null;
   });
   if (processableNodes.length === 0) throw new Error("No processable node found in workflow");
@@ -219,17 +229,27 @@ export function resolveWorkflowToPipeline(
     visionFps: (inputNode?.config.visionFps as number) ?? 1,
   };
 
-  // Shared output config from output node
-  const outputNode = nodes.find(n => n.type === "output");
+  // Shared output config from all sink nodes (OR-merge)
+  const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
   const baseOutput: OutputConfig = {
-    viewers: outputNode?.config.viewers !== false,
-    overlays: outputNode?.config.overlays !== false,
-    speaker: outputNode?.config.speaker !== false,
-    recording: outputNode?.config.recording !== false,
+    viewers: sinkNodes.some(n => n.config.viewers === true),
+    overlays: sinkNodes.some(n => n.config.overlays === true),
+    speaker: sinkNodes.some(n => n.config.speaker === true),
+    recording: sinkNodes.some(n => n.config.recording === true),
   };
+  // Fallback: if no explicit channel, check legacy output-full with all-true defaults
+  if (!baseOutput.viewers && !baseOutput.overlays && !baseOutput.speaker && !baseOutput.recording && sinkNodes.length > 0) {
+    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
+    if (fullNode) {
+      baseOutput.viewers = fullNode.config.viewers !== false;
+      baseOutput.overlays = fullNode.config.overlays !== false;
+      baseOutput.speaker = fullNode.config.speaker !== false;
+      baseOutput.recording = fullNode.config.recording !== false;
+    }
+  }
 
   return processableNodes.map((node, idx) => {
-    const def = NODE_DEF_MAP.get(node.type)!;
+    const def = NODE_DEF_MAP.get(resolveNodeType(node.type))!;
     const isJepa = def.activationMode === "jepa";
     const binding = def.binding ?? "s2s-gemini-live";
     const systemPrompt = isJepa ? "jepa-vision" : findPromptForAiNode(node.id, nodes, edges);

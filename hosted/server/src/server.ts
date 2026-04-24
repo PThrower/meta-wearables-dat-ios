@@ -52,7 +52,7 @@ import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
-import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure } from "./node-definitions.js";
+import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -787,8 +787,8 @@ const server = Bun.serve<WsData>({
         if (!nodeIds.has(e.sourceNodeId) || !nodeIds.has(e.targetNodeId)) {
           return "Edge references unknown node";
         }
-        const srcType = nodeMap.get(e.sourceNodeId)!;
-        const tgtType = nodeMap.get(e.targetNodeId)!;
+        const srcType = resolveNodeType(nodeMap.get(e.sourceNodeId)!);
+        const tgtType = resolveNodeType(nodeMap.get(e.targetNodeId)!);
         if (!ALLOWED_EDGE_MAP.get(srcType)?.has(tgtType)) {
           return `Invalid edge: ${srcType} -> ${tgtType}`;
         }

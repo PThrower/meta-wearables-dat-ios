@@ -69,8 +69,12 @@ const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "s2s-live", label: "S2S Live", subtitle: "${model}", color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemini-live", defaultModel: "gemini-2.5-flash-native-audio-latest", configSchema: [], defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" }, defaultLabel: "S2S Live" },
   { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST" },
   { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B" },
-  { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["output"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision" },
-  { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output" },
+  { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision" },
+  { type: "output-speaker", label: "Output Speaker", subtitle: "speaker", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { speaker: true }, defaultLabel: "Output Speaker" },
+  { type: "output-viewers", label: "Output Viewers", subtitle: "viewers", color: { fill: "#3d2b00", header: "#eab308", stroke: "#eab308" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { viewers: true }, defaultLabel: "Output Viewers" },
+  { type: "output-recording", label: "Output Recording", subtitle: "recording", color: { fill: "#3d1010", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { recording: true }, defaultLabel: "Output Recording" },
+  { type: "output-overlays", label: "Output Overlays", subtitle: "overlays", color: { fill: "#3d2200", header: "#fb923c", stroke: "#fb923c" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { overlays: true }, defaultLabel: "Output Overlays" },
+  { type: "output-full", label: "Output Full", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output Full" },
 ];
 
 function nanoid(): string {
@@ -201,7 +205,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
         { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 200 },
         { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 400, positionY: 80 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 250 },
-        { id: `n_out_${now}`, type: "output", label: "Output", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 250 },
+        { id: `n_out_${now}`, type: "output-full", label: "Output Full", config: { viewers: true, overlays: true, speaker: true, recording: true }, positionX: 700, positionY: 250 },
       ],
       edges: [
         { id: `e_1_${now}`, sourceNodeId: `n_src_${now}`, targetNodeId: `n_ai_${now}` },
@@ -648,8 +652,13 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
       // Validate edge compatibility
       const sourceNode = _workflow.nodes.find(n => n.id === _edgeState!.sourceNodeId);
       const sourceDef = sourceNode ? _nodeDefMap.get(sourceNode.type) : null;
-      const allowed = sourceDef ? sourceDef.allowedTargets.includes(target.type) : false;
-      if (!allowed) { _edgeState = null; return; }
+      const targetDef = _nodeDefMap.get(target.type);
+      const allowedDirect = sourceDef ? sourceDef.allowedTargets.includes(target.type) : false;
+      const allowedByRole = sourceDef && targetDef && targetDef.role === "sink" && sourceDef.allowedTargets.some(t => {
+        const sinkTypes = ["output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full"];
+        return sinkTypes.includes(t);
+      });
+      if (!allowedDirect && !allowedByRole) { _edgeState = null; return; }
 
       const exists = _workflow.edges.some(e =>
         e.sourceNodeId === _edgeState!.sourceNodeId && e.targetNodeId === target.id

@@ -2,16 +2,18 @@
  * Workflow builder tests
  *
  * Covers:
- *   1. resolveWorkflowToApp — maps workflow nodes → virtual AppDefinition
+ *   1. resolveWorkflowToApp — maps workflow nodes -> virtual AppDefinition
  *   2. resolveWorkflowToPipeline — multi-node pipeline resolution
  *   3. AppRegistry — listPrimitives, transient app registration/lifecycle
  *   4. Node definitions — completeness, structure, edge rules
  *   5. validateStructure — DAG structure validation
+ *   6. Multi-sink OR-merge — combining specialized output nodes
+ *   7. Backward compat — legacy "output" type resolution
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
 import { resolveWorkflowToApp, resolveWorkflowToPipeline, AppRegistry } from "../src/app-registry.js";
-import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure } from "../src/node-definitions.js";
+import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType, TARGET_ROLE_SINK } from "../src/node-definitions.js";
 import type { WorkflowNodeDef, WorkflowEdgeDef } from "../src/app-types.js";
 
 // --- resolveWorkflowToApp ---
@@ -20,7 +22,7 @@ describe("resolveWorkflowToApp", () => {
   const defaultNodes: WorkflowNodeDef[] = [
     { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
     { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 300, positionY: 0 },
-    { id: "out1", type: "output", label: "Output", config: { outputTarget: "guidance" }, positionX: 600, positionY: 0 },
+    { id: "out1", type: "output-full", label: "Output Full", config: { outputTarget: "guidance" }, positionX: 600, positionY: 0 },
   ];
   const defaultEdges: WorkflowEdgeDef[] = [
     { id: "e1", sourceNodeId: "src1", targetNodeId: "ai1" },
@@ -98,7 +100,7 @@ describe("resolveWorkflowToApp", () => {
   test("throws when no AI node present", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
-      { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
+      { id: "out1", type: "output-full", label: "Output Full", config: {}, positionX: 600, positionY: 0 },
     ];
     expect(() => resolveWorkflowToApp(nodes, [], { id: "wf_bad", name: "Bad" })).toThrow("No processable node found");
   });
@@ -108,7 +110,7 @@ describe("resolveWorkflowToApp", () => {
       { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
       { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash" }, positionX: 200, positionY: 0 },
       { id: "ai2", type: "s2s-rest", label: "Gemma", config: { model: "gemma-4-27b" }, positionX: 400, positionY: 0 },
-      { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
+      { id: "out1", type: "output-full", label: "Output Full", config: {}, positionX: 600, positionY: 0 },
     ];
     // s2s-live appears first, so binding should be gemini-live
     const app = resolveWorkflowToApp(nodes, [], { id: "wf_multi", name: "Multi" });
@@ -245,10 +247,11 @@ describe("AppRegistry", () => {
 // --- Node Definitions ---
 
 describe("NODE_DEFINITIONS", () => {
-  test("defines all 7 node types", () => {
+  test("defines all 11 node types", () => {
     const types = NODE_DEFINITIONS.map(d => d.type);
     expect(types).toEqual([
-      "stream-input", "text", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output",
+      "stream-input", "text", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision",
+      "output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full",
     ]);
   });
 
@@ -282,11 +285,15 @@ describe("NODE_DEFINITIONS", () => {
     expect(sources[0].type).toBe("stream-input");
   });
 
-  test("exactly 1 sink node (output)", () => {
+  test("5 sink nodes (output-speaker, output-viewers, output-recording, output-overlays, output-full)", () => {
     const sinks = NODE_DEFINITIONS.filter(d => d.role === "sink");
-    expect(sinks.length).toBe(1);
-    expect(sinks[0].type).toBe("output");
-    expect(sinks[0].allowedTargets).toEqual([]);
+    expect(sinks.length).toBe(5);
+    expect(sinks.map(s => s.type).sort()).toEqual([
+      "output-full", "output-overlays", "output-recording", "output-speaker", "output-viewers",
+    ]);
+    for (const sink of sinks) {
+      expect(sink.allowedTargets).toEqual([]);
+    }
   });
 
   test("exactly 1 reference node (text)", () => {
@@ -317,12 +324,12 @@ describe("NODE_DEFINITIONS", () => {
     }
   });
 
-  test("jepa-vision has activationMode jepa", () => {
+  test("jepa-vision has activationMode jepa and targets <sink> sentinel", () => {
     const jepa = NODE_DEF_MAP.get("jepa-vision")!;
     expect(jepa.activationMode).toBe("jepa");
     expect(jepa.binding).toBe("jepa-vjepa2");
     expect(jepa.defaultModel).toBe("vjepa2-vit-l");
-    expect(jepa.allowedTargets).toEqual(["output"]);
+    expect(jepa.allowedTargets).toEqual([TARGET_ROLE_SINK]);
   });
 
   test("AI nodes have activationMode ai", () => {
@@ -345,13 +352,17 @@ describe("buildAllowedEdgeMap", () => {
     }
   });
 
-  test("stream-input can target processors and output", () => {
+  test("stream-input can target processors and all output types", () => {
     const targets = edgeMap.get("stream-input")!;
     expect(targets.has("s2s-live")).toBe(true);
     expect(targets.has("s2s-rest")).toBe(true);
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(true);
-    expect(targets.has("output")).toBe(true);
+    expect(targets.has("output-speaker")).toBe(true);
+    expect(targets.has("output-viewers")).toBe(true);
+    expect(targets.has("output-recording")).toBe(true);
+    expect(targets.has("output-overlays")).toBe(true);
+    expect(targets.has("output-full")).toBe(true);
     expect(targets.has("text")).toBe(false);
     expect(targets.has("stream-input")).toBe(false);
   });
@@ -362,28 +373,39 @@ describe("buildAllowedEdgeMap", () => {
     expect(targets.has("s2s-rest")).toBe(true);
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(false);
-    expect(targets.has("output")).toBe(false);
+    expect(targets.has("output-full")).toBe(false);
+    expect(targets.has("output-speaker")).toBe(false);
   });
 
-  test("jepa-vision can only target output", () => {
+  test("jepa-vision can target all output types", () => {
     const targets = edgeMap.get("jepa-vision")!;
-    expect(targets.has("output")).toBe(true);
-    expect(targets.size).toBe(1);
+    expect(targets.has("output-speaker")).toBe(true);
+    expect(targets.has("output-viewers")).toBe(true);
+    expect(targets.has("output-recording")).toBe(true);
+    expect(targets.has("output-overlays")).toBe(true);
+    expect(targets.has("output-full")).toBe(true);
+    expect(targets.size).toBe(5);
   });
 
-  test("output has no outgoing edges", () => {
-    const targets = edgeMap.get("output")!;
-    expect(targets.size).toBe(0);
+  test("all output types have no outgoing edges", () => {
+    for (const type of ["output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full"]) {
+      const targets = edgeMap.get(type)!;
+      expect(targets.size).toBe(0);
+    }
   });
 
-  test("processors can target other processors and output", () => {
+  test("processors can target other processors and all output types", () => {
     for (const type of ["s2s-live", "s2s-rest", "s2s-e4b"]) {
       const targets = edgeMap.get(type)!;
       expect(targets.has("s2s-live")).toBe(true);
       expect(targets.has("s2s-rest")).toBe(true);
       expect(targets.has("s2s-e4b")).toBe(true);
       expect(targets.has("jepa-vision")).toBe(true);
-      expect(targets.has("output")).toBe(true);
+      expect(targets.has("output-speaker")).toBe(true);
+      expect(targets.has("output-viewers")).toBe(true);
+      expect(targets.has("output-recording")).toBe(true);
+      expect(targets.has("output-overlays")).toBe(true);
+      expect(targets.has("output-full")).toBe(true);
     }
   });
 });
@@ -391,11 +413,20 @@ describe("buildAllowedEdgeMap", () => {
 // --- validateStructure ---
 
 describe("validateStructure", () => {
-  test("valid minimal workflow passes", () => {
+  test("valid minimal workflow passes with output-full", () => {
     const nodes = [
       { type: "stream-input" },
       { type: "s2s-live" },
-      { type: "output" },
+      { type: "output-full" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with specialized output-speaker sink", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output-speaker" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
@@ -404,7 +435,7 @@ describe("validateStructure", () => {
     const nodes = [
       { type: "stream-input" },
       { type: "jepa-vision" },
-      { type: "output" },
+      { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
@@ -414,7 +445,30 @@ describe("validateStructure", () => {
       { type: "stream-input" },
       { type: "s2s-live" },
       { type: "jepa-vision" },
-      { type: "output" },
+      { type: "output-full" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with multiple sinks", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output-speaker" },
+      { type: "output-recording" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with all 5 sink types", () => {
+    const nodes = [
+      { type: "stream-input" },
+      { type: "s2s-live" },
+      { type: "output-speaker" },
+      { type: "output-viewers" },
+      { type: "output-recording" },
+      { type: "output-overlays" },
+      { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
@@ -422,7 +476,7 @@ describe("validateStructure", () => {
   test("fails with no source node", () => {
     const nodes = [
       { type: "s2s-live" },
-      { type: "output" },
+      { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
   });
@@ -432,7 +486,7 @@ describe("validateStructure", () => {
       { type: "stream-input" },
       { type: "stream-input" },
       { type: "s2s-live" },
-      { type: "output" },
+      { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
   });
@@ -441,7 +495,7 @@ describe("validateStructure", () => {
     const nodes = [
       { type: "stream-input" },
       { type: "text" },
-      { type: "output" },
+      { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toMatch(/at least 1 processor/);
   });
@@ -451,17 +505,7 @@ describe("validateStructure", () => {
       { type: "stream-input" },
       { type: "s2s-live" },
     ];
-    expect(validateStructure(nodes)).toMatch(/exactly 1 output/);
-  });
-
-  test("fails with multiple output nodes", () => {
-    const nodes = [
-      { type: "stream-input" },
-      { type: "s2s-live" },
-      { type: "output" },
-      { type: "output" },
-    ];
-    expect(validateStructure(nodes)).toMatch(/exactly 1 output/);
+    expect(validateStructure(nodes)).toMatch(/at least 1 output/);
   });
 });
 
@@ -472,7 +516,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf1", name: "Single" });
     expect(pipeline.length).toBe(1);
@@ -485,7 +529,7 @@ describe("resolveWorkflowToPipeline", () => {
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
       { id: "ai2", type: "s2s-rest", label: "Gemma", config: { model: "gemma-4-27b" }, positionX: 300, positionY: 200 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf2", name: "Multi" });
     expect(pipeline.length).toBe(2);
@@ -499,7 +543,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "jepa", type: "jepa-vision", label: "JEPA", config: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf3", name: "JEPA" });
     expect(pipeline.length).toBe(1);
@@ -514,7 +558,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "jepa", type: "jepa-vision", label: "JEPA", config: {}, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf4", name: "JEPA" });
     expect((pipeline[0].config as any).output.speaker).toBe(false);
@@ -524,7 +568,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf5", name: "AI" });
     expect((pipeline[0].config as any).output.speaker).toBe(true);
@@ -535,7 +579,7 @@ describe("resolveWorkflowToPipeline", () => {
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "txt", type: "text", label: "Prompt", config: { text: "Be helpful" }, positionX: 100, positionY: -100 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const edges: WorkflowEdgeDef[] = [
       { id: "e1", sourceNodeId: "src", targetNodeId: "ai" },
@@ -550,7 +594,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "jepa", type: "jepa-vision", label: "JEPA", config: {}, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf7", name: "JEPA" });
     expect(pipeline[0].systemPrompt).toBe("jepa-vision");
@@ -559,7 +603,7 @@ describe("resolveWorkflowToPipeline", () => {
   test("throws when no processable node present", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     expect(() => resolveWorkflowToPipeline(nodes, [], { id: "bad", name: "Bad" })).toThrow("No processable node found");
   });
@@ -568,7 +612,7 @@ describe("resolveWorkflowToPipeline", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: { video: true, phoneMic: false, glassesMic: true }, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf8", name: "InputCfg" });
     expect((pipeline[0].config as any).input.video).toBe(true);
@@ -576,14 +620,94 @@ describe("resolveWorkflowToPipeline", () => {
     expect((pipeline[0].config as any).input.glassesMic).toBe(true);
   });
 
-  test("extracts output config from output node", () => {
+  test("extracts output config from output-full node", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: { viewers: false, recording: false }, positionX: 600, positionY: 0 },
+      { id: "out", type: "output-full", label: "Out", config: { viewers: false, recording: false }, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf9", name: "OutCfg" });
     expect((pipeline[0].config as any).output.viewers).toBe(false);
     expect((pipeline[0].config as any).output.recording).toBe(false);
+  });
+});
+
+// --- Multi-sink OR-merge ---
+
+describe("multi-sink OR-merge", () => {
+  test("separate speaker + recording sinks enable both channels", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "spk", type: "output-speaker", label: "Speaker", config: { speaker: true }, positionX: 600, positionY: 0 },
+      { id: "rec", type: "output-recording", label: "Recording", config: { recording: true }, positionX: 600, positionY: 150 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf_merge1", name: "Merge" });
+    expect((pipeline[0].config as any).output.speaker).toBe(true);
+    expect((pipeline[0].config as any).output.recording).toBe(true);
+    expect((pipeline[0].config as any).output.viewers).toBe(false);
+    expect((pipeline[0].config as any).output.overlays).toBe(false);
+  });
+
+  test("all 4 specialized sinks enable all channels", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "spk", type: "output-speaker", label: "Speaker", config: { speaker: true }, positionX: 600, positionY: 0 },
+      { id: "view", type: "output-viewers", label: "Viewers", config: { viewers: true }, positionX: 600, positionY: 100 },
+      { id: "rec", type: "output-recording", label: "Recording", config: { recording: true }, positionX: 600, positionY: 200 },
+      { id: "ovr", type: "output-overlays", label: "Overlays", config: { overlays: true }, positionX: 600, positionY: 300 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf_merge2", name: "AllSinks" });
+    expect((pipeline[0].config as any).output.speaker).toBe(true);
+    expect((pipeline[0].config as any).output.viewers).toBe(true);
+    expect((pipeline[0].config as any).output.recording).toBe(true);
+    expect((pipeline[0].config as any).output.overlays).toBe(true);
+  });
+});
+
+// --- Backward Compat ---
+
+describe("backward compat", () => {
+  test("resolveNodeType maps legacy 'output' to 'output-full'", () => {
+    expect(resolveNodeType("output")).toBe("output-full");
+    expect(resolveNodeType("output-full")).toBe("output-full");
+    expect(resolveNodeType("s2s-live")).toBe("s2s-live");
+  });
+
+  test("isSinkType identifies all sink types", () => {
+    expect(isSinkType("output-speaker")).toBe(true);
+    expect(isSinkType("output-viewers")).toBe(true);
+    expect(isSinkType("output-recording")).toBe(true);
+    expect(isSinkType("output-overlays")).toBe(true);
+    expect(isSinkType("output-full")).toBe(true);
+    expect(isSinkType("output")).toBe(false);
+    expect(isSinkType("s2s-live")).toBe(false);
+    expect(isSinkType("stream-input")).toBe(false);
+  });
+
+  test("legacy 'output' type resolves correctly in resolveWorkflowToApp", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src1", type: "stream-input", label: "Camera", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai1", type: "s2s-live", label: "Gemini", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out1", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const app = resolveWorkflowToApp(nodes, [], { id: "wf_legacy", name: "Legacy" });
+    expect(app.binding).toBe("s2s-gemini-live");
+    // Legacy "output" maps to "output-full" which defaults all channels to true
+    expect(app.config.output?.speaker).toBe(true);
+    expect(app.config.output?.viewers).toBe(true);
+  });
+
+  test("legacy 'output' type resolves correctly in resolveWorkflowToPipeline", () => {
+    const nodes: WorkflowNodeDef[] = [
+      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
+      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
+      { id: "out", type: "output", label: "Output", config: {}, positionX: 600, positionY: 0 },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf_legacy2", name: "Legacy" });
+    expect(pipeline.length).toBe(1);
+    expect(pipeline[0].binding).toBe("s2s-gemini-live");
+    expect((pipeline[0].config as any).output.speaker).toBe(true);
   });
 });

@@ -55,6 +55,27 @@ export interface NodeDefinition {
   defaultLabel: string;
 }
 
+// --- Sentinel ---
+
+/** Sentinel value in allowedTargets: expands to all current sink types */
+export const TARGET_ROLE_SINK = "<sink>";
+
+// --- Sink type helper ---
+
+const SINK_TYPES = [
+  "output-speaker",
+  "output-viewers",
+  "output-recording",
+  "output-overlays",
+  "output-full",
+] as const;
+
+/** Expand "<sink>" sentinel to all concrete sink types */
+function expandTargets(targets: string[]): string[] {
+  if (!targets.includes(TARGET_ROLE_SINK)) return targets;
+  return [...targets.filter(t => t !== TARGET_ROLE_SINK), ...SINK_TYPES];
+}
+
 // --- Definitions ---
 
 export const NODE_DEFINITIONS: NodeDefinition[] = [
@@ -63,7 +84,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Stream Input",
     subtitle: "${_modalities}",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", TARGET_ROLE_SINK],
     role: "source",
     activationMode: null,
     binding: null,
@@ -120,7 +141,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S Live",
     subtitle: "${model}",
     color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", TARGET_ROLE_SINK],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemini-live",
@@ -150,7 +171,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S REST",
     subtitle: "${model}",
     color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", TARGET_ROLE_SINK],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemma4-rest",
@@ -172,7 +193,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S E4B",
     subtitle: "${model}",
     color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "output"],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", TARGET_ROLE_SINK],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemma4-e4b-rest",
@@ -199,7 +220,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "JEPA Vision",
     subtitle: "${model} | ${provider}",
     color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" },
-    allowedTargets: ["output"],
+    allowedTargets: [TARGET_ROLE_SINK],
     role: "processor",
     activationMode: "jepa",
     binding: "jepa-vjepa2",
@@ -235,8 +256,72 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "JEPA Vision",
   },
   {
-    type: "output",
-    label: "Output",
+    type: "output-speaker",
+    label: "Output Speaker",
+    subtitle: "speaker",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: { speaker: true },
+    defaultLabel: "Output Speaker",
+  },
+  {
+    type: "output-viewers",
+    label: "Output Viewers",
+    subtitle: "viewers",
+    color: { fill: "#3d2b00", header: "#eab308", stroke: "#eab308" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: { viewers: true },
+    defaultLabel: "Output Viewers",
+  },
+  {
+    type: "output-recording",
+    label: "Output Recording",
+    subtitle: "recording",
+    color: { fill: "#3d1010", header: "#ef4444", stroke: "#ef4444" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: { recording: true },
+    defaultLabel: "Output Recording",
+  },
+  {
+    type: "output-overlays",
+    label: "Output Overlays",
+    subtitle: "overlays",
+    color: { fill: "#3d2200", header: "#fb923c", stroke: "#fb923c" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: { overlays: true },
+    defaultLabel: "Output Overlays",
+  },
+  {
+    type: "output-full",
+    label: "Output Full",
     subtitle: "${_channels}",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
@@ -254,7 +339,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       ]},
     ],
     defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true },
-    defaultLabel: "Output",
+    defaultLabel: "Output Full",
   },
 ];
 
@@ -266,7 +351,7 @@ export const NODE_DEF_MAP = new Map(NODE_DEFINITIONS.map(d => [d.type, d]));
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   for (const def of NODE_DEFINITIONS) {
-    map.set(def.type, new Set(def.allowedTargets));
+    map.set(def.type, new Set(expandTargets(def.allowedTargets)));
   }
   return map;
 }
@@ -278,6 +363,17 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
   const sinkCount = nodes.filter(n => NODE_DEF_MAP.get(n.type)?.role === "sink").length;
   if (sourceCount !== 1) return "Must have exactly 1 source (stream-input) node";
   if (processorCount < 1) return "Must have at least 1 processor (AI/JEPA) node";
-  if (sinkCount !== 1) return "Must have exactly 1 output node";
+  if (sinkCount < 1) return "Must have at least 1 output node";
   return null;
+}
+
+/** Resolve legacy node types to their current equivalent */
+export function resolveNodeType(type: string): string {
+  if (type === "output") return "output-full";
+  return type;
+}
+
+/** Check if a node type is a sink */
+export function isSinkType(type: string): boolean {
+  return (SINK_TYPES as readonly string[]).includes(type);
 }
