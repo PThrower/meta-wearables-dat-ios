@@ -32,7 +32,10 @@ export type GuidanceEventType =
   | "guidance.identification"
   | "guidance.acknowledgment"
   | "guidance.transcript"
-  | "guidance.bbox";
+  | "guidance.bbox"
+  | "guidance.jepa.embedding"
+  | "guidance.jepa.prediction"
+  | "guidance.jepa.anomaly";
 
 export interface BoundingBox {
   y1: number;

@@ -1484,7 +1484,7 @@ const server = Bun.serve<WsData>({
                 for (const pNode of processableNodes) {
                   const def = NODE_DEF_MAP.get((pNode as any).type);
                   if (def?.activationMode === "jepa" && virtualApp.config?.jepa) {
-                    const jc = virtualApp.config.jepa;
+                    const jc = virtualApp.config.jepa as Record<string, any>;
                     await jepaOrchestrator.activate(sessionId, {
                       provider: jc.provider,
                       model: jc.model ?? virtualApp.config.model,
