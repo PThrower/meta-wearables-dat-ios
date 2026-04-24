@@ -41,6 +41,29 @@
       "outputs": [
         { "format": "gesture-event" }
       ]
+    },
+    {
+      "id": "jepa-vjepa2",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "jepa-embedding" },
+        { "format": "jepa-action" },
+        { "format": "jepa-anomaly" },
+        { "format": "jepa-prediction" }
+      ]
+    },
+    {
+      "id": "jepa-lewm",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "jepa-embedding" },
+        { "format": "jepa-anomaly" },
+        { "format": "jepa-prediction" }
+      ]
     }
   ],
   "apps": [

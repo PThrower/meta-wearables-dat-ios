@@ -65,7 +65,33 @@ export interface AppsConfig {
 
 // --- Workflow Builder ---
 
-export type WorkflowNodeType = "stream-input" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "output";
+export type WorkflowNodeType = "stream-input" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "jepa-vision" | "output";
+
+/** JEPA vision node config -- provider-abstraction for continuous stream understanding */
+export interface JEPANodeConfig {
+  /** Provider: "modal" (cloud GPU), "coreml" (on-device Apple Silicon), "onnx" (on-device Android) */
+  provider: "modal" | "coreml" | "onnx";
+  /** Deployment tier: "cloud" runs on remote GPU, "mobile" runs on-device */
+  tier: "cloud" | "mobile";
+  /** Model variant (e.g., "vjepa2-vitl-fpc16-384") */
+  model: string;
+  /** GPU type for cloud tier (e.g., "A10G", "A100-80GB", "H100") -- ignored for mobile */
+  gpu: string;
+  /** Frames per clip (16 or 64) */
+  clipLength: number;
+  /** Frames per second sampled from stream */
+  sampleFps: number;
+  /** Encoder input resolution (256 or 384) */
+  resolution: number;
+  /** Task heads to enable */
+  tasks: JEPATaskType[];
+}
+
+export interface JEPATaskType {
+  type: "action-classification" | "anomaly-detection" | "prediction" | "embedding-extraction";
+  labels?: string[];
+  threshold?: number;
+}
 
 /** Input modality config — each publisher stream is a toggleable modality */
 export interface InputConfig {

@@ -201,6 +201,7 @@ docs/prds/
 | PRD-009 | Two-Way Comms | Remote expert sees feed, talks back to operator | Not Written |
 | PRD-010 | Task State Engine | Procedure tracking, current step, what's next | Not Written |
 | PRD-011 | Alert System | Wrong part, safety violation, restricted zone | Not Written |
+| [PRD-020](infrastructure/PRD-020-jepa-vision-node.md) | JEPA Vision Node | Continuous stream understanding, action prediction, anomaly detection (parallel to AI) | Draft |
 
 ### Layer 3 -- Product (the actual things someone pays for)
 
@@ -281,6 +282,14 @@ PRD-011 (Alert System)
    |
    +---> PRD-012 (session.on('detection'))
 
+PRD-020 (JEPA Vision Node)
+   |
+   +---> PRD-002 (relay server frame fan-out, guidance event system)
+   +---> PRD-014 (JEPA telemetry metrics)
+   +---> PRD-011 (JEPA anomaly -> alert pipeline)
+   +---> PRD-010 (JEPA action classification -> task state tracking)
+   +---> Modal (GPU provider, provider-abstracted via JEPAService interface)
+
 LAYER 3: PRODUCT (depends on Layers 1+2)
   (no PRDs yet -- scenarios combining primitives)
 
@@ -309,6 +318,7 @@ PRD-006 (Enterprise Platform) -- umbrella, Phase 9
 | **Phase 7** | PRD-012 P0 | Developer API (`@ebowwa/mwdat-sdk` TypeScript) | 1.5 |
 | **Phase 8** | PRD-008, PRD-009 | AI guidance loop, two-way comms | 2 |
 | **Phase 9** | PRD-010, PRD-011 | Task state engine, alert system | 2 |
+| **Phase 9.5** | PRD-020 | JEPA vision node (continuous stream understanding, parallel to AI) | 2 |
 | **Phase 10** | All P2 items | HLS, Whisper, multi-session grid, Swift/Browser SDKs | 1+1.5 |
 | **Phase 11** | Layer 3 PRDs | Actual product scenarios | 3 |
 | **Phase 12** | PRD-006 P0 | Hardware abstraction, CRM, AI safety | 3+ |

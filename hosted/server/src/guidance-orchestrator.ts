@@ -974,4 +974,9 @@ export class GuidanceOrchestrator {
       try { cb(msg); } catch { /* subscriber error, skip */ }
     }
   }
+
+  /** Expose subscriber set for a session (used by JEPA orchestrator to reuse viewer fan-out) */
+  getSubscriberSet(sessionId: string): Set<(msg: any) => void> | undefined {
+    return this.subscribers.get(sessionId);
+  }
 }

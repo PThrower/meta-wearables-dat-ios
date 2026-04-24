@@ -51,6 +51,7 @@ import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
+import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -178,7 +179,10 @@ const appRegistry = new AppRegistry();
 const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
 
 // Clean up orchestrator state when sessions expire
-registry.setOnSessionDestroy((id: string) => orchestrator.cleanup(id));
+registry.setOnSessionDestroy((id: string) => {
+  orchestrator.cleanup(id);
+  jepaOrchestrator.deactivate(id);
+});
 
 // Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
 // push through the relay's audio-in path (fan-out to publisher + viewers).
@@ -234,6 +238,34 @@ orchestrator.setGuidancePersistFn((sessionId: string, event) => {
 });
 
 orchestrator.start();
+
+// --- JEPA Orchestrator setup ---
+
+const jepaOrchestrator = new JEPAOrchestrator();
+
+// JEPA events fan out to viewer WebSockets (same subscriber list as AI guidance)
+jepaOrchestrator.setEventFanoutFn((sessionId: string, event) => {
+  const subs = orchestrator.getSubscriberSet(sessionId);
+  if (!subs) return;
+  const msg = { type: "guidance_event", event };
+  for (const cb of subs) {
+    try { cb(msg); } catch { /* subscriber error, skip */ }
+  }
+});
+
+// JEPA anomaly alerts push to publisher (for audio cue via HFP)
+jepaOrchestrator.setGuidancePushFn((sessionId: string, event) => {
+  const session = registry.get(sessionId);
+  if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+    session.publisher.ws.send(JSON.stringify({ type: "guidance_event", event }));
+  }
+});
+
+// JEPA events persist to R2 guidance.jsonl
+jepaOrchestrator.setPersistFn((sessionId: string, event) => {
+  const session = registry.get(sessionId);
+  session?.recorder?.appendGuidanceEvent(event);
+});
 
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)
@@ -1537,6 +1569,11 @@ const server = Bun.serve<WsData>({
               if (session.activeAppId) {
                 const jpegPayload = buf.slice(HEADER_SIZE);
                 orchestrator.sendVideoFrame(sessionId, jpegPayload);
+              }
+              // Forward to JEPA encoder (if active) -- parallel to AI
+              if (jepaOrchestrator.isActive(sessionId)) {
+                const jpegPayload = buf.slice(HEADER_SIZE);
+                jepaOrchestrator.sendFrame(sessionId, jpegPayload, Date.now());
               }
             } else if (codecType === 1) {
               // H.264: feed through server-side ffmpeg decoder
