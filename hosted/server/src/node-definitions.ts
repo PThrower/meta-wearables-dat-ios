@@ -60,40 +60,7 @@ export interface NodeDefinition {
 /** Sentinel value in allowedTargets: expands to all current sink types */
 export const TARGET_ROLE_SINK = "<sink>";
 
-// --- Sink type helpers ---
-
-/** Specialized sink definitions — each gates a single output channel */
-const SPECIALIZED_SINKS: Array<{
-  type: string;
-  label: string;
-  channel: string;
-  color: { fill: string; header: string; stroke: string };
-}> = [
-  { type: "output-speaker",  label: "Output Speaker",  channel: "speaker",   color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" } },
-  { type: "output-viewers",  label: "Output Viewers",  channel: "viewers",   color: { fill: "#3d2b00", header: "#eab308", stroke: "#eab308" } },
-  { type: "output-recording", label: "Output Recording", channel: "recording", color: { fill: "#3d1010", header: "#ef4444", stroke: "#ef4444" } },
-  { type: "output-overlays", label: "Output Overlays", channel: "overlays",  color: { fill: "#3d2200", header: "#fb923c", stroke: "#fb923c" } },
-];
-
-/** Build a specialized sink NodeDefinition from its config */
-function makeSinkDef(cfg: typeof SPECIALIZED_SINKS[number]): NodeDefinition {
-  return {
-    type: cfg.type,
-    label: cfg.label,
-    subtitle: cfg.channel,
-    color: cfg.color,
-    allowedTargets: [],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [{ kind: "text", key: "label", label: "Label" }],
-    defaultConfig: { [cfg.channel]: true },
-    defaultLabel: cfg.label,
-  };
-}
-
-/** Expand "<sink>" sentinel to all concrete sink types (derived from definitions below) */
+/** Expand "<sink>" sentinel to all concrete sink types */
 function expandTargets(targets: string[], sinkTypes: string[]): string[] {
   if (!targets.includes(TARGET_ROLE_SINK)) return targets;
   return [...targets.filter(t => t !== TARGET_ROLE_SINK), ...sinkTypes];
@@ -278,12 +245,9 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] },
     defaultLabel: "JEPA Vision",
   },
-  // Specialized single-channel sinks (generated from SPECIALIZED_SINKS)
-  ...SPECIALIZED_SINKS.map(makeSinkDef),
-  // Configurable multi-channel sink
   {
     type: "output-full",
-    label: "Output Full",
+    label: "Output",
     subtitle: "${_channels}",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
@@ -301,7 +265,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       ]},
     ],
     defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true },
-    defaultLabel: "Output Full",
+    defaultLabel: "Output",
   },
 ];
 

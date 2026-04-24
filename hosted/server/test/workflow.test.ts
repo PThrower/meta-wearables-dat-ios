@@ -7,7 +7,7 @@
  *   3. AppRegistry — listPrimitives, transient app registration/lifecycle
  *   4. Node definitions — completeness, structure, edge rules
  *   5. validateStructure — DAG structure validation
- *   6. Multi-sink OR-merge — combining specialized output nodes
+ *   6. Output config — OR-merge across multiple output-full sinks
  *   7. Backward compat — legacy "output" type resolution
  */
 
@@ -247,11 +247,11 @@ describe("AppRegistry", () => {
 // --- Node Definitions ---
 
 describe("NODE_DEFINITIONS", () => {
-  test("defines all 11 node types", () => {
+  test("defines all 7 node types", () => {
     const types = NODE_DEFINITIONS.map(d => d.type);
     expect(types).toEqual([
       "stream-input", "text", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision",
-      "output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full",
+      "output-full",
     ]);
   });
 
@@ -285,15 +285,11 @@ describe("NODE_DEFINITIONS", () => {
     expect(sources[0].type).toBe("stream-input");
   });
 
-  test("5 sink nodes (output-speaker, output-viewers, output-recording, output-overlays, output-full)", () => {
+  test("1 sink node (output-full)", () => {
     const sinks = NODE_DEFINITIONS.filter(d => d.role === "sink");
-    expect(sinks.length).toBe(5);
-    expect(sinks.map(s => s.type).sort()).toEqual([
-      "output-full", "output-overlays", "output-recording", "output-speaker", "output-viewers",
-    ]);
-    for (const sink of sinks) {
-      expect(sink.allowedTargets).toEqual([]);
-    }
+    expect(sinks.length).toBe(1);
+    expect(sinks[0].type).toBe("output-full");
+    expect(sinks[0].allowedTargets).toEqual([]);
   });
 
   test("exactly 1 reference node (text)", () => {
@@ -352,16 +348,12 @@ describe("buildAllowedEdgeMap", () => {
     }
   });
 
-  test("stream-input can target processors and all output types", () => {
+  test("stream-input can target processors and output-full", () => {
     const targets = edgeMap.get("stream-input")!;
     expect(targets.has("s2s-live")).toBe(true);
     expect(targets.has("s2s-rest")).toBe(true);
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(true);
-    expect(targets.has("output-speaker")).toBe(true);
-    expect(targets.has("output-viewers")).toBe(true);
-    expect(targets.has("output-recording")).toBe(true);
-    expect(targets.has("output-overlays")).toBe(true);
     expect(targets.has("output-full")).toBe(true);
     expect(targets.has("text")).toBe(false);
     expect(targets.has("stream-input")).toBe(false);
@@ -374,37 +366,26 @@ describe("buildAllowedEdgeMap", () => {
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(false);
     expect(targets.has("output-full")).toBe(false);
-    expect(targets.has("output-speaker")).toBe(false);
   });
 
-  test("jepa-vision can target all output types", () => {
+  test("jepa-vision can target output-full (via <sink> expansion)", () => {
     const targets = edgeMap.get("jepa-vision")!;
-    expect(targets.has("output-speaker")).toBe(true);
-    expect(targets.has("output-viewers")).toBe(true);
-    expect(targets.has("output-recording")).toBe(true);
-    expect(targets.has("output-overlays")).toBe(true);
     expect(targets.has("output-full")).toBe(true);
-    expect(targets.size).toBe(5);
+    expect(targets.size).toBe(1);
   });
 
-  test("all output types have no outgoing edges", () => {
-    for (const type of ["output-speaker", "output-viewers", "output-recording", "output-overlays", "output-full"]) {
-      const targets = edgeMap.get(type)!;
-      expect(targets.size).toBe(0);
-    }
+  test("output-full has no outgoing edges", () => {
+    const targets = edgeMap.get("output-full")!;
+    expect(targets.size).toBe(0);
   });
 
-  test("processors can target other processors and all output types", () => {
+  test("processors can target other processors and output-full", () => {
     for (const type of ["s2s-live", "s2s-rest", "s2s-e4b"]) {
       const targets = edgeMap.get(type)!;
       expect(targets.has("s2s-live")).toBe(true);
       expect(targets.has("s2s-rest")).toBe(true);
       expect(targets.has("s2s-e4b")).toBe(true);
       expect(targets.has("jepa-vision")).toBe(true);
-      expect(targets.has("output-speaker")).toBe(true);
-      expect(targets.has("output-viewers")).toBe(true);
-      expect(targets.has("output-recording")).toBe(true);
-      expect(targets.has("output-overlays")).toBe(true);
       expect(targets.has("output-full")).toBe(true);
     }
   });
@@ -418,15 +399,6 @@ describe("validateStructure", () => {
       { type: "stream-input" },
       { type: "s2s-live" },
       { type: "output-full" },
-    ];
-    expect(validateStructure(nodes)).toBeNull();
-  });
-
-  test("valid with specialized output-speaker sink", () => {
-    const nodes = [
-      { type: "stream-input" },
-      { type: "s2s-live" },
-      { type: "output-speaker" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
@@ -450,24 +422,11 @@ describe("validateStructure", () => {
     expect(validateStructure(nodes)).toBeNull();
   });
 
-  test("valid with multiple sinks", () => {
+  test("valid with multiple output-full sinks", () => {
     const nodes = [
       { type: "stream-input" },
       { type: "s2s-live" },
-      { type: "output-speaker" },
-      { type: "output-recording" },
-    ];
-    expect(validateStructure(nodes)).toBeNull();
-  });
-
-  test("valid with all 5 sink types", () => {
-    const nodes = [
-      { type: "stream-input" },
-      { type: "s2s-live" },
-      { type: "output-speaker" },
-      { type: "output-viewers" },
-      { type: "output-recording" },
-      { type: "output-overlays" },
+      { type: "output-full" },
       { type: "output-full" },
     ];
     expect(validateStructure(nodes)).toBeNull();
@@ -635,34 +594,18 @@ describe("resolveWorkflowToPipeline", () => {
 // --- Multi-sink OR-merge ---
 
 describe("multi-sink OR-merge", () => {
-  test("separate speaker + recording sinks enable both channels", () => {
+  test("two output-full sinks OR-merge their channel configs", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "spk", type: "output-speaker", label: "Speaker", config: { speaker: true }, positionX: 600, positionY: 0 },
-      { id: "rec", type: "output-recording", label: "Recording", config: { recording: true }, positionX: 600, positionY: 150 },
+      { id: "out1", type: "output-full", label: "Out1", config: { speaker: true, viewers: false }, positionX: 600, positionY: 0 },
+      { id: "out2", type: "output-full", label: "Out2", config: { recording: true, viewers: true }, positionX: 600, positionY: 150 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf_merge1", name: "Merge" });
+    // OR-merge: viewers=true because out2 has it, speaker=true from out1, recording=true from out2
     expect((pipeline[0].config as any).output.speaker).toBe(true);
     expect((pipeline[0].config as any).output.recording).toBe(true);
-    expect((pipeline[0].config as any).output.viewers).toBe(false);
-    expect((pipeline[0].config as any).output.overlays).toBe(false);
-  });
-
-  test("all 4 specialized sinks enable all channels", () => {
-    const nodes: WorkflowNodeDef[] = [
-      { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
-      { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "spk", type: "output-speaker", label: "Speaker", config: { speaker: true }, positionX: 600, positionY: 0 },
-      { id: "view", type: "output-viewers", label: "Viewers", config: { viewers: true }, positionX: 600, positionY: 100 },
-      { id: "rec", type: "output-recording", label: "Recording", config: { recording: true }, positionX: 600, positionY: 200 },
-      { id: "ovr", type: "output-overlays", label: "Overlays", config: { overlays: true }, positionX: 600, positionY: 300 },
-    ];
-    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf_merge2", name: "AllSinks" });
-    expect((pipeline[0].config as any).output.speaker).toBe(true);
     expect((pipeline[0].config as any).output.viewers).toBe(true);
-    expect((pipeline[0].config as any).output.recording).toBe(true);
-    expect((pipeline[0].config as any).output.overlays).toBe(true);
   });
 });
 
@@ -675,11 +618,7 @@ describe("backward compat", () => {
     expect(resolveNodeType("s2s-live")).toBe("s2s-live");
   });
 
-  test("isSinkType identifies all sink types", () => {
-    expect(isSinkType("output-speaker")).toBe(true);
-    expect(isSinkType("output-viewers")).toBe(true);
-    expect(isSinkType("output-recording")).toBe(true);
-    expect(isSinkType("output-overlays")).toBe(true);
+  test("isSinkType identifies output-full as sink", () => {
     expect(isSinkType("output-full")).toBe(true);
     expect(isSinkType("output")).toBe(false);
     expect(isSinkType("s2s-live")).toBe(false);
