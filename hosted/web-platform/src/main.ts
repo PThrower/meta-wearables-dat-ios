@@ -8,7 +8,7 @@ import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiv
 import { openRecordedPlayer, closeRecordedPlayer, initRecordedPlayerEvents } from "./recorded.js";
 import { Router } from "./router/router.js";
 import { routes } from "./router/routes.js";
-import { initSidebar } from "./components/sidebar.js";
+import { initSidebar, initTheme } from "./components/sidebar.js";
 import { bus } from "./core/event-bus.js";
 import "./share.js";
 
@@ -96,6 +96,8 @@ function shareTokenFromUrl(): string | null {
 }
 
 // ─── Boot sequence ───
+
+initTheme();
 
 (async () => {
   await loadConfig();

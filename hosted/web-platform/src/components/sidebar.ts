@@ -1,12 +1,33 @@
 /**
  * Collapsible sidebar navigation — matches GlassFlow's nav structure.
- * Collapsed state persists to localStorage.
+ * Collapsed state and theme persist to localStorage.
  */
 
 import { routes, icons } from "../router/routes.js";
 import { bus } from "../core/event-bus.js";
 
 const STORAGE_KEY = "cm_sidebar_collapsed";
+const THEME_KEY = "cm_theme";
+
+// ─── Theme helpers ───
+
+function applyTheme(theme: string): void {
+  if (theme === "dark") {
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+}
+
+export function initTheme(): void {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved) {
+    applyTheme(saved);
+  }
+  // No saved preference → light (no data-theme attr = :root light default)
+}
+
+// ─── Sidebar ───
 
 export function initSidebar(sidebar: HTMLElement, currentPath: string): () => void {
   const collapsed = localStorage.getItem(STORAGE_KEY) === "true";
@@ -21,6 +42,15 @@ export function initSidebar(sidebar: HTMLElement, currentPath: string): () => vo
     const now = sidebar.classList.contains("collapsed");
     localStorage.setItem(STORAGE_KEY, String(now));
     bus.emit("sidebar:toggle", { collapsed: now });
+  });
+
+  // Theme toggle
+  const themeBtn = sidebar.querySelector(".theme-toggle") as HTMLElement;
+  themeBtn?.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme");
+    const next = current === "dark" ? "light" : "dark";
+    applyTheme(next);
+    localStorage.setItem(THEME_KEY, next);
   });
 
   // Listen for route changes to update active state
@@ -59,6 +89,10 @@ function render(sidebar: HTMLElement, currentPath: string): void {
         <span class="status-dot"></span>
         <span class="sidebar-status-text">Online</span>
       </div>
+      <button class="theme-toggle" title="Toggle theme">
+        <span class="theme-icon theme-icon-light">&#9788;</span>
+        <span class="theme-icon theme-icon-dark">&#9790;</span>
+      </button>
     </div>
   `;
 
