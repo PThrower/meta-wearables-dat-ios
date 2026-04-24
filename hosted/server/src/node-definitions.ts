@@ -301,12 +301,21 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
   return null;
 }
 
-/** Resolve node types — passthrough, extensible for future renames */
+/** Resolve node types — maps old names to current definitions */
+const TYPE_ALIASES: Record<string, string> = {
+  "camera-source": "stream-input",
+  "output-full": "output",
+  "output-viewers": "output",
+  "output-speaker": "output",
+  "output-recording": "output",
+  "output-overlays": "output",
+};
+
 export function resolveNodeType(type: string): string {
-  return type;
+  return TYPE_ALIASES[type] ?? type;
 }
 
-/** Check if a node type is a sink */
+/** Check if a node type is a sink (resolves aliases first) */
 export function isSinkType(type: string): boolean {
-  return SINK_TYPES.includes(type);
+  return SINK_TYPES.includes(resolveNodeType(type));
 }

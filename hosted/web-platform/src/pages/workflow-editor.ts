@@ -73,6 +73,26 @@ const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "output", label: "Output", subtitle: "${_channels}", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [{ kind: "checkbox-group", key: "channels", label: "Channels", fields: [{ key: "viewers", label: "Viewers (WS fanout)" }, { key: "overlays", label: "Overlays (bbox)" }, { key: "speaker", label: "Speaker (HFP)" }, { key: "recording", label: "Recording (R2)" }] }], defaultConfig: { viewers: true, overlays: true, speaker: true, recording: true }, defaultLabel: "Output" },
 ];
 
+/** Map old node type names to their current equivalents */
+const TYPE_ALIASES: Record<string, string> = {
+  "camera-source": "stream-input",
+  "output-full": "output",
+  "output-viewers": "output",
+  "output-speaker": "output",
+  "output-recording": "output",
+  "output-overlays": "output",
+};
+
+/** Resolve a node type, mapping old names to current definitions */
+function resolveNodeType(type: string): string {
+  return TYPE_ALIASES[type] ?? type;
+}
+
+/** Get node definition, resolving old type aliases */
+function getNodeDef(type: string): NodeDefinition | undefined {
+  return _nodeDefMap.get(resolveNodeType(type));
+}
+
 function nanoid(): string {
   return `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -259,7 +279,7 @@ function buildSVG(): string {
   const edges = _workflow.edges;
 
   const nodeSVGs = nodes.map(n => {
-    const def = _nodeDefMap.get(n.type);
+    const def = getNodeDef(n.type);
     const c = def?.color ?? FALLBACK_COLOR;
     const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
     const selected = _selectedNodeId === n.id;
@@ -317,7 +337,7 @@ function wireEditorEvents(): void {
     btn.addEventListener("click", () => {
       if (!_workflow) return;
       const type = (btn as HTMLElement).dataset.type as string;
-      const def = _nodeDefMap.get(type);
+      const def = getNodeDef(type);
       const id = nanoid();
       const offset = _workflow.nodes.length * 30;
       const config = def ? { ...def.defaultConfig } : {};
@@ -647,8 +667,8 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
     if (target && _workflow) {
       // Validate edge compatibility
       const sourceNode = _workflow.nodes.find(n => n.id === _edgeState!.sourceNodeId);
-      const sourceDef = sourceNode ? _nodeDefMap.get(sourceNode.type) : null;
-      const targetDef = _nodeDefMap.get(target.type);
+      const sourceDef = sourceNode ? getNodeDef(sourceNode.type) : null;
+      const targetDef = getNodeDef(target.type);
       const allowedDirect = sourceDef ? sourceDef.allowedTargets.includes(target.type) : false;
       const allowedBySinkRole = sourceDef && targetDef && targetDef.role === "sink" && sourceDef.allowedTargets.includes("<sink>");
       if (!allowedDirect && !allowedBySinkRole) { _edgeState = null; return; }
@@ -758,7 +778,7 @@ function renderConfigPanel(): void {
   const node = _workflow.nodes.find(n => n.id === _selectedNodeId);
   if (!node) { panel.innerHTML = '<p class="empty-state">Select a node</p>'; return; }
 
-  const def = _nodeDefMap.get(node.type);
+  const def = getNodeDef(node.type);
   if (!def) { panel.innerHTML = '<p class="empty-state">Unknown node type</p>'; return; }
 
   const c = def.color;
