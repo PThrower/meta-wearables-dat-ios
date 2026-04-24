@@ -60,20 +60,43 @@ export interface NodeDefinition {
 /** Sentinel value in allowedTargets: expands to all current sink types */
 export const TARGET_ROLE_SINK = "<sink>";
 
-// --- Sink type helper ---
+// --- Sink type helpers ---
 
-const SINK_TYPES = [
-  "output-speaker",
-  "output-viewers",
-  "output-recording",
-  "output-overlays",
-  "output-full",
-] as const;
+/** Specialized sink definitions — each gates a single output channel */
+const SPECIALIZED_SINKS: Array<{
+  type: string;
+  label: string;
+  channel: string;
+  color: { fill: string; header: string; stroke: string };
+}> = [
+  { type: "output-speaker",  label: "Output Speaker",  channel: "speaker",   color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" } },
+  { type: "output-viewers",  label: "Output Viewers",  channel: "viewers",   color: { fill: "#3d2b00", header: "#eab308", stroke: "#eab308" } },
+  { type: "output-recording", label: "Output Recording", channel: "recording", color: { fill: "#3d1010", header: "#ef4444", stroke: "#ef4444" } },
+  { type: "output-overlays", label: "Output Overlays", channel: "overlays",  color: { fill: "#3d2200", header: "#fb923c", stroke: "#fb923c" } },
+];
 
-/** Expand "<sink>" sentinel to all concrete sink types */
-function expandTargets(targets: string[]): string[] {
+/** Build a specialized sink NodeDefinition from its config */
+function makeSinkDef(cfg: typeof SPECIALIZED_SINKS[number]): NodeDefinition {
+  return {
+    type: cfg.type,
+    label: cfg.label,
+    subtitle: cfg.channel,
+    color: cfg.color,
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [{ kind: "text", key: "label", label: "Label" }],
+    defaultConfig: { [cfg.channel]: true },
+    defaultLabel: cfg.label,
+  };
+}
+
+/** Expand "<sink>" sentinel to all concrete sink types (derived from definitions below) */
+function expandTargets(targets: string[], sinkTypes: string[]): string[] {
   if (!targets.includes(TARGET_ROLE_SINK)) return targets;
-  return [...targets.filter(t => t !== TARGET_ROLE_SINK), ...SINK_TYPES];
+  return [...targets.filter(t => t !== TARGET_ROLE_SINK), ...sinkTypes];
 }
 
 // --- Definitions ---
@@ -255,70 +278,9 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] },
     defaultLabel: "JEPA Vision",
   },
-  {
-    type: "output-speaker",
-    label: "Output Speaker",
-    subtitle: "speaker",
-    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-    allowedTargets: [],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-    ],
-    defaultConfig: { speaker: true },
-    defaultLabel: "Output Speaker",
-  },
-  {
-    type: "output-viewers",
-    label: "Output Viewers",
-    subtitle: "viewers",
-    color: { fill: "#3d2b00", header: "#eab308", stroke: "#eab308" },
-    allowedTargets: [],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-    ],
-    defaultConfig: { viewers: true },
-    defaultLabel: "Output Viewers",
-  },
-  {
-    type: "output-recording",
-    label: "Output Recording",
-    subtitle: "recording",
-    color: { fill: "#3d1010", header: "#ef4444", stroke: "#ef4444" },
-    allowedTargets: [],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-    ],
-    defaultConfig: { recording: true },
-    defaultLabel: "Output Recording",
-  },
-  {
-    type: "output-overlays",
-    label: "Output Overlays",
-    subtitle: "overlays",
-    color: { fill: "#3d2200", header: "#fb923c", stroke: "#fb923c" },
-    allowedTargets: [],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-    ],
-    defaultConfig: { overlays: true },
-    defaultLabel: "Output Overlays",
-  },
+  // Specialized single-channel sinks (generated from SPECIALIZED_SINKS)
+  ...SPECIALIZED_SINKS.map(makeSinkDef),
+  // Configurable multi-channel sink
   {
     type: "output-full",
     label: "Output Full",
@@ -347,20 +309,23 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
 
 export const NODE_DEF_MAP = new Map(NODE_DEFINITIONS.map(d => [d.type, d]));
 
+/** All current sink type identifiers (derived from definitions) */
+const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink").map(d => d.type);
+
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   for (const def of NODE_DEFINITIONS) {
-    map.set(def.type, new Set(expandTargets(def.allowedTargets)));
+    map.set(def.type, new Set(expandTargets(def.allowedTargets, SINK_TYPES)));
   }
   return map;
 }
 
 /** Validate workflow DAG structure using role-based rules */
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
-  const sourceCount = nodes.filter(n => NODE_DEF_MAP.get(n.type)?.role === "source").length;
-  const processorCount = nodes.filter(n => NODE_DEF_MAP.get(n.type)?.role === "processor").length;
-  const sinkCount = nodes.filter(n => NODE_DEF_MAP.get(n.type)?.role === "sink").length;
+  const sourceCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "source").length;
+  const processorCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "processor").length;
+  const sinkCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "sink").length;
   if (sourceCount !== 1) return "Must have exactly 1 source (stream-input) node";
   if (processorCount < 1) return "Must have at least 1 processor (AI/JEPA) node";
   if (sinkCount < 1) return "Must have at least 1 output node";
@@ -375,5 +340,5 @@ export function resolveNodeType(type: string): string {
 
 /** Check if a node type is a sink */
 export function isSinkType(type: string): boolean {
-  return (SINK_TYPES as readonly string[]).includes(type);
+  return SINK_TYPES.includes(type);
 }

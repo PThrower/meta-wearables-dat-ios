@@ -91,6 +91,28 @@ export class AppRegistry {
   }
 }
 
+/** Resolve output config from all sink nodes using OR-merge semantics */
+function resolveSinkOutput(nodes: WorkflowNodeDef[]): OutputConfig {
+  const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
+  const output: OutputConfig = {
+    viewers: sinkNodes.some(n => n.config.viewers === true),
+    overlays: sinkNodes.some(n => n.config.overlays === true),
+    speaker: sinkNodes.some(n => n.config.speaker === true),
+    recording: sinkNodes.some(n => n.config.recording === true),
+  };
+  // Fallback: if no explicit channel, apply output-full's all-true defaults
+  if (!output.viewers && !output.overlays && !output.speaker && !output.recording && sinkNodes.length > 0) {
+    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
+    if (fullNode) {
+      output.viewers = fullNode.config.viewers !== false;
+      output.overlays = fullNode.config.overlays !== false;
+      output.speaker = fullNode.config.speaker !== false;
+      output.recording = fullNode.config.recording !== false;
+    }
+  }
+  return output;
+}
+
 /** Resolve workflow nodes + edges into a virtual AppDefinition for activation */
 export function resolveWorkflowToApp(
   nodes: WorkflowNodeDef[],
@@ -126,25 +148,8 @@ export function resolveWorkflowToApp(
   config.visionFps = input.visionFps;
   config.input = input;
 
-  // Read output config from all sink nodes (OR-merge: if any sink enables a channel, it's on)
-  const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
-  const output: OutputConfig = {
-    viewers: sinkNodes.some(n => n.config.viewers === true),
-    overlays: sinkNodes.some(n => n.config.overlays === true),
-    speaker: sinkNodes.some(n => n.config.speaker === true),
-    recording: sinkNodes.some(n => n.config.recording === true),
-  };
-  // If no explicit channel is set, check legacy output-full with all-true defaults
-  if (!output.viewers && !output.overlays && !output.speaker && !output.recording && sinkNodes.length > 0) {
-    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
-    if (fullNode) {
-      output.viewers = fullNode.config.viewers !== false;
-      output.overlays = fullNode.config.overlays !== false;
-      output.speaker = fullNode.config.speaker !== false;
-      output.recording = fullNode.config.recording !== false;
-    }
-  }
-  config.output = output;
+  // Read output config from all sink nodes (OR-merge)
+  config.output = resolveSinkOutput(nodes);
 
   // Read system prompt from text node (connected to AI node via edges)
   const textNode = nodes.find(n => n.type === "text");
@@ -230,23 +235,7 @@ export function resolveWorkflowToPipeline(
   };
 
   // Shared output config from all sink nodes (OR-merge)
-  const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
-  const baseOutput: OutputConfig = {
-    viewers: sinkNodes.some(n => n.config.viewers === true),
-    overlays: sinkNodes.some(n => n.config.overlays === true),
-    speaker: sinkNodes.some(n => n.config.speaker === true),
-    recording: sinkNodes.some(n => n.config.recording === true),
-  };
-  // Fallback: if no explicit channel, check legacy output-full with all-true defaults
-  if (!baseOutput.viewers && !baseOutput.overlays && !baseOutput.speaker && !baseOutput.recording && sinkNodes.length > 0) {
-    const fullNode = sinkNodes.find(n => resolveNodeType(n.type) === "output-full");
-    if (fullNode) {
-      baseOutput.viewers = fullNode.config.viewers !== false;
-      baseOutput.overlays = fullNode.config.overlays !== false;
-      baseOutput.speaker = fullNode.config.speaker !== false;
-      baseOutput.recording = fullNode.config.recording !== false;
-    }
-  }
+  const baseOutput = resolveSinkOutput(nodes);
 
   return processableNodes.map((node, idx) => {
     const def = NODE_DEF_MAP.get(resolveNodeType(node.type))!;
