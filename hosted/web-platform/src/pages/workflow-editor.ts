@@ -247,14 +247,14 @@ async function renderEditor(isNew: boolean): Promise<void> {
       status: "draft",
       ownerId: null,
       nodes: [
-        { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 100, positionY: 200 },
-        { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 400, positionY: 80 },
-        { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 400, positionY: 250 },
-        { id: `n_out_${now}`, type: "output", label: "Output", config: {}, positionX: 700, positionY: 250 },
-        { id: `n_spk_${now}`, type: "speaker", label: "Speaker", config: {}, positionX: 950, positionY: 130 },
-        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 950, positionY: 200 },
-        { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 950, positionY: 270 },
-        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 950, positionY: 340 },
+        { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 50, positionY: 220 },
+        { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 320, positionY: 100 },
+        { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 320, positionY: 260 },
+        { id: `n_out_${now}`, type: "output", label: "Output", config: {}, positionX: 590, positionY: 260 },
+        { id: `n_spk_${now}`, type: "speaker", label: "Speaker", config: {}, positionX: 830, positionY: 120 },
+        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 830, positionY: 210 },
+        { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 830, positionY: 300 },
+        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 830, positionY: 390 },
       ],
       edges: [
         { id: `e_1_${now}`, sourceNodeId: `n_src_${now}`, targetNodeId: `n_ai_${now}` },
@@ -362,7 +362,7 @@ function buildSVG(): string {
     <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#wf-grid)" />
   `;
 
-  return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${_viewX} ${_viewY} ${900 / _zoom} ${600 / _zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+  return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${_viewX} ${_viewY} ${1100 / _zoom} ${550 / _zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
 }
 
 function refreshSVG(): void {
@@ -743,10 +743,12 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
 
 function resolveSubtitle(template: string, config: Record<string, unknown>): string {
   if (template === "${_channels}") {
-    return Object.entries({ viewers: "view", overlays: "overlay", speaker: "speaker", recording: "rec" })
-      .filter(([, k]) => config[k] !== false)
-      .map(([l]) => l)
-      .join(", ") || "all";
+    // Count connected channel nodes for the output hub
+    if (!_workflow) return "";
+    const channelTypes = ["speaker", "viewers", "overlays", "recording"];
+    const currentNodeId = Object.keys(config).length === 0 ? null : null; // output hub has no channel config
+    // Just show "hub" for the output node — channels are visible as connected nodes
+    return "hub";
   }
   if (template === "${_modalities}") {
     return [

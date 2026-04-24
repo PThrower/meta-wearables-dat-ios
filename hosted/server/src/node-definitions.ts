@@ -263,7 +263,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   {
     type: "output",
     label: "Output",
-    subtitle: "${_channels}",
+    subtitle: "hub",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: ["speaker", "viewers", "overlays", "recording"],
     role: "sink",
