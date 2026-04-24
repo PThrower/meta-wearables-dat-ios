@@ -438,7 +438,7 @@ const server = Bun.serve<WsData>({
         // Only show non-terminal, non-ephemeral sessions as live
         .filter(s => {
           const session = registry.get(s.id);
-          return session && ["active", "standby", "paused", "orphaned"].includes(session.state) && !session.flags.ephemeral;
+          return session && ["created", "active", "standby", "paused", "orphaned"].includes(session.state) && !session.flags.ephemeral;
         })
         .map(s => {
           return {
