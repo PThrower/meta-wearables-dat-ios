@@ -265,7 +265,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Output",
     subtitle: "hub",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-    allowedTargets: ["tts", "tones", "phone-speaker", "glasses-speaker", "viewers", "overlays", "recording"],
+    allowedTargets: ["local-tts", "tones", "phone-speaker", "glasses-speaker", "viewers", "overlays", "recording"],
     role: "sink",
     activationMode: null,
     binding: null,
@@ -279,9 +279,9 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   },
   // --- Output channel nodes (connect FROM output only) ---
   {
-    type: "tts",
-    label: "TTS",
-    subtitle: "text to speech",
+    type: "local-tts",
+    label: "Local TTS",
+    subtitle: "on-device speech",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
     role: "channel",
@@ -299,7 +299,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       ]},
     ],
     defaultConfig: {},
-    defaultLabel: "TTS",
+    defaultLabel: "Local TTS",
     runtime: ["mobile"],
   },
   {
@@ -445,10 +445,10 @@ const TYPE_ALIASES: Record<string, string> = {
   "camera-source": "stream-input",
   "output-full": "output",
   "output-viewers": "output",
-  "output-speaker": "tts",
+  "output-speaker": "local-tts",
   "output-recording": "output",
   "output-overlays": "output",
-  "speaker": "tts",
+  "speaker": "local-tts",
 };
 
 export function resolveNodeType(type: string): string {
