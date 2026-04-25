@@ -1544,17 +1544,25 @@ const server = Bun.serve<WsData>({
                   if (!wf) throw new Error("Workflow not found");
                   const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                   const edges = q.getWorkflowEdges(wfId);
-                  const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
-                  appRegistry.registerTransientApp(virtualApp);
-                  session.activeAppId = virtualApp.id;
-                  session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
-                  await orchestrator.activateWithConfig(sessionId, virtualApp);
-                  ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
-                  // Push input config to publisher
-                  const ic = orchestrator.getInputConfig(sessionId);
-                  if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
-                  const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
+                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  const primaryApp = pipelineApps[0];
+                  for (const app of pipelineApps) {
+                    appRegistry.registerTransientApp(app);
+                  }
+                  if (primaryApp) {
+                    session.activeAppId = primaryApp.id;
+                    session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    for (const app of pipelineApps) {
+                      await orchestrator.activateWithConfig(sessionId, app);
+                    }
+                    ws.send(JSON.stringify({ type: "app_status", appId: primaryApp.id, status: "active" }));
+                    const ic = orchestrator.getInputConfig(sessionId);
+                    if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
+                    const cachedFrame = registry.getLastFrame(sessionId);
+                    if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
+                  } else {
+                    ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
+                  }
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
@@ -1594,34 +1602,35 @@ const server = Bun.serve<WsData>({
                 if (!wf) { ws.send(JSON.stringify({ type: "workflow_error", error: "Workflow not found" })); return; }
                 const nodes = q.getWorkflowNodes(workflowId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                 const edges = q.getWorkflowEdges(workflowId);
-                const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: workflowId, name: wf.name });
-                appRegistry.registerTransientApp(virtualApp);
-                session.activeAppId = virtualApp.id;
-                session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
-                await orchestrator.activateWithConfig(sessionId, virtualApp);
-                // Activate processable nodes by activationMode
-                const processableNodes = nodes.filter((n: any) => {
-                  const def = NODE_DEF_MAP.get(n.type);
-                  return def && def.activationMode !== null;
-                });
-                for (const pNode of processableNodes) {
-                  const def = NODE_DEF_MAP.get((pNode as any).type);
-                  if (def?.activationMode === "jepa" && virtualApp.config?.jepa) {
-                    const jc = virtualApp.config.jepa as Record<string, any>;
-                    await jepaOrchestrator.activate(sessionId, {
-                      provider: jc.provider,
-                      model: jc.model ?? virtualApp.config.model,
-                      gpu: jc.gpu,
-                      clipLength: jc.clipLength,
-                      sampleFps: jc.sampleFps,
-                      resolution: jc.resolution,
-                      tasks: jc.tasks,
-                      sessionId,
-                    });
-                  }
-                  // "ai" mode already handled by orchestrator.activateWithConfig above
+                const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: workflowId, name: wf.name });
+                const primaryApp = pipelineApps[0];
+                for (const app of pipelineApps) {
+                  appRegistry.registerTransientApp(app);
                 }
-                ws.send(JSON.stringify({ type: "workflow_activated", appId: virtualApp.id }));
+                if (primaryApp) {
+                  session.activeAppId = primaryApp.id;
+                  session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                  for (const app of pipelineApps) {
+                    await orchestrator.activateWithConfig(sessionId, app);
+                  }
+                  // Activate JEPA nodes by activationMode
+                  for (const app of pipelineApps) {
+                    if (app.config?.jepa) {
+                      const jc = app.config.jepa as Record<string, any>;
+                      await jepaOrchestrator.activate(sessionId, {
+                        provider: jc.provider,
+                        model: jc.model ?? app.config.model,
+                        gpu: jc.gpu,
+                        clipLength: jc.clipLength,
+                        sampleFps: jc.sampleFps,
+                        resolution: jc.resolution,
+                        tasks: jc.tasks,
+                        sessionId,
+                      });
+                    }
+                  }
+                }
+                ws.send(JSON.stringify({ type: "workflow_activated", appId: primaryApp?.id ?? "passive" }));
                 const ic = orchestrator.getInputConfig(sessionId);
                 if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                 const cachedFrame = registry.getLastFrame(sessionId);
@@ -1797,37 +1806,41 @@ const server = Bun.serve<WsData>({
                   if (!wf) throw new Error("Workflow not found");
                   const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                   const edges = q.getWorkflowEdges(wfId);
-                  const virtualApp = resolveWorkflowToApp(nodes as any, edges as any, { id: wfId, name: wf.name });
-                  appRegistry.registerTransientApp(virtualApp);
-                  session.activeAppId = virtualApp.id;
-                  session.appPipeline = { appId: virtualApp.id, primitiveId: virtualApp.binding };
-                  // Route to correct orchestrator based on activationMode
-                  const aiNode = (nodes as any[]).find((n: any) => {
-                    const d = NODE_DEF_MAP.get(n.type);
-                    return d && d.activationMode !== null;
-                  });
-                  const aiDef = aiNode ? NODE_DEF_MAP.get(aiNode.type) : null;
-                  if (aiDef?.activationMode === "jepa" && virtualApp.config?.jepa) {
-                    const jc = virtualApp.config.jepa as any;
-                    await jepaOrchestrator.activate(sessionId, {
-                      provider: jc.provider,
-                      model: jc.model ?? virtualApp.config.model,
-                      gpu: jc.gpu,
-                      clipLength: jc.clipLength,
-                      sampleFps: jc.sampleFps,
-                      resolution: jc.resolution,
-                      tasks: jc.tasks,
-                      sessionId,
-                    });
-                  } else {
-                    await orchestrator.activateWithConfig(sessionId, virtualApp);
+                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  const primaryApp = pipelineApps[0];
+                  for (const app of pipelineApps) {
+                    appRegistry.registerTransientApp(app);
                   }
-                  console.log(`[relay] Viewer activated workflow app: ${virtualApp.id} session=${sessionId}`);
-                  ws.send(JSON.stringify({ type: "app_status", appId: virtualApp.id, status: "active" }));
+                  if (primaryApp) {
+                    session.activeAppId = primaryApp.id;
+                    session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    for (const app of pipelineApps) {
+                      // Route to correct orchestrator based on activationMode
+                      if (app.config?.jepa) {
+                        const jc = app.config.jepa as any;
+                        await jepaOrchestrator.activate(sessionId, {
+                          provider: jc.provider,
+                          model: jc.model ?? app.config.model,
+                          gpu: jc.gpu,
+                          clipLength: jc.clipLength,
+                          sampleFps: jc.sampleFps,
+                          resolution: jc.resolution,
+                          tasks: jc.tasks,
+                          sessionId,
+                        });
+                      } else {
+                        await orchestrator.activateWithConfig(sessionId, app);
+                      }
+                    }
+                    console.log(`[relay] Viewer activated workflow app: ${primaryApp.id} session=${sessionId}`);
+                    ws.send(JSON.stringify({ type: "app_status", appId: primaryApp.id, status: "active" }));
                   const ic = orchestrator.getInputConfig(sessionId);
                   if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                   const cachedFrame = registry.getLastFrame(sessionId);
-                  if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
+                    if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
+                  } else {
+                    ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
+                  }
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
                 }
