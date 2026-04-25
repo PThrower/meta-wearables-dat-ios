@@ -1,21 +1,20 @@
 /*
  * AudioPlaybackStage.swift
  *
- * Pipeline stage that plays TTS audio through the glasses speaker
+ * Pipeline stage that plays TTS audio through the glasses or phone speaker
  * AND publishes the PCM data for relay streaming.
  *
  * Architecture:
- *   AVSpeechSynthesizer.speak() -> glasses HFP speaker (local output)
+ *   AVSpeechSynthesizer.speak() -> preferred speaker (local output)
  *   AVSpeechSynthesizer.write() -> Int16 PCM -> AudioEventBus -> relay stream
  *
- * Event-driven: call speakGuidance(_:) with guidance text from the server.
+ * Event-driven: call speakGuidance(_:,preferGlasses:) with guidance text.
  * The stage generates PCM via write(), plays via speak(), and publishes
  * PCM chunks to AudioEventBus (codecType 2) for relay streaming to viewers.
  *
- * Key constraints:
- *   - Audio session is pre-configured as .playAndRecord by CameraAccessApp.
- *     Do NOT change the category or call setPreferredInput().
- *   - Runs on its own actor executor -- never blocks the main thread.
+ * Serial playback: utterances are queued and played one at a time so that
+ * per-utterance audio routing (glasses vs phone) doesn't conflict. Each
+ * utterance waits for the previous one to finish before changing the route.
  */
 
 import AVFoundation
@@ -33,9 +32,12 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     private let speechRate: Float = 0.5
     private let language: String = "en-US"
 
-    // Reusable synthesizer — creating a new one each call resets audio routing.
-    // Lazily created on @MainActor where it's used.
+    // Reusable synthesizer — lazily created on @MainActor.
     @MainActor private var synth: AVSpeechSynthesizer?
+
+    // Serial queue: ensures utterances play one at a time with correct routing
+    private var queue: [(text: String, preferGlasses: Bool)] = []
+    private var isSpeaking = false
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -59,6 +61,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     func stop() async {
         guard isPlaying else { return }
         isPlaying = false
+        queue.removeAll()
         await Task { @MainActor [weak self] in
             self?.synth?.stopSpeaking(at: .immediate)
             self?.synth = nil
@@ -66,47 +69,70 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         NSLog("[AudioPlayback] Stopped")
     }
 
-    // MARK: - Guidance TTS
+    // MARK: - Guidance TTS (queued)
 
-    /// Speak guidance text through preferred speaker and publish PCM to relay.
-    /// Called when the server sends a `guidance_text` JSON message.
-    /// - Parameter preferGlasses: If true, route to glasses HFP; if false, use phone speaker.
+    /// Queue guidance text for serial playback. Each utterance waits for the
+    /// previous one to finish before changing the audio route and speaking.
     func speakGuidance(_ text: String, preferGlasses: Bool = true) async {
         guard !text.isEmpty else { return }
+        NSLog("[AudioPlayback] Queued: \"\(text.prefix(80))\" preferGlasses=\(preferGlasses)")
+        queue.append((text, preferGlasses))
+        await drainQueue()
+    }
 
-        NSLog("[AudioPlayback] speakGuidance: \"\(text.prefix(80))\" preferGlasses=\(preferGlasses)")
+    /// Process queued utterances one at a time.
+    private func drainQueue() async {
+        guard !isSpeaking else { return }  // already draining
+        isSpeaking = true
+        defer { isSpeaking = false }
 
+        while let item = queue.first {
+            queue.removeFirst()
+            await speakNow(item.text, preferGlasses: item.preferGlasses)
+        }
+    }
+
+    /// Speak a single utterance: route → speak → wait for finish → generate PCM.
+    private func speakNow(_ text: String, preferGlasses: Bool) async {
         let rate = self.speechRate
         let language = self.language
 
         let result: (pcm: Data, sampleRate: UInt32, channels: UInt16)? = await Task { @MainActor in
-            // Route to preferred output BEFORE speaking — must be on @MainActor
-            // for iOS 17+ AVAudioSession strict concurrency.
+            // Route to preferred output BEFORE speaking
             if preferGlasses {
                 Self.routeToGlasses()
             } else {
                 Self.routeToPhone()
             }
 
-            // Reuse synthesizer to avoid route reset from new instances
             if self.synth == nil {
                 self.synth = AVSpeechSynthesizer()
             }
             let synth = self.synth!
 
-            // Stop any current speech before starting new
+            // Stop anything currently playing before starting new
             if synth.isSpeaking {
                 synth.stopSpeaking(at: .immediate)
             }
 
-            // Play through glasses speaker (local output)
-            let speakUtterance = AVSpeechUtterance(string: text)
-            speakUtterance.rate = rate
-            speakUtterance.volume = 1.0
-            speakUtterance.voice = AVSpeechSynthesisVoice(language: language)
-            synth.speak(speakUtterance)
+            // Speak and wait for completion via delegate
+            let utterance = AVSpeechUtterance(string: text)
+            utterance.rate = rate
+            utterance.volume = 1.0
+            utterance.voice = AVSpeechSynthesisVoice(language: language)
 
-            // Generate PCM for relay publishing (separate utterance)
+            let delegate = SpeechWaitDelegate()
+            synth.delegate = delegate
+            synth.speak(utterance)
+
+            // Wait for speech to finish (with timeout)
+            let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+                delegate.completion = { finished in cont.resume(returning: finished) }
+            }
+
+            NSLog("[AudioPlayback] Speech finished: \(finished), route=\(preferGlasses ? "glasses" : "phone")")
+
+            // Generate PCM for relay publishing
             let writeUtterance = AVSpeechUtterance(string: text)
             writeUtterance.rate = rate
             writeUtterance.voice = AVSpeechSynthesisVoice(language: language)
@@ -185,30 +211,21 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         }
     }
 
-    // MARK: - PCM Conversion (delegated to PCMConvert)
+    // MARK: - Audio Route
 
-    // MARK: - Audio Route Probing
-
-    /// Try to route audio output to Bluetooth HFP glasses.
-    /// AVSpeechSynthesizer doesn't automatically use the HFP output,
-    /// so we explicitly set the preferred input to the Bluetooth port
-    /// which forces output through the glasses speaker.
+    /// Route audio output to Bluetooth HFP glasses.
     nonisolated static func routeToGlasses() {
         let session = AVAudioSession.sharedInstance()
 
-        // Log current route
         let route = session.currentRoute
         let outputs = route.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
         NSLog("[AudioPlayback] Current outputs before route: \(outputs)")
 
-        // If already on Bluetooth HFP, nothing to do
         if route.outputs.contains(where: { $0.portType == .bluetoothHFP }) {
             NSLog("[AudioPlayback] Already on Bluetooth HFP output")
             return
         }
 
-        // Find a Bluetooth HFP input and set it as preferred — this forces
-        // the output to route through the same Bluetooth device's HFP speaker
         let btInput = session.availableInputs?.first(where: { $0.portType == .bluetoothHFP })
         if let bt = btInput {
             do {
@@ -247,5 +264,24 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         }
 
         NSLog("[AudioPlayback] Category options: \(session.categoryOptions)")
+    }
+}
+
+// MARK: - Speech Wait Delegate
+
+/// Delegate that resolves a continuation when speech finishes.
+/// Used to wait for AVSpeechSynthesizer to complete before changing audio route.
+@MainActor
+private class SpeechWaitDelegate: NSObject, AVSpeechSynthesizerDelegate {
+    var completion: ((Bool) -> Void)?
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        completion?(true)
+        completion = nil
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        completion?(false)
+        completion = nil
     }
 }
