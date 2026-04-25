@@ -290,18 +290,32 @@ async function renderEditor(isNew: boolean): Promise<void> {
     <div class="page workflow-editor-page">
       <div class="wf-editor-layout">
         <div class="wf-palette">
-          <h3 class="wf-palette-title">Nodes</h3>
-          ${_nodeDefs.map(d => {
-            const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
-              ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
-              : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
-            return `
-            <button class="wf-palette-item" data-type="${d.type}">
-              <span class="wf-palette-dot" style="background:${d.color.header}"></span>
-              <span class="wf-palette-label">${esc(d.label)}</span>
-              <span class="wf-palette-runtime">${rtBadge}</span>
-            </button>`;
-          }).join("")}
+          ${(() => {
+            const roleOrder: Array<{ role: string; label: string }> = [
+              { role: "source", label: "Source" },
+              { role: "reference", label: "Reference" },
+              { role: "processor", label: "Processor" },
+              { role: "transform", label: "Transform" },
+              { role: "sink", label: "Sink" },
+            ];
+            return roleOrder.map(({ role, label }) => {
+              const nodes = _nodeDefs.filter(d => d.role === role);
+              if (nodes.length === 0) return "";
+              return `
+                <h3 class="wf-palette-title">${label}</h3>
+                ${nodes.map(d => {
+                  const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
+                    ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
+                    : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
+                  return `
+                  <button class="wf-palette-item" data-type="${d.type}">
+                    <span class="wf-palette-dot" style="background:${d.color.header}"></span>
+                    <span class="wf-palette-label">${esc(d.label)}</span>
+                    <span class="wf-palette-runtime">${rtBadge}</span>
+                  </button>`;
+                }).join("")}`;
+            }).join("");
+          })()}
         </div>
         <div class="wf-canvas-wrap" id="wf-canvas-wrap">
           ${buildSVG()}

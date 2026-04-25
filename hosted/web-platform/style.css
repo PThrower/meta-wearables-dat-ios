@@ -2587,6 +2587,11 @@ body {
   letter-spacing: 0.8px;
   color: var(--text-tertiary);
   margin-bottom: 4px;
+  margin-top: 12px;
+}
+
+.wf-palette-title:first-child {
+  margin-top: 0;
 }
 
 .wf-palette-item {
