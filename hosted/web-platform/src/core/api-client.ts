@@ -348,6 +348,16 @@ export function fetchWorkflow(id: string): Promise<WorkflowDetail | null> {
   return apiGet<WorkflowDetail>(`/workflows/${id}`);
 }
 
+/** Fetch workflow templates */
+export function fetchWorkflowTemplates(): Promise<Array<{ id: string; name: string; description: string; nodeCount: number }>> {
+  return apiGet<Array<{ id: string; name: string; description: string; nodeCount: number }>>("/workflow-templates").then(r => r ?? []);
+}
+
+/** Instantiate a workflow from a template */
+export function instantiateWorkflowTemplate(templateId: string, options?: { name?: string; description?: string }): Promise<WorkflowDetail | null> {
+  return apiPost<WorkflowDetail>(`/workflow-templates/${templateId}`, options ?? {});
+}
+
 /** Create a new workflow */
 export function createWorkflow(data: {
   name: string;

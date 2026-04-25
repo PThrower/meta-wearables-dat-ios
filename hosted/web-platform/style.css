@@ -2050,6 +2050,7 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
+  position: relative;
 }
 .fleet-health-badge {
   display: flex;
@@ -2834,6 +2835,51 @@ select.wf-config-input {
   font-size: 12px;
   font-family: inherit;
   max-width: 260px;
+}
+
+/* Template picker dropdown */
+.wf-template-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 320px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.wf-template-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.wf-template-item:hover {
+  background: var(--border-subtle);
+}
+.wf-template-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.wf-template-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 8px;
+}
+.wf-template-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: 4px 0 0;
+  line-height: 1.4;
 }
 .wf-activate-go {
   padding: 5px 12px;

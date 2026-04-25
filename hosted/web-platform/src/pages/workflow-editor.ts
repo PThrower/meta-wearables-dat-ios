@@ -10,7 +10,7 @@
 import type { PageModule } from "../router/router.js";
 import {
   fetchWorkflows, fetchWorkflow, createWorkflow, updateWorkflow, deleteWorkflow,
-  activateWorkflow, fetchSessions, fetchNodeDefinitions, esc, formatDateTime,
+  activateWorkflow, fetchSessions, fetchNodeDefinitions, fetchWorkflowTemplates, instantiateWorkflowTemplate, esc, formatDateTime,
 } from "../core/api-client.js";
 import type { WorkflowSummary, WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef, SessionInfo, NodeDefinition, ConfigFieldSchema } from "../core/api-client.js";
 
@@ -167,8 +167,49 @@ async function renderList(): Promise<void> {
     </div>
   `;
 
-  _container.querySelector("#wf-new-btn")?.addEventListener("click", () => {
-    location.hash = "/workflows/new";
+  _container.querySelector("#wf-new-btn")?.addEventListener("click", async () => {
+    // Remove existing dropdown if open
+    const existing = _container?.querySelector(".wf-template-dropdown");
+    if (existing) { existing.remove(); return; }
+
+    const templates = await fetchWorkflowTemplates();
+    if (templates.length === 0) {
+      location.hash = "/workflows/new";
+      return;
+    }
+
+    const dd = document.createElement("div");
+    dd.className = "wf-template-dropdown";
+    dd.innerHTML = `
+      ${templates.map(t => `
+        <button class="wf-template-item" data-id="${esc(t.id)}">
+          <span class="wf-template-name">${esc(t.name)}</span>
+          <span class="wf-template-meta">${t.nodeCount} nodes</span>
+          <p class="wf-template-desc">${esc(t.description)}</p>
+        </button>
+      `).join("")}
+    `;
+    (_container?.querySelector("#wf-new-btn") as HTMLElement)?.after(dd);
+
+    dd.querySelectorAll(".wf-template-item").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const tplId = (btn as HTMLElement).dataset.id!;
+        dd.remove();
+        const wf = await instantiateWorkflowTemplate(tplId);
+        if (wf) {
+          history.replaceState(null, "", `#/workflows/${wf.id}`);
+          renderEditor(false);
+        } else {
+          alert("Failed to create workflow from template");
+        }
+      });
+    });
+
+    // Dismiss on click outside
+    const dismiss = (ev: MouseEvent) => {
+      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
+    };
+    setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
   await loadList();
