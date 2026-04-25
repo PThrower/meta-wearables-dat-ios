@@ -22,7 +22,7 @@ export type ConfigFieldSchema =
 
 // --- Structural & Activation Types ---
 
-export type StructuralRole = "source" | "processor" | "reference" | "sink" | "channel";
+export type StructuralRole = "source" | "reference" | "processor" | "transform" | "sink";
 
 export type ActivationMode = "ai" | "jepa" | "passthrough";
 
@@ -277,14 +277,14 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "Output",
     runtime: ["server", "mobile"],
   },
-  // --- Output channel nodes (connect FROM output only) ---
+  // --- Transform nodes (data format conversion) ---
   {
     type: "local-tts",
     label: "Local TTS",
     subtitle: "on-device speech",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-    allowedTargets: [],
-    role: "channel",
+    allowedTargets: ["phone-speaker", "glasses-speaker"],
+    role: "transform",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -302,13 +302,14 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "Local TTS",
     runtime: ["mobile"],
   },
+  // --- Sink nodes (final delivery endpoints) ---
   {
     type: "tones",
     label: "Tones",
     subtitle: "alert sounds",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -325,7 +326,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     subtitle: "phone audio out",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -342,7 +343,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     subtitle: "HFP/A2DP audio",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -363,7 +364,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     subtitle: "WS fanout",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -380,7 +381,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     subtitle: "bbox annotations",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
@@ -397,7 +398,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     subtitle: "R2 persist",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
-    role: "channel",
+    role: "sink",
     activationMode: null,
     binding: null,
     defaultModel: null,
