@@ -97,7 +97,9 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         let rate = self.speechRate
         let language = self.language
 
-        let result: (pcm: Data, sampleRate: UInt32, channels: UInt16)? = await Task { @MainActor in
+        let result: (pcm: Data, sampleRate: UInt32, channels: UInt16)? = await Task { @MainActor [weak self] in
+            guard let self else { return nil }
+
             // Route to preferred output BEFORE speaking
             if preferGlasses {
                 Self.routeToGlasses()
@@ -105,10 +107,11 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
                 Self.routeToPhone()
             }
 
+            guard await self.isPlaying else { return nil }
             if self.synth == nil {
                 self.synth = AVSpeechSynthesizer()
             }
-            let synth = self.synth!
+            guard let synth = self.synth else { return nil }
 
             // Stop anything currently playing before starting new
             if synth.isSpeaking {
@@ -131,6 +134,9 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
             }
 
             NSLog("[AudioPlayback] Speech finished: \(finished), route=\(preferGlasses ? "glasses" : "phone")")
+
+            // If stopped while speaking, bail out
+            guard await self.isPlaying else { return nil }
 
             // Generate PCM for relay publishing
             let writeUtterance = AVSpeechUtterance(string: text)
