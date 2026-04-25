@@ -65,7 +65,7 @@ export interface AppsConfig {
 
 // --- Workflow Builder ---
 
-export type WorkflowNodeType = "stream-input" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "jepa-vision" | "local-tts" | "tones" | "phone-speaker" | "glasses-speaker" | "overlays";
+export type WorkflowNodeType = "stream-input" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "jepa-vision" | "jepa-trigger" | "timer-trigger" | "conditional" | "local-tts" | "tones" | "phone-speaker" | "glasses-speaker" | "overlays";
 
 /** JEPA vision node config -- provider-abstraction for continuous stream understanding */
 export interface JEPANodeConfig {

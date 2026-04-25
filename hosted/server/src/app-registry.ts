@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
-import { NODE_DEF_MAP, resolveNodeType, isSinkType } from "./node-definitions.js";
+import { NODE_DEF_MAP, resolveNodeType, isSinkType, isTriggerType } from "./node-definitions.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -209,6 +209,49 @@ export function extractLifecyclePolicy(inputNode: WorkflowNodeDef | undefined): 
 }
 
 /**
+ * Resolve trigger chains: find trigger nodes connected to each processable node.
+ * Returns a map of processorNodeId -> trigger config (for conditional activation).
+ *
+ * Trigger chain: processor → trigger → processor
+ *   e.g. jepa-vision → jepa-trigger → s2s-live
+ *   means s2s-live should only activate when jepa-trigger fires.
+ */
+function resolveTriggerChains(
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+): Map<string, { triggerType: string; config: Record<string, unknown>; sourceProcessorId: string | null }> {
+  const chains = new Map<string, { triggerType: string; config: Record<string, unknown>; sourceProcessorId: string | null }>();
+  const edgeMap = new Map(edges.map(e => [e.sourceNodeId, e.targetNodeId]));
+
+  for (const node of nodes) {
+    if (!isTriggerType(resolveNodeType(node.type))) continue;
+    const triggerDef = NODE_DEF_MAP.get(resolveNodeType(node.type));
+    if (!triggerDef) continue;
+
+    // Find what feeds INTO this trigger (upstream processor)
+    const inEdge = edges.find(e => e.targetNodeId === node.id);
+    const sourceProcessorId = inEdge?.sourceNodeId ?? null;
+
+    // Find what this trigger targets (downstream nodes)
+    for (const edge of edges) {
+      if (edge.sourceNodeId !== node.id) continue;
+      const targetNode = nodes.find(n => n.id === edge.targetNodeId);
+      if (!targetNode) continue;
+      const targetDef = NODE_DEF_MAP.get(resolveNodeType(targetNode.type));
+      // Only annotate processable targets (processors)
+      if (targetDef && targetDef.activationMode !== null) {
+        chains.set(targetNode.id, {
+          triggerType: triggerDef.type,
+          config: node.config,
+          sourceProcessorId,
+        });
+      }
+    }
+  }
+  return chains;
+}
+
+/**
  * Resolve workflow into a multi-node pipeline.
  * Each processable node becomes its own AppDefinition with per-node prompt and config.
  * For single-node workflows, returns an array of one (backward compat with resolveWorkflowToApp).
@@ -225,6 +268,9 @@ export function resolveWorkflowToPipeline(
   // Passive pipelines (no AI processor) are valid — return empty so activation
   // skips AI orchestration and just configures sinks/transforms on the mobile side.
   if (processableNodes.length === 0) return [];
+
+  // Resolve trigger chains: map processorNodeId -> trigger metadata
+  const triggerChains = resolveTriggerChains(nodes, edges);
 
   // Shared input config from stream-input node
   const inputNode = nodes.find(n => n.type === "stream-input");
@@ -274,6 +320,14 @@ export function resolveWorkflowToPipeline(
       input,
       output,
       lifecycle,
+      // Annotate with trigger chain if this processor is downstream of a trigger
+      ...(triggerChains.has(node.id) ? {
+        trigger: {
+          type: triggerChains.get(node.id)!.triggerType,
+          config: triggerChains.get(node.id)!.config,
+          sourceProcessorId: triggerChains.get(node.id)!.sourceProcessorId,
+        },
+      } : {}),
       ...(isJepa ? {
         jepa: {
           provider: (node.config.provider as string) ?? "modal",

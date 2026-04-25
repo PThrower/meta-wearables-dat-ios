@@ -22,7 +22,7 @@ export type ConfigFieldSchema =
 
 // --- Structural & Activation Types ---
 
-export type StructuralRole = "source" | "reference" | "processor" | "transform" | "sink";
+export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
 export type ActivationMode = "ai" | "jepa" | "passthrough";
 
@@ -64,10 +64,19 @@ export interface NodeDefinition {
 /** Sentinel value in allowedTargets: expands to all current sink types */
 export const TARGET_ROLE_SINK = "<sink>";
 
-/** Expand "<sink>" sentinel to all concrete sink types */
-function expandTargets(targets: string[], sinkTypes: string[]): string[] {
-  if (!targets.includes(TARGET_ROLE_SINK)) return targets;
-  return [...targets.filter(t => t !== TARGET_ROLE_SINK), ...sinkTypes];
+/** Sentinel value in allowedTargets: expands to all current trigger types */
+export const TARGET_ROLE_TRIGGER = "<trigger>";
+
+/** Expand "<sink>" and "<trigger>" sentinels to concrete types */
+function expandTargets(targets: string[], sinkTypes: string[], triggerTypes: string[]): string[] {
+  let expanded = targets;
+  if (expanded.includes(TARGET_ROLE_SINK)) {
+    expanded = [...expanded.filter(t => t !== TARGET_ROLE_SINK), ...sinkTypes];
+  }
+  if (expanded.includes(TARGET_ROLE_TRIGGER)) {
+    expanded = [...expanded.filter(t => t !== TARGET_ROLE_TRIGGER), ...triggerTypes];
+  }
+  return expanded;
 }
 
 // --- Definitions ---
@@ -78,7 +87,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Stream Input",
     subtitle: "${_modalities}",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -137,7 +146,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S Live",
     subtitle: "${model}",
     color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemini-live",
@@ -170,7 +179,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S REST",
     subtitle: "${model}",
     color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemma4-rest",
@@ -194,7 +203,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "S2S E4B",
     subtitle: "${model}",
     color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "ai",
     binding: "s2s-gemma4-e4b-rest",
@@ -224,7 +233,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "JEPA Vision",
     subtitle: "${model} | ${provider}",
     color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" },
-    allowedTargets: ["local-tts", TARGET_ROLE_SINK],
+    allowedTargets: ["local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "jepa",
     binding: "jepa-vjepa2",
@@ -259,6 +268,103 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] },
     defaultLabel: "JEPA Vision",
     runtime: ["server", "mobile"],
+  },
+  // --- Trigger nodes (event-driven conditional routers) ---
+  //
+  // Triggers are event-driven routers that bridge processors to other nodes.
+  // They receive discrete events from upstream processors and conditionally
+  // activate downstream processors/transforms/sinks.
+  //
+  // Contract:
+  //   - role: "trigger"
+  //   - activationMode: null (not directly activated; routes events)
+  //   - Produces discrete events, not continuous streams
+  //   - Can receive from processors (downstream of their output)
+  //   - Can target processors, transforms, or sinks
+  //   - Runtime: evaluate condition -> activate downstream
+  //
+  {
+    type: "jepa-trigger",
+    label: "JEPA Trigger",
+    subtitle: "on ${triggerOn} > ${confidenceThreshold}",
+    color: { fill: "#3d3000", header: "#eab308", stroke: "#eab308" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts", TARGET_ROLE_SINK],
+    role: "trigger",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "range", key: "confidenceThreshold", label: "Confidence Threshold", min: 0, max: 1, step: 0.05 },
+      { kind: "select", key: "triggerOn", label: "Trigger On", options: [
+        { value: "anomaly", label: "Anomaly detected" },
+        { value: "action", label: "Action recognized" },
+        { value: "any", label: "Any JEPA event" },
+      ]},
+      { kind: "select", key: "action", label: "Action", options: [
+        { value: "activate", label: "Activate AI processor" },
+        { value: "speak", label: "Speak alert via TTS" },
+        { value: "notify", label: "Send notification" },
+      ]},
+      { kind: "textarea", key: "promptTemplate", label: "Prompt Template", rows: 4, placeholder: "Anomaly detected: ${description}. Confidence: ${confidence}" },
+      { kind: "number", key: "cooldownSec", label: "Cooldown (sec, 0 = none)", min: 0, max: 300, step: 5 },
+    ],
+    defaultConfig: { confidenceThreshold: 0.8, triggerOn: "anomaly", action: "activate", promptTemplate: "", cooldownSec: 30 },
+    defaultLabel: "JEPA Trigger",
+    runtime: ["server"],
+  },
+  {
+    type: "timer-trigger",
+    label: "Timer Trigger",
+    subtitle: "every ${intervalSec}s",
+    color: { fill: "#3d3000", header: "#eab308", stroke: "#eab308" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    role: "trigger",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "number", key: "intervalSec", label: "Interval (seconds)", min: 5, max: 3600, step: 5 },
+      { kind: "number", key: "maxTriggers", label: "Max triggers (0 = unlimited)", min: 0, max: 100, step: 1 },
+      { kind: "select", key: "action", label: "Action", options: [
+        { value: "activate", label: "Activate AI processor" },
+        { value: "speak", label: "Speak text via TTS" },
+        { value: "capture", label: "Capture frame for analysis" },
+      ]},
+      { kind: "textarea", key: "promptTemplate", label: "Prompt Template", rows: 3, placeholder: "Analyze the current scene." },
+    ],
+    defaultConfig: { intervalSec: 30, maxTriggers: 0, action: "activate", promptTemplate: "" },
+    defaultLabel: "Timer Trigger",
+    runtime: ["server"],
+  },
+  {
+    type: "conditional",
+    label: "Conditional",
+    subtitle: "if ${field} ${operator} ${value}",
+    color: { fill: "#3d3000", header: "#eab308", stroke: "#eab308" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts", TARGET_ROLE_SINK],
+    role: "trigger",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "text", key: "field", label: "Field", placeholder: "confidence" },
+      { kind: "select", key: "operator", label: "Operator", options: [
+        { value: "gt", label: "> (greater than)" },
+        { value: "gte", label: ">= (greater or equal)" },
+        { value: "lt", label: "< (less than)" },
+        { value: "lte", label: "<= (less or equal)" },
+        { value: "eq", label: "= (equals)" },
+        { value: "neq", label: "!= (not equals)" },
+      ]},
+      { kind: "number", key: "value", label: "Value", step: 0.01 },
+      { kind: "number", key: "cooldownSec", label: "Cooldown (sec, 0 = none)", min: 0, max: 300, step: 5 },
+    ],
+    defaultConfig: { field: "confidence", operator: "gt", value: 0.8, cooldownSec: 30 },
+    defaultLabel: "Conditional",
+    runtime: ["server"],
   },
   // --- Transform nodes (data format conversion) ---
   {
@@ -367,11 +473,14 @@ export const NODE_DEF_MAP = new Map(NODE_DEFINITIONS.map(d => [d.type, d]));
 /** All current sink type identifiers (derived from definitions) */
 const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink").map(d => d.type);
 
+/** All current trigger type identifiers (derived from definitions) */
+const TRIGGER_TYPES = NODE_DEFINITIONS.filter(d => d.role === "trigger").map(d => d.type);
+
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   for (const def of NODE_DEFINITIONS) {
-    map.set(def.type, new Set(expandTargets(def.allowedTargets, SINK_TYPES)));
+    map.set(def.type, new Set(expandTargets(def.allowedTargets, SINK_TYPES, TRIGGER_TYPES)));
   }
   return map;
 }
@@ -379,11 +488,11 @@ export function buildAllowedEdgeMap(): Map<string, Set<string>> {
 /** Validate workflow DAG structure using role-based rules */
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
   if (nodes.length === 0) return "Workflow must have at least 1 node";
-  const sinkOrTransformCount = nodes.filter(n => {
+  const sinkTransformTriggerCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
-    return role === "sink" || role === "transform";
+    return role === "sink" || role === "transform" || role === "trigger";
   }).length;
-  if (sinkOrTransformCount < 1) return "Must have at least 1 sink or transform node";
+  if (sinkTransformTriggerCount < 1) return "Must have at least 1 sink, transform, or trigger node";
   return null;
 }
 
@@ -406,4 +515,9 @@ export function resolveNodeType(type: string): string {
 /** Check if a node type is a sink (resolves aliases first) */
 export function isSinkType(type: string): boolean {
   return SINK_TYPES.includes(resolveNodeType(type));
+}
+
+/** Check if a node type is a trigger (resolves aliases first) */
+export function isTriggerType(type: string): boolean {
+  return TRIGGER_TYPES.includes(resolveNodeType(type));
 }
