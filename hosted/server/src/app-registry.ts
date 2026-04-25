@@ -379,6 +379,8 @@ export function resolveWorkflowToPipeline(
     const nodeLabel = node.label ? ` - ${node.label}` : "";
     const suffix = processableNodes.length > 1 ? ` [${idx + 1}]` : "";
 
+    console.log(`[app-registry] Pipeline node ${idx}: type=${node.type} id=${node.id} speakerTarget=${speakerTarget} speaker=${output.speaker}`);
+
     return {
       id: processableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
       name: `${workflow.name}${nodeLabel}${suffix}`,
