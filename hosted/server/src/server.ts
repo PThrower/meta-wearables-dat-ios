@@ -168,6 +168,30 @@ function sendCachedFrameToAI(sessionId: string, frame: Uint8Array): void {
   }
 }
 
+/** Build mobile-side config for passive workflows (no AI, just sinks/transforms) */
+function buildMobileWorkflowConfig(
+  nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+): Record<string, unknown> | null {
+  const sinkNodes = nodes.filter(n => {
+    const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
+    return def && (def.role === "sink" || def.role === "transform");
+  });
+  if (sinkNodes.length === 0) return null;
+
+  const inputNode = nodes.find(n => n.type === "stream-input");
+  return {
+    sinks: sinkNodes.map(n => ({ type: n.type, config: n.config })),
+    input: inputNode ? {
+      video: inputNode.config.video !== false,
+      phoneMic: inputNode.config.phoneMic !== false,
+      glassesMic: inputNode.config.glassesMic === true,
+      gestures: inputNode.config.gestures !== false,
+    } : undefined,
+    edges: edges.map(e => ({ source: e.sourceNodeId, target: e.targetNodeId })),
+  };
+}
+
 // --- Control Event Bus ---
 // Pub/sub for gesture/control events from iOS publisher.
 
@@ -1029,7 +1053,7 @@ const server = Bun.serve<WsData>({
         }
 
         const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
-        const primaryApp = pipelineApps[0];
+        const primaryApp = pipelineApps[0];  // undefined for passive pipelines (no AI processor)
         for (const app of pipelineApps) {
           appRegistry.registerTransientApp(app);
         }
@@ -1038,6 +1062,40 @@ const server = Bun.serve<WsData>({
         if (!session) {
           return Response.json({ error: "Session not found or not active" }, { status: 404 });
         }
+
+        // Passive pipelines (no processable nodes) — configure session but skip AI activation
+        if (!primaryApp) {
+          session.activeAppId = null;
+          session.appPipeline = null;
+
+          // Request codec change if specified
+          const inputCodec = (nodes as any[]).find((n: any) => n.type === "stream-input")?.config?.codec as string | undefined;
+          if (inputCodec && ["jpeg", "h264"].includes(inputCodec) && session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify({ type: "set_codec", codec: inputCodec }));
+          }
+
+          // Audit log
+          const activationId = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          dbWriter.enqueue(q.insertActivation({
+            id: activationId,
+            sessionId: body.sessionId,
+            workflowId: wfId,
+            appId: "passive",
+            activatedBy: session.activeAppId ?? "api",
+            overrodeAppId: conflict.hasConflict ? conflict.appId ?? undefined : undefined,
+            reason: body.reason ?? (conflict.hasConflict ? "Override" : "Activate"),
+          }));
+          dbWriter.flushNow();
+
+          // Send workflow config to mobile for sink/transform setup
+          const mobileConfig = buildMobileWorkflowConfig(nodes as any, edges as any);
+          if (mobileConfig && session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify({ type: "workflow_config", config: mobileConfig }));
+          }
+
+          return Response.json({ appId: null, status: "passive", apps: [] });
+        }
+
         session.activeAppId = primaryApp.id;
         session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
 

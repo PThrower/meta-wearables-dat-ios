@@ -222,7 +222,9 @@ export function resolveWorkflowToPipeline(
     const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
     return def && def.activationMode !== null;
   });
-  if (processableNodes.length === 0) throw new Error("No processable node found in workflow");
+  // Passive pipelines (no AI processor) are valid — return empty so activation
+  // skips AI orchestration and just configures sinks/transforms on the mobile side.
+  if (processableNodes.length === 0) return [];
 
   // Shared input config from stream-input node
   const inputNode = nodes.find(n => n.type === "stream-input");
