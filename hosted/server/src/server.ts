@@ -168,6 +168,61 @@ function sendCachedFrameToAI(sessionId: string, frame: Uint8Array): void {
   }
 }
 
+/** BFS from a node to find the nearest speaker sink type — returns true if glasses-speaker reachable */
+function resolveSinkTarget(
+  startNodeId: string,
+  nodes: Array<{ id: string; type: string }>,
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+): boolean {
+  const visited = new Set<string>();
+  const queue = [startNodeId];
+  visited.add(startNodeId);
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    for (const edge of edges) {
+      if (edge.sourceNodeId !== currentId) continue;
+      if (visited.has(edge.targetNodeId)) continue;
+      visited.add(edge.targetNodeId);
+      const targetNode = nodes.find(n => n.id === edge.targetNodeId);
+      if (!targetNode) continue;
+      const resolved = resolveNodeType(targetNode.type);
+      if (resolved === "glasses-speaker") return true;
+      // Keep walking through transforms
+      const def = NODE_DEF_MAP.get(resolved);
+      if (def?.role === "transform" || def?.role === "sink") {
+        queue.push(edge.targetNodeId);
+      }
+    }
+  }
+  return false;
+}
+
+/** Push text→local-tts→speaker chains for passive workflows to the publisher */
+function pushPassiveTTSChains(
+  nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+  publisherWs: { send: (data: string) => void; readyState: number },
+  sessionId: string,
+): void {
+  if (publisherWs.readyState !== 1) return; // WebSocket.OPEN
+  for (const node of nodes) {
+    if (node.type !== "text") continue;
+    const textContent = node.config?.text as string | undefined;
+    if (!textContent) continue;
+    for (const edge of edges) {
+      if (edge.sourceNodeId !== node.id) continue;
+      const ttsNode = nodes.find(n => n.id === edge.targetNodeId);
+      if (!ttsNode) continue;
+      const ttsDef = NODE_DEF_MAP.get(resolveNodeType(ttsNode.type));
+      if (ttsDef?.type !== "local-tts") continue;
+      const preferGlasses = resolveSinkTarget(ttsNode.id, nodes, edges);
+      publisherWs.send(JSON.stringify({ type: "audio_route", preferGlasses }));
+      publisherWs.send(JSON.stringify({ type: "guidance_text", text: textContent, preferGlasses }));
+      console.log(`[relay] Passive TTS: pushed text (${textContent.length} chars) preferGlasses=${preferGlasses} session=${sessionId}`);
+    }
+  }
+}
+
 /** Build mobile-side config for passive workflows (no AI, just sinks/transforms) */
 function buildMobileWorkflowConfig(
   nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
@@ -1098,24 +1153,9 @@ const server = Bun.serve<WsData>({
             session.publisher.ws.send(JSON.stringify({ type: "workflow_config", config: mobileConfig }));
           }
 
-          // For passive workflows with text→local-tts chains, push text as guidance_text
-          // so the iOS app speaks it via AudioPlaybackStage.speakGuidance()
-          const edgeMap = new Map((edges as any[]).map((e: any) => [e.sourceNodeId, e.targetNodeId]));
-          for (const node of nodes as any[]) {
-            if (node.type !== "text") continue;
-            const textContent = (node.config as Record<string, unknown>)?.text as string | undefined;
-            if (!textContent) continue;
-            // Walk: text → local-tts → speaker
-            const ttsTarget = edgeMap.get(node.id);
-            const ttsDef = ttsTarget ? NODE_DEF_MAP.get((nodes as any[]).find(n => n.id === ttsTarget)?.type ?? "") : null;
-            if (ttsDef?.type === "local-tts") {
-              const speakerTarget = edgeMap.get(ttsTarget);
-              const speakerDef = speakerTarget ? NODE_DEF_MAP.get((nodes as any[]).find(n => n.id === speakerTarget)?.type ?? "") : null;
-              if (speakerDef?.role === "sink" && session.publisher?.ws?.readyState === WebSocket.OPEN) {
-                session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text: textContent }));
-                console.log(`[relay] Passive TTS: pushed text (${textContent.length} chars) to publisher session=${body.sessionId}`);
-              }
-            }
+          // For passive workflows with text→local-tts→speaker chains, push text as guidance_text
+          if (session.publisher?.ws) {
+            pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, body.sessionId);
           }
 
           return Response.json({ appId: null, status: "passive", apps: [] });
@@ -1562,6 +1602,9 @@ const server = Bun.serve<WsData>({
                     if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                   } else {
                     ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
+                    if (session.publisher?.ws) {
+                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                    }
                   }
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
@@ -1631,6 +1674,9 @@ const server = Bun.serve<WsData>({
                   }
                 }
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: primaryApp?.id ?? "passive" }));
+                if (!primaryApp && session.publisher?.ws) {
+                  pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                }
                 const ic = orchestrator.getInputConfig(sessionId);
                 if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
                 const cachedFrame = registry.getLastFrame(sessionId);
@@ -1840,6 +1886,9 @@ const server = Bun.serve<WsData>({
                     if (cachedFrame) sendCachedFrameToAI(sessionId, cachedFrame);
                   } else {
                     ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
+                    if (session.publisher?.ws) {
+                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                    }
                   }
                 } catch (e) {
                   ws.send(JSON.stringify({ type: "app_status", appId, status: "error", error: String(e) }));
