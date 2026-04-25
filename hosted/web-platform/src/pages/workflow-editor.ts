@@ -55,6 +55,7 @@ function autoSave(): void {
 async function doSave(): Promise<void> {
   if (!_workflow || _saving) return;
   _saving = true;
+  updateSaveIndicator();
   try {
     _workflow.name = (_container?.querySelector("#wf-name") as HTMLInputElement)?.value ?? _workflow.name;
     _workflow.description = (_container?.querySelector("#wf-desc") as HTMLInputElement)?.value ?? _workflow.description;
@@ -68,7 +69,12 @@ async function doSave(): Promise<void> {
         edges: _workflow.edges,
         canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
       });
-      if (result) _workflow = result;
+      if (result) {
+        _workflow = result;
+        _dirty = false;
+      } else {
+        console.warn("[auto-save] server rejected save — server may need redeploy");
+      }
     } else {
       const result = await createWorkflow({
         name: _workflow.name,
@@ -80,9 +86,11 @@ async function doSave(): Promise<void> {
         const published = await updateWorkflow(result.id, { status: "published" });
         _workflow = published ?? result;
         history.replaceState(null, "", `#/workflows/${_workflow.id}`);
+        _dirty = false;
+      } else {
+        console.warn("[auto-save] server rejected create — server may need redeploy");
       }
     }
-    _dirty = false;
     updateSaveIndicator();
   } finally {
     _saving = false;
