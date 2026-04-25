@@ -52,11 +52,14 @@ interface AppsConfig {
 function buildWorkflowNodes(app: StaticApp, nodeInfo: { type: string; extraConfig: Record<string, unknown> }) {
   const s = app.id;
   const isJepa = nodeInfo.type === "jepa-vision";
+  const hasAudio = nodeInfo.type === "s2s-live" || nodeInfo.type === "s2s-e4b";
 
   const srcId = `n_src_${s}`;
   const txtId = `n_txt_${s}`;
   const aiId = `n_ai_${s}`;
-  const outId = `n_out_${s}`;
+  const sinkId = `n_sink_${s}`;
+  // For audio-capable processors (s2s-live, s2s-e4b), add a speaker sink too
+  const speakerId = hasAudio ? `n_spk_${s}` : null;
 
   const processorConfig: Record<string, unknown> = {
     ...nodeInfo.extraConfig,
@@ -80,26 +83,26 @@ function buildWorkflowNodes(app: StaticApp, nodeInfo: { type: string; extraConfi
     autoDeactivateMin: null,
   };
 
-  const outputConfig: Record<string, unknown> = {
-    viewers: true,
-    overlays: !isJepa,
-    speaker: nodeInfo.type === "s2s-live",
-    recording: true,
-  };
+  const nodes = [
+    { id: srcId, type: "stream-input", label: "Input", config: JSON.stringify(inputConfig), positionX: 100, positionY: 200 },
+    { id: txtId, type: "text", label: "Prompt", config: JSON.stringify({ text: app.systemPrompt }), positionX: 400, positionY: 80 },
+    { id: aiId, type: nodeInfo.type, label: app.name, config: JSON.stringify(processorConfig), positionX: 400, positionY: 250 },
+    // Overlays sink for bbox annotations (replaces the old output node)
+    { id: sinkId, type: "overlays", label: "Overlays", config: JSON.stringify({}), positionX: 700, positionY: 250 },
+  ];
+  const edges = [
+    { id: `e_src_ai_${s}`, sourceNodeId: srcId, targetNodeId: aiId },
+    ...(isJepa ? [] : [{ id: `e_txt_ai_${s}`, sourceNodeId: txtId, targetNodeId: aiId }]),
+    { id: `e_ai_sink_${s}`, sourceNodeId: aiId, targetNodeId: sinkId },
+  ];
 
-  return {
-    nodes: [
-      { id: srcId, type: "stream-input", label: "Input", config: JSON.stringify(inputConfig), positionX: 100, positionY: 200 },
-      { id: txtId, type: "text", label: "Prompt", config: JSON.stringify({ text: app.systemPrompt }), positionX: 400, positionY: 80 },
-      { id: aiId, type: nodeInfo.type, label: app.name, config: JSON.stringify(processorConfig), positionX: 400, positionY: 250 },
-      { id: outId, type: "output", label: "Output", config: JSON.stringify(outputConfig), positionX: 700, positionY: 250 },
-    ],
-    edges: [
-      { id: `e_src_ai_${s}`, sourceNodeId: srcId, targetNodeId: aiId },
-      ...(isJepa ? [] : [{ id: `e_txt_ai_${s}`, sourceNodeId: txtId, targetNodeId: aiId }]),
-      { id: `e_ai_out_${s}`, sourceNodeId: aiId, targetNodeId: outId },
-    ],
-  };
+  // Audio-capable processors get a phone-speaker sink
+  if (speakerId) {
+    nodes.push({ id: speakerId, type: "phone-speaker", label: "Phone Speaker", config: JSON.stringify({}), positionX: 700, positionY: 400 });
+    edges.push({ id: `e_ai_spk_${s}`, sourceNodeId: aiId, targetNodeId: speakerId });
+  }
+
+  return { nodes, edges };
 }
 
 /**
