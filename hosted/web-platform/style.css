@@ -1387,6 +1387,9 @@ header {
   height: 100%;
   display: block;
 }
+.mini-editor-canvas.hidden {
+  display: none;
+}
 
 /* Node palette */
 .mini-editor-palette {

@@ -8,9 +8,9 @@ import { GuidancePanel, NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeState } from "../guidance.js";
 import { fetchWorkflow, updateWorkflow, esc } from "../core/api-client.js";
 import type { WorkflowDetail, WorkflowNodeDef } from "../core/api-client.js";
-import { buildSVGFromData } from "../pages/workflow/svg-renderer.js";
+import { NODE_STATUS_DOT_COLORS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
-import { NODE_W, NODE_H } from "../pages/workflow/constants.js";
+import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
 import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.js";
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";
@@ -150,24 +150,50 @@ export class MiniWorkflowEditor {
     if (!this.workflow) return;
     const { vbX, vbY, vbW, vbH } = this.computeAutoFit();
 
-    // Build SVG with scale=1 and a dummy viewBox (we override it immediately)
-    const svg = buildSVGFromData(
-      this.workflow,
-      { x: vbX, y: vbY, zoom: 1 },
-      this.selectedNodeId,
-      this.nodeStates,
-      1,
-      "mini-wf-svg",
-    );
+    // Build SVG directly with correct viewBox — avoids buildSVGFromData's
+    // hardcoded 1100x600 viewBox and giant grid rect that cause rendering issues
+    const nodes = this.workflow.nodes;
+    const edges = this.workflow.edges;
+
+    const nodeSVGs = nodes.map(n => {
+      const def = getNodeDef(n.type);
+      const c = def?.color ?? FALLBACK_COLOR;
+      const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
+      const selected = this.selectedNodeId === n.id;
+      const stateColor = this.nodeStates.get(n.id);
+      const statusDot = stateColor
+        ? `<circle cx="8" cy="8" r="5" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
+        : "";
+      return `<g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX}, ${n.positionY})">
+        ${statusDot}
+        <rect class="wf-node-bg" width="${NODE_W}" height="${NODE_H}" rx="${NODE_R}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
+        <rect class="wf-node-header" width="${NODE_W}" height="24" rx="${NODE_R}" fill="${c.header}" />
+        <rect x="0" y="${NODE_R}" width="${NODE_W}" height="${24 - NODE_R}" fill="${c.header}" />
+        <text x="${NODE_W / 2}" y="16" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${esc(n.type.replace(/-/g, " "))}</text>
+        <text x="12" y="44" fill="#ccc" font-size="11">${esc(n.label || n.type)}</text>
+        ${configSummary ? `<text x="12" y="60" fill="#888" font-size="9">${esc(configSummary)}</text>` : ""}
+        <circle class="wf-port wf-port-in" cx="0" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
+        <circle class="wf-port wf-port-out" cx="${NODE_W}" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
+      </g>`;
+    }).join("");
+
+    const edgeSVGs = edges.map(e => {
+      const src = nodes.find(n => n.id === e.sourceNodeId);
+      const tgt = nodes.find(n => n.id === e.targetNodeId);
+      if (!src || !tgt) return "";
+      const sx = src.positionX + NODE_W;
+      const sy = src.positionY + NODE_H / 2;
+      const tx = tgt.positionX;
+      const ty = tgt.positionY + NODE_H / 2;
+      const mx = (sx + tx) / 2;
+      return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />`;
+    }).join("");
+
+    const svg = `<svg class="wf-canvas-svg" id="mini-wf-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg">${edgeSVGs}${nodeSVGs}</svg>`;
     this.canvas.innerHTML = svg;
 
-    // Override viewBox to match actual content bounding box
-    const svgEl = this.canvas.querySelector("#mini-wf-svg") as SVGElement | null;
-    if (svgEl) {
-      svgEl.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
-      // Store initial viewBox width for zoom ratio tracking
-      (this.canvas as any).__initialVbW = vbW;
-    }
+    // Store initial viewBox width for zoom ratio tracking
+    (this.canvas as any).__initialVbW = vbW;
 
     // Wire interactions (initial setup or rewire after render)
     if (!this.cleanupInteractions) {
