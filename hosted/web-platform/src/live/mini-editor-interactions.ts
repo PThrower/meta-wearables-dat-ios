@@ -1,6 +1,7 @@
 /**
  * Mini editor interactions — pan, zoom, node drag, edge drag, edge deletion, keyboard delete.
  * Parameterized via MiniEditorState interface so it doesn't depend on singleton state.
+ * Reads viewBox dimensions from the SVG element at runtime (no hardcoded base dimensions).
  */
 
 import { NODE_W, NODE_H } from "../pages/workflow/constants.js";
@@ -42,18 +43,30 @@ let _dragState: DragState | null = null;
 let _edgeState: EdgeDragState | null = null;
 let _panState: PanState | null = null;
 
+/** Parse the viewBox attribute of the SVG element into {x, y, w, h}. */
+function parseSVGViewBox(svg: SVGElement): { x: number; y: number; w: number; h: number } {
+  const vb = svg.getAttribute("viewBox");
+  if (!vb) return { x: 0, y: 0, w: 900, h: 600 };
+  const parts = vb.split(/[\s,]+/).map(Number);
+  return { x: parts[0] ?? 0, y: parts[1] ?? 0, w: parts[2] ?? 900, h: parts[3] ?? 600 };
+}
+
+/** Convert screen coordinates to SVG coordinates using the current viewBox. */
+function screenToSVG(svg: SVGElement, clientX: number, clientY: number): { x: number; y: number } {
+  const rect = svg.getBoundingClientRect();
+  const vb = parseSVGViewBox(svg);
+  return {
+    x: vb.x + (clientX - rect.left) / rect.width * vb.w,
+    y: vb.y + (clientY - rect.top) / rect.height * vb.h,
+  };
+}
+
 /** Wire all SVG interaction events on the mini editor canvas. */
 export function wireMiniInteractions(
   canvas: HTMLElement,
   state: MiniEditorState,
 ): () => void {
-  const handlers: Array<[string, EventListener]> = [];
   const docHandlers: Array<[string, EventListener]> = [];
-
-  function addEvt(target: EventTarget, event: string, fn: EventListener) {
-    target.addEventListener(event, fn);
-    handlers.push([event, fn]);
-  }
 
   function addDocEvt(event: string, fn: EventListener) {
     document.addEventListener(event, fn);
@@ -125,74 +138,76 @@ export function wireMiniInteractions(
       }
     });
 
-    // Zoom
+    // Zoom — scale the viewBox dimensions around the cursor point
     clone.addEventListener("wheel", (e: Event) => {
       e.preventDefault();
       const we = e as WheelEvent;
-      const vb = state.getViewBox();
-      const delta = we.deltaY > 0 ? 0.9 : 1.1;
-      const newZoom = Math.max(0.3, Math.min(2, vb.zoom * delta));
-      state.setViewBox({ ...vb, zoom: newZoom });
-      // Update viewBox directly on the SVG
-      const svgW = 1100 / newZoom;
-      const svgH = 700 / newZoom;
-      clone.setAttribute("viewBox", `${vb.x} ${vb.y} ${svgW} ${svgH}`);
+      const vb = parseSVGViewBox(clone);
+      const delta = we.deltaY > 0 ? 1.1 : 0.9; // zoom out/in
+      const newW = vb.w * delta;
+      const newH = vb.h * delta;
+      // Zoom towards cursor
+      const rect = clone.getBoundingClientRect();
+      const cx = (we.clientX - rect.left) / rect.width;
+      const cy = (we.clientY - rect.top) / rect.height;
+      const newX = vb.x + (vb.w - newW) * cx;
+      const newY = vb.y + (vb.h - newH) * cy;
+      clone.setAttribute("viewBox", `${newX} ${newY} ${newW} ${newH}`);
+      // Update state zoom (ratio relative to initial fit)
+      const initialW = (canvas as any).__initialVbW ?? vb.w;
+      state.setViewBox({ x: newX, y: newY, zoom: initialW / newW });
     }, { passive: false });
   }
 
   // --- Document-level move/up handlers (shared for drag, edge, pan) ---
 
-  // Node drag move
   const onMouseMove = (e: MouseEvent) => {
     if (_dragState) {
       const wf = state.getWorkflow();
       if (!wf) return;
-      const zoom = state.getViewBox().zoom;
-      const dx = (e.clientX - _dragState.startX) / zoom;
-      const dy = (e.clientY - _dragState.startY) / zoom;
+      const svg = canvas.querySelector(".wf-canvas-svg");
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const vb = parseSVGViewBox(svg as SVGElement);
+      // Convert screen pixel delta to SVG unit delta
+      const scale = vb.w / rect.width;
+      const dx = (e.clientX - _dragState.startX) * scale;
+      const dy = (e.clientY - _dragState.startY) * scale;
       const n = wf.nodes.find(nd => nd.id === _dragState!.nodeId);
       if (n) {
         n.positionX = Math.round(_dragState.nodeStartX + dx);
         n.positionY = Math.round(_dragState.nodeStartY + dy);
         state.markDirty();
-        // Incremental update during drag
-        const svgEl = canvas.querySelector(".wf-canvas-svg");
-        const g = svgEl?.querySelector(`[data-id="${_dragState.nodeId}"]`);
+        const g = svg.querySelector(`[data-id="${_dragState.nodeId}"]`);
         if (g) {
           g.setAttribute("transform", `translate(${n.positionX}, ${n.positionY})`);
-          updateMiniEdges(svgEl!, n, wf.edges, wf.nodes);
+          updateMiniEdges(svg, n, wf.edges, wf.nodes);
         }
       }
       return;
     }
 
     if (_edgeState) {
-      const svg = canvas.querySelector(".wf-canvas-svg");
+      const svg = canvas.querySelector(".wf-canvas-svg") as SVGElement | null;
       if (!svg) return;
-      const rect = svg.getBoundingClientRect();
-      const vb = state.getViewBox();
-      const zoom = vb.zoom;
-      const vbW = 1100 / zoom;
-      const vbH = 700 / zoom;
-      const mx = vb.x + (e.clientX - rect.left) / rect.width * vbW;
-      const my = vb.y + (e.clientY - rect.top) / rect.height * vbH;
-      _edgeState.tempLine.setAttribute("x2", String(mx));
-      _edgeState.tempLine.setAttribute("y2", String(my));
+      const pt = screenToSVG(svg, e.clientX, e.clientY);
+      _edgeState.tempLine.setAttribute("x2", String(pt.x));
+      _edgeState.tempLine.setAttribute("y2", String(pt.y));
       return;
     }
 
     if (_panState) {
-      const vb = state.getViewBox();
-      const svg = canvas.querySelector(".wf-canvas-svg");
+      const svg = canvas.querySelector(".wf-canvas-svg") as SVGElement | null;
       if (!svg) return;
       const rect = svg.getBoundingClientRect();
-      const vbW = 1100 / vb.zoom;
-      const dx = (e.clientX - _panState.startX) / rect.width * vbW;
-      const dy = (e.clientY - _panState.startY) / rect.width * vbW;
+      const vb = parseSVGViewBox(svg);
+      const scale = vb.w / rect.width;
+      const dx = (e.clientX - _panState.startX) * scale;
+      const dy = (e.clientY - _panState.startY) * scale;
       const newX = _panState.viewX - dx;
       const newY = _panState.viewY - dy;
-      state.setViewBox({ x: newX, y: newY, zoom: vb.zoom });
-      svg.setAttribute("viewBox", `${newX} ${newY} ${vbW} ${700 / vb.zoom}`);
+      state.setViewBox({ x: newX, y: newY, zoom: state.getViewBox().zoom });
+      svg.setAttribute("viewBox", `${newX} ${newY} ${vb.w} ${vb.h}`);
       return;
     }
   };
@@ -209,17 +224,12 @@ export function wireMiniInteractions(
         _edgeState.tempLine.parentNode.removeChild(_edgeState.tempLine);
       }
       const wf = state.getWorkflow();
-      const svg = canvas.querySelector(".wf-canvas-svg");
+      const svg = canvas.querySelector(".wf-canvas-svg") as SVGElement | null;
       if (svg && wf) {
-        const rect = svg.getBoundingClientRect();
-        const vb = state.getViewBox();
-        const vbW = 1100 / vb.zoom;
-        const vbH = 700 / vb.zoom;
-        const mx = vb.x + (e.clientX - rect.left) / rect.width * vbW;
-        const my = vb.y + (e.clientY - rect.top) / rect.height * vbH;
+        const pt = screenToSVG(svg, e.clientX, e.clientY);
         const target = wf.nodes.find(n =>
-          mx >= n.positionX && mx <= n.positionX + NODE_W &&
-          my >= n.positionY && my <= n.positionY + NODE_H &&
+          pt.x >= n.positionX && pt.x <= n.positionX + NODE_W &&
+          pt.y >= n.positionY && pt.y <= n.positionY + NODE_H &&
           n.id !== _edgeState!.sourceNodeId
         );
         if (target) {
@@ -261,7 +271,8 @@ export function wireMiniInteractions(
     const selectedId = state.getSelectedNodeId();
     const wf = state.getWorkflow();
     if ((e.key === "Delete" || e.key === "Backspace") && selectedId && wf) {
-      if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "SELECT") return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       e.preventDefault();
       wf.nodes = wf.nodes.filter(n => n.id !== selectedId);
       wf.edges = wf.edges.filter(ed => ed.sourceNodeId !== selectedId && ed.targetNodeId !== selectedId);
@@ -287,9 +298,6 @@ export function wireMiniInteractions(
     _dragState = null;
     _edgeState = null;
     _panState = null;
-    for (const [event, fn] of handlers) {
-      canvas.removeEventListener(event, fn);
-    }
     for (const [event, fn] of docHandlers) {
       document.removeEventListener(event, fn);
     }

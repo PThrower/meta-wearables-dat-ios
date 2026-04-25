@@ -122,47 +122,51 @@ export class MiniWorkflowEditor {
     }
   }
 
-  private computeAutoFit(): void {
+  /** Compute auto-fit viewBox from node bounding box. Returns actual viewBox dimensions. */
+  private computeAutoFit(): { vbX: number; vbY: number; vbW: number; vbH: number } {
     if (!this.workflow || this.workflow.nodes.length === 0) {
       this.viewBox = { x: 0, y: 0, zoom: 1 };
-      return;
+      return { vbX: 0, vbY: 0, vbW: 900, vbH: 600 };
     }
     const ns = this.workflow.nodes;
     const minX = Math.min(...ns.map(n => n.positionX));
     const maxX = Math.max(...ns.map(n => n.positionX + NODE_W));
     const minY = Math.min(...ns.map(n => n.positionY));
     const maxY = Math.max(...ns.map(n => n.positionY + NODE_H));
-    const pad = 60;
+    const pad = 40;
     const contentW = maxX - minX + pad * 2;
     const contentH = maxY - minY + pad * 2;
-    const panelW = PANEL_WIDTH - PANEL_PAD;
-    const panelH = 300; // typical canvas height
-    const zoom = Math.min(panelW / contentW, panelH / contentH, 1.5);
-    this.viewBox = {
-      x: minX - pad,
-      y: minY - pad,
-      zoom,
+    // zoom=1 means viewBox matches content exactly — the SVG element fills its container
+    this.viewBox = { x: minX - pad, y: minY - pad, zoom: 1 };
+    return {
+      vbX: minX - pad,
+      vbY: minY - pad,
+      vbW: contentW,
+      vbH: contentH,
     };
   }
 
   private render(): void {
     if (!this.workflow) return;
+    const { vbX, vbY, vbW, vbH } = this.computeAutoFit();
+
+    // Build SVG with scale=1 and a dummy viewBox (we override it immediately)
     const svg = buildSVGFromData(
       this.workflow,
-      this.viewBox,
+      { x: vbX, y: vbY, zoom: 1 },
       this.selectedNodeId,
       this.nodeStates,
-      1, // scale=1, auto-fit zoom handles sizing via viewBox
+      1,
       "mini-wf-svg",
     );
     this.canvas.innerHTML = svg;
 
-    // Override the viewBox computed by buildSVGFromData to use our auto-fit values
+    // Override viewBox to match actual content bounding box
     const svgEl = this.canvas.querySelector("#mini-wf-svg") as SVGElement | null;
     if (svgEl) {
-      const vbW = 1100 / this.viewBox.zoom;
-      const vbH = 700 / this.viewBox.zoom;
-      svgEl.setAttribute("viewBox", `${this.viewBox.x} ${this.viewBox.y} ${vbW} ${vbH}`);
+      svgEl.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+      // Store initial viewBox width for zoom ratio tracking
+      (this.canvas as any).__initialVbW = vbW;
     }
 
     // Wire interactions (initial setup or rewire after render)
@@ -241,12 +245,14 @@ export class MiniWorkflowEditor {
     const def = getNodeDef(type);
     const id = `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     const config = def ? { ...def.defaultConfig } : {};
-    // Place at viewport center
-    const vb = this.viewBox;
-    const vbW = 1100 / vb.zoom;
-    const vbH = 700 / vb.zoom;
-    const cx = vb.x + vbW / 2 - NODE_W / 2;
-    const cy = vb.y + vbH / 2 - NODE_H / 2;
+    // Place near center of existing nodes, offset slightly
+    const ns = this.workflow.nodes;
+    const cx = ns.length > 0
+      ? Math.round(ns.reduce((s, n) => s + n.positionX, 0) / ns.length)
+      : 200;
+    const cy = ns.length > 0
+      ? Math.round(ns.reduce((s, n) => s + n.positionY, 0) / ns.length)
+      : 150;
     this.workflow.nodes.push({
       id,
       type,
