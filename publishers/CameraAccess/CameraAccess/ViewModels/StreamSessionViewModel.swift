@@ -855,6 +855,19 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // Workflow node execution states (log for now)
+      if msgType == "node_states",
+         let workflowId = msg["workflowId"] as? String,
+         let nodes = msg["nodes"] as? [[String: Any]] {
+        let states = nodes.compactMap { node -> String? in
+          guard let nodeId = node["nodeId"] as? String,
+                let state = node["state"] as? String else { return nil }
+          let label = node["label"] as? String ?? nodeId
+          return "\(label): \(state)"
+        }
+        NSLog("[StreamSession] node_states for workflow \(workflowId): \(states.joined(separator: ", "))")
+      }
+
       // Audio config query from viewer
       if msgType == "get_audio_config" {
         Task { [weak self] in

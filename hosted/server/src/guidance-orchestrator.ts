@@ -14,11 +14,13 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig, NodeExecutionState, NodeExecutionInfo, WorkflowInstanceState, WorkflowControlAction, WorkflowNodeType, NodeStatesMessage } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
 import { createAIService } from "./ai-service.js";
+import { dbWriter } from "./db/db-writer.js";
+import * as q from "./db/queries.js";
 // Import to register the AI providers
 import "./gemini-live-service.js";
 import "./gemma4-service.js";
@@ -136,6 +138,7 @@ export class GuidanceOrchestrator {
   private eventHistory = new Map<string, GuidanceEvent[]>();
   private subscribers = new Map<string, Set<(msg: any) => void>>();
   private aiState = new Map<string, Map<string, SessionAIState>>();  // sessionId -> appId -> state
+  private workflowInstances = new Map<string, WorkflowInstanceState>(); // "sessionId:workflowId" -> state
 
   /** Callback to push AI audio response to relay's audio-in path */
   private audioPushFn: AudioPushFn | null = null;
@@ -367,6 +370,8 @@ export class GuidanceOrchestrator {
 
       console.log(`[orchestrator] App activated: ${appId} provider=${provider} model=${app.config.model} session=${sessionId}`);
       state.consecutiveReconnects = 0;
+      // Update workflow node state if this app is part of an active workflow
+      this.updateNodeState(sessionId, appId, "running");
     } catch (err) {
       console.error(`[orchestrator] AI connect failed:`, err);
       sessionApps.delete(appId);
@@ -390,6 +395,8 @@ export class GuidanceOrchestrator {
         timestampMs: Date.now(),
         metadata: { severity: "critical" },
       });
+      // Update workflow node state to errored
+      this.updateNodeState(sessionId, appId, "errored", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -421,6 +428,229 @@ export class GuidanceOrchestrator {
   }
 
   // --- Frame / audio forwarding ---
+
+  // --- Workflow Execution Controls ---
+
+  private workflowInstanceKey(sessionId: string, workflowId: string): string {
+    return `${sessionId}:${workflowId}`;
+  }
+
+  /** Register a workflow instance when it's activated. Called from server.ts after resolveWorkflowToPipeline. */
+  activateWorkflow(
+    sessionId: string,
+    workflowId: string,
+    workflowName: string,
+    nodeEntries: Array<{ nodeId: string; appId: string; nodeType: WorkflowNodeType; label: string; triggerChained?: boolean }>,
+  ): void {
+    const key = this.workflowInstanceKey(sessionId, workflowId);
+    const nodes = new Map<string, NodeExecutionInfo>();
+    for (const n of nodeEntries) {
+      nodes.set(n.nodeId, {
+        nodeId: n.nodeId,
+        appId: n.appId,
+        nodeType: n.nodeType,
+        label: n.label,
+        state: n.triggerChained ? "waiting" : "pending",
+        startedAt: null,
+        completedAt: null,
+      });
+    }
+    this.workflowInstances.set(key, {
+      workflowId,
+      workflowName,
+      sessionId,
+      nodes,
+      activatedAt: Date.now(),
+    });
+    this.broadcastNodeStates(sessionId, workflowId);
+    console.log(`[orchestrator] Workflow instance created: ${key} (${nodes.size} nodes)`);
+  }
+
+  /** Update a node's execution state. Called from activateWithConfig on success/error. */
+  updateNodeState(sessionId: string, appId: string, state: NodeExecutionState, error?: string): void {
+    for (const [, instance] of this.workflowInstances) {
+      if (instance.sessionId !== sessionId) continue;
+      for (const [, node] of instance.nodes) {
+        if (node.appId !== appId) continue;
+        const prevState = node.state;
+        node.state = state;
+        if (state === "running" && node.startedAt === null) node.startedAt = Date.now();
+        if (state === "completed" || state === "skipped" || state === "errored") node.completedAt = Date.now();
+        if (error) node.error = error;
+        if (prevState !== state) {
+          this.logNodeExecution(sessionId, instance.workflowId, node, state, error);
+          this.broadcastNodeStates(sessionId, instance.workflowId);
+        }
+        return;
+      }
+    }
+  }
+
+  /** Handle a workflow control action from viewer or publisher. */
+  async handleWorkflowControl(sessionId: string, action: WorkflowControlAction, workflowId: string, nodeId?: string, triggeredBy?: string): Promise<void> {
+    const key = this.workflowInstanceKey(sessionId, workflowId);
+    const instance = this.workflowInstances.get(key);
+    if (!instance) {
+      console.warn(`[orchestrator] workflow_control: no instance for ${key}`);
+      return;
+    }
+
+    console.log(`[orchestrator] workflow_control: action=${action} workflow=${workflowId} node=${nodeId ?? "all"} session=${sessionId}`);
+
+    switch (action) {
+      case "pause_workflow":
+        this.pauseWorkflow(instance, triggeredBy);
+        break;
+      case "resume_workflow":
+        await this.resumeWorkflow(instance, triggeredBy);
+        break;
+      case "stop_workflow":
+        this.stopWorkflow(instance, triggeredBy);
+        break;
+      case "skip_node":
+        if (nodeId) this.skipNode(instance, nodeId, triggeredBy);
+        break;
+      case "redo_node":
+        if (nodeId) await this.redoNode(instance, nodeId, triggeredBy);
+        break;
+      case "continue_node":
+        if (nodeId) await this.continueNode(instance, nodeId, triggeredBy);
+        break;
+    }
+  }
+
+  private pauseWorkflow(instance: WorkflowInstanceState, triggeredBy?: string): void {
+    for (const [nodeId, node] of instance.nodes) {
+      if (node.state === "running") {
+        node.state = "paused";
+        this.disconnectApp(instance.sessionId, node.appId);
+        this.logNodeExecution(instance.sessionId, instance.workflowId, node, "paused", undefined, triggeredBy);
+      }
+    }
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  private async resumeWorkflow(instance: WorkflowInstanceState, triggeredBy?: string): Promise<void> {
+    for (const [nodeId, node] of instance.nodes) {
+      if (node.state === "paused") {
+        node.state = "running";
+        const app = this.appRegistry.getApp(node.appId);
+        if (app) {
+          await this.activateWithConfig(instance.sessionId, app);
+        }
+        this.logNodeExecution(instance.sessionId, instance.workflowId, node, "running", undefined, triggeredBy);
+      }
+    }
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  private stopWorkflow(instance: WorkflowInstanceState, triggeredBy?: string): void {
+    for (const [nodeId, node] of instance.nodes) {
+      if (node.state === "running" || node.state === "paused" || node.state === "waiting") {
+        node.state = "completed";
+        node.completedAt = Date.now();
+        this.disconnectApp(instance.sessionId, node.appId);
+        this.logNodeExecution(instance.sessionId, instance.workflowId, node, "completed", undefined, triggeredBy);
+      }
+    }
+    this.disconnectAI(instance.sessionId);
+    const key = this.workflowInstanceKey(instance.sessionId, instance.workflowId);
+    this.workflowInstances.delete(key);
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  private skipNode(instance: WorkflowInstanceState, nodeId: string, triggeredBy?: string): void {
+    const node = instance.nodes.get(nodeId);
+    if (!node || (node.state !== "running" && node.state !== "waiting" && node.state !== "paused")) return;
+    node.state = "skipped";
+    node.completedAt = Date.now();
+    this.disconnectApp(instance.sessionId, node.appId);
+    this.logNodeExecution(instance.sessionId, instance.workflowId, node, "skipped", undefined, triggeredBy);
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  private async redoNode(instance: WorkflowInstanceState, nodeId: string, triggeredBy?: string): Promise<void> {
+    const node = instance.nodes.get(nodeId);
+    if (!node || (node.state !== "skipped" && node.state !== "errored" && node.state !== "completed")) return;
+    // Disconnect then reconnect with same config
+    this.disconnectApp(instance.sessionId, node.appId);
+    node.state = "running";
+    node.startedAt = Date.now();
+    node.completedAt = null;
+    node.error = undefined;
+    const app = this.appRegistry.getApp(node.appId);
+    if (app) {
+      await this.activateWithConfig(instance.sessionId, app);
+    }
+    this.logNodeExecution(instance.sessionId, instance.workflowId, node, "running", undefined, triggeredBy);
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  private async continueNode(instance: WorkflowInstanceState, nodeId: string, triggeredBy?: string): Promise<void> {
+    const node = instance.nodes.get(nodeId);
+    if (!node || node.state !== "waiting") return;
+    node.state = "running";
+    node.startedAt = Date.now();
+    const app = this.appRegistry.getApp(node.appId);
+    if (app) {
+      await this.activateWithConfig(instance.sessionId, app);
+    }
+    this.logNodeExecution(instance.sessionId, instance.workflowId, node, "running", undefined, triggeredBy);
+    this.broadcastNodeStates(instance.sessionId, instance.workflowId);
+  }
+
+  /** Broadcast current node states to all viewer subscribers for a session. */
+  broadcastNodeStates(sessionId: string, workflowId: string): void {
+    const key = this.workflowInstanceKey(sessionId, workflowId);
+    const instance = this.workflowInstances.get(key);
+    const subs = this.subscribers.get(sessionId);
+    if (!subs || !instance) return;
+
+    const msg: NodeStatesMessage = {
+      type: "node_states",
+      workflowId,
+      nodes: [...instance.nodes.values()].map(n => ({
+        nodeId: n.nodeId,
+        appId: n.appId,
+        nodeType: n.nodeType,
+        label: n.label,
+        state: n.state,
+        startedAt: n.startedAt,
+        completedAt: n.completedAt,
+        error: n.error,
+      })),
+    };
+    for (const cb of subs) {
+      try { cb(msg); } catch { /* skip */ }
+    }
+  }
+
+  /** Get the active workflow instance for a session (if any). */
+  getActiveWorkflow(sessionId: string): WorkflowInstanceState | null {
+    for (const [, instance] of this.workflowInstances) {
+      if (instance.sessionId === sessionId) return instance;
+    }
+    return null;
+  }
+
+  /** Log a node state transition to the DB audit trail. */
+  private logNodeExecution(sessionId: string, workflowId: string, node: NodeExecutionInfo, state: string, error?: string, triggeredBy?: string): void {
+    const id = `nel_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    dbWriter.enqueue(q.insertNodeExecutionLog({
+      id,
+      sessionId,
+      workflowId,
+      nodeId: node.nodeId,
+      appId: node.appId,
+      nodeType: node.nodeType,
+      state,
+      action: state, // The action IS the new state
+      error,
+      triggeredBy,
+    }));
+  }
+
+  // --- End Workflow Execution Controls ---
 
   /** Forward a JPEG frame from the relay to all active AI services for this session */
   sendVideoFrame(sessionId: string, jpeg: Uint8Array): void {
@@ -516,6 +746,12 @@ export class GuidanceOrchestrator {
     this.subscribers.delete(sessionId);
     this.latencySum.delete(sessionId);
     this.latencyCount.delete(sessionId);
+    // Clear workflow instances for this session
+    for (const [key, instance] of this.workflowInstances) {
+      if (instance.sessionId === sessionId) {
+        this.workflowInstances.delete(key);
+      }
+    }
   }
 
   // --- Lifecycle ---

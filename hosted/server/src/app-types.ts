@@ -139,6 +139,57 @@ export interface WorkflowDefinition {
   updatedAt: string;
 }
 
+// --- Workflow Execution Controls ---
+
+export type NodeExecutionState = "pending" | "running" | "paused" | "completed" | "skipped" | "errored" | "waiting";
+
+export interface NodeExecutionInfo {
+  nodeId: string;
+  appId: string;
+  nodeType: WorkflowNodeType;
+  label: string;
+  state: NodeExecutionState;
+  startedAt: number | null;
+  completedAt: number | null;
+  error?: string;
+}
+
+export interface WorkflowInstanceState {
+  workflowId: string;
+  workflowName: string;
+  sessionId: string;
+  nodes: Map<string, NodeExecutionInfo>;
+  activatedAt: number;
+}
+
+export type WorkflowControlAction = "pause_workflow" | "resume_workflow" | "stop_workflow" | "skip_node" | "redo_node" | "continue_node";
+
+// --- Wire messages for workflow control ---
+
+/** Client -> Server: request a control action */
+export interface WorkflowControlMessage {
+  type: "workflow_control";
+  action: WorkflowControlAction;
+  workflowId: string;
+  nodeId?: string;
+}
+
+/** Server -> Client: broadcast node execution states */
+export interface NodeStatesMessage {
+  type: "node_states";
+  workflowId: string;
+  nodes: Array<{
+    nodeId: string;
+    appId: string;
+    nodeType: WorkflowNodeType;
+    label: string;
+    state: NodeExecutionState;
+    startedAt: number | null;
+    completedAt: number | null;
+    error?: string;
+  }>;
+}
+
 // --- Activation Guard ---
 
 export interface ActivationConflict {

@@ -677,3 +677,65 @@ export function getDeviceBuildHistory(deviceId: string): Array<{
     ORDER BY last_seen_at DESC
   `).all(deviceId) as any[];
 }
+
+// --- Node Execution Log ---
+
+/** Insert a node execution log entry */
+export function insertNodeExecutionLog(params: {
+  id: string;
+  sessionId: string;
+  workflowId: string;
+  nodeId: string;
+  appId?: string;
+  nodeType: string;
+  state: string;
+  action: string;
+  error?: string;
+  triggeredBy?: string;
+}) {
+  return () => {
+    const db = getDbRaw();
+    db.prepare(`
+      INSERT INTO node_execution_log (id, session_id, workflow_id, node_id, app_id, node_type, state, action, error, triggered_by, timestamp_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      params.id,
+      params.sessionId,
+      params.workflowId,
+      params.nodeId,
+      params.appId ?? null,
+      params.nodeType,
+      params.state,
+      params.action,
+      params.error ?? null,
+      params.triggeredBy ?? null,
+      Date.now(),
+    );
+  };
+}
+
+/** Get recent node execution log entries for a session */
+export function getNodeExecutionLog(sessionId: string, limit = 100): Array<{
+  id: string;
+  sessionId: string;
+  workflowId: string;
+  nodeId: string;
+  appId: string | null;
+  nodeType: string;
+  state: string;
+  action: string;
+  error: string | null;
+  triggeredBy: string | null;
+  timestampMs: number;
+}> {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT id, session_id as sessionId, workflow_id as workflowId, node_id as nodeId,
+      app_id as appId, node_type as nodeType, state, action, error,
+      triggered_by as triggeredBy, timestamp_ms as timestampMs
+    FROM node_execution_log
+    WHERE session_id = ?
+    ORDER BY timestamp_ms DESC
+    LIMIT ?
+  `).all(sessionId, limit) as any[];
+}

@@ -51,6 +51,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
+import type { WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo } from "./app-types.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
@@ -267,6 +268,21 @@ const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
 registry.setOnSessionDestroy((id: string) => {
   orchestrator.cleanup(id);
   jepaOrchestrator.deactivate(id);
+});
+
+// Pause/resume active workflow when session pauses/resumes
+registry.setOnSessionPause((id: string) => {
+  const session = registry.get(id);
+  if (session?.activeWorkflowId) {
+    orchestrator.handleWorkflowControl(id, "pause_workflow", session.activeWorkflowId, undefined, "system");
+  }
+});
+
+registry.setOnSessionResume((id: string) => {
+  const session = registry.get(id);
+  if (session?.activeWorkflowId) {
+    orchestrator.handleWorkflowControl(id, "resume_workflow", session.activeWorkflowId, undefined, "system");
+  }
 });
 
 // Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
@@ -1191,6 +1207,19 @@ const server = Bun.serve<WsData>({
           const d = NODE_DEF_MAP.get(n.type);
           return d && d.activationMode !== null;
         });
+
+        // Register workflow instance for execution controls
+        session.activeWorkflowId = wfId;
+        const nodeEntries = processableNodes.map((n: any, i: number) => ({
+          nodeId: n.id,
+          appId: pipelineApps[i]?.id ?? n.id,
+          nodeType: n.type as WorkflowNodeType,
+          label: n.label || n.type,
+          triggerChained: false, // will be refined by trigger chain analysis
+        }));
+        if (pipelineApps.length > 1) {
+          orchestrator.activateWorkflow(body.sessionId, wfId, wf.name, nodeEntries);
+        }
         for (let i = 0; i < pipelineApps.length; i++) {
           const app = pipelineApps[i];
           const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
@@ -1438,6 +1467,12 @@ const server = Bun.serve<WsData>({
         });
         ws.data.guidanceUnsub = unsubGuidance;
 
+        // Send current node states if a workflow is active
+        const activeSess = registry.get(sessionId);
+        if (activeSess?.activeWorkflowId) {
+          orchestrator.broadcastNodeStates(sessionId, activeSess.activeWorkflowId);
+        }
+
         // Send cached last frame so viewer sees current scene immediately
         const cachedFrame = registry.getLastFrame(sessionId);
         if (cachedFrame && ws.readyState === WebSocket.OPEN) {
@@ -1591,7 +1626,23 @@ const server = Bun.serve<WsData>({
                   }
                   if (primaryApp) {
                     session.activeAppId = primaryApp.id;
+                    session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    // Register workflow instance for execution controls (multi-node only)
+                    const processableNodes = (nodes as any[]).filter((n: any) => {
+                      const d = NODE_DEF_MAP.get(n.type);
+                      return d && d.activationMode !== null;
+                    });
+                    if (pipelineApps.length > 1) {
+                      const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                        nodeId: n.id,
+                        appId: pipelineApps[i]?.id ?? n.id,
+                        nodeType: n.type as WorkflowNodeType,
+                        label: n.label || n.type,
+                        triggerChained: false,
+                      }));
+                      orchestrator.activateWorkflow(sessionId, wfId, wf.name, nodeEntries);
+                    }
                     for (const app of pipelineApps) {
                       await orchestrator.activateWithConfig(sessionId, app);
                     }
@@ -1627,6 +1678,7 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "deactivate_app") {
               const prevApp = session.activeAppId;
               session.activeAppId = null;
+              session.activeWorkflowId = null;
               session.appPipeline = null;
               console.log(`[relay] App deactivated: ${prevApp} session=${sessionId}`);
               // Audit log: record deactivation
@@ -1652,7 +1704,23 @@ const server = Bun.serve<WsData>({
                 }
                 if (primaryApp) {
                   session.activeAppId = primaryApp.id;
+                  session.activeWorkflowId = workflowId;
                   session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                  // Register workflow instance for execution controls
+                  const processableNodes = (nodes as any[]).filter((n: any) => {
+                    const d = NODE_DEF_MAP.get(n.type);
+                    return d && d.activationMode !== null;
+                  });
+                  if (pipelineApps.length > 1) {
+                    const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                      nodeId: n.id,
+                      appId: pipelineApps[i]?.id ?? n.id,
+                      nodeType: n.type as WorkflowNodeType,
+                      label: n.label || n.type,
+                      triggerChained: false,
+                    }));
+                    orchestrator.activateWorkflow(sessionId, workflowId, wf.name, nodeEntries);
+                  }
                   for (const app of pipelineApps) {
                     await orchestrator.activateWithConfig(sessionId, app);
                   }
@@ -1695,6 +1763,22 @@ const server = Bun.serve<WsData>({
               // Publisher acknowledges audio mode change — broadcast to all viewers
               console.log(`[relay] Audio mode changed by publisher: mode=${cmd.mode} session=${sessionId}`);
               broadcastToViewers(session, { type: "audio_mode_changed", mode: cmd.mode });
+            } else if (cmd.type === "workflow_control") {
+              // Publisher sends workflow control action
+              const action = cmd.action as string;
+              const workflowId = cmd.workflowId as string;
+              const nodeId = cmd.nodeId as string | undefined;
+              if (action && workflowId) {
+                await orchestrator.handleWorkflowControl(sessionId, action as any, workflowId, nodeId, "publisher");
+                if (action === "stop_workflow") {
+                  session.activeAppId = null;
+                  session.activeWorkflowId = null;
+                  session.appPipeline = null;
+                  dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
+                  dbWriter.flushNow();
+                  broadcastToViewers(session, { type: "app_status", appId: null, status: "inactive" });
+                }
+              }
             } else if (cmd.type === "audio_config") {
               // Publisher responds with current audio config — broadcast to all viewers
               broadcastToViewers(session, cmd);
@@ -1859,7 +1943,23 @@ const server = Bun.serve<WsData>({
                   }
                   if (primaryApp) {
                     session.activeAppId = primaryApp.id;
+                    session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    // Register workflow instance for execution controls (multi-node only)
+                    const processableNodes = (nodes as any[]).filter((n: any) => {
+                      const d = NODE_DEF_MAP.get(n.type);
+                      return d && d.activationMode !== null;
+                    });
+                    if (pipelineApps.length > 1) {
+                      const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                        nodeId: n.id,
+                        appId: pipelineApps[i]?.id ?? n.id,
+                        nodeType: n.type as WorkflowNodeType,
+                        label: n.label || n.type,
+                        triggerChained: false,
+                      }));
+                      orchestrator.activateWorkflow(sessionId, wfId, wf.name, nodeEntries);
+                    }
                     for (const app of pipelineApps) {
                       // Route to correct orchestrator based on activationMode
                       if (app.config?.jepa) {
@@ -1911,6 +2011,7 @@ const server = Bun.serve<WsData>({
               // Viewer requests app deactivation
               const prevApp = session.activeAppId;
               session.activeAppId = null;
+              session.activeWorkflowId = null;
               session.appPipeline = null;
               console.log(`[relay] Viewer deactivated app: ${prevApp} session=${sessionId}`);
               // Audit log: record deactivation
@@ -1955,6 +2056,23 @@ const server = Bun.serve<WsData>({
                 type: "ai_telemetry",
                 telemetry: orchestrator.getTelemetry(sessionId),
               }));
+            } else if (cmd.type === "workflow_control") {
+              // Viewer requests workflow control action
+              const action = cmd.action as string;
+              const workflowId = cmd.workflowId as string;
+              const nodeId = cmd.nodeId as string | undefined;
+              if (action && workflowId) {
+                await orchestrator.handleWorkflowControl(sessionId, action as any, workflowId, nodeId, "viewer");
+                // On stop_workflow, also clear session-level state
+                if (action === "stop_workflow") {
+                  session.activeAppId = null;
+                  session.activeWorkflowId = null;
+                  session.appPipeline = null;
+                  dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
+                  dbWriter.flushNow();
+                  broadcastToViewers(session, { type: "app_status", appId: null, status: "inactive" });
+                }
+              }
             } else if (isBackpressureMessage(cmd)) {
               // Viewer -> Server -> Publisher: relay backpressure signal (clamp to 1-60 fps)
               const clampedFps = Math.max(1, Math.min(60, cmd.targetFps));

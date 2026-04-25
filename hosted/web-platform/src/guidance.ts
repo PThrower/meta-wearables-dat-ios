@@ -107,6 +107,41 @@ export interface AppInfo {
   };
 }
 
+// --- Workflow Execution Controls ---
+
+export type NodeExecutionState = "pending" | "running" | "paused" | "completed" | "skipped" | "errored" | "waiting";
+
+export interface NodeState {
+  nodeId: string;
+  appId: string;
+  nodeType: string;
+  label: string;
+  state: NodeExecutionState;
+  startedAt: number | null;
+  completedAt: number | null;
+  error?: string;
+}
+
+const NODE_STATE_COLORS: Record<NodeExecutionState, string> = {
+  pending: "#9ca3af",
+  running: "#4ade80",
+  paused: "#facc15",
+  completed: "#60a5fa",
+  skipped: "#6b7280",
+  errored: "#f87171",
+  waiting: "#38bdf8",
+};
+
+const NODE_STATE_LABELS: Record<NodeExecutionState, string> = {
+  pending: "Pending",
+  running: "Running",
+  paused: "Paused",
+  completed: "Done",
+  skipped: "Skipped",
+  errored: "Error",
+  waiting: "Waiting",
+};
+
 const MAX_EVENTS = 50;
 
 export const SOURCE_BADGES: Record<string, string> = {
@@ -185,6 +220,8 @@ export class GuidancePanel {
   private showOverlays = true;
   private onBboxEvent: ((boxes: GuidanceEvent["boundingBoxes"]) => void) | null = null;
   private onOverlayToggle: ((show: boolean) => void) | null = null;
+  private nodeStates: NodeState[] = [];
+  private activeWorkflowId: string | null = null;
 
   constructor(container: HTMLElement, sendFn: (msg: object) => void) {
     this.container = container;
@@ -284,6 +321,14 @@ export class GuidancePanel {
     } else if (msg.type === "vision_fps") {
       this.visionFps = (msg as { fps: number }).fps;
       this.updateFpsDisplay();
+    } else if (msg.type === "node_states") {
+      const data = msg as { workflowId: string; nodes: NodeState[] };
+      this.activeWorkflowId = data.workflowId;
+      this.nodeStates = data.nodes;
+      if (data.nodes.length === 0) {
+        this.activeWorkflowId = null;
+      }
+      this.renderWorkflowPipeline();
     }
   }
 
@@ -388,6 +433,11 @@ export class GuidancePanel {
     // Active controls (only when this app is active)
     if (isThisActive) {
       html += `<div class="guidance-section">${this.renderActiveControls(app)}</div>`;
+    }
+
+    // Workflow execution pipeline (only when multi-node workflow is active)
+    if (isThisActive && this.activeWorkflowId && this.nodeStates.length > 1) {
+      html += `<div id="workflowPipeline" class="guidance-section workflow-pipeline">${this.renderWorkflowPipelineInner()}</div>`;
     }
 
     // Event log (only when active)
@@ -652,6 +702,98 @@ export class GuidancePanel {
       </div>
     `;
   }
+
+  // --- Workflow Pipeline Rendering ---
+
+  private renderWorkflowPipeline(): void {
+    const el = document.getElementById("workflowPipeline");
+    if (!el) return;
+    if (!this.activeWorkflowId || this.nodeStates.length === 0) {
+      el.innerHTML = "";
+      return;
+    }
+    el.innerHTML = this.renderWorkflowPipelineInner();
+    this.bindWorkflowControlEvents();
+  }
+
+  private renderWorkflowPipelineInner(): string {
+    const hasRunning = this.nodeStates.some(n => n.state === "running");
+    const hasPaused = this.nodeStates.some(n => n.state === "paused");
+    const hasWaiting = this.nodeStates.some(n => n.state === "waiting");
+
+    let html = '<div class="workflow-controls-bar">';
+    if (hasRunning) {
+      html += `<button class="guidance-btn guidance-btn-sm" data-workflow-action="pause_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Pause All</button>`;
+    }
+    if (hasPaused) {
+      html += `<button class="guidance-btn guidance-btn-sm guidance-btn-activate" data-workflow-action="resume_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Resume All</button>`;
+    }
+    html += `<button class="guidance-btn guidance-btn-sm guidance-btn-deactivate" data-workflow-action="stop_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Stop</button>`;
+    html += "</div>";
+
+    // Node pipeline cards
+    html += '<div class="workflow-node-pipeline">';
+    for (const node of this.nodeStates) {
+      const color = NODE_STATE_COLORS[node.state] || "#9ca3af";
+      const label = NODE_STATE_LABELS[node.state] || node.state;
+      const errorText = node.error ? `<div class="workflow-node-error">${esc(node.error)}</div>` : "";
+
+      html += `<div class="workflow-node-card" style="border-left-color:${color}" data-node-state="${node.state}">
+        <div class="workflow-node-header">
+          <span class="workflow-node-label">${esc(node.label)}</span>
+          <span class="workflow-node-badge" style="background:${color}30;color:${color}">${label}</span>
+        </div>
+        <div class="workflow-node-type">${esc(node.nodeType)}</div>
+        ${errorText}
+        <div class="workflow-node-actions">`;
+
+      // Per-node actions based on state
+      if (node.state === "running") {
+        html += `<button class="guidance-btn guidance-btn-xs" data-node-action="skip_node" data-node-id="${esc(node.nodeId)}" data-workflow-id="${esc(this.activeWorkflowId!)}">Skip</button>`;
+      }
+      if (node.state === "skipped" || node.state === "errored") {
+        html += `<button class="guidance-btn guidance-btn-xs guidance-btn-activate" data-node-action="redo_node" data-node-id="${esc(node.nodeId)}" data-workflow-id="${esc(this.activeWorkflowId!)}">Redo</button>`;
+      }
+      if (node.state === "waiting") {
+        html += `<button class="guidance-btn guidance-btn-xs guidance-btn-activate" data-node-action="continue_node" data-node-id="${esc(node.nodeId)}" data-workflow-id="${esc(this.activeWorkflowId!)}">Start</button>`;
+      }
+
+      html += `</div></div>`;
+    }
+    html += "</div>";
+
+    return html;
+  }
+
+  private bindWorkflowControlEvents(): void {
+    const pipeline = document.getElementById("workflowPipeline");
+    if (!pipeline) return;
+
+    pipeline.addEventListener("click", (e) => {
+      const target = e.target as HTMLElement;
+
+      // Workflow-level actions (Pause All, Resume All, Stop)
+      const wfAction = target.closest("[data-workflow-action]") as HTMLElement | null;
+      if (wfAction && !wfAction.dataset.nodeId) {
+        const action = wfAction.dataset.workflowAction!;
+        const workflowId = wfAction.dataset.workflowId!;
+        this.sendFn({ type: "workflow_control", action, workflowId });
+        return;
+      }
+
+      // Per-node actions (Skip, Redo, Start)
+      const nodeAction = target.closest("[data-node-action]") as HTMLElement | null;
+      if (nodeAction) {
+        const action = nodeAction.dataset.nodeAction!;
+        const nodeId = nodeAction.dataset.nodeId!;
+        const workflowId = nodeAction.dataset.workflowId!;
+        this.sendFn({ type: "workflow_control", action, workflowId, nodeId });
+        return;
+      }
+    });
+  }
+
+  // --- End Workflow Pipeline Rendering ---
 
   // --- Event binding ---
 

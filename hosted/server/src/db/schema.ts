@@ -266,6 +266,27 @@ export const activationLog = sqliteTable("activation_log", {
   index("idx_activation_log_status").on(t.status),
 ]);
 
+// --- Node Execution Log ---
+
+export const nodeExecutionLog = sqliteTable("node_execution_log", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id").notNull(),
+  workflowId: text("workflow_id").notNull(),
+  nodeId: text("node_id").notNull(),
+  appId: text("app_id"),
+  nodeType: text("node_type").notNull(),
+  state: text("state").notNull(),  // pending, running, paused, completed, skipped, errored, waiting
+  action: text("action").notNull(), // activate, pause, resume, stop, skip, redo, continue, error
+  error: text("error"),
+  triggeredBy: text("triggered_by"), // viewer, publisher, system, auto
+  timestampMs: integer("timestamp_ms").notNull(),
+}, (t) => [
+  index("idx_node_exec_session").on(t.sessionId),
+  index("idx_node_exec_workflow").on(t.workflowId),
+  index("idx_node_exec_node").on(t.nodeId),
+  index("idx_node_exec_timestamp").on(t.timestampMs),
+]);
+
 // --- Device Build History ---
 
 export const deviceBuildHistory = sqliteTable("device_build_history", {

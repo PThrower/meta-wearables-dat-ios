@@ -40,6 +40,8 @@ export class SessionRegistry {
   private framesThrottledQuality = 0;
 
   private onSessionDestroy?: (id: string) => void;
+  private onSessionPause?: (id: string) => void;
+  private onSessionResume?: (id: string) => void;
 
   // Orphan timers: sessionId -> timeout handle
   private orphanTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -51,6 +53,16 @@ export class SessionRegistry {
   /** Set callback invoked when a session is destroyed (for orchestrator cleanup) */
   setOnSessionDestroy(fn: (id: string) => void) {
     this.onSessionDestroy = fn;
+  }
+
+  /** Set callback invoked when a session is paused (for workflow pause) */
+  setOnSessionPause(fn: (id: string) => void) {
+    this.onSessionPause = fn;
+  }
+
+  /** Set callback invoked when a session is resumed (for workflow resume) */
+  setOnSessionResume(fn: (id: string) => void) {
+    this.onSessionResume = fn;
   }
 
   /** Expose read-only view for stats computation */
@@ -118,6 +130,7 @@ export class SessionRegistry {
         framesRelayed: 0,
         publisherClaiming: false,
         activeAppId: null,
+        activeWorkflowId: null,
         appPipeline: null,
         lastFrame: null,
         linkState: "unknown",
@@ -529,6 +542,7 @@ export class SessionRegistry {
     }
 
     console.log(`[registry] Session paused: ${sessionId}`);
+    this.onSessionPause?.(sessionId);
   }
 
   /** Resume session: paused -> active. Re-creates recorder, re-activates AI if activeAppId set. */
@@ -542,6 +556,7 @@ export class SessionRegistry {
     await this.activatePublisher(sessionId);
 
     console.log(`[registry] Session resumed: ${sessionId}`);
+    this.onSessionResume?.(sessionId);
   }
 
   // --- Orphan timer ---

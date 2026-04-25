@@ -317,7 +317,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
       ownerId: null,
       nodes: [
         { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 50, positionY: 220 },
-        { id: `n_txt_${now}`, type: "text", label: "System Prompt", config: { text: "You are a helpful assistant." }, positionX: 320, positionY: 100 },
+        { id: `n_txt_${now}`, type: "text", label: "Text Content", config: { text: "You are a helpful assistant." }, positionX: 320, positionY: 100 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 320, positionY: 260 },
         { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 600, positionY: 260 },
       ],
@@ -343,32 +343,32 @@ async function renderEditor(isNew: boolean): Promise<void> {
       <div class="wf-editor-layout">
         <div class="wf-palette">
           ${(() => {
-            const roleOrder: Array<{ role: string; label: string }> = [
-              { role: "source", label: "Source" },
-              { role: "reference", label: "Reference" },
-              { role: "processor", label: "Processor" },
-              { role: "trigger", label: "Trigger" },
-              { role: "transform", label: "Transform" },
-              { role: "sink", label: "Sink" },
-            ];
-            return roleOrder.map(({ role, label }) => {
-              const nodes = _nodeDefs.filter(d => d.role === role);
-              if (nodes.length === 0) return "";
-              return `
+      const roleOrder: Array<{ role: string; label: string }> = [
+        { role: "source", label: "Source" },
+        { role: "reference", label: "Reference" },
+        { role: "processor", label: "Processor" },
+        { role: "trigger", label: "Trigger" },
+        { role: "transform", label: "Transform" },
+        { role: "sink", label: "Sink" },
+      ];
+      return roleOrder.map(({ role, label }) => {
+        const nodes = _nodeDefs.filter(d => d.role === role);
+        if (nodes.length === 0) return "";
+        return `
                 <h3 class="wf-palette-title">${label}</h3>
                 ${nodes.map(d => {
-                  const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
-                    ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
-                    : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
-                  return `
+          const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
+            ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
+            : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
+          return `
                   <button class="wf-palette-item" data-type="${d.type}">
                     <span class="wf-palette-dot" style="background:${d.color.header}"></span>
                     <span class="wf-palette-label">${esc(d.label)}</span>
                     <span class="wf-palette-runtime">${rtBadge}</span>
                   </button>`;
-                }).join("")}`;
-            }).join("");
-          })()}
+        }).join("")}`;
+      }).join("");
+    })()}
         </div>
         <div class="wf-canvas-wrap" id="wf-canvas-wrap">
           ${buildSVG()}
@@ -787,7 +787,7 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
           targetNodeId: target.id,
         });
         _dirty = true;
-      autoSave();
+        autoSave();
         refreshSVG();
       }
     }
