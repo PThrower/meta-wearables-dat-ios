@@ -1657,19 +1657,10 @@ class StreamSessionViewModel: ObservableObject {
       do {
         try engine.start()
 
-        // Route output based on workflow's preferred speaker.
-        // If workflow has glasses-speaker sink, use HFP. Otherwise phone loudspeaker.
-        let audioSession = AVAudioSession.sharedInstance()
-        if preferredSpeaker == .glasses,
-           let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
-          try audioSession.setPreferredInput(btHFP)
-          NSLog("[StreamSession] Inbound engine: routed to HFP \(btHFP.portName) (workflow: glasses)")
-        } else {
-          // Phone speaker — override to loudspeaker (default .playAndRecord goes to earpiece)
-          try audioSession.overrideOutputAudioPort(.speaker)
-          NSLog("[StreamSession] Inbound engine: routed to loudspeaker (workflow: phone)")
-        }
+        // Apply current audio route
+        applySpeakerRoute()
 
+        let audioSession = AVAudioSession.sharedInstance()
         let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
         NSLog("[StreamSession] Inbound audio engine started at \(sr)Hz, output: \(outputs)")
       } catch {
@@ -1679,6 +1670,9 @@ class StreamSessionViewModel: ObservableObject {
 
       inboundAudioEngine = engine
       inboundPlayerNode = player
+    } else {
+      // Re-apply route on every frame — per-thread routing can change between bursts
+      applySpeakerRoute()
     }
 
     guard let player = inboundPlayerNode else { return }
@@ -1701,6 +1695,22 @@ class StreamSessionViewModel: ObservableObject {
 
     player.scheduleBuffer(buffer)
     if !player.isPlaying { player.play() }
+  }
+
+  /// Apply current preferredSpeaker to AVAudioSession output route.
+  /// Called on every inbound PCM frame so per-thread routing takes effect mid-session.
+  private func applySpeakerRoute() {
+    let audioSession = AVAudioSession.sharedInstance()
+    do {
+      if preferredSpeaker == .glasses,
+         let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+        try audioSession.setPreferredInput(btHFP)
+      } else {
+        try audioSession.overrideOutputAudioPort(.speaker)
+      }
+    } catch {
+      NSLog("[StreamSession] Speaker route failed: \(error)")
+    }
   }
 
   /// Stop and tear down the inbound audio engine.
