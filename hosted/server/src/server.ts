@@ -1210,14 +1210,14 @@ const server = Bun.serve<WsData>({
 
         // Register workflow instance for execution controls
         session.activeWorkflowId = wfId;
-        const nodeEntries = processableNodes.map((n: any, i: number) => ({
+        const nodeEntries = (nodes as any[]).map((n: any) => ({
           nodeId: n.id,
-          appId: pipelineApps[i]?.id ?? n.id,
+          appId: n.id,
           nodeType: n.type as WorkflowNodeType,
           label: n.label || n.type,
-          triggerChained: false, // will be refined by trigger chain analysis
+          triggerChained: false,
         }));
-        if (pipelineApps.length > 1) {
+        if ((nodes as any[]).length > 1) {
           orchestrator.activateWorkflow(body.sessionId, wfId, wf.name, nodeEntries);
         }
         for (let i = 0; i < pipelineApps.length; i++) {
@@ -1628,15 +1628,11 @@ const server = Bun.serve<WsData>({
                     session.activeAppId = primaryApp.id;
                     session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
-                    // Register workflow instance for execution controls (multi-node only)
-                    const processableNodes = (nodes as any[]).filter((n: any) => {
-                      const d = NODE_DEF_MAP.get(n.type);
-                      return d && d.activationMode !== null;
-                    });
-                    if (pipelineApps.length > 1) {
-                      const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                    // Register workflow instance for execution controls
+                    if ((nodes as any[]).length > 1) {
+                      const nodeEntries = (nodes as any[]).map((n: any) => ({
                         nodeId: n.id,
-                        appId: pipelineApps[i]?.id ?? n.id,
+                        appId: n.id,
                         nodeType: n.type as WorkflowNodeType,
                         label: n.label || n.type,
                         triggerChained: false,
@@ -1707,14 +1703,10 @@ const server = Bun.serve<WsData>({
                   session.activeWorkflowId = workflowId;
                   session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
                   // Register workflow instance for execution controls
-                  const processableNodes = (nodes as any[]).filter((n: any) => {
-                    const d = NODE_DEF_MAP.get(n.type);
-                    return d && d.activationMode !== null;
-                  });
-                  if (pipelineApps.length > 1) {
-                    const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                  if ((nodes as any[]).length > 1) {
+                    const nodeEntries = (nodes as any[]).map((n: any) => ({
                       nodeId: n.id,
-                      appId: pipelineApps[i]?.id ?? n.id,
+                      appId: n.id,
                       nodeType: n.type as WorkflowNodeType,
                       label: n.label || n.type,
                       triggerChained: false,
@@ -1945,15 +1937,11 @@ const server = Bun.serve<WsData>({
                     session.activeAppId = primaryApp.id;
                     session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
-                    // Register workflow instance for execution controls (multi-node only)
-                    const processableNodes = (nodes as any[]).filter((n: any) => {
-                      const d = NODE_DEF_MAP.get(n.type);
-                      return d && d.activationMode !== null;
-                    });
-                    if (pipelineApps.length > 1) {
-                      const nodeEntries = processableNodes.map((n: any, i: number) => ({
+                    // Register workflow instance for execution controls
+                    if ((nodes as any[]).length > 1) {
+                      const nodeEntries = (nodes as any[]).map((n: any) => ({
                         nodeId: n.id,
-                        appId: pipelineApps[i]?.id ?? n.id,
+                        appId: n.id,
                         nodeType: n.type as WorkflowNodeType,
                         label: n.label || n.type,
                         triggerChained: false,
