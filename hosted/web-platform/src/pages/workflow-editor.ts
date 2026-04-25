@@ -559,7 +559,8 @@ function wireEditorEvents(): void {
         if (!result) { alert("Override failed"); return; }
       }
 
-      if (result.appId) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
+      if (result.status === "passive") alert(`Activated (passive). No AI processor — sinks/transforms configured on device.`);
+      else if (result.appId) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
       else alert("Activation failed");
     });
 
