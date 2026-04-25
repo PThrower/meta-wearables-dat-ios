@@ -1093,6 +1093,26 @@ const server = Bun.serve<WsData>({
             session.publisher.ws.send(JSON.stringify({ type: "workflow_config", config: mobileConfig }));
           }
 
+          // For passive workflows with text→local-tts chains, push text as guidance_text
+          // so the iOS app speaks it via AudioPlaybackStage.speakGuidance()
+          const edgeMap = new Map((edges as any[]).map((e: any) => [e.sourceNodeId, e.targetNodeId]));
+          for (const node of nodes as any[]) {
+            if (node.type !== "text") continue;
+            const textContent = (node.config as Record<string, unknown>)?.text as string | undefined;
+            if (!textContent) continue;
+            // Walk: text → local-tts → speaker
+            const ttsTarget = edgeMap.get(node.id);
+            const ttsDef = ttsTarget ? NODE_DEF_MAP.get((nodes as any[]).find(n => n.id === ttsTarget)?.type ?? "") : null;
+            if (ttsDef?.type === "local-tts") {
+              const speakerTarget = edgeMap.get(ttsTarget);
+              const speakerDef = speakerTarget ? NODE_DEF_MAP.get((nodes as any[]).find(n => n.id === speakerTarget)?.type ?? "") : null;
+              if (speakerDef?.role === "sink" && session.publisher?.ws?.readyState === WebSocket.OPEN) {
+                session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text: textContent }));
+                console.log(`[relay] Passive TTS: pushed text (${textContent.length} chars) to publisher session=${body.sessionId}`);
+              }
+            }
+          }
+
           return Response.json({ appId: null, status: "passive", apps: [] });
         }
 
