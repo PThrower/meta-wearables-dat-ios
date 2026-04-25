@@ -95,7 +95,6 @@ const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST", runtime: ["server"] },
   { type: "s2s-e4b", label: "S2S E4B", subtitle: "${model}", color: { fill: "#2d1050", header: "#a855f7", stroke: "#a855f7" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-e4b-rest", defaultModel: "gemma-4-e4b-it", configSchema: [], defaultConfig: { model: "gemma-4-e4b-it" }, defaultLabel: "S2S E4B", runtime: ["server"] },
   { type: "jepa-vision", label: "JEPA Vision", subtitle: "${model} | ${provider}", color: { fill: "#3d1a00", header: "#ef4444", stroke: "#ef4444" }, allowedTargets: ["<sink>"], role: "processor", activationMode: "jepa", binding: "jepa-vjepa2", defaultModel: "vjepa2-vit-l", configSchema: [], defaultConfig: { provider: "modal", tier: "cloud", model: "vjepa2-vit-l", gpu: "A100-80GB", clipLength: 16, sampleFps: 2, resolution: 224, tasks: [{ type: "anomaly" }, { type: "action" }] }, defaultLabel: "JEPA Vision", runtime: ["server", "mobile"] },
-  { type: "output", label: "Output", subtitle: "hub", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: ["local-tts", "tones", "phone-speaker", "glasses-speaker", "viewers", "overlays", "recording"], role: "sink", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Output", runtime: ["server", "mobile"] },
   { type: "local-tts", label: "Local TTS", subtitle: "on-device speech", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: ["phone-speaker", "glasses-speaker"], role: "transform" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Local TTS", runtime: ["mobile"] },
   { type: "tones", label: "Tones", subtitle: "alert sounds", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Tones", runtime: ["mobile"] },
   { type: "phone-speaker", label: "Phone Speaker", subtitle: "phone audio out", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Phone Speaker", runtime: ["mobile"] },
@@ -108,11 +107,12 @@ const FALLBACK_PALETTE: NodeDefinition[] = [
 /** Map old node type names to their current equivalents */
 const TYPE_ALIASES: Record<string, string> = {
   "camera-source": "stream-input",
-  "output-full": "output",
-  "output-viewers": "output",
-  "output-speaker": "output",
-  "output-recording": "output",
-  "output-overlays": "output",
+  "output-full": "viewers",
+  "output-viewers": "viewers",
+  "output-speaker": "local-tts",
+  "output-recording": "recording",
+  "output-overlays": "overlays",
+  "output": "viewers",
 };
 
 /** Resolve a node type, mapping old names to current definitions */
@@ -253,26 +253,20 @@ async function renderEditor(isNew: boolean): Promise<void> {
         { id: `n_src_${now}`, type: "stream-input", label: "Input", config: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, positionX: 50, positionY: 220 },
         { id: `n_txt_${now}`, type: "text", label: "Prompt", config: { text: "" }, positionX: 320, positionY: 100 },
         { id: `n_ai_${now}`, type: "s2s-live", label: "AI Assistant", config: { model: "gemini-2.5-flash-native-audio-latest" }, positionX: 320, positionY: 260 },
-        { id: `n_out_${now}`, type: "output", label: "Output", config: {}, positionX: 590, positionY: 260 },
-        { id: `n_local-tts_${now}`, type: "local-tts", label: "Local TTS", config: {}, positionX: 830, positionY: 50 },
-        { id: `n_ton_${now}`, type: "tones", label: "Tones", config: {}, positionX: 830, positionY: 120 },
-        { id: `n_psp_${now}`, type: "phone-speaker", label: "Phone Speaker", config: {}, positionX: 830, positionY: 190 },
-        { id: `n_gsp_${now}`, type: "glasses-speaker", label: "Glasses Speaker", config: { profile: "hfp" }, positionX: 830, positionY: 260 },
-        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 830, positionY: 330 },
-        { id: `n_ovl_${now}`, type: "overlays", label: "Overlays", config: {}, positionX: 830, positionY: 400 },
-        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 830, positionY: 470 },
+        { id: `n_local-tts_${now}`, type: "local-tts", label: "Local TTS", config: {}, positionX: 600, positionY: 50 },
+        { id: `n_psp_${now}`, type: "phone-speaker", label: "Phone Speaker", config: {}, positionX: 850, positionY: 50 },
+        { id: `n_gsp_${now}`, type: "glasses-speaker", label: "Glasses Speaker", config: { profile: "hfp" }, positionX: 850, positionY: 130 },
+        { id: `n_viw_${now}`, type: "viewers", label: "Viewers", config: {}, positionX: 600, positionY: 260 },
+        { id: `n_rec_${now}`, type: "recording", label: "Recording", config: {}, positionX: 600, positionY: 340 },
       ],
       edges: [
         { id: `e_1_${now}`, sourceNodeId: `n_src_${now}`, targetNodeId: `n_ai_${now}` },
         { id: `e_2_${now}`, sourceNodeId: `n_txt_${now}`, targetNodeId: `n_ai_${now}` },
-        { id: `e_3_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_out_${now}` },
-        { id: `e_4_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_local-tts_${now}` },
-        { id: `e_5_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_ton_${now}` },
-        { id: `e_6_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_psp_${now}` },
-        { id: `e_7_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_gsp_${now}` },
-        { id: `e_8_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_viw_${now}` },
-        { id: `e_9_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_ovl_${now}` },
-        { id: `e_10_${now}`, sourceNodeId: `n_out_${now}`, targetNodeId: `n_rec_${now}` },
+        { id: `e_3_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_local-tts_${now}` },
+        { id: `e_4_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_viw_${now}` },
+        { id: `e_5_${now}`, sourceNodeId: `n_ai_${now}`, targetNodeId: `n_rec_${now}` },
+        { id: `e_6_${now}`, sourceNodeId: `n_local-tts_${now}`, targetNodeId: `n_psp_${now}` },
+        { id: `e_7_${now}`, sourceNodeId: `n_local-tts_${now}`, targetNodeId: `n_gsp_${now}` },
       ],
       canvasViewport: { x: 0, y: 0, zoom: 1 },
       createdAt: new Date().toISOString(),
@@ -765,14 +759,6 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
 // --- Subtitle resolver ---
 
 function resolveSubtitle(template: string, config: Record<string, unknown>): string {
-  if (template === "${_channels}") {
-    // Count connected channel nodes for the output hub
-    if (!_workflow) return "";
-    const channelTypes = ["speaker", "viewers", "overlays", "recording"];
-    const currentNodeId = Object.keys(config).length === 0 ? null : null; // output hub has no channel config
-    // Just show "hub" for the output node — channels are visible as connected nodes
-    return "hub";
-  }
   if (template === "${_modalities}") {
     return [
       config.video !== false ? "video" : "",

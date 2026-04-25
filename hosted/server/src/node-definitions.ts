@@ -260,23 +260,6 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "JEPA Vision",
     runtime: ["server", "mobile"],
   },
-  {
-    type: "output",
-    label: "Output",
-    subtitle: "hub",
-    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
-    allowedTargets: ["local-tts", "tones", "phone-speaker", "glasses-speaker", "viewers", "overlays", "recording"],
-    role: "sink",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-    ],
-    defaultConfig: {},
-    defaultLabel: "Output",
-    runtime: ["server", "mobile"],
-  },
   // --- Transform nodes (data format conversion) ---
   {
     type: "local-tts",
@@ -415,8 +398,8 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
 
 export const NODE_DEF_MAP = new Map(NODE_DEFINITIONS.map(d => [d.type, d]));
 
-/** All current sink + channel type identifiers (derived from definitions) */
-const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink" || d.role === "channel").map(d => d.type);
+/** All current sink type identifiers (derived from definitions) */
+const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink").map(d => d.type);
 
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
@@ -431,24 +414,25 @@ export function buildAllowedEdgeMap(): Map<string, Set<string>> {
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
   const sourceCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "source").length;
   const processorCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "processor").length;
-  const sinkOrChannelCount = nodes.filter(n => {
+  const sinkCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
-    return role === "sink" || role === "channel";
+    return role === "sink" || role === "transform";
   }).length;
   if (sourceCount !== 1) return "Must have exactly 1 source (stream-input) node";
   if (processorCount < 1) return "Must have at least 1 processor (AI/JEPA) node";
-  if (sinkOrChannelCount < 1) return "Must have at least 1 output or channel node";
+  if (sinkCount < 1) return "Must have at least 1 sink or transform node";
   return null;
 }
 
 /** Resolve node types — maps old names to current definitions */
 const TYPE_ALIASES: Record<string, string> = {
   "camera-source": "stream-input",
-  "output-full": "output",
-  "output-viewers": "output",
+  "output-full": "viewers",
+  "output-viewers": "viewers",
   "output-speaker": "local-tts",
-  "output-recording": "output",
-  "output-overlays": "output",
+  "output-recording": "recording",
+  "output-overlays": "overlays",
+  "output": "viewers",
   "speaker": "local-tts",
 };
 
