@@ -1658,8 +1658,14 @@ const server = Bun.serve<WsData>({
             } else if (cmd.type === "standby") {
               // Publisher announcing standby state (connected but not streaming)
               const isReady = cmd.status === "ready";
-              if (session.publisher) {
-                session.publisher.standby = isReady;
+              if (isReady) {
+                // Pause session: transitions state to "paused" so stale checker won't evict
+                registry.pauseSession(sessionId).catch(() => {});
+              } else {
+                // Resume session: transitions state back to "active"
+                if (session.state === "paused" || session.state === "standby") {
+                  registry.activatePublisher(sessionId).catch(() => {});
+                }
               }
               console.log(`[relay] Publisher standby: ${isReady} session=${sessionId}`);
               broadcastToViewers(session, { type: "publisher_status", status: isReady ? "standby" : "live" });

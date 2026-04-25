@@ -401,9 +401,12 @@ export class SessionRegistry {
     // No viewers left — end the session immediately
     if (session.viewers.size === 0) {
       const prevState = session.state;
-      stateMachine.transition(sessionId, prevState, "ended", dropReason, {
-        viewerCount: 0,
-      });
+      // Skip transition if session already ended (e.g. stale checker got here first)
+      if (prevState !== "ended") {
+        stateMachine.transition(sessionId, prevState, "ended", dropReason, {
+          viewerCount: 0,
+        });
+      }
       session.state = "ended";
       session.stateEnteredAt = Date.now();
       if (!session.flags.ephemeral) {
@@ -415,6 +418,8 @@ export class SessionRegistry {
     } else {
       // Viewers remain — enter orphaned state with grace timer
       const prevState = session.state;
+      // Skip if already ended (stale checker won the race)
+      if (prevState === "ended") return;
       stateMachine.transition(sessionId, prevState, "orphaned", dropReason, {
         viewerCount: session.viewers.size,
       });
