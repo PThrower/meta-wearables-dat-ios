@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-BnrvR59P.js"></script>
+  <script type="module" crossorigin src="/assets/main-Chk9tZBe.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-CuJQr1DY.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-BqsHmNvO.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -324,10 +324,18 @@
           </svg>
         </button>
         <div id="miniEditorContent" class="mini-editor-content">
-          <div id="miniEditorHeader" class="mini-editor-header"></div>
+          <div id="miniEditorHeader" class="mini-editor-header">
+            <span class="mini-editor-title"></span>
+            <div class="mini-editor-exec-bar" id="miniEditorExecBar"></div>
+          </div>
+          <div class="mini-editor-tab-bar" id="miniEditorTabBar">
+            <button class="mini-editor-tab active" data-tab="canvas">Canvas</button>
+            <button class="mini-editor-tab" data-tab="palette">+ Nodes</button>
+          </div>
           <div id="miniEditorCanvas" class="mini-editor-canvas"></div>
-          <div id="miniEditorConfig" class="mini-editor-config">
-            <span class="mini-editor-hint">Click a node to inspect</span>
+          <div id="miniEditorPalette" class="mini-editor-palette hidden"></div>
+          <div id="miniEditorConfigPanel" class="mini-editor-config-panel">
+            <span class="mini-editor-hint">Select a node to edit</span>
           </div>
         </div>
       </div>
