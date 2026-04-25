@@ -119,7 +119,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Text",
     subtitle: "${text}",
     color: { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b"],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts"],
     role: "reference",
     activationMode: null,
     binding: null,
@@ -378,15 +378,12 @@ export function buildAllowedEdgeMap(): Map<string, Set<string>> {
 
 /** Validate workflow DAG structure using role-based rules */
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
-  const sourceCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "source").length;
-  const processorCount = nodes.filter(n => NODE_DEF_MAP.get(resolveNodeType(n.type))?.role === "processor").length;
-  const sinkCount = nodes.filter(n => {
+  if (nodes.length === 0) return "Workflow must have at least 1 node";
+  const sinkOrTransformCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
     return role === "sink" || role === "transform";
   }).length;
-  if (sourceCount !== 1) return "Must have exactly 1 source (stream-input) node";
-  if (processorCount < 1) return "Must have at least 1 processor (AI/JEPA) node";
-  if (sinkCount < 1) return "Must have at least 1 sink or transform node";
+  if (sinkOrTransformCount < 1) return "Must have at least 1 sink or transform node";
   return null;
 }
 
