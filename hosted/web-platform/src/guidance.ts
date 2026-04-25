@@ -122,7 +122,7 @@ export interface NodeState {
   error?: string;
 }
 
-const NODE_STATE_COLORS: Record<NodeExecutionState, string> = {
+export const NODE_STATE_COLORS: Record<NodeExecutionState, string> = {
   pending: "#9ca3af",
   running: "#4ade80",
   paused: "#facc15",
@@ -346,6 +346,15 @@ export class GuidancePanel {
   setOverlayToggleCallback(fn: (show: boolean) => void): void {
     this.onOverlayToggle = fn;
   }
+
+  /** Get the active workflow ID (for mini editor). */
+  getActiveWorkflowId(): string | null { return this.activeWorkflowId; }
+
+  /** Get current node execution states (for mini editor). */
+  getNodeStates(): NodeState[] { return this.nodeStates; }
+
+  /** Whether the panel is collapsed (for mini editor coordination). */
+  isCollapsed(): boolean { return this.collapsed; }
 
   // --- Rendering ---
 

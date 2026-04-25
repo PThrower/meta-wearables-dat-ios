@@ -52,30 +52,58 @@ export function resolveSubtitle(template: string, config: Record<string, unknown
   });
 }
 
-/** Build the full SVG string for nodes + edges + grid. */
-export function buildSVG(): string {
-  const workflow = getWorkflow();
-  if (!workflow) return "";
+/** Node status dot colors for live status indicators. */
+export const NODE_STATUS_DOT_COLORS: Record<string, string> = {
+  running: "#50fa7b",
+  active: "#50fa7b",
+  idle: "#f1fa8c",
+  pending: "#f1fa8c",
+  waiting: "#38bdf8",
+  paused: "#facc15",
+  completed: "#60a5fa",
+  skipped: "#6b7280",
+  errored: "#ff5555",
+  unknown: "#9ca3af",
+};
+
+/**
+ * Parameterized SVG builder — accepts explicit data instead of reading singleton state.
+ * Used by MiniWorkflowEditor and the full editor.
+ */
+export function buildSVGFromData(
+  workflow: { nodes: WorkflowNodeDef[]; edges: WorkflowEdgeDef[] },
+  viewBox: { x: number; y: number; zoom: number },
+  selectedId: string | null,
+  nodeStates?: Map<string, string>,
+  scale = 1,
+): string {
   const nodes = workflow.nodes;
   const edges = workflow.edges;
-  const { x: vx, y: vy, zoom } = getViewBox();
+  const { x: vx, y: vy, zoom } = viewBox;
+  const w = NODE_W * scale;
+  const h = NODE_H * scale;
+  const r = NODE_R * scale;
 
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
     const c = def?.color ?? FALLBACK_COLOR;
     const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
-    const selected = getSelectedNodeId() === n.id;
+    const selected = selectedId === n.id;
+    const stateColor = nodeStates?.get(n.id);
+    const statusDot = stateColor
+      ? `<circle cx="${r}" cy="${r}" r="${5 * scale}" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
+      : "";
     return `
-      <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX}, ${n.positionY})">
-        <rect class="wf-node-bg" width="${NODE_W}" height="${NODE_H}" rx="${NODE_R}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
-        <rect class="wf-node-header" width="${NODE_W}" height="24" rx="${NODE_R}" fill="${c.header}" />
-        <rect x="0" y="${NODE_R}" width="${NODE_W}" height="${24 - NODE_R}" fill="${c.header}" />
-        <text x="${NODE_W / 2}" y="16" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${esc(n.type.replace("-", " "))}</text>
-        <text x="12" y="44" fill="#ccc" font-size="11">${esc(n.label || n.type)}</text>
-        <text x="12" y="60" fill="#888" font-size="9">${esc(configSummary)}</text>
-        ${runtimeBadgeSVG(def)}
-        <circle class="wf-port wf-port-in" cx="0" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
-        <circle class="wf-port wf-port-out" cx="${NODE_W}" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
+      <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
+        ${statusDot}
+        <rect class="wf-node-bg" width="${w}" height="${h}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
+        <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
+        <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
+        <text x="${w / 2}" y="${16 * scale}" text-anchor="middle" fill="#fff" font-size="${10 * scale}" font-weight="600">${esc(n.type.replace("-", " "))}</text>
+        <text x="${12 * scale}" y="${44 * scale}" fill="#ccc" font-size="${11 * scale}">${esc(n.label || n.type)}</text>
+        <text x="${12 * scale}" y="${60 * scale}" fill="#888" font-size="${9 * scale}">${esc(configSummary)}</text>
+        <circle class="wf-port wf-port-in" cx="0" cy="${h / 2}" r="${6 * scale}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
+        <circle class="wf-port wf-port-out" cx="${w}" cy="${h / 2}" r="${6 * scale}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
       </g>
     `;
   }).join("");
@@ -84,10 +112,10 @@ export function buildSVG(): string {
     const src = nodes.find(n => n.id === e.sourceNodeId);
     const tgt = nodes.find(n => n.id === e.targetNodeId);
     if (!src || !tgt) return "";
-    const sx = src.positionX + NODE_W;
-    const sy = src.positionY + NODE_H / 2;
-    const tx = tgt.positionX;
-    const ty = tgt.positionY + NODE_H / 2;
+    const sx = src.positionX * scale + w;
+    const sy = src.positionY * scale + h / 2;
+    const tx = tgt.positionX * scale;
+    const ty = tgt.positionY * scale + h / 2;
     const mx = (sx + tx) / 2;
     return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />`;
   }).join("");
@@ -102,6 +130,13 @@ export function buildSVG(): string {
   `;
 
   return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${vx} ${vy} ${1100 / zoom} ${600 / zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+}
+
+/** Build the full SVG string for nodes + edges + grid (singleton state wrapper). */
+export function buildSVG(): string {
+  const workflow = getWorkflow();
+  if (!workflow) return "";
+  return buildSVGFromData(workflow, getViewBox(), getSelectedNodeId());
 }
 
 /** Re-inject SVG and re-wire events. */

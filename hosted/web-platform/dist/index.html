@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CaringMind</title>
   <!-- OAuth disabled: <script src="https://accounts.google.com/gsi/client" async defer></script> -->
-  <script type="module" crossorigin src="/assets/main-B2nsLO1U.js"></script>
+  <script type="module" crossorigin src="/assets/main-Bkfjra7z.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/modulepreload-polyfill-B5Qt9EMX.js">
-  <link rel="stylesheet" crossorigin href="/assets/main-fixHHwF7.css">
+  <link rel="stylesheet" crossorigin href="/assets/main-CuJQr1DY.css">
 </head>
 <body>
   <!-- LOGIN OVERLAY -->
@@ -313,6 +313,22 @@
           <div id="guidanceControl" class="guidance-section"></div>
           <div id="guidanceLog" class="guidance-section guidance-log"></div>
           <div id="guidanceTelemetry" class="guidance-section"></div>
+        </div>
+      </div>
+      <!-- Mini Workflow Editor Panel (right side overlay, below guidance) -->
+      <div id="miniEditorPanel" class="mini-editor-panel collapsed">
+        <button id="miniEditorToggle" class="mini-editor-toggle" title="Workflow">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
+            <line x1="8" y1="6" x2="16" y2="6"/><line x1="9.5" y1="15.5" x2="7" y2="8.5"/><line x1="14.5" y1="15.5" x2="17" y2="8.5"/>
+          </svg>
+        </button>
+        <div id="miniEditorContent" class="mini-editor-content">
+          <div id="miniEditorHeader" class="mini-editor-header"></div>
+          <div id="miniEditorCanvas" class="mini-editor-canvas"></div>
+          <div id="miniEditorConfig" class="mini-editor-config">
+            <span class="mini-editor-hint">Click a node to inspect</span>
+          </div>
         </div>
       </div>
     </div>

@@ -7,7 +7,7 @@
 import type { PageModule } from "../router/router.js";
 import { fetchSessions, esc, formatTime } from "../core/api-client.js";
 import type { SessionInfo } from "../core/api-client.js";
-import { watchLive } from "../live.js";
+import { watchLive } from "../live/index.js";
 
 export const page: PageModule = {
   init(container) {

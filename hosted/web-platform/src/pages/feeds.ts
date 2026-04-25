@@ -8,7 +8,7 @@ import type { PageModule } from "../router/router.js";
 import { fetchGallery, fetchGuidanceHistory, esc } from "../core/api-client.js";
 import type { SessionInfo, GuidanceHistoryEvent } from "../core/api-client.js";
 import { fmtDur } from "../core/format.js";
-import { watchLive } from "../live.js";
+import { watchLive } from "../live/index.js";
 import { openRecordedPlayer } from "../recorded.js";
 import { authUrl } from "../auth.js";
 

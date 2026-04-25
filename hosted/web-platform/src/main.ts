@@ -4,7 +4,7 @@
 
 import { loadConfig } from "./config.js";
 import { initAuth, requireAuth, isNoAuth, getToken } from "./auth.js";
-import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live.js";
+import { watchLive, closeLive, setQuality, resumeAudio, getPlayer, getPendingLiveSession, clearPendingLiveSession } from "./live/index.js";
 import { openRecordedPlayer, closeRecordedPlayer, initRecordedPlayerEvents } from "./recorded.js";
 import { Router } from "./router/router.js";
 import { routes } from "./router/routes.js";

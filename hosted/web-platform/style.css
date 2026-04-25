@@ -1234,6 +1234,142 @@ header {
   }
 }
 
+/* === MINI WORKFLOW EDITOR PANEL === */
+.mini-editor-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 380px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--player-border);
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+}
+.mini-editor-panel > * {
+  pointer-events: auto;
+}
+
+/* Collapsed: only toggle visible */
+.mini-editor-panel.collapsed .mini-editor-content {
+  display: none;
+}
+.mini-editor-panel.collapsed {
+  width: auto;
+}
+
+/* Toggle button */
+.mini-editor-toggle {
+  position: absolute;
+  top: 44px; right: 8px;
+  width: 36px; height: 36px;
+  background: var(--bg-surface);
+  border: 1px solid var(--player-border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+  z-index: 10;
+}
+.mini-editor-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.mini-editor-panel:not(.collapsed) .mini-editor-toggle {
+  right: 388px;
+}
+
+/* Content area */
+.mini-editor-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px;
+  padding-top: 48px;
+}
+
+/* Header */
+.mini-editor-header {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--player-border);
+  margin-bottom: 4px;
+}
+.mini-editor-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mini-editor-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* SVG canvas */
+.mini-editor-canvas {
+  flex: 1;
+  overflow: hidden;
+  min-height: 100px;
+}
+.mini-editor-canvas svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Config panel */
+.mini-editor-config {
+  border-top: 1px solid var(--player-border);
+  padding: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  min-height: 32px;
+}
+.mini-config-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+.mini-config-type {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mini-config-state {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.mini-config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 11px;
+}
+.mini-config-key {
+  color: var(--text-tertiary);
+}
+.mini-config-val {
+  color: var(--text-secondary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Responsive: narrower on small screens */
+@media (max-width: 640px) {
+  .mini-editor-content {
+    width: 280px;
+  }
+  .mini-editor-panel:not(.collapsed) .mini-editor-toggle {
+    right: 288px;
+  }
+}
+
 /* === CONNECTION STATE OVERLAY === */
 .connection-overlay {
   position: absolute; inset: 0; z-index: 8;
