@@ -101,6 +101,7 @@ export class MiniWorkflowEditor {
       this.selectedNodeId,
       this.nodeStates,
       MINI_SCALE,
+      "mini-wf-svg",
     );
     this.canvas.innerHTML = svg;
     this.wireCanvasEvents();

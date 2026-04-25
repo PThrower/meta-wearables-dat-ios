@@ -76,6 +76,7 @@ export function buildSVGFromData(
   selectedId: string | null,
   nodeStates?: Map<string, string>,
   scale = 1,
+  svgId = "wf-svg",
 ): string {
   const nodes = workflow.nodes;
   const edges = workflow.edges;
@@ -83,6 +84,7 @@ export function buildSVGFromData(
   const w = NODE_W * scale;
   const h = NODE_H * scale;
   const r = NODE_R * scale;
+  const gridId = svgId + "-grid";
 
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
@@ -122,14 +124,16 @@ export function buildSVGFromData(
 
   const grid = `
     <defs>
-      <pattern id="wf-grid" width="20" height="20" patternUnits="userSpaceOnUse">
-        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5" />
+      <pattern id="${gridId}" width="${20 * scale}" height="${20 * scale}" patternUnits="userSpaceOnUse">
+        <path d="M ${20 * scale} 0 L 0 0 0 ${20 * scale}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5" />
       </pattern>
     </defs>
-    <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#wf-grid)" />
+    <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#${gridId})" />
   `;
 
-  return `<svg class="wf-canvas-svg" id="wf-svg" viewBox="${vx} ${vy} ${1100 / zoom} ${600 / zoom}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+  const vbW = 1100 * scale / zoom;
+  const vbH = 600 * scale / zoom;
+  return `<svg class="wf-canvas-svg" id="${svgId}" viewBox="${vx} ${vy} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
 }
 
 /** Build the full SVG string for nodes + edges + grid (singleton state wrapper). */
