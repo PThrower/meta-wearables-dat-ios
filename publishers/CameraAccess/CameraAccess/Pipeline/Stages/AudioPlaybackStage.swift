@@ -68,20 +68,25 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Guidance TTS
 
-    /// Speak guidance text through glasses speaker and publish PCM to relay.
+    /// Speak guidance text through preferred speaker and publish PCM to relay.
     /// Called when the server sends a `guidance_text` JSON message.
-    func speakGuidance(_ text: String) async {
+    /// - Parameter preferGlasses: If true, route to glasses HFP; if false, use phone speaker.
+    func speakGuidance(_ text: String, preferGlasses: Bool = true) async {
         guard !text.isEmpty else { return }
 
-        NSLog("[AudioPlayback] speakGuidance: \"\(text.prefix(80))\"")
+        NSLog("[AudioPlayback] speakGuidance: \"\(text.prefix(80))\" preferGlasses=\(preferGlasses)")
 
         let rate = self.speechRate
         let language = self.language
 
         let result: (pcm: Data, sampleRate: UInt32, channels: UInt16)? = await Task { @MainActor in
-            // Route to glasses HFP BEFORE speaking — must be on @MainActor
+            // Route to preferred output BEFORE speaking — must be on @MainActor
             // for iOS 17+ AVAudioSession strict concurrency.
-            Self.routeToGlasses()
+            if preferGlasses {
+                Self.routeToGlasses()
+            } else {
+                Self.routeToPhone()
+            }
 
             // Reuse synthesizer to avoid route reset from new instances
             if self.synth == nil {
@@ -214,6 +219,18 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
             }
         } else {
             NSLog("[AudioPlayback] No Bluetooth HFP input found — TTS will use phone speaker")
+        }
+    }
+
+    /// Route audio output to phone loudspeaker.
+    nonisolated static func routeToPhone() {
+        let session = AVAudioSession.sharedInstance()
+
+        do {
+            try session.overrideOutputAudioPort(.speaker)
+            NSLog("[AudioPlayback] Routed to phone loudspeaker")
+        } catch {
+            NSLog("[AudioPlayback] Failed to route to phone speaker: \(error)")
         }
     }
 

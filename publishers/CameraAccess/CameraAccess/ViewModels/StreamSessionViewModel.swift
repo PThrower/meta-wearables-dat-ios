@@ -52,6 +52,12 @@ enum AudioInputMode: String, CaseIterable, Identifiable {
   }
 }
 
+/// Preferred audio output target, determined by workflow sink nodes.
+enum PreferredSpeaker: String {
+  case phone      // Phone speaker (default for workflows with phone-speaker sink)
+  case glasses    // Glasses HFP/A2DP speaker (only when glasses-speaker sink is present)
+}
+
 /// Lightweight representation of an AI app from the relay server.
 struct AppInfo: Identifiable, Equatable {
   let id: String
@@ -117,6 +123,11 @@ class StreamSessionViewModel: ObservableObject {
       // be applied on the next relay session if needed in the future.
     }
   }
+
+  /// Preferred audio output target from workflow configuration.
+  /// Set by `workflow_config` message from the server. Determines whether
+  /// AI audio and TTS route to glasses (HFP) or phone speaker.
+  @Published var preferredSpeaker: PreferredSpeaker = .phone
 
 
   var isStreaming: Bool {
@@ -737,7 +748,8 @@ class StreamSessionViewModel: ObservableObject {
       if msgType == "guidance_text",
          let text = msg["text"] as? String, !text.isEmpty {
         Task { [weak self] in
-          await self?.audioPlaybackStage.speakGuidance(text)
+          let preferGlasses = await self?.preferredSpeaker == .glasses
+          await self?.audioPlaybackStage.speakGuidance(text, preferGlasses: preferGlasses)
         }
       }
 
@@ -784,6 +796,22 @@ class StreamSessionViewModel: ObservableObject {
           await self.configureRelayEncoder()
           await self.relayStage.sendJson(["type": "codec_changed", "codec": newCodec == .h264 ? "h264" : "jpeg"])
           NSLog("[StreamSession] Codec switched to \(newCodec) by viewer")
+        }
+      }
+
+      // Workflow config from server — sets preferred speaker based on sink nodes
+      if msgType == "workflow_config", let config = msg["config"] as? [String: Any] {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          let sinks = config["sinks"] as? [[String: Any]] ?? []
+          let sinkTypes = sinks.compactMap { $0["type"] as? String }
+          // If workflow has glasses-speaker, prefer glasses. Otherwise phone.
+          if sinkTypes.contains("glasses-speaker") {
+            self.preferredSpeaker = .glasses
+          } else {
+            self.preferredSpeaker = .phone
+          }
+          NSLog("[StreamSession] Workflow config: sinks=\(sinkTypes), preferredSpeaker=\(self.preferredSpeaker)")
         }
       }
 
@@ -895,7 +923,8 @@ class StreamSessionViewModel: ObservableObject {
       // Remote TTS from viewer
       if msgType == "speak_text", let text = msg["text"] as? String, !text.isEmpty {
         Task { @MainActor [weak self] in
-          await self?.audioPlaybackStage.speakGuidance(text)
+          let preferGlasses = self?.preferredSpeaker == .glasses
+          await self?.audioPlaybackStage.speakGuidance(text, preferGlasses: preferGlasses)
           await self?.relayStage.sendJson(["type": "spoken_text", "text": text])
         }
       }
@@ -1625,17 +1654,17 @@ class StreamSessionViewModel: ObservableObject {
       do {
         try engine.start()
 
-        // Route output to glasses HFP speaker if available.
-        // Setting preferredInput to a BT HFP port routes both input and output there.
-        // This is the only reliable way to play audio through the glasses speaker on iOS.
+        // Route output based on workflow's preferred speaker.
+        // If workflow has glasses-speaker sink, use HFP. Otherwise phone loudspeaker.
         let audioSession = AVAudioSession.sharedInstance()
-        if let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+        if preferredSpeaker == .glasses,
+           let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
           try audioSession.setPreferredInput(btHFP)
-          NSLog("[StreamSession] Inbound engine: routed to HFP \(btHFP.portName)")
+          NSLog("[StreamSession] Inbound engine: routed to HFP \(btHFP.portName) (workflow: glasses)")
         } else {
-          // No BT HFP -- route to phone loudspeaker (default .playAndRecord goes to earpiece)
+          // Phone speaker — override to loudspeaker (default .playAndRecord goes to earpiece)
           try audioSession.overrideOutputAudioPort(.speaker)
-          NSLog("[StreamSession] Inbound engine: routed to loudspeaker")
+          NSLog("[StreamSession] Inbound engine: routed to loudspeaker (workflow: phone)")
         }
 
         let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
