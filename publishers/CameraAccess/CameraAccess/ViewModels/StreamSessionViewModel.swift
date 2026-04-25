@@ -124,10 +124,10 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
-  /// Preferred audio output target from workflow configuration.
-  /// Set by `workflow_config` message from the server. Determines whether
-  /// AI audio and TTS route to glasses (HFP) or phone speaker.
-  @Published var preferredSpeaker: PreferredSpeaker = .phone
+  /// Preferred audio output for inbound AI PCM audio.
+  /// Set by `audio_route` JSON message from the server before each audio burst.
+  /// Default: phone speaker.
+  var preferredSpeaker: PreferredSpeaker = .phone
 
 
   var isStreaming: Bool {
@@ -745,10 +745,11 @@ class StreamSessionViewModel: ObservableObject {
       }
 
       // Guidance text from server AI — trigger client-side TTS
+      // Per-message preferGlasses comes from the processor's downstream sink config
       if msgType == "guidance_text",
          let text = msg["text"] as? String, !text.isEmpty {
         Task { [weak self] in
-          let preferGlasses = await self?.preferredSpeaker == .glasses
+          let preferGlasses = msg["preferGlasses"] as? Bool ?? false
           await self?.audioPlaybackStage.speakGuidance(text, preferGlasses: preferGlasses)
         }
       }
@@ -799,20 +800,22 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
-      // Workflow config from server — sets preferred speaker based on sink nodes
-      if msgType == "workflow_config", let config = msg["config"] as? [String: Any] {
+      // Audio route from server — sets preferred speaker for subsequent inbound AI PCM
+      // Sent before each AI audio burst so per-thread routing works correctly
+      if msgType == "audio_route" {
+        let preferGlasses = msg["preferGlasses"] as? Bool ?? false
         Task { @MainActor [weak self] in
-          guard let self else { return }
-          let sinks = config["sinks"] as? [[String: Any]] ?? []
-          let sinkTypes = sinks.compactMap { $0["type"] as? String }
-          // If workflow has glasses-speaker, prefer glasses. Otherwise phone.
-          if sinkTypes.contains("glasses-speaker") {
-            self.preferredSpeaker = .glasses
-          } else {
-            self.preferredSpeaker = .phone
-          }
-          NSLog("[StreamSession] Workflow config: sinks=\(sinkTypes), preferredSpeaker=\(self.preferredSpeaker)")
+          self?.preferredSpeaker = preferGlasses ? .glasses : .phone
+          NSLog("[StreamSession] Audio route: preferGlasses=\(preferGlasses) -> \(self?.preferredSpeaker)")
         }
+      }
+
+      // Workflow config from server — sets mobile-side pipeline config (input modality, sinks)
+      // For passive workflows (no AI). Active AI workflows use per-message audio_route instead.
+      if msgType == "workflow_config", let config = msg["config"] as? [String: Any] {
+        let sinks = config["sinks"] as? [[String: Any]] ?? []
+        let sinkTypes = sinks.compactMap { $0["type"] as? String }
+        NSLog("[StreamSession] Workflow config: sinks=\(sinkTypes)")
       }
 
       // Audio gain control from viewer
@@ -920,7 +923,7 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
-      // Remote TTS from viewer
+      // Remote TTS from viewer — uses current audio_route setting
       if msgType == "speak_text", let text = msg["text"] as? String, !text.isEmpty {
         Task { @MainActor [weak self] in
           let preferGlasses = self?.preferredSpeaker == .glasses

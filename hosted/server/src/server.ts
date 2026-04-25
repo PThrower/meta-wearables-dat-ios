@@ -216,10 +216,16 @@ registry.setOnSessionDestroy((id: string) => {
 
 // Audio push: when AI produces spoken audio, wrap as FRAU codecType 3 and
 // push through the relay's audio-in path (fan-out to publisher + viewers).
-orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
+orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array, preferGlasses: boolean) => {
   if (pcm.length === 0) return;
 
-  console.log(`[relay] AI audio push: ${pcm.length} bytes session=${sessionId}`);
+  console.log(`[relay] AI audio push: ${pcm.length} bytes session=${sessionId} preferGlasses=${preferGlasses}`);
+
+  // Send routing control message to publisher BEFORE binary frames
+  const session = registry.get(sessionId);
+  if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+    session.publisher.ws.send(JSON.stringify({ type: "audio_route", preferGlasses }));
+  }
 
   // Build FRAU v1 frame: codecType=3 (relay-inbound), 16kHz, mono, 16-bit
   const seq = Date.now();
@@ -229,21 +235,20 @@ orchestrator.setAudioPushFn((sessionId: string, pcm: Uint8Array) => {
   // Fan out to viewers
   registry.fanoutAudio(sessionId, frame, 3, 16000);
 
-  // Push to publisher for local playback (glasses speakers via HFP)
+  // Push to publisher for local playback
   registry.sendToPublisher(sessionId, frame);
 
   // Record
-  const session = registry.get(sessionId);
   session?.recorder?.appendAudio(frame);
 });
 
 // Guidance text push: when AI emits a guidance event with content,
 // send it to the publisher as JSON for client-side TTS.
 // The publisher's RelayStage receives it and triggers AudioPlaybackStage.speakGuidance().
-orchestrator.setGuidanceTextPushFn((sessionId: string, text: string) => {
+orchestrator.setGuidanceTextPushFn((sessionId: string, text: string, preferGlasses: boolean) => {
   const session = registry.get(sessionId);
   if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
-    session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text }));
+    session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text, preferGlasses }));
   }
 });
 

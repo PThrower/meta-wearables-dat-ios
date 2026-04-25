@@ -84,10 +84,10 @@ export interface AITelemetry {
 }
 
 /** Callback for pushing audio back to the relay's /audio-in path */
-export type AudioPushFn = (sessionId: string, pcm: Uint8Array) => void;
+export type AudioPushFn = (sessionId: string, pcm: Uint8Array, preferGlasses: boolean) => void;
 
 /** Callback for pushing guidance text to the publisher for client-side TTS */
-export type GuidanceTextPushFn = (sessionId: string, text: string) => void;
+export type GuidanceTextPushFn = (sessionId: string, text: string, preferGlasses: boolean) => void;
 
 /** Callback for recording bbox annotations to session JSONL */
 export type BboxAnnotationFn = (sessionId: string, annotation: import("./session-recorder.js").BboxAnnotation) => void;
@@ -591,7 +591,8 @@ export class GuidanceOrchestrator {
 
     // Push audio to relay's audio-in path (which fans out to publisher + viewers)
     if (this.audioPushFn && pcm.length > 0 && state.output.speaker) {
-      this.audioPushFn(sessionId, pcm);
+      const preferGlasses = state.output.speakerTarget === "glasses";
+      this.audioPushFn(sessionId, pcm, preferGlasses);
     }
 
     this.broadcastTelemetry(sessionId);
@@ -632,7 +633,8 @@ export class GuidanceOrchestrator {
       // Push guidance text to publisher for client-side TTS
       const state = this.aiState.get(sessionId)?.get(appId);
       if (this.guidanceTextPushFn && content && state?.output.speaker) {
-        this.guidanceTextPushFn(sessionId, content);
+        const preferGlasses = state.output.speakerTarget === "glasses";
+        this.guidanceTextPushFn(sessionId, content, preferGlasses);
       }
 
       const t = this.getOrCreateTelemetry(sessionId);

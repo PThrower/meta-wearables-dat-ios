@@ -91,6 +91,38 @@ export class AppRegistry {
   }
 }
 
+/** Walk edges from a processor to find reachable sink types (BFS through transforms/triggers) */
+function resolveProcessorSinkTarget(
+  processorId: string,
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+): "phone" | "glasses" {
+  const visited = new Set<string>();
+  const queue = [processorId];
+  visited.add(processorId);
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    for (const edge of edges) {
+      if (edge.sourceNodeId !== currentId) continue;
+      if (visited.has(edge.targetNodeId)) continue;
+      visited.add(edge.targetNodeId);
+
+      const targetNode = nodes.find(n => n.id === edge.targetNodeId);
+      if (!targetNode) continue;
+      const resolvedType = resolveNodeType(targetNode.type);
+      const targetDef = NODE_DEF_MAP.get(resolvedType);
+
+      if (resolvedType === "glasses-speaker") return "glasses";
+      if (targetDef?.role === "transform" || targetDef?.role === "trigger") {
+        queue.push(edge.targetNodeId);
+      }
+      // Don't walk into other processors — they're a different thread
+    }
+  }
+  return "phone";
+}
+
 /** Resolve output config from all sink nodes using OR-merge semantics */
 function resolveSinkOutput(nodes: WorkflowNodeDef[]): OutputConfig {
   const sinkNodes = nodes.filter(n => isSinkType(resolveNodeType(n.type)));
@@ -304,10 +336,12 @@ export function resolveWorkflowToPipeline(
 
     // Per-node output config
     const isPrimary = idx === 0 && !isJepa;
+    const speakerTarget = resolveProcessorSinkTarget(node.id, nodes, edges);
     const output: OutputConfig = {
       viewers: node.config.viewers !== undefined ? node.config.viewers as boolean : baseOutput.viewers,
       overlays: node.config.overlays !== undefined ? node.config.overlays as boolean : baseOutput.overlays,
       speaker: isJepa ? false : (node.config.speaker !== undefined ? node.config.speaker as boolean : (isPrimary && baseOutput.speaker)),
+      speakerTarget,
       recording: node.config.recording !== undefined ? node.config.recording as boolean : baseOutput.recording,
     };
 

@@ -107,6 +107,7 @@ export interface OutputConfig {
   viewers: boolean;   // Fan out guidance events to viewer WebSockets
   overlays: boolean;  // Render bbox annotations on viewer video canvas
   speaker: boolean;   // Push AI audio to publisher (glasses/phone speakers)
+  speakerTarget?: "phone" | "glasses";  // Which speaker to route to (resolved from downstream sink nodes)
   recording: boolean; // Persist guidance events + annotations to R2/S3
 }
 
