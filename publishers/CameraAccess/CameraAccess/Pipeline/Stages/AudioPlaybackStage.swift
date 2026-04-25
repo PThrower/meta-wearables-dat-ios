@@ -64,6 +64,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         queue.removeAll()
         await Task { @MainActor [weak self] in
             self?.synth?.stopSpeaking(at: .immediate)
+            self?.synth = nil
         }.value
         NSLog("[AudioPlayback] Stopped")
     }
@@ -107,7 +108,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
             if self.synth == nil {
                 self.synth = AVSpeechSynthesizer()
             }
-            guard let synth = self.synth else { return nil }
+            let synth = self.synth!
 
             // Stop anything currently playing before starting new
             if synth.isSpeaking {

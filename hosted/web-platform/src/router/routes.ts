@@ -40,7 +40,7 @@ export const routes: RouteConfig[] = [
     path: "/workflows",
     title: "Workflows",
     icon: "workflow",
-    load: () => import("../pages/workflow-editor.js").then(m => m.page),
+    load: () => import("../pages/workflow/index.js").then(m => m.page),
   },
 ];
 
