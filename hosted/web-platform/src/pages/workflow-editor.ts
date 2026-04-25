@@ -10,7 +10,7 @@
 import type { PageModule } from "../router/router.js";
 import {
   fetchWorkflows, fetchWorkflow, createWorkflow, updateWorkflow, deleteWorkflow,
-  activateWorkflow, fetchSessions, fetchNodeDefinitions, fetchWorkflowTemplates, instantiateWorkflowTemplate, esc, formatDateTime,
+  activateWorkflow, fetchSessions, fetchNodeDefinitions, esc, formatDateTime,
 } from "../core/api-client.js";
 import type { WorkflowSummary, WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef, SessionInfo, NodeDefinition, ConfigFieldSchema } from "../core/api-client.js";
 
@@ -224,78 +224,8 @@ async function renderList(): Promise<void> {
     </div>
   `;
 
-  _container.querySelector("#wf-new-btn")?.addEventListener("click", async () => {
-    // Remove existing dropdown if open
-    const existing = _container?.querySelector(".wf-template-dropdown");
-    if (existing) { existing.remove(); return; }
-
-    // Fetch from server, fallback to built-in templates
-    let templates = await fetchWorkflowTemplates();
-    if (templates.length === 0) {
-      templates = [
-        { id: "streaming-ai", name: "Streaming AI Assistant", description: "Live camera stream with speech-to-speech AI processing and overlay annotations.", nodeCount: 4 },
-        { id: "tts-announcement", name: "TTS Announcement", description: "Speak a text announcement through phone and glasses speakers. Ready for triggers.", nodeCount: 4 },
-      ];
-    }
-
-    const dd = document.createElement("div");
-    dd.className = "wf-template-dropdown";
-    dd.innerHTML = `
-      ${templates.map(t => `
-        <button class="wf-template-item" data-id="${esc(t.id)}">
-          <span class="wf-template-name">${esc(t.name)}</span>
-          <span class="wf-template-meta">${t.nodeCount} nodes</span>
-          <p class="wf-template-desc">${esc(t.description)}</p>
-        </button>
-      `).join("")}
-    `;
-    (_container?.querySelector("#wf-new-btn") as HTMLElement)?.after(dd);
-
-    dd.querySelectorAll(".wf-template-item").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const tplId = (btn as HTMLElement).dataset.id!;
-        dd.remove();
-
-        // Try server-side instantiation first, fallback to client-side
-        const wf = await instantiateWorkflowTemplate(tplId);
-        if (wf) {
-          history.replaceState(null, "", `#/workflows/${wf.id}`);
-          renderEditor(false);
-          return;
-        }
-
-        // Client-side fallback: build from built-in templates
-        const now = Date.now();
-        if (tplId === "tts-announcement") {
-          _workflow = {
-            id: "", name: "TTS Announcement", description: "Speak a text announcement through phone and glasses speakers.",
-            status: "draft", ownerId: null,
-            nodes: [
-              { id: `n_txt_${now}`, type: "text", label: "Announcement", config: { text: "Hello! I'm your smart glasses assistant. I'm here to help." }, positionX: 80, positionY: 200 },
-              { id: `n_tts_${now}`, type: "local-tts", label: "Speak", config: {}, positionX: 380, positionY: 200 },
-              { id: `n_psp_${now}`, type: "phone-speaker", label: "Phone Speaker", config: {}, positionX: 650, positionY: 140 },
-              { id: `n_gsp_${now}`, type: "glasses-speaker", label: "Glasses Speaker", config: { profile: "hfp" }, positionX: 650, positionY: 260 },
-            ],
-            edges: [
-              { id: `e_1_${now}`, sourceNodeId: `n_txt_${now}`, targetNodeId: `n_tts_${now}` },
-              { id: `e_2_${now}`, sourceNodeId: `n_tts_${now}`, targetNodeId: `n_psp_${now}` },
-              { id: `e_3_${now}`, sourceNodeId: `n_tts_${now}`, targetNodeId: `n_gsp_${now}` },
-            ],
-            canvasViewport: { x: 0, y: 0, zoom: 1 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-          };
-          location.hash = "/workflows/new";
-          renderEditor(true);
-        } else {
-          location.hash = "/workflows/new";
-        }
-      });
-    });
-
-    // Dismiss on click outside
-    const dismiss = (ev: MouseEvent) => {
-      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
-    };
-    setTimeout(() => document.addEventListener("click", dismiss), 0);
+  _container.querySelector("#wf-new-btn")?.addEventListener("click", () => {
+    location.hash = "/workflows/new";
   });
 
   await loadList();

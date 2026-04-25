@@ -54,7 +54,6 @@ import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
-import { WORKFLOW_TEMPLATES, instantiateTemplate } from "./workflow-templates.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -835,57 +834,6 @@ const server = Bun.serve<WsData>({
     // Node definitions (single source of truth for frontend)
     if (url.pathname === "/api/node-definitions" && req.method === "GET") {
       return Response.json(NODE_DEFINITIONS);
-    }
-
-    // --- Workflow Templates ---
-
-    if (url.pathname === "/workflow-templates" && req.method === "GET") {
-      return Response.json(WORKFLOW_TEMPLATES.map(t => ({
-        id: t.id,
-        name: t.name,
-        description: t.description,
-        nodeCount: t.nodes.length,
-      })));
-    }
-
-    const tplMatch = url.pathname.match(/^\/workflow-templates\/([^/]+)$/);
-    if (tplMatch && req.method === "POST") {
-      const tplId = tplMatch[1];
-      try {
-        const body = await req.json() as { name?: string; description?: string } | null;
-        const result = instantiateTemplate(tplId, body?.name);
-        if (!result) return Response.json({ error: "Template not found" }, { status: 404 });
-
-        const id = `wf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        dbWriter.enqueue(q.insertWorkflow({
-          id,
-          name: body?.name ?? result.template.name,
-          description: body?.description ?? result.template.description,
-          nodes: result.nodes,
-          edges: result.edges,
-        }));
-        dbWriter.flushNow();
-
-        const wf = q.getWorkflow(id);
-        return Response.json({
-          id: wf!.id,
-          name: wf!.name,
-          description: wf!.description,
-          status: wf!.status,
-          nodes: q.getWorkflowNodes(id).map(n => ({
-            id: n.id, type: n.type, label: n.label,
-            config: JSON.parse(n.config), positionX: n.positionX, positionY: n.positionY,
-          })),
-          edges: q.getWorkflowEdges(id).map(e => ({
-            id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
-          })),
-          canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
-          createdAt: wf!.createdAt,
-          updatedAt: wf!.updatedAt,
-        }, { status: 201 });
-      } catch {
-        return Response.json({ error: "Invalid JSON" }, { status: 400 });
-      }
     }
 
     // List workflows
