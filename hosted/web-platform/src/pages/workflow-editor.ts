@@ -21,9 +21,11 @@ export const page: PageModule = {
   },
   destroy() {
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
     document.removeEventListener("keydown", onKeyDown);
     _container = null;
     _dirty = false;
+    _saving = false;
     _workflow = null;
     _selectedNodeId = null;
     _viewX = 0;
@@ -39,7 +41,62 @@ let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
 let _workflow: WorkflowDetail | null = null;
 let _dirty = false;
+let _saving = false;
+let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let _selectedNodeId: string | null = null;
+
+/** Debounced auto-save: persists workflow 2s after last change */
+function autoSave(): void {
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(() => doSave(), 2000);
+}
+
+/** Save workflow to server (create or update) */
+async function doSave(): Promise<void> {
+  if (!_workflow || _saving) return;
+  _saving = true;
+  try {
+    _workflow.name = (_container?.querySelector("#wf-name") as HTMLInputElement)?.value ?? _workflow.name;
+    _workflow.description = (_container?.querySelector("#wf-desc") as HTMLInputElement)?.value ?? _workflow.description;
+    const nodesPayload = _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) }));
+
+    if (_workflow.id) {
+      const result = await updateWorkflow(_workflow.id, {
+        name: _workflow.name,
+        description: _workflow.description,
+        nodes: nodesPayload,
+        edges: _workflow.edges,
+        canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
+      });
+      if (result) _workflow = result;
+    } else {
+      const result = await createWorkflow({
+        name: _workflow.name,
+        description: _workflow.description,
+        nodes: nodesPayload,
+        edges: _workflow.edges,
+      });
+      if (result) {
+        const published = await updateWorkflow(result.id, { status: "published" });
+        _workflow = published ?? result;
+        history.replaceState(null, "", `#/workflows/${_workflow.id}`);
+      }
+    }
+    _dirty = false;
+    updateSaveIndicator();
+  } finally {
+    _saving = false;
+  }
+}
+
+/** Show save status in toolbar */
+function updateSaveIndicator(): void {
+  const el = _container?.querySelector("#wf-save-status");
+  if (!el) return;
+  if (_saving) el.textContent = "Saving...";
+  else if (_dirty) el.textContent = "Unsaved";
+  else el.textContent = "Saved";
+}
 
 // Node definitions (fetched from server, single source of truth)
 let _nodeDefs: NodeDefinition[] = [];
@@ -382,6 +439,7 @@ async function renderEditor(isNew: boolean): Promise<void> {
         <input type="text" class="wf-toolbar-input" id="wf-name" value="${esc(_workflow.name)}" placeholder="Workflow name" />
         <input type="text" class="wf-toolbar-input wf-toolbar-desc" id="wf-desc" value="${esc(_workflow.description)}" placeholder="Description" />
         <button class="btn btn-primary" id="wf-save-btn">Save</button>
+        <span id="wf-save-status" style="font-size:11px;color:var(--text-tertiary);margin-left:4px;">Saved</span>
         <button class="btn" id="wf-publish-btn">${_workflow.status === "published" ? "Unpublish" : "Publish"}</button>
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-activate-btn">Activate</button>
@@ -470,42 +528,21 @@ function wireEditorEvents(): void {
         positionY: 150 + offset,
       });
       _dirty = true;
+      autoSave();
+      autoSave();
       refreshSVG();
     });
   });
 
-  // Toolbar: save (auto-publishes draft workflows)
+  // Toolbar: save (manual trigger, also publishes)
   _container?.querySelector("#wf-save-btn")?.addEventListener("click", async () => {
-    if (!_workflow) return;
-    _workflow.name = (_container?.querySelector("#wf-name") as HTMLInputElement)?.value ?? _workflow.name;
-    _workflow.description = (_container?.querySelector("#wf-desc") as HTMLInputElement)?.value ?? _workflow.description;
-    const nodesPayload = _workflow.nodes.map(n => ({ ...n, config: JSON.stringify(n.config) }));
-
-    if (_workflow.id) {
-      const result = await updateWorkflow(_workflow.id, {
-        name: _workflow.name,
-        description: _workflow.description,
-        nodes: nodesPayload,
-        edges: _workflow.edges,
-        canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
-        status: "published",
-      });
+    await doSave();
+    // Also publish if draft
+    if (_workflow?.id && _workflow.status !== "published") {
+      const result = await updateWorkflow(_workflow.id, { status: "published" });
       if (result) _workflow = result;
-    } else {
-      const result = await createWorkflow({
-        name: _workflow.name,
-        description: _workflow.description,
-        nodes: nodesPayload,
-        edges: _workflow.edges,
-      });
-      if (result) {
-        const published = await updateWorkflow(result.id, { status: "published" });
-        _workflow = published ?? result;
-        history.replaceState(null, "", `#/workflows/${_workflow.id}`);
-      }
     }
-    _dirty = false;
-    renderEditor(false);
+    updateSaveIndicator();
   });
 
   // Toolbar: publish
@@ -609,6 +646,7 @@ function onKeyDown(e: KeyboardEvent): void {
     _workflow.edges = _workflow.edges.filter(e => e.sourceNodeId !== id && e.targetNodeId !== id);
     _selectedNodeId = null;
     _dirty = true;
+    autoSave();
     refreshSVG();
     renderConfigPanel();
   }
@@ -649,6 +687,7 @@ function wireSVGEvents(): void {
       const id = (path as Element).getAttribute("data-id")!;
       _workflow.edges = _workflow.edges.filter(e => e.id !== id);
       _dirty = true;
+      autoSave();
       refreshSVG();
     });
   });
@@ -718,6 +757,7 @@ function startNodeDrag(me: MouseEvent, nodeId: string): void {
       node.positionX = Math.round(_dragState.nodeStartX + dx);
       node.positionY = Math.round(_dragState.nodeStartY + dy);
       _dirty = true;
+      autoSave();
       // Update node position directly in DOM instead of full rebuild
       const svgEl = _container?.querySelector("#wf-svg");
       const g = svgEl?.querySelector(`[data-id="${_dragState.nodeId}"]`);
@@ -803,6 +843,7 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
           targetNodeId: target.id,
         });
         _dirty = true;
+      autoSave();
         refreshSVG();
       }
     }
@@ -922,6 +963,7 @@ function renderConfigPanel(): void {
         (node as any)[field] = el.value;
       }
       _dirty = true;
+      autoSave();
       refreshSVG();
     });
   });
@@ -934,6 +976,7 @@ function renderConfigPanel(): void {
     _workflow.edges = _workflow.edges.filter(e => e.sourceNodeId !== id && e.targetNodeId !== id);
     _selectedNodeId = null;
     _dirty = true;
+    autoSave();
     refreshSVG();
     renderConfigPanel();
   });
