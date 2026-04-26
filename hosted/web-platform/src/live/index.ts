@@ -141,6 +141,13 @@ function _watchLiveInner(sessionId: string, shareToken?: string): boolean {
     if (msg.type === "node_states" && miniEditor) {
       miniEditor.updateNodeStates((msg as { nodes: import("../guidance.js").NodeState[] }).nodes);
     }
+    // Forward transcription/debug events to mini editor debug-sink nodes
+    if (msg.type === "guidance_event" && miniEditor) {
+      const evt = (msg as { event: { type: string; content: string; source: string } }).event;
+      if (evt && (evt.type === "guidance.transcript" || evt.type === "guidance.transcription")) {
+        miniEditor.pushDebugOutput(evt.source ?? "", evt.content ?? "");
+      }
+    }
   };
 
   // Hide page-content behind the player overlay

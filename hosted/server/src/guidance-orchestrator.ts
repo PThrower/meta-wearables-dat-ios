@@ -35,6 +35,7 @@ export type GuidanceEventType =
   | "guidance.identification"
   | "guidance.acknowledgment"
   | "guidance.transcript"
+  | "guidance.transcription"
   | "guidance.bbox"
   | "guidance.jepa.embedding"
   | "guidance.jepa.prediction"

@@ -44,6 +44,9 @@ export class MiniWorkflowEditor {
   private saving = false;
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Debug output: last text received per source appId
+  private debugOutput = new Map<string, string>();
+
   // Tab state
   private activeTab: "canvas" | "palette" | "flows" = "canvas";
 
@@ -125,6 +128,28 @@ export class MiniWorkflowEditor {
     }
   }
 
+  /** Push live text to debug-sink nodes connected downstream from the source. */
+  pushDebugOutput(sourceAppId: string, text: string): void {
+    if (!this.workflow || this.collapsed) return;
+    // Find debug-sink nodes that receive edges from the source or its processors
+    const debugNodes = this.workflow.nodes.filter(n => n.type === "debug-sink");
+    for (const dn of debugNodes) {
+      // Check if there's any path from sourceAppId to this debug node
+      // Simple approach: if the debug node has any incoming edge, update it
+      const hasIncoming = this.workflow.edges.some(e => e.targetNodeId === dn.id);
+      if (hasIncoming) {
+        this.debugOutput.set(dn.id, text);
+        // Update the SVG text element directly — no full re-render
+        const svg = this.canvas.querySelector("#mini-wf-svg");
+        if (!svg) return;
+        const g = svg.querySelector(`g[data-id="${dn.id}"]`);
+        if (!g) return;
+        const txt = g.querySelector(".wf-debug-text");
+        if (txt) txt.textContent = text.slice(0, 30);
+      }
+    }
+  }
+
   /** Compute auto-fit viewBox from node bounding box. Returns actual viewBox dimensions. */
   private computeAutoFit(): { vbX: number; vbY: number; vbW: number; vbH: number } {
     if (!this.workflow || this.workflow.nodes.length === 0) {
@@ -183,6 +208,12 @@ export class MiniWorkflowEditor {
       const flowDot = multiFlow && nodeFlowColor.has(n.id)
         ? `<circle cx="22" cy="8" r="4" fill="${nodeFlowColor.get(n.id)}" stroke="#0a0a0a" stroke-width="1" />`
         : "";
+      // Debug output text for debug-sink nodes
+      const isDebug = n.type === "debug-sink";
+      const debugText = isDebug ? (this.debugOutput.get(n.id) ?? "waiting...") : "";
+      const debugLine = isDebug
+        ? `<text class="wf-debug-text" x="12" y="60" fill="#4ade80" font-size="8" font-family="monospace">${esc(debugText.slice(0, 30))}</text>`
+        : (configSummary ? `<text x="12" y="60" fill="#888" font-size="9">${esc(configSummary)}</text>` : "");
       return `<g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX}, ${n.positionY})">
         ${statusDot}
         ${flowDot}
@@ -191,7 +222,7 @@ export class MiniWorkflowEditor {
         <rect x="0" y="${NODE_R}" width="${NODE_W}" height="${24 - NODE_R}" fill="${c.header}" />
         <text x="${NODE_W / 2}" y="16" text-anchor="middle" fill="#fff" font-size="10" font-weight="600">${esc(n.type.replace(/-/g, " "))}</text>
         <text x="12" y="44" fill="#ccc" font-size="11">${esc(n.label || n.type)}</text>
-        ${configSummary ? `<text x="12" y="60" fill="#888" font-size="9">${esc(configSummary)}</text>` : ""}
+        ${debugLine}
         <circle class="wf-port wf-port-in" cx="0" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
         <circle class="wf-port wf-port-out" cx="${NODE_W}" cy="${NODE_H / 2}" r="6" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
       </g>`;

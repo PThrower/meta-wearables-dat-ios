@@ -15,6 +15,7 @@ export interface GuidanceEvent {
     | "guidance.identification"
     | "guidance.acknowledgment"
     | "guidance.transcript"
+    | "guidance.transcription"
     | "guidance.bbox";
   content: string;
   confidence: number;
@@ -180,6 +181,7 @@ export const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.identification": "#4ade80",
   "guidance.acknowledgment": "rgba(255,255,255,0.45)",
   "guidance.transcript": "rgba(255,255,255,0.15)",
+  "guidance.transcription": "#4ade80",
   "guidance.bbox": "#a78bfa",
 };
 
@@ -190,6 +192,7 @@ export const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
   "guidance.identification": "ID",
   "guidance.acknowledgment": "ACK",
   "guidance.transcript": "",
+  "guidance.transcription": "STT",
   "guidance.bbox": "BBOX",
 };
 
