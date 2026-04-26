@@ -1370,6 +1370,9 @@ header {
   color: var(--text-primary);
   border-bottom-color: var(--accent);
 }
+.mini-editor-tab.hidden {
+  display: none;
+}
 
 /* SVG canvas */
 .mini-editor-canvas {

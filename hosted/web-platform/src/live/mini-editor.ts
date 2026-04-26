@@ -11,7 +11,8 @@ import type { WorkflowDetail, WorkflowNodeDef } from "../core/api-client.js";
 import { NODE_STATUS_DOT_COLORS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
-import { detectFlows, DEFAULT_EDGE_COLOR } from "../pages/workflow/flow-detection.js";
+import { detectFlows, DEFAULT_EDGE_COLOR, buildDefaultFlowConfig } from "../pages/workflow/flow-detection.js";
+import type { FlowExecutionConfig, FlowExecutionMode, DetectedFlow } from "../core/api-client.js";
 import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.js";
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";
@@ -44,7 +45,7 @@ export class MiniWorkflowEditor {
   private autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Tab state
-  private activeTab: "canvas" | "palette" = "canvas";
+  private activeTab: "canvas" | "palette" | "flows" = "canvas";
 
   // Interaction cleanup
   private cleanupInteractions: (() => void) | null = null;
@@ -94,6 +95,7 @@ export class MiniWorkflowEditor {
         this.syncNodeStates();
         this.computeAutoFit();
         this.renderPalette();
+        this.updateFlowTabVisibility();
         this.render();
       } else {
         this.header.innerHTML = '<span class="mini-editor-title">Workflow not found</span>';
@@ -258,6 +260,11 @@ export class MiniWorkflowEditor {
   }
 
   private renderConfigPanel(): void {
+    // Flows tab: render flow config into config panel area
+    if (this.activeTab === "flows") {
+      this.renderFlowConfig();
+      return;
+    }
     if (!this.workflow || !this.selectedNodeId) {
       this.configPanel.innerHTML = '<span class="mini-editor-hint">Select a node to edit</span>';
       return;
@@ -280,6 +287,121 @@ export class MiniWorkflowEditor {
       this.workflow.nodes,
       this.workflow.edges,
     );
+  }
+
+  /** Render flow config panel in the mini-editor config area. */
+  private renderFlowConfig(): void {
+    if (!this.workflow) {
+      this.configPanel.innerHTML = '<span class="mini-editor-hint">No workflow loaded</span>';
+      return;
+    }
+    const flows = detectFlows(this.workflow.nodes, this.workflow.edges);
+    if (flows.length <= 1) {
+      this.configPanel.innerHTML = '<span class="mini-editor-hint">Only one flow — nothing to configure</span>';
+      return;
+    }
+    const config = this.workflow.flowConfig ?? buildDefaultFlowConfig(flows);
+    const mode: FlowExecutionMode = config?.mode ?? "parallel";
+    const flowOrder: string[] = config?.flowOrder ?? flows.map(f => f.flowId);
+
+    const flowList = flowOrder.map(fid => {
+      const f = flows.find(fl => fl.flowId === fid);
+      if (!f) return "";
+      return `<div class="wf-flow-order-item" data-flow-id="${f.flowId}" draggable="${mode === "sequential"}">
+        <span class="wf-flow-drag-handle">${mode === "sequential" ? "⋮⋮" : "●"}</span>
+        <span class="wf-flow-color-dot" style="background:${f.color}"></span>
+        <span class="wf-flow-label">${esc(f.label)}</span>
+      </div>`;
+    }).join("");
+
+    this.configPanel.innerHTML = `
+      <div class="wf-flow-config">
+        <div class="wf-flow-config-header">
+          <span class="wf-flow-config-title">Flows</span>
+          <span class="wf-flow-config-count">${flows.length} found</span>
+        </div>
+        <div class="wf-flow-mode-selector">
+          <button class="wf-flow-mode-btn ${mode === "parallel" ? "active" : ""}" data-mode="parallel">Parallel</button>
+          <button class="wf-flow-mode-btn ${mode === "sequential" ? "active" : ""}" data-mode="sequential">Sequential</button>
+        </div>
+        <div class="wf-flow-order ${mode === "parallel" ? "disabled" : ""}" id="mini-wf-flow-order">
+          ${flowList}
+        </div>
+      </div>
+    `;
+
+    this.wireFlowConfigEvents(flows);
+  }
+
+  /** Wire flow config events for the mini-editor. */
+  private wireFlowConfigEvents(flows: DetectedFlow[]): void {
+    const panel = this.configPanel;
+
+    // Mode toggle
+    panel.querySelectorAll(".wf-flow-mode-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const mode = (btn as HTMLElement).dataset.mode as FlowExecutionMode;
+        if (!this.workflow) return;
+        const currentConfig = this.workflow.flowConfig ?? buildDefaultFlowConfig(flows);
+        this.workflow.flowConfig = { mode, flowOrder: currentConfig?.flowOrder ?? flows.map(f => f.flowId) };
+        this.dirty = true;
+        this.autoSave();
+        this.renderFlowConfig();
+      });
+    });
+
+    // Drag-and-drop reorder
+    const orderEl = panel.querySelector("#mini-wf-flow-order");
+    if (orderEl) {
+      let draggedId: string | null = null;
+
+      orderEl.querySelectorAll(".wf-flow-order-item").forEach(item => {
+        item.addEventListener("dragstart", (e) => {
+          draggedId = (item as HTMLElement).dataset.flowId ?? null;
+          item.classList.add("dragging");
+          (e as DragEvent).dataTransfer!.effectAllowed = "move";
+        });
+
+        item.addEventListener("dragend", () => {
+          item.classList.remove("dragging");
+          draggedId = null;
+        });
+
+        item.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          (e as DragEvent).dataTransfer!.dropEffect = "move";
+        });
+
+        item.addEventListener("drop", (e) => {
+          e.preventDefault();
+          const targetId = (item as HTMLElement).dataset.flowId;
+          if (!draggedId || !targetId || draggedId === targetId) return;
+          if (!this.workflow?.flowConfig) return;
+          const order = [...this.workflow.flowConfig.flowOrder];
+          const fromIdx = order.indexOf(draggedId);
+          const toIdx = order.indexOf(targetId);
+          if (fromIdx < 0 || toIdx < 0) return;
+          order.splice(fromIdx, 1);
+          order.splice(toIdx, 0, draggedId);
+          this.workflow.flowConfig = { ...this.workflow.flowConfig, flowOrder: order };
+          this.dirty = true;
+          this.autoSave();
+          this.renderFlowConfig();
+        });
+      });
+    }
+  }
+
+  /** Show or hide the flows tab based on flow count. */
+  private updateFlowTabVisibility(): void {
+    const flowsTab = this.tabBar.querySelector('[data-tab="flows"]');
+    if (!flowsTab) return;
+    if (!this.workflow) {
+      flowsTab.classList.add("hidden");
+      return;
+    }
+    const flows = detectFlows(this.workflow.nodes, this.workflow.edges);
+    flowsTab.classList.toggle("hidden", flows.length <= 1);
   }
 
   private onConfigChange(field: string, value: unknown): void {
@@ -344,13 +466,19 @@ export class MiniWorkflowEditor {
     this.renderConfigPanel();
   }
 
-  private switchTab(tab: "canvas" | "palette"): void {
+  private switchTab(tab: "canvas" | "palette" | "flows"): void {
     this.activeTab = tab;
     this.canvas.classList.toggle("hidden", tab !== "canvas");
     this.palette.classList.toggle("hidden", tab !== "palette");
     this.tabBar.querySelectorAll(".mini-editor-tab").forEach(btn => {
       btn.classList.toggle("active", (btn as HTMLElement).dataset.tab === tab);
     });
+    if (tab === "flows") {
+      this.selectedNodeId = null;
+      this.renderConfigPanel();
+    } else if (tab === "canvas") {
+      this.configPanel.innerHTML = '<span class="mini-editor-hint">Select a node to edit</span>';
+    }
   }
 
   private autoSave(): void {
@@ -401,7 +529,7 @@ export class MiniWorkflowEditor {
     this.tabBar.addEventListener("click", (e) => {
       const target = (e.target as HTMLElement).closest(".mini-editor-tab") as HTMLElement | null;
       if (!target) return;
-      const tab = target.dataset.tab as "canvas" | "palette";
+      const tab = target.dataset.tab as "canvas" | "palette" | "flows";
       this.switchTab(tab);
     });
 
