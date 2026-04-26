@@ -99,6 +99,7 @@ export async function doSave(): Promise<void> {
         nodes: nodesPayload,
         edges: _workflow.edges,
         canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
+        flowConfig: _workflow.flowConfig ?? undefined,
       });
       if (result) {
         _workflow = result;

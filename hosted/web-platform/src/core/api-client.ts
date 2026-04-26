@@ -323,6 +323,26 @@ export interface WorkflowEdgeDef {
   targetNodeId: string;
 }
 
+/** Execution mode for multi-flow workflows */
+export type FlowExecutionMode = "parallel" | "sequential";
+
+/** Persisted per-workflow config for flow execution */
+export interface FlowExecutionConfig {
+  mode: FlowExecutionMode;
+  /** Ordered flow IDs — only meaningful when mode is "sequential" */
+  flowOrder: string[];
+}
+
+/** A detected flow = weakly connected component of the DAG */
+export interface DetectedFlow {
+  flowId: string;
+  nodeIds: string[];
+  edgeIds: string[];
+  color: string;
+  /** Human-readable label: first node type → last node type */
+  label: string;
+}
+
 export interface WorkflowDetail {
   id: string;
   name: string;
@@ -332,6 +352,7 @@ export interface WorkflowDetail {
   nodes: WorkflowNodeDef[];
   edges: WorkflowEdgeDef[];
   canvasViewport: { x: number; y: number; zoom: number };
+  flowConfig: FlowExecutionConfig | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -364,6 +385,7 @@ export function updateWorkflow(id: string, data: {
   description?: string;
   status?: string;
   canvasViewport?: string;
+  flowConfig?: FlowExecutionConfig | null;
   nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
   edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
 }): Promise<WorkflowDetail | null> {

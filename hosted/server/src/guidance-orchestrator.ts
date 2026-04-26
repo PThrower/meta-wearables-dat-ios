@@ -14,7 +14,7 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig, NodeExecutionState, NodeExecutionInfo, WorkflowInstanceState, WorkflowControlAction, WorkflowNodeType, NodeStatesMessage } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig, NodeExecutionState, NodeExecutionInfo, WorkflowInstanceState, WorkflowControlAction, WorkflowNodeType, NodeStatesMessage, FlowExecutionConfig } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
@@ -145,6 +145,15 @@ export class GuidanceOrchestrator {
   /** Pending activations waiting for upstream processor to produce first output */
   private pendingActivations = new Map<string, Map<string, AppDefinition>>(); // sessionId -> upstreamAppId -> deferred app
   private workflowInstances = new Map<string, WorkflowInstanceState>(); // "sessionId:workflowId" -> state
+
+  /** Pending flows for sequential execution: sessionId -> flow schedule */
+  private pendingFlows = new Map<string, {
+    flows: Array<{ flowId: string; apps: AppDefinition[] }>;
+    config: FlowExecutionConfig;
+    currentFlowIndex: number;
+    sessionId: string;
+    workflowId: string;
+  }>();
 
   /** Callback to push AI audio response to relay's audio-in path */
   private audioPushFn: AudioPushFn | null = null;
@@ -494,6 +503,73 @@ export class GuidanceOrchestrator {
     console.log(`[orchestrator] Workflow instance created: ${key} (${nodes.size} nodes)`);
   }
 
+  /**
+   * Register pending flows for sequential execution.
+   * Called from server.ts after resolveWorkflowToPipeline when mode is "sequential".
+   * The first flow is already activated; remaining flows are queued here.
+   */
+  registerPendingFlows(
+    sessionId: string,
+    workflowId: string,
+    flows: Array<{ flowId: string; apps: AppDefinition[] }>,
+    config: FlowExecutionConfig,
+  ): void {
+    if (flows.length <= 1) return;
+    this.pendingFlows.set(sessionId, {
+      flows,
+      config,
+      currentFlowIndex: 0,
+      sessionId,
+      workflowId,
+    });
+    console.log(`[orchestrator] Sequential flows registered: session=${sessionId} flows=${flows.length} order=${config.flowOrder.join(",")}`);
+  }
+
+  /**
+   * Activate the next pending flow when sequential mode is active.
+   * Called from updateNodeState when all apps in the current flow reach terminal state.
+   * Returns true if a new flow was activated, false if no more flows.
+   */
+  async activateNextFlow(sessionId: string): Promise<boolean> {
+    const pending = this.pendingFlows.get(sessionId);
+    if (!pending) return false;
+
+    const nextIndex = pending.currentFlowIndex + 1;
+    if (nextIndex >= pending.flows.length) {
+      this.pendingFlows.delete(sessionId);
+      console.log(`[orchestrator] All sequential flows completed: session=${sessionId}`);
+      return false;
+    }
+
+    const nextFlow = pending.flows[nextIndex];
+    pending.currentFlowIndex = nextIndex;
+
+    console.log(`[orchestrator] Activating next sequential flow: session=${sessionId} flowId=${nextFlow.flowId} index=${nextIndex}`);
+
+    for (const app of nextFlow.apps) {
+      this.appRegistry.registerTransientApp(app);
+      const pDef = (app.config as any);
+      if (pDef?.jepa) {
+        // JEPA apps handled by JEPAOrchestrator externally — skip here
+      } else {
+        await this.activateWithConfig(sessionId, app);
+      }
+    }
+
+    this.broadcastNodeStates(sessionId, pending.workflowId);
+    return true;
+  }
+
+  /** Check if a session has pending sequential flows */
+  hasPendingFlows(sessionId: string): boolean {
+    return this.pendingFlows.has(sessionId);
+  }
+
+  /** Clean up pending flows for a session */
+  clearPendingFlows(sessionId: string): void {
+    this.pendingFlows.delete(sessionId);
+  }
+
   /** Update a node's execution state. Called from activateWithConfig on success/error. */
   updateNodeState(sessionId: string, appId: string, state: NodeExecutionState, error?: string): void {
     for (const [, instance] of this.workflowInstances) {
@@ -509,8 +585,40 @@ export class GuidanceOrchestrator {
           this.logNodeExecution(sessionId, instance.workflowId, node, state, error);
           this.broadcastNodeStates(sessionId, instance.workflowId);
         }
+
+        // Check if sequential flow should advance after a terminal state
+        if ((state === "completed" || state === "skipped" || state === "errored") && this.hasPendingFlows(sessionId)) {
+          this.checkSequentialFlowCompletion(sessionId, instance);
+        }
+
         return;
       }
+    }
+  }
+
+  /** Check if all apps in the current sequential flow have reached terminal state */
+  private async checkSequentialFlowCompletion(sessionId: string, instance: WorkflowInstanceState): Promise<void> {
+    const pending = this.pendingFlows.get(sessionId);
+    if (!pending) return;
+
+    const currentFlow = pending.flows[pending.currentFlowIndex];
+    if (!currentFlow) return;
+
+    // Check if all apps in the current flow are terminal
+    const flowAppIds = new Set(currentFlow.apps.map(a => a.id));
+    const terminalStates: NodeExecutionState[] = ["completed", "skipped", "errored"];
+
+    let allTerminal = true;
+    for (const [nodeId, node] of instance.nodes) {
+      if (flowAppIds.has(node.appId) && !terminalStates.includes(node.state)) {
+        allTerminal = false;
+        break;
+      }
+    }
+
+    if (allTerminal) {
+      console.log(`[orchestrator] Flow ${currentFlow.flowId} completed (all terminal), activating next flow`);
+      await this.activateNextFlow(sessionId);
     }
   }
 

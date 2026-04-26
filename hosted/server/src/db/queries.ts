@@ -379,6 +379,7 @@ export function updateWorkflow(id: string, params: {
   description?: string;
   status?: string;
   canvasViewport?: string;
+  flowConfig?: string;
   nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
   edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
 }) {
@@ -392,9 +393,10 @@ export function updateWorkflow(id: string, params: {
           description = COALESCE(?, description),
           status = COALESCE(?, status),
           canvas_viewport = COALESCE(?, canvas_viewport),
+          flow_config = COALESCE(?, flow_config),
           updated_at = ?
         WHERE id = ?
-      `).run(params.name ?? null, params.description ?? null, params.status ?? null, params.canvasViewport ?? null, ts, id);
+      `).run(params.name ?? null, params.description ?? null, params.status ?? null, params.canvasViewport ?? null, params.flowConfig ?? null, ts, id);
 
       if (params.nodes) {
         db.prepare("DELETE FROM workflow_nodes WHERE workflow_id = ?").run(id);
@@ -429,12 +431,13 @@ export function deleteWorkflow(id: string) {
 /** Get a single workflow by ID */
 export function getWorkflow(id: string): {
   id: string; name: string; description: string; ownerId: string | null;
-  status: string; canvasViewport: string; createdAt: string; updatedAt: string;
+  status: string; canvasViewport: string; flowConfig: string | null; createdAt: string; updatedAt: string;
 } | null {
   const db = getDbRaw();
   return db.prepare(`
     SELECT id, name, description, owner_id as ownerId, status,
-      canvas_viewport as canvasViewport, created_at as createdAt, updated_at as updatedAt
+      canvas_viewport as canvasViewport, flow_config as flowConfig,
+      created_at as createdAt, updated_at as updatedAt
     FROM workflows WHERE id = ?
   `).get(id) as any ?? null;
 }

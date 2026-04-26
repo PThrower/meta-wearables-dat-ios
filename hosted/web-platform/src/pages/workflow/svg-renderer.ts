@@ -1,14 +1,15 @@
 /**
  * SVG DAG rendering — build, refresh, runtime badges, subtitle resolution,
- * incremental edge updates.
+ * incremental edge updates, flow-colored edges.
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, WorkflowEdgeDef } from "../../core/api-client.js";
+import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/api-client.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { wireSVGEvents } from "./interactions.js";
+import { detectFlows, DEFAULT_EDGE_COLOR } from "./flow-detection.js";
 
 /** Render runtime badge SVG for a node definition. */
 export function runtimeBadgeSVG(def: { runtime?: string[] | null } | undefined): string {
@@ -110,6 +111,7 @@ export function buildSVGFromData(
   nodeStates?: Map<string, string>,
   scale = 1,
   svgId = "wf-svg",
+  flows?: DetectedFlow[],
 ): string {
   const nodes = workflow.nodes;
   const edges = workflow.edges;
@@ -118,6 +120,26 @@ export function buildSVGFromData(
   const h = NODE_H * scale;
   const r = NODE_R * scale;
   const gridId = svgId + "-grid";
+
+  // Auto-detect flows if not provided
+  const detectedFlows = flows ?? detectFlows(nodes, edges);
+  const multiFlow = detectedFlows.length > 1;
+
+  // Build lookup: nodeId -> flow color
+  const nodeFlowColor = new Map<string, string>();
+  if (multiFlow) {
+    for (const f of detectedFlows) {
+      for (const nid of f.nodeIds) nodeFlowColor.set(nid, f.color);
+    }
+  }
+
+  // Build lookup: edgeId -> flow color
+  const edgeFlowColor = new Map<string, string>();
+  if (multiFlow) {
+    for (const f of detectedFlows) {
+      for (const eid of f.edgeIds) edgeFlowColor.set(eid, f.color);
+    }
+  }
 
   // Compute topological depth (execution timeline) for all nodes
   const depths = computeDepth(nodes, edges);
@@ -131,9 +153,14 @@ export function buildSVGFromData(
     const statusDot = stateColor
       ? `<circle cx="${r}" cy="${r}" r="${5 * scale}" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
       : "";
+    // Flow indicator badge (small colored dot in top-left, only when multi-flow)
+    const flowDot = multiFlow && nodeFlowColor.has(n.id)
+      ? `<circle cx="${8 * scale}" cy="${8 * scale}" r="${4 * scale}" fill="${nodeFlowColor.get(n.id)}" stroke="#0a0a0a" stroke-width="1" />`
+      : "";
     return `
       <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
         ${statusDot}
+        ${flowDot}
         <rect class="wf-node-bg" width="${w}" height="${h}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
         <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
         <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
@@ -146,7 +173,7 @@ export function buildSVGFromData(
     `;
   }).join("");
 
-  // Edge rendering with timeline step numbers
+  // Edge rendering with flow coloring and timeline step numbers
   const edgeSVGs = edges.map(e => {
     const src = nodes.find(n => n.id === e.sourceNodeId);
     const tgt = nodes.find(n => n.id === e.targetNodeId);
@@ -158,6 +185,9 @@ export function buildSVGFromData(
     const mx = (sx + tx) / 2;
     const midY = (sy + ty) / 2;
 
+    // Edge color: flow color when multi-flow, otherwise default gray
+    const edgeColor = multiFlow ? (edgeFlowColor.get(e.id) ?? DEFAULT_EDGE_COLOR) : DEFAULT_EDGE_COLOR;
+
     // Step label from topological depth (skip depth 0 roots)
     const tgtDepth = depths.get(tgt.id);
     const stepLabel = (tgtDepth != null && tgtDepth > 0)
@@ -165,7 +195,7 @@ export function buildSVGFromData(
         `<text x="${mx}" y="${midY + 3 * scale}" text-anchor="middle" fill="#94a3b8" font-size="${7 * scale}" font-weight="600" pointer-events="none">${tgtDepth}</text>`
       : "";
 
-    return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />${stepLabel}`;
+    return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="${edgeColor}" stroke-width="2" />${stepLabel}`;
   }).join("");
 
   const grid = `

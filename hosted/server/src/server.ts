@@ -51,7 +51,8 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
-import type { WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo } from "./app-types.js";
+import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, DetectedFlow } from "./app-types.js";
+import { detectFlows } from "./flow-detection.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
@@ -1043,6 +1044,7 @@ const server = Bun.serve<WsData>({
             id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
           })),
           canvasViewport: JSON.parse(wf.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+          flowConfig: wf.flowConfig ? JSON.parse(wf.flowConfig) : null,
           createdAt: wf.createdAt, updatedAt: wf.updatedAt,
         });
       }
@@ -1052,6 +1054,7 @@ const server = Bun.serve<WsData>({
           const body = await req.json() as {
             name?: string; description?: string; status?: string;
             canvasViewport?: string;
+            flowConfig?: { mode: string; flowOrder: string[] } | null;
             nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
             edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
           };
@@ -1071,6 +1074,7 @@ const server = Bun.serve<WsData>({
             description: body.description,
             status: body.status,
             canvasViewport: body.canvasViewport,
+            flowConfig: body.flowConfig !== undefined ? JSON.stringify(body.flowConfig) : undefined,
             nodes: body.nodes?.map(n => ({ ...n, config: n.config ?? "{}" })),
             edges: body.edges,
           }));
@@ -1088,6 +1092,7 @@ const server = Bun.serve<WsData>({
               id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
             })),
             canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+            flowConfig: wf!.flowConfig ? JSON.parse(wf!.flowConfig) : null,
             createdAt: wf!.createdAt, updatedAt: wf!.updatedAt,
           });
         } catch (e) {
@@ -1147,7 +1152,7 @@ const server = Bun.serve<WsData>({
           orchestrator.forceDeactivate(body.sessionId);
         }
 
-        const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+        const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name }, wf.flowConfig ? JSON.parse(wf.flowConfig) : null);
         const primaryApp = pipelineApps[0];  // undefined for passive pipelines (no AI processor)
         for (const app of pipelineApps) {
           appRegistry.registerTransientApp(app);
@@ -1156,6 +1161,43 @@ const server = Bun.serve<WsData>({
         const session = registry.get(body.sessionId);
         if (!session) {
           return Response.json({ error: "Session not found or not active" }, { status: 404 });
+        }
+
+        // Parse flow config for sequential mode handling
+        const flowConfig: FlowExecutionConfig | null = wf.flowConfig ? JSON.parse(wf.flowConfig) : null;
+        const flows = detectFlows(nodes as any, edges as any);
+
+        // For sequential mode: only activate first flow's apps, register remaining as pending
+        let appsToActivate = pipelineApps;
+        if (flowConfig?.mode === "sequential" && flows.length > 1) {
+          const firstFlowId = flowConfig.flowOrder[0] ?? flows[0]?.flowId;
+          const firstFlow = flows.find(f => f.flowId === firstFlowId) ?? flows[0];
+          const firstFlowNodeIds = new Set(firstFlow.nodeIds);
+
+          appsToActivate = pipelineApps.filter(app => {
+            const flowId = (app.config as any).flowId as string | undefined;
+            return flowId === firstFlowId || (firstFlowNodeIds.size > 0 && !flowId);
+          });
+
+          // Build remaining flow schedule for sequential activation
+          const remainingFlows = flowConfig.flowOrder
+            .filter(fid => fid !== firstFlowId)
+            .map(fid => {
+              const flow = flows.find(f => f.flowId === fid);
+              if (!flow) return null;
+              return {
+                flowId: flow.flowId,
+                apps: pipelineApps.filter(app => (app.config as any).flowId === flow.flowId),
+              };
+            })
+            .filter((f): f is { flowId: string; apps: AppDefinition[] } => f !== null);
+
+          orchestrator.registerPendingFlows(
+            body.sessionId,
+            wfId,
+            [{ flowId: firstFlowId, apps: appsToActivate }, ...remainingFlows],
+            flowConfig,
+          );
         }
 
         // Passive pipelines (no processable nodes) — configure session but skip AI activation
@@ -1239,8 +1281,8 @@ const server = Bun.serve<WsData>({
         if ((nodes as any[]).length > 1) {
           orchestrator.activateWorkflow(body.sessionId, wfId, wf.name, nodeEntries);
         }
-        for (let i = 0; i < pipelineApps.length; i++) {
-          const app = pipelineApps[i];
+        for (let i = 0; i < appsToActivate.length; i++) {
+          const app = appsToActivate[i];
           const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
 
           if (pDef?.activationMode === "jepa" && app.config?.jepa) {

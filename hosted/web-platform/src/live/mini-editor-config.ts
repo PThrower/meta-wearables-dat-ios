@@ -4,9 +4,10 @@
  */
 
 import { esc } from "../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, NodeDefinition } from "../core/api-client.js";
+import type { WorkflowNodeDef, ConfigFieldSchema, NodeDefinition, DetectedFlow } from "../core/api-client.js";
 import { NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeExecutionState } from "../guidance.js";
+import { detectFlows } from "../pages/workflow/flow-detection.js";
 
 /** Render a single config field based on its schema kind. */
 function renderField(field: ConfigFieldSchema, node: WorkflowNodeDef): string {
@@ -60,13 +61,27 @@ export function renderMiniConfigPanel(
   onChange: (field: string, value: unknown) => void,
   onDelete: (nodeId: string) => void,
   onNodeAction: (action: string, nodeId: string) => void,
+  allNodes?: Array<{ id: string; type?: string; label?: string }>,
+  allEdges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>,
 ): void {
   const def = nodeDef;
   const color = def?.color.header ?? "#666";
   const stateColor = nodeState ? (NODE_STATE_COLORS as Record<string, string>)[nodeState] ?? "#9ca3af" : "#9ca3af";
 
+  // Flow badge for multi-flow workflows
+  let flowBadge = "";
+  if (allNodes && allEdges) {
+    const flows = detectFlows(allNodes, allEdges);
+    if (flows.length > 1) {
+      const flow = flows.find(f => f.nodeIds.includes(node.id));
+      if (flow) {
+        flowBadge = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${flow.color};margin-right:4px;vertical-align:middle;"></span>`;
+      }
+    }
+  }
+
   let html = `<div class="mini-config-header" style="border-left:3px solid ${color}">
-    <span class="mini-config-type">${esc(def?.label ?? node.type)}</span>
+    ${flowBadge}<span class="mini-config-type">${esc(def?.label ?? node.type)}</span>
     ${nodeState ? `<span class="mini-config-state" style="background:${stateColor}30;color:${stateColor}">${nodeState}</span>` : ""}
   </div>`;
 

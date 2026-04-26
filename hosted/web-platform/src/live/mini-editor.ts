@@ -11,6 +11,7 @@ import type { WorkflowDetail, WorkflowNodeDef } from "../core/api-client.js";
 import { NODE_STATUS_DOT_COLORS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
+import { detectFlows, DEFAULT_EDGE_COLOR } from "../pages/workflow/flow-detection.js";
 import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.js";
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";
@@ -155,6 +156,18 @@ export class MiniWorkflowEditor {
     const nodes = this.workflow.nodes;
     const edges = this.workflow.edges;
 
+    // Detect flows for coloring
+    const flows = detectFlows(nodes, edges);
+    const multiFlow = flows.length > 1;
+    const nodeFlowColor = new Map<string, string>();
+    const edgeFlowColor = new Map<string, string>();
+    if (multiFlow) {
+      for (const f of flows) {
+        for (const nid of f.nodeIds) nodeFlowColor.set(nid, f.color);
+        for (const eid of f.edgeIds) edgeFlowColor.set(eid, f.color);
+      }
+    }
+
     const nodeSVGs = nodes.map(n => {
       const def = getNodeDef(n.type);
       const c = def?.color ?? FALLBACK_COLOR;
@@ -164,8 +177,13 @@ export class MiniWorkflowEditor {
       const statusDot = stateColor
         ? `<circle cx="8" cy="8" r="5" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
         : "";
+      // Flow indicator badge (small colored dot in top-left, only when multi-flow)
+      const flowDot = multiFlow && nodeFlowColor.has(n.id)
+        ? `<circle cx="22" cy="8" r="4" fill="${nodeFlowColor.get(n.id)}" stroke="#0a0a0a" stroke-width="1" />`
+        : "";
       return `<g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX}, ${n.positionY})">
         ${statusDot}
+        ${flowDot}
         <rect class="wf-node-bg" width="${NODE_W}" height="${NODE_H}" rx="${NODE_R}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
         <rect class="wf-node-header" width="${NODE_W}" height="24" rx="${NODE_R}" fill="${c.header}" />
         <rect x="0" y="${NODE_R}" width="${NODE_W}" height="${24 - NODE_R}" fill="${c.header}" />
@@ -186,7 +204,8 @@ export class MiniWorkflowEditor {
       const tx = tgt.positionX;
       const ty = tgt.positionY + NODE_H / 2;
       const mx = (sx + tx) / 2;
-      return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />`;
+      const edgeColor = multiFlow ? (edgeFlowColor.get(e.id) ?? DEFAULT_EDGE_COLOR) : DEFAULT_EDGE_COLOR;
+      return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="${edgeColor}" stroke-width="2" />`;
     }).join("");
 
     const svg = `<svg class="wf-canvas-svg" id="mini-wf-svg" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg">${edgeSVGs}${nodeSVGs}</svg>`;
@@ -215,7 +234,23 @@ export class MiniWorkflowEditor {
     if (!this.workflow) { this.execBar.innerHTML = ""; return; }
     const hasRunning = Array.from(this.nodeStates.values()).some(s => s === "running");
     const hasPaused = Array.from(this.nodeStates.values()).some(s => s === "paused");
+
+    // Detect flows for label
+    const flows = detectFlows(this.workflow.nodes, this.workflow.edges);
+    const multiFlow = flows.length > 1;
+
     let html = "";
+
+    // Show flow label when executing with multiple flows
+    if (multiFlow && this.nodeStates.size > 0) {
+      const flowConfig = this.workflow.flowConfig;
+      const mode = flowConfig?.mode ?? "parallel";
+      const currentFlowLabel = mode === "sequential" && flowConfig?.flowOrder?.[0]
+        ? (flows.find(f => f.flowId === flowConfig.flowOrder[0])?.label ?? "Flow 1")
+        : `${flows.length} flows (parallel)`;
+      html += `<span style="font-size:10px;color:var(--text-tertiary);margin-right:6px;">${esc(currentFlowLabel)}</span>`;
+    }
+
     if (hasRunning) html += `<button class="exec-warn" data-exec="pause_all">Pause</button>`;
     if (hasPaused) html += `<button class="exec-go" data-exec="resume_all">Resume</button>`;
     if (this.nodeStates.size > 0) html += `<button class="exec-danger" data-exec="stop">Stop</button>`;
@@ -242,6 +277,8 @@ export class MiniWorkflowEditor {
       (field, value) => this.onConfigChange(field, value),
       (nodeId) => this.deleteNode(nodeId),
       (action, nodeId) => this.onNodeAction(action, nodeId),
+      this.workflow.nodes,
+      this.workflow.edges,
     );
   }
 

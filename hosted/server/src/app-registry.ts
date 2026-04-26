@@ -6,6 +6,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
 import { NODE_DEF_MAP, resolveNodeType, isSinkType, isTriggerType, isSourceType } from "./node-definitions.js";
+import { detectFlows } from "./flow-detection.js";
+import type { FlowExecutionConfig, DetectedFlow } from "./app-types.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -345,6 +347,7 @@ export function resolveWorkflowToPipeline(
   nodes: WorkflowNodeDef[],
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
+  flowConfig?: FlowExecutionConfig | null,
 ): AppDefinition[] {
   const processableNodes = nodes.filter(n => {
     const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
@@ -353,6 +356,15 @@ export function resolveWorkflowToPipeline(
   // Passive pipelines (no AI processor) are valid — return empty so activation
   // skips AI orchestration and just configures sinks/transforms on the mobile side.
   if (processableNodes.length === 0) return [];
+
+  // Detect flows and build nodeId -> flowId/flowIndex lookup
+  const flows = detectFlows(nodes, edges);
+  const nodeFlowMap = new Map<string, { flowId: string; flowIndex: number }>();
+  for (let fi = 0; fi < flows.length; fi++) {
+    for (const nid of flows[fi].nodeIds) {
+      nodeFlowMap.set(nid, { flowId: flows[fi].flowId, flowIndex: fi });
+    }
+  }
 
   // Resolve trigger chains: map processorNodeId -> trigger metadata
   const triggerChains = resolveTriggerChains(nodes, edges);
@@ -396,6 +408,9 @@ export function resolveWorkflowToPipeline(
       recording: node.config.recording !== undefined ? node.config.recording as boolean : baseOutput.recording,
     };
 
+    // Flow annotation
+    const flowInfo = nodeFlowMap.get(node.id);
+
     const config: AppConfig = {
       model: (node.config.model as string) ?? (def.defaultModel ?? "gemini-2.5-flash-native-audio-latest"),
       voice: node.config.voice as string | undefined,
@@ -405,6 +420,8 @@ export function resolveWorkflowToPipeline(
       input,
       output,
       lifecycle,
+      // Annotate with flow info
+      ...(flowInfo ? { flowId: flowInfo.flowId, flowIndex: flowInfo.flowIndex } : {}),
       // Annotate with sequential dependency if this processor depends on another
       ...(dependsOnMap.has(node.id) ? {
         dependsOn: dependsOnMap.get(node.id),
@@ -434,7 +451,7 @@ export function resolveWorkflowToPipeline(
     const nodeLabel = node.label ? ` - ${node.label}` : "";
     const suffix = processableNodes.length > 1 ? ` [${idx + 1}]` : "";
 
-    console.log(`[app-registry] Pipeline node ${idx}: type=${node.type} id=${node.id} speakerTarget=${speakerTarget} speaker=${output.speaker} dependsOn=${dependsOnMap.get(node.id) ?? "none"}`);
+    console.log(`[app-registry] Pipeline node ${idx}: type=${node.type} id=${node.id} speakerTarget=${speakerTarget} speaker=${output.speaker} dependsOn=${dependsOnMap.get(node.id) ?? "none"} flowId=${flowInfo?.flowId ?? "n/a"}`);
 
     return {
       id: processableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
