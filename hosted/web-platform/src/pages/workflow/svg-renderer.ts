@@ -110,6 +110,10 @@ export function buildSVGFromData(
     `;
   }).join("");
 
+  // Detect processor→processor edges for sequential styling
+  const processorTypes = new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "deepgram-stt"]);
+  const isProcessor = (type: string) => processorTypes.has(type);
+
   const edgeSVGs = edges.map(e => {
     const src = nodes.find(n => n.id === e.sourceNodeId);
     const tgt = nodes.find(n => n.id === e.targetNodeId);
@@ -119,6 +123,15 @@ export function buildSVGFromData(
     const tx = tgt.positionX * scale;
     const ty = tgt.positionY * scale + h / 2;
     const mx = (sx + tx) / 2;
+
+    // Processor→processor edges are sequential dependencies
+    const isSequential = isProcessor(src.type) && isProcessor(tgt.type);
+    if (isSequential) {
+      const labelX = mx;
+      const labelY = (sy + ty) / 2 - (8 * scale);
+      return `<path class="wf-edge wf-edge-seq" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 3" />` +
+        `<text x="${labelX}" y="${labelY}" text-anchor="middle" fill="#f59e0b" font-size="${9 * scale}" font-weight="600" pointer-events="none">SEQ</text>`;
+    }
     return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />`;
   }).join("");
 

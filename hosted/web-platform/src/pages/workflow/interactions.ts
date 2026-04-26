@@ -228,7 +228,8 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
       const allowedDirect = sourceDef ? sourceDef.allowedTargets.includes(target.type) : false;
       const allowedBySinkRole = sourceDef && targetDef && targetDef.role === "sink" && sourceDef.allowedTargets.includes("<sink>");
       const allowedByTriggerRole = sourceDef && targetDef && targetDef.role === "trigger" && sourceDef.allowedTargets.includes("<trigger>");
-      if (!allowedDirect && !allowedBySinkRole && !allowedByTriggerRole) { _edgeState = null; return; }
+      const allowedBySourceRole = sourceDef && targetDef && targetDef.role === "source" && sourceDef.allowedTargets.includes("<source>");
+      if (!allowedDirect && !allowedBySinkRole && !allowedByTriggerRole && !allowedBySourceRole) { _edgeState = null; return; }
 
       const exists = workflow.edges.some(e =>
         e.sourceNodeId === _edgeState!.sourceNodeId && e.targetNodeId === target.id

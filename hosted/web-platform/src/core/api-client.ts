@@ -423,7 +423,7 @@ export interface NodeDefinition {
   color: { fill: string; header: string; stroke: string };
   allowedTargets: string[];
   role: "source" | "processor" | "reference" | "trigger" | "transform" | "sink";
-  activationMode: "ai" | "jepa" | "passthrough" | null;
+  activationMode: "ai" | "jepa" | "stt" | "passthrough" | null;
   binding: string | null;
   defaultModel: string | null;
   configSchema: ConfigFieldSchema[];

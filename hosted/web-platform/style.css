@@ -3028,6 +3028,7 @@ body {
   transition: stroke 0.15s;
 }
 .wf-edge:hover { stroke: #94a3b3; stroke-width: 3; }
+.wf-edge-seq:hover { stroke: #fbbf24; stroke-width: 3; }
 
 /* Config panel */
 .wf-config-panel {
