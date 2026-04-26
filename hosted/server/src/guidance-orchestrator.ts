@@ -300,7 +300,7 @@ export class GuidanceOrchestrator {
     }
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
-    const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: app.config.visionFps ?? 1 };
+    const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, phoneMic: true, glassesMic: true, gestures: true, visionFps: app.config.visionFps ?? 1 };
     const dependsOn = app.config.dependsOn as string | undefined;
     console.log(`[orchestrator] activateWithConfig appId=${appId} speakerTarget=${output.speakerTarget} speaker=${output.speaker} dependsOn=${dependsOn ?? "none"}`);
     const state: SessionAIState = {

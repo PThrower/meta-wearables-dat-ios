@@ -325,15 +325,18 @@ function resolveSourceInput(
   const hasGlassesMic = connectedSources.has("glasses-mic-source");
   const hasGestures = connectedSources.has("gesture-source");
 
+  // Default to all inputs when no sources are explicitly wired
+  const anySource = hasCamera || hasPhoneMic || hasGlassesMic || hasGestures;
+
   // Read visionFps from camera-source config if present
   const cameraNode = nodes.find(n => resolveNodeType(n.type) === "camera-source");
   const visionFps = (cameraNode?.config.visionFps as number) ?? 1;
 
   return {
-    video: hasCamera,
-    phoneMic: hasPhoneMic,
-    glassesMic: hasGlassesMic,
-    gestures: hasGestures,
+    video: anySource ? hasCamera : true,
+    phoneMic: anySource ? hasPhoneMic : true,
+    glassesMic: anySource ? hasGlassesMic : true,
+    gestures: anySource ? hasGestures : true,
     visionFps,
   };
 }
