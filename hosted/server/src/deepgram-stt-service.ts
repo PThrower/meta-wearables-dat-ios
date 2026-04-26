@@ -166,7 +166,7 @@ export class DeepgramSTTService implements AIService {
   private buildConnectionParams(config: AIServiceConfig): string {
     const parts: string[] = [
       "encoding=linear16",
-      "sample_rate=16000",
+      "sample_rate=48000",
       "channels=1",
       "interim_results=true",
       "smart_format=true",
