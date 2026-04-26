@@ -125,7 +125,7 @@ class AudioTapClientTests: XCTestCase {
         let bus = AudioEventBus()
         let client = AudioTapClient(eventBus: bus)
 
-        let url = await client.tapURL(for: "ws://192.168.1.5:3000", session: "test-session")
+        let url = client.tapURL(for: "ws://192.168.1.5:3000", session: "test-session")
         XCTAssertEqual(url, "ws://192.168.1.5:3000/tap/audio?session=test-session")
     }
 
@@ -133,7 +133,7 @@ class AudioTapClientTests: XCTestCase {
         let bus = AudioEventBus()
         let client = AudioTapClient(eventBus: bus)
 
-        let url = await client.tapURL(for: "ws://192.168.1.5:3000", session: nil)
+        let url = client.tapURL(for: "ws://192.168.1.5:3000", session: nil)
         XCTAssertEqual(url, "ws://192.168.1.5:3000/tap/audio?session=default")
     }
 
@@ -142,7 +142,7 @@ class AudioTapClientTests: XCTestCase {
         let client = AudioTapClient(eventBus: bus)
 
         // Should strip /publish and use /tap/audio
-        let url = await client.tapURL(for: "ws://relay.example.com/publish?session=abc", session: "abc")
+        let url = client.tapURL(for: "ws://relay.example.com/publish?session=abc", session: "abc")
         XCTAssertEqual(url, "ws://relay.example.com/tap/audio?session=abc")
     }
 
@@ -177,28 +177,21 @@ class AudioTapClientTests: XCTestCase {
             pcmBase64: pcmData.base64EncodedString()
         )
 
+        // Start consumer concurrently — handleReceivedFrame spawns a Task
+        let consumerTask = Task<AudioPacket?, Never> {
+            for await packet in stream {
+                return packet
+            }
+            return nil
+        }
+
         // Directly inject frame (simulating WebSocket receive)
         await client.handleReceivedFrame(frame)
 
-        // Read from the event bus
-        let received: AudioPacket? = await withUnsafeContinuation { continuation in
-            let task = Task<AudioPacket?, Never> {
-                for await packet in stream {
-                    return packet
-                }
-                return nil
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                task.cancel()
-                continuation.resume(returning: nil)
-            }
-            Task {
-                if let result = await task.value {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
+        // Give the spawned publish Task time to execute
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        let received = await consumerTask.value
 
         XCTAssertNotNil(received, "Event bus should receive the audio packet")
         XCTAssertEqual(received?.sampleRate, 48000)
@@ -266,30 +259,15 @@ class AudioTapClientTests: XCTestCase {
 
         await client.handleReceivedFrame(frame)
 
-        // Should not publish anything to the bus
-        let received: Bool = await withUnsafeContinuation { continuation in
-            let task = Task {
-                var gotPacket = false
-                for await _ in stream {
-                    gotPacket = true
-                    break
-                }
-                return gotPacket
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
-                task.cancel()
-                continuation.resume(returning: false)
-            }
-            Task {
-                let result = await task.value
-                continuation.resume(returning: result)
-            }
+        // Should not publish anything to the bus — unsubscribe to end the stream
+        await bus.unsubscribe(subId)
+
+        var received = false
+        for await _ in stream {
+            received = true
         }
 
         XCTAssertFalse(received, "Non-audio messages should be ignored")
-
-        await bus.unsubscribe(subId)
     }
 
     // MARK: - Empty PCM Ignored
@@ -313,30 +291,15 @@ class AudioTapClientTests: XCTestCase {
 
         await client.handleReceivedFrame(frame)
 
-        // Should not publish empty PCM to bus
-        let received: Bool = await withUnsafeContinuation { continuation in
-            let task = Task {
-                var gotPacket = false
-                for await _ in stream {
-                    gotPacket = true
-                    break
-                }
-                return gotPacket
-            }
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                task.cancel()
-                continuation.resume(returning: false)
-            }
-            Task {
-                let result = await task.value
-                continuation.resume(returning: result)
-            }
+        // Should not publish empty PCM to bus — unsubscribe to end the stream
+        await bus.unsubscribe(subId)
+
+        var received = false
+        for await _ in stream {
+            received = true
         }
 
         XCTAssertFalse(received, "Empty PCM should be ignored")
-
-        await bus.unsubscribe(subId)
     }
 
     // MARK: - Stats

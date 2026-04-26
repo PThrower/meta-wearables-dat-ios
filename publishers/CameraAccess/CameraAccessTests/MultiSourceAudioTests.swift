@@ -315,6 +315,25 @@ class MultiSourceAudioTests: XCTestCase {
         let bus = AudioEventBus()
         let (subId, stream) = await bus.subscribe()
 
+        // Start consumer concurrently — bus buffers only 10 newest
+        let consumerTask = Task {
+            var builtInCount = 0
+            var glassesCount = 0
+            var total = 0
+
+            for await packet in stream {
+                total += 1
+                if packet.codecType == 0 {
+                    builtInCount += 1
+                } else if packet.codecType == 1 {
+                    glassesCount += 1
+                }
+                if total == 60 { break }
+            }
+
+            return (builtInCount, glassesCount)
+        }
+
         // Simulate 60 frames: alternating built-in (0) and glasses (1) mics
         for i in 0..<60 {
             let packet = AudioPacket(
@@ -329,19 +348,7 @@ class MultiSourceAudioTests: XCTestCase {
             await bus.publish(packet)
         }
 
-        var builtInCount = 0
-        var glassesCount = 0
-        var total = 0
-
-        for await packet in stream {
-            total += 1
-            if packet.codecType == 0 {
-                builtInCount += 1
-            } else if packet.codecType == 1 {
-                glassesCount += 1
-            }
-            if total == 60 { break }
-        }
+        let (builtInCount, glassesCount) = await consumerTask.value
 
         XCTAssertEqual(builtInCount, 30, "30 built-in mic frames")
         XCTAssertEqual(glassesCount, 30, "30 glasses mic frames")

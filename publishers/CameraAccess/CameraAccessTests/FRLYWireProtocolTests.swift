@@ -187,7 +187,7 @@ final class FRLYWireProtocolTests: XCTestCase {
         XCTAssertEqual(message.count, 29 + 8, "Header + 8 bytes JPEG payload")
         XCTAssertEqual(message[29], 0xFF, "JPEG SOI byte 0")
         XCTAssertEqual(message[30], 0xD8, "JPEG SOI byte 1")
-        XCTAssertEqual(message[33], 0xE0, "JPEG APP0 byte")
+        XCTAssertEqual(message[32], 0xE0, "JPEG APP0 byte")
     }
 
     func testLargePayload() {

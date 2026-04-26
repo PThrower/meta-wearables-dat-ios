@@ -38,6 +38,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     // Serial queue: ensures utterances play one at a time with correct routing
     private var queue: [(text: String, preferGlasses: Bool)] = []
     private var isSpeaking = false
+    @MainActor private var activeDelegate: SpeechWaitDelegate?
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
@@ -108,7 +109,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
             if self.synth == nil {
                 self.synth = AVSpeechSynthesizer()
             }
-            let synth = self.synth!
+            guard let synth = self.synth else { return nil }
 
             // Stop anything currently playing before starting new
             if synth.isSpeaking {
@@ -123,11 +124,18 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 
             let delegate = SpeechWaitDelegate()
             synth.delegate = delegate
+            self.activeDelegate = delegate
             synth.speak(utterance)
 
             // Wait for speech to finish (with timeout)
             let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
                 delegate.completion = { finished in cont.resume(returning: finished) }
+
+                // Timeout after 30s
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 30_000_000_000)
+                    delegate.resumeOnce(returning: false)
+                }
             }
 
             NSLog("[AudioPlayback] Speech finished: \(finished), route=\(preferGlasses ? "glasses" : "phone")")
@@ -272,16 +280,26 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
 /// Delegate that resolves a continuation when speech finishes.
 /// Used to wait for AVSpeechSynthesizer to complete before changing audio route.
 @MainActor
-private class SpeechWaitDelegate: NSObject, AVSpeechSynthesizerDelegate {
+private class SpeechWaitDelegate: NSObject, @preconcurrency AVSpeechSynthesizerDelegate {
     var completion: ((Bool) -> Void)?
+    private var resumed = false
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        completion?(true)
+    func resumeOnce(returning value: Bool) {
+        guard !resumed else { return }
+        resumed = true
+        completion?(value)
         completion = nil
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        completion?(false)
-        completion = nil
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            resumeOnce(returning: true)
+        }
+    }
+
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        Task { @MainActor in
+            resumeOnce(returning: false)
+        }
     }
 }

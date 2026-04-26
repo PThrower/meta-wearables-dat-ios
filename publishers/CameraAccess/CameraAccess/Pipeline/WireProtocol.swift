@@ -227,6 +227,7 @@ enum WireProtocol {
 
 extension Data {
     func extractUInt16(at offset: Int) -> UInt16 {
+        precondition(offset + 2 <= count, "extractUInt16: offset \(offset) out of bounds for data of size \(count)")
         var value: UInt16 = 0
         _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
             dest.copyBytes(from: self[offset..<(offset + 2)])
@@ -235,6 +236,7 @@ extension Data {
     }
 
     func extractUInt32(at offset: Int) -> UInt32 {
+        precondition(offset + 4 <= count, "extractUInt32: offset \(offset) out of bounds for data of size \(count)")
         var value: UInt32 = 0
         _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
             dest.copyBytes(from: self[offset..<(offset + 4)])
@@ -243,6 +245,7 @@ extension Data {
     }
 
     func extractUInt64(at offset: Int) -> UInt64 {
+        precondition(offset + 8 <= count, "extractUInt64: offset \(offset) out of bounds for data of size \(count)")
         var value: UInt64 = 0
         _ = Swift.withUnsafeMutableBytes(of: &value) { dest in
             dest.copyBytes(from: self[offset..<(offset + 8)])

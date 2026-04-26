@@ -28,16 +28,8 @@ class RelayPipelineTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        try? Wearables.configure()
-
-        let pairedMockDevice = MockDeviceKit.shared.pairRaybanMeta()
-        mockDevice = pairedMockDevice
-        cameraKit = pairedMockDevice.getCameraKit()
-
-        pairedMockDevice.powerOn()
-        pairedMockDevice.unfold()
-
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        // Mock device setup only needed for testMockDeviceStreamingProducesFrames.
+        // Other tests are pure unit tests that don't need hardware.
     }
 
     override func tearDown() async throws {
@@ -52,6 +44,14 @@ class RelayPipelineTests: XCTestCase {
     // MARK: - MockDeviceKit + StreamSession Integration
 
     func testMockDeviceStreamingProducesFrames() async throws {
+        try? Wearables.configure()
+        let pairedMockDevice = MockDeviceKit.shared.pairRaybanMeta()
+        mockDevice = pairedMockDevice
+        cameraKit = pairedMockDevice.getCameraKit()
+        pairedMockDevice.powerOn()
+        pairedMockDevice.unfold()
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+
         guard let camera = cameraKit else {
             XCTFail("Mock device should be available")
             return
@@ -227,7 +227,7 @@ class RelayPipelineTests: XCTestCase {
 // MARK: - Mock Relay Stage
 
 /// Captures raw data sent by AudioRelayStage for wire protocol verification.
-final class MockRelayStage: FramePipelineStage, AudioTransport {
+final class MockRelayStage: FramePipelineStage, AudioTransport, @unchecked Sendable {
     nonisolated let stageId = "mock-relay"
     var config: FrameStageConfig = .maxFPS
 

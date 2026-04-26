@@ -89,7 +89,10 @@ final class PushNotificationService: ObservableObject {
       return
     }
 
-    let url = URL(string: "\(relayURL)/api/device-token")!
+    guard let url = URL(string: "\(relayURL)/api/device-token") else {
+      NSLog("[PushNotification] Invalid relay URL for device token registration")
+      return
+    }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")

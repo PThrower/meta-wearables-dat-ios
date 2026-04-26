@@ -97,6 +97,14 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Set by StreamSessionViewModel before connecting.
     var onControlMessage: (@Sendable ([String: Any]) -> Void)?
 
+    /// Callback for display_frame messages from the server.
+    /// Set by StreamSessionViewModel before connecting.
+    var onDisplayFrame: (@Sendable ([String: Any]) -> Void)?
+
+    /// Connected Even Realities device model (e.g. "even-g1", "even-g2").
+    /// Set by StreamSessionViewModel when BLE device is detected.
+    var displayViewerModel: String?
+
     // Frame pacing — time-based throttle using config.targetFPS
     private var lastRelayTime: ContinuousClock.Instant?
 
@@ -149,6 +157,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         // Store for reconnection
         lastConnectedURL = urlString
 
+        var timeoutTask: Task<Void, Never>?
         let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             var resumed = false
 
@@ -178,7 +187,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             task.resume()
 
             // Timeout: if no open/close event in 5 seconds, assume failure
-            _ = Task {
+            timeoutTask = Task {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard !resumed else { return }
                 resumed = true
@@ -186,6 +195,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 continuation.resume(returning: false)
             }
         }
+        timeoutTask?.cancel()
 
         if connected {
             isConnected = true
@@ -273,6 +283,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                                let targetFps = json["targetFps"] as? Double {
                                 NSLog("[RelayStage] Backpressure from server: targetFps=\(targetFps)")
                                 await self.handleBackpressure(targetFps: targetFps)
+                            }
+                            // Handle display_frame from server (for smart glasses display)
+                            if json["type"] as? String == "display_frame" {
+                                if let handler = await self.onDisplayFrame {
+                                    handler(json)
+                                }
                             }
                             if let handler = await self.onControlMessage {
                                 handler(json)
@@ -460,7 +476,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             )
 
             let msgSize = UInt64(message.count)
-            wsTask.send(.data(message)) { error in
+            guard await self?.isConnected == true else { return }
+            wsTask.send(.data(message)) { [weak self] error in
                 if let error {
                     NSLog("[RelayStage] Send error: \(error)")
                     Task { [weak self] in
@@ -579,7 +596,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             previous = encodeMs
             encodeTimeEmaMs = encodeMs  // First sample: initialize
         }
-        let ema = encodeTimeEmaMs!
+        guard let ema = encodeTimeEmaMs else { return }
 
         // Frame budget in ms — how long we can afford per encode to hit target FPS
         let targetFps = effectiveTargetFps
@@ -654,6 +671,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         guard let wsTask = webSocketTask else { return }
         let capturedWearableId = wearableId
         let capturedWearableType = wearableType
+        let capturedDisplayViewerModel = displayViewerModel
 
         // UIDevice.current is @MainActor-isolated in iOS 17+.
         // Dispatch to main to read device info, then send using captured wsTask.
@@ -687,7 +705,16 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 }(),
                 "lowPowerMode": ProcessInfo.processInfo.isLowPowerModeEnabled,
                 "videoCodec": capturedCodec,
-            ]
+            ] as [String: Any]
+
+            // Add display_viewer if Even Realities device is connected
+            if let model = capturedDisplayViewerModel {
+                let proto = model == "even-g1" ? "uart" : "protobuf"
+                hello["display_viewer"] = [
+                    "model": model,
+                    "protocol": proto,
+                ]
+            }
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
                   let str = String(data: data, encoding: .utf8) else { return }

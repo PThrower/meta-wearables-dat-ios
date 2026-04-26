@@ -61,6 +61,8 @@ actor GoogleAuthService {
 
     // MARK: - OAuth Flow
 
+    private var authSession: ASWebAuthenticationSession?
+
     private func authenticate() async throws -> String {
         guard !clientId.isEmpty else {
             throw GoogleAuthError.missingClientId
@@ -72,7 +74,9 @@ actor GoogleAuthService {
         let codeVerifier = generateCodeVerifier()
         let codeChallenge = generateCodeChallenge(from: codeVerifier)
 
-        var components = URLComponents(string: authEndpoint)!
+        guard var components = URLComponents(string: authEndpoint) else {
+            throw GoogleAuthError.invalidURL
+        }
         components.queryItems = [
             URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "redirect_uri", value: redirectURI),
@@ -95,7 +99,8 @@ actor GoogleAuthService {
             let session = ASWebAuthenticationSession(
                 url: authURL,
                 callbackURLScheme: scheme
-            ) { callbackURL, error in
+            ) { [weak self] callbackURL, error in
+                self?.authSession = nil
                 if let error {
                     continuation.resume(throwing: error)
                 } else if let callbackURL {
@@ -104,6 +109,7 @@ actor GoogleAuthService {
                     continuation.resume(throwing: GoogleAuthError.cancelled)
                 }
             }
+            self.authSession = session
             session.start()
         }
 
@@ -126,7 +132,10 @@ actor GoogleAuthService {
     }
 
     private func exchangeCode(_ code: String, codeVerifier: String) async throws -> TokenResponse {
-        var request = URLRequest(url: URL(string: tokenEndpoint)!)
+        guard let tokenURL = URL(string: tokenEndpoint) else {
+            throw GoogleAuthError.invalidURL
+        }
+        var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 

@@ -12,11 +12,22 @@ import Foundation
 // MARK: - FramePacket
 
 /// Immutable, Sendable packet created on MainActor from VideoFrame.sampleBuffer.
-/// Safe to share across actor boundaries.
+/// `@unchecked Sendable` is safe here: CMSampleBuffer is a reference type but
+/// CoreMedia guarantees thread-safety for read-only access. All pipeline stages
+/// only read the buffer. If a stage needs to hold the buffer beyond processFrame(),
+/// call copySampleBuffer() to get an independent deep copy.
 struct FramePacket: @unchecked Sendable {
     let sampleBuffer: CMSampleBuffer
     let timestamp: ContinuousClock.Instant
     let sequenceNumber: UInt64
+
+    /// Creates a deep copy of the underlying CMSampleBuffer.
+    /// Use when a stage must retain the buffer beyond the processFrame() call.
+    func copySampleBuffer() -> CMSampleBuffer? {
+        var copy: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopy(allocator: kCFAllocatorDefault, sampleBuffer: sampleBuffer, sampleBufferOut: &copy)
+        return status == noErr ? copy : nil
+    }
 }
 
 // MARK: - FrameStageConfig

@@ -127,7 +127,7 @@ class StreamSessionViewModel: ObservableObject {
   /// Preferred audio output for inbound AI PCM audio.
   /// Set by `audio_route` JSON message from the server before each audio burst.
   /// Default: phone speaker.
-  var preferredSpeaker: PreferredSpeaker = .phone
+  var preferredSpeaker: PreferredSpeaker = .glasses
 
 
   var isStreaming: Bool {
@@ -168,9 +168,14 @@ class StreamSessionViewModel: ObservableObject {
   private let audioEventBus = AudioEventBus()
   private let audioPlaybackStage = AudioPlaybackStage()
   private let audioTapClient: AudioTapClient
-  private var displayStage: DisplayStage!
+  private var displayStage: DisplayStage?
   private var inboundAudioEngine: AVAudioEngine?
   private var inboundPlayerNode: AVAudioPlayerNode?
+  private var inboundSampleRate: Double?
+  private var hasAppliedSpeakerRoute = false
+  private var isInboundAudioActive = false
+  private var routeChangeObserver: NSObjectProtocol?
+  private var inboundAudioRestoreTask: Task<Void, Never>?
   private var telemetryPushTimer: Task<Void, Never>?
 
   // Phone camera mode
@@ -216,7 +221,7 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     // Register stages
-    pipeline.register(displayStage)
+    if let displayStage { pipeline.register(displayStage) }
     pipeline.register(recordingStage)
     pipeline.register(relayStage)
 
@@ -478,10 +483,12 @@ class StreamSessionViewModel: ObservableObject {
         guard let parsed = WireProtocol.parseFRAU(data) else { return }
         NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
         Task { @MainActor [weak self] in
-          guard let self else { return }
+          guard let self, self.isInboundAudioActive else { return }
           self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
         }
       }
+
+      isInboundAudioActive = true
 
       // On auto-reconnect, re-announce streaming state so server stops treating us as standby
       await relayStage.setOnReconnected { [weak self] in
@@ -618,10 +625,12 @@ class StreamSessionViewModel: ObservableObject {
         guard let parsed = WireProtocol.parseFRAU(data) else { return }
         NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
         Task { @MainActor [weak self] in
-          guard let self else { return }
+          guard let self, self.isInboundAudioActive else { return }
           self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
         }
       }
+
+      isInboundAudioActive = true
 
       await startRelayAudioAndTelemetry()
       await relayStage.sendJson(["type": "link_state_changed", "state": "connected"])
@@ -645,10 +654,12 @@ class StreamSessionViewModel: ObservableObject {
       guard let parsed = WireProtocol.parseFRAU(data) else { return }
       NSLog("[StreamSession] Server audio: \(parsed.pcmData.count) bytes, \(parsed.sampleRate)Hz, \(parsed.channels)ch, \(parsed.bitsPerSample)bit codec=\(parsed.codecType)")
       Task { @MainActor [weak self] in
-        guard let self else { return }
+        guard let self, self.isInboundAudioActive else { return }
         self.playInboundPCM(parsed.pcmData, sampleRate: parsed.sampleRate, channels: parsed.channels, bitsPerSample: parsed.bitsPerSample)
       }
     }
+
+    isInboundAudioActive = true
 
     await startRelayAudioAndTelemetry()
 
@@ -803,10 +814,10 @@ class StreamSessionViewModel: ObservableObject {
       // Audio route from server — sets preferred speaker for subsequent inbound AI PCM
       // Sent before each AI audio burst so per-thread routing works correctly
       if msgType == "audio_route" {
-        let preferGlasses = msg["preferGlasses"] as? Bool ?? false
+        let preferPhone = msg["preferPhone"] as? Bool ?? false
         Task { @MainActor [weak self] in
-          self?.preferredSpeaker = preferGlasses ? .glasses : .phone
-          NSLog("[StreamSession] Audio route: preferGlasses=\(preferGlasses) -> \(self?.preferredSpeaker)")
+          self?.preferredSpeaker = preferPhone ? .phone : .glasses
+          NSLog("[StreamSession] Audio route: preferPhone=\(preferPhone) -> \(self?.preferredSpeaker)")
         }
       }
 
@@ -1179,7 +1190,9 @@ class StreamSessionViewModel: ObservableObject {
       }
 
       let scheme = wsURL.scheme == "wss" ? "https" : "http"
-      let appsURL = URL(string: "\(scheme)://\(host)/apps")!
+      guard let appsURL = URL(string: "\(scheme)://\(host)/apps") else {
+        throw AppFetchError.invalidURL
+      }
 
       let (data, response) = try await URLSession.shared.data(from: appsURL)
 
@@ -1655,6 +1668,13 @@ class StreamSessionViewModel: ObservableObject {
     let sr = Double(sampleRate)
     let ch = UInt32(channels)
 
+    // M-4: Tear down and rebuild engine if sample rate changed
+    if let currentSR = inboundSampleRate, currentSR != sr {
+      NSLog("[StreamSession] Inbound sample rate changed \(currentSR) -> \(sr), rebuilding engine")
+      stopInboundAudioEngine()
+    }
+    inboundSampleRate = sr
+
     // Lazy-init engine + player node on first call
     if inboundAudioEngine == nil {
       let engine = AVAudioEngine()
@@ -1670,8 +1690,18 @@ class StreamSessionViewModel: ObservableObject {
       do {
         try engine.start()
 
-        // Apply current audio route
+        // H-10: Apply route once at engine start
         applySpeakerRoute()
+        hasAppliedSpeakerRoute = true
+
+        // H-10: Observe system route changes to re-apply
+        routeChangeObserver = NotificationCenter.default.addObserver(
+          forName: AVAudioSession.routeChangeNotification,
+          object: nil,
+          queue: .main
+        ) { [weak self] _ in
+          self?.hasAppliedSpeakerRoute = false
+        }
 
         let audioSession = AVAudioSession.sharedInstance()
         let outputs = audioSession.currentRoute.outputs.map { "\($0.portName)(\($0.portType.rawValue))" }
@@ -1684,8 +1714,11 @@ class StreamSessionViewModel: ObservableObject {
       inboundAudioEngine = engine
       inboundPlayerNode = player
     } else {
-      // Re-apply route on every frame — per-thread routing can change between bursts
-      applySpeakerRoute()
+      // H-10: Only re-apply route if a system route change reset the flag
+      if !hasAppliedSpeakerRoute {
+        applySpeakerRoute()
+        hasAppliedSpeakerRoute = true
+      }
     }
 
     guard let player = inboundPlayerNode else { return }
@@ -1708,16 +1741,29 @@ class StreamSessionViewModel: ObservableObject {
 
     player.scheduleBuffer(buffer)
     if !player.isPlaying { player.play() }
+
+    // Auto-restore glasses route when inbound audio stops (1.5s silence)
+    if preferredSpeaker != .glasses {
+      inboundAudioRestoreTask?.cancel()
+      inboundAudioRestoreTask = Task { @MainActor [weak self] in
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard !Task.isCancelled else { return }
+        self?.restoreSpeakerRoute()
+        NSLog("[StreamSession] Auto-restored glasses route after inbound audio silence")
+      }
+    }
   }
 
   /// Apply current preferredSpeaker to AVAudioSession output route.
-  /// Called on every inbound PCM frame so per-thread routing takes effect mid-session.
   private func applySpeakerRoute() {
     let audioSession = AVAudioSession.sharedInstance()
     do {
-      if preferredSpeaker == .glasses,
-         let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
-        try audioSession.setPreferredInput(btHFP)
+      if preferredSpeaker == .glasses {
+        // Remove any previous phone-speaker override so system uses Bluetooth
+        try audioSession.overrideOutputAudioPort(.none)
+        if let btHFP = audioSession.availableInputs?.first(where: { $0.portType == .bluetoothHFP }) {
+          try audioSession.setPreferredInput(btHFP)
+        }
       } else {
         try audioSession.overrideOutputAudioPort(.speaker)
       }
@@ -1726,12 +1772,34 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  /// Restore audio route to default (Bluetooth A2DP) after inbound audio stops.
+  /// Clears phone-speaker override and preferred input so system auto-routes to glasses.
+  private func restoreSpeakerRoute() {
+    let audioSession = AVAudioSession.sharedInstance()
+    do {
+      try audioSession.overrideOutputAudioPort(.none)
+      try audioSession.setPreferredInput(nil)
+    } catch {
+      NSLog("[StreamSession] Restore speaker route failed: \(error)")
+    }
+  }
+
   /// Stop and tear down the inbound audio engine.
   private func stopInboundAudioEngine() {
+    inboundAudioRestoreTask?.cancel()
+    inboundAudioRestoreTask = nil
     inboundPlayerNode?.stop()
     inboundAudioEngine?.stop()
     inboundPlayerNode = nil
     inboundAudioEngine = nil
+    inboundSampleRate = nil
+    hasAppliedSpeakerRoute = false
+    isInboundAudioActive = false
+    if let observer = routeChangeObserver {
+      NotificationCenter.default.removeObserver(observer)
+      routeChangeObserver = nil
+    }
+    restoreSpeakerRoute()
   }
 
   private static func formatStreamingError(_ error: StreamSessionError) -> String {

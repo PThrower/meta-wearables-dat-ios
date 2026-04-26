@@ -121,6 +121,7 @@ actor AudioTapClient {
 
         NSLog("[AudioTapClient] Connecting to \(tapURLString) ...")
 
+        var timeoutTask: Task<Void, Never>?
         let connected = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             var resumed = false
 
@@ -146,7 +147,7 @@ actor AudioTapClient {
             task.resume()
 
             // 5 second timeout
-            _ = Task {
+            timeoutTask = Task {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
                 guard !resumed else { return }
                 resumed = true
@@ -154,6 +155,7 @@ actor AudioTapClient {
                 continuation.resume(returning: false)
             }
         }
+        timeoutTask?.cancel()
 
         if connected {
             isConnected = true

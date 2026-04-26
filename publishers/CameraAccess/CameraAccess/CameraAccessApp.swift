@@ -162,7 +162,8 @@ struct CameraAccessApp: App {
         guard let videoURL = Bundle.main.url(forResource: "plant", withExtension: "mp4"),
           let imageURL = Bundle.main.url(forResource: "plant", withExtension: "png")
         else {
-          fatalError("Test resources not found - are you running a Release build?")
+          NSLog("[CameraAccess] WARNING: Test resources not found - skipping UI testing resources")
+          return
         }
         await cameraKit.setCameraFeed(fileURL: videoURL)
         await cameraKit.setCapturedImage(fileURL: imageURL)

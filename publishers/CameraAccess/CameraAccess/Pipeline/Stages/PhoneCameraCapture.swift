@@ -56,7 +56,20 @@ actor PhoneCameraCapture {
     private var captureSession: AVCaptureSession?
     private var delegate: SampleBufferDelegate?
     private var _isRunning = false
-    nonisolated(unsafe) private(set) var currentDevice: AVCaptureDevice?
+    private let deviceLock = NSLock()
+    private nonisolated(unsafe) var _currentDevice: AVCaptureDevice?
+
+    nonisolated var currentDevice: AVCaptureDevice? {
+        deviceLock.lock()
+        defer { deviceLock.unlock() }
+        return _currentDevice
+    }
+
+    private func setCurrentDevice(_ device: AVCaptureDevice?) {
+        deviceLock.lock()
+        defer { deviceLock.unlock() }
+        _currentDevice = device
+    }
 
     private let targetFPS: Int
     private let sessionQueue = DispatchQueue(label: "com.mwdat.phonecamera", qos: .userInteractive)
@@ -66,6 +79,10 @@ actor PhoneCameraCapture {
     }
 
     var isRunning: Bool { _isRunning }
+
+    private func setRunning(_ running: Bool) {
+        _isRunning = running
+    }
 
     /// Start capturing from the back camera. Requires camera permission.
     func start(onFrame: @Sendable @escaping (CMSampleBuffer) -> Void) throws {
@@ -122,14 +139,17 @@ actor PhoneCameraCapture {
 
         session.commitConfiguration()
 
+        self.captureSession = session
+        self.setCurrentDevice(device)
+
         // startRunning() is synchronous and slow -- run on session queue
+        let actor = self
         sessionQueue.async {
             session.startRunning()
+            Task {
+                await actor.setRunning(session.isRunning)
+            }
         }
-
-        self.captureSession = session
-        self.currentDevice = device
-        self._isRunning = true
 
         NSLog("[PhoneCamera] Started: 1280x720 @ \(self.targetFPS)fps")
     }
@@ -138,6 +158,7 @@ actor PhoneCameraCapture {
         guard _isRunning else { return }
         captureSession?.stopRunning()
         captureSession = nil
+        setCurrentDevice(nil)
         delegate = nil
         _isRunning = false
         NSLog("[PhoneCamera] Stopped")

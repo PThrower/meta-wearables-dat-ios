@@ -121,7 +121,7 @@ final class NowPlayingLowLevelTests: XCTestCase {
     let notificationName = "com.apple.MRMediaRemoteNowPlayingInfoDidChangeNotification" as CFString
     Self.darwinFired = false
 
-    let expectation = self.expectation(description: "Darwin notification for Now Playing")
+    let _ = self.expectation(description: "Darwin notification for Now Playing")
 
     let center = CFNotificationCenterGetDarwinNotifyCenter()
     CFNotificationCenterAddObserver(
@@ -308,7 +308,7 @@ final class NowPlayingLowLevelTests: XCTestCase {
 
     print("[LowLevel] === MediaRemote symbol scan ===")
     for sym in symbols {
-      if let ptr = dlsym(handle, sym) {
+      if dlsym(handle, sym) != nil {
         print("[LowLevel]   FOUND: \(sym)")
       }
     }

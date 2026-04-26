@@ -431,6 +431,7 @@ final class TelemetryService: ObservableObject {
             effectiveFPS = 0
             effectiveUptimeAccumulated = .zero
             totalBackgroundDuration = .zero
+            streamTokens.removeAll()
         }
 
         if newState == .streaming && !isUptimePaused && currentSegmentStart == nil {
@@ -666,9 +667,16 @@ final class TelemetryService: ObservableObject {
 
         // Memory
         let availableBytes = os_proc_available_memory()
-        let availableMB = Double(availableBytes) / 1_048_576.0
         let totalPhysical = ProcessInfo.processInfo.physicalMemory
-        let usedRatio = 1.0 - (Double(availableBytes) / Double(totalPhysical))
+        let availableMB: Double
+        let usedRatio: Double
+        if availableBytes > 0 {
+            availableMB = Double(availableBytes) / 1_048_576.0
+            usedRatio = 1.0 - (Double(availableBytes) / Double(totalPhysical))
+        } else {
+            availableMB = 0
+            usedRatio = 1.0
+        }
         let pressureStr: String
         if usedRatio < 0.7 { pressureStr = "normal" }
         else if usedRatio < 0.85 { pressureStr = "warning" }

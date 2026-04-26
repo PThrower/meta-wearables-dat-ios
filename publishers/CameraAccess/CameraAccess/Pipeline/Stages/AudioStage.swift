@@ -46,6 +46,15 @@ actor AudioStage: @preconcurrency FramePipelineStage {
         self.config = config
     }
 
+    deinit {
+        if let obs = interruptionObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+        if let obs = routeChangeObserver {
+            NotificationCenter.default.removeObserver(obs)
+        }
+    }
+
     func setEventBus(_ bus: AudioEventBus) {
         self.eventBus = bus
     }
@@ -88,12 +97,25 @@ actor AudioStage: @preconcurrency FramePipelineStage {
 
         // Install mic tap using hardware format — no format conversion at tap level.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
+            guard let floatChannelData = buffer.floatChannelData else {
+                let frameCount = Int(buffer.frameLength)
+                guard frameCount > 0 else { return }
+                if let int16Data = buffer.int16ChannelData?[0] {
+                    let pcmData = Data(bytes: int16Data, count: frameCount * 2)
+                    guard pcmData.count > 0 else { return }
+                    let sampleRate = UInt32(hwFormat.sampleRate)
+                    Task { [weak self] in
+                        await self?.publishPCMAudio(pcmData, sampleRate: sampleRate)
+                    }
+                }
+                return
+            }
             let frameCount = Int(buffer.frameLength)
-            if frameCount == 0 { return }
+            guard frameCount > 0 else { return }
 
             let pcmData: Data
-            if isFloat, let floatData = buffer.floatChannelData?[0] {
-                pcmData = PCMConvert.floatToPCM16(floatData, frameCount: frameCount)
+            if isFloat {
+                pcmData = PCMConvert.floatToPCM16(floatChannelData[0], frameCount: frameCount)
             } else if let int16Data = buffer.int16ChannelData?[0] {
                 pcmData = Data(bytes: int16Data, count: frameCount * 2)
             } else {
