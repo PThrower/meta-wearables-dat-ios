@@ -564,6 +564,23 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "Overlays",
     runtime: ["mobile"],
   },
+  {
+    type: "debug-sink",
+    label: "Debug Log",
+    subtitle: "shows output in viewer",
+    color: { fill: "#1a1a1a", header: "#6b7280", stroke: "#6b7280" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+    ],
+    defaultConfig: {},
+    defaultLabel: "Debug Log",
+    runtime: ["server"],
+  },
 ];
 
 // --- Derived Helpers ---

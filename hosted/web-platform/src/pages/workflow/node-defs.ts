@@ -39,6 +39,7 @@ export const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "phone-speaker", label: "Phone Speaker", subtitle: "phone audio out", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Phone Speaker", runtime: ["mobile"] },
   { type: "glasses-speaker", label: "Glasses Speaker", subtitle: "HFP/A2DP audio", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Glasses Speaker", runtime: ["mobile"] },
   { type: "overlays", label: "Overlays", subtitle: "bbox annotations", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Overlays", runtime: ["mobile"] },
+  { type: "debug-sink", label: "Debug Log", subtitle: "shows output in viewer", color: { fill: "#1a1a1a", header: "#6b7280", stroke: "#6b7280" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Debug Log", runtime: ["server"] },
 ];
 
 /** Resolve a node type, mapping old names to current definitions. */
