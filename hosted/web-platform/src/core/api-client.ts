@@ -116,7 +116,8 @@ export async function apiPost<T>(url: string, body: unknown): Promise<T | null> 
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      console.warn(`[api] POST ${url} returned ${res.status}`);
+      const errBody = await res.text().catch(() => "");
+      console.warn(`[api] POST ${url} returned ${res.status}:`, errBody);
       return null;
     }
     return await res.json() as T;
@@ -135,7 +136,8 @@ export async function apiPut<T>(url: string, body: unknown): Promise<T | null> {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      console.warn(`[api] PUT ${url} returned ${res.status}`);
+      const errBody = await res.text().catch(() => "");
+      console.warn(`[api] PUT ${url} returned ${res.status}:`, errBody);
       return null;
     }
     return await res.json() as T;
