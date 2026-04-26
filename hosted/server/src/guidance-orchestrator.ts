@@ -24,6 +24,7 @@ import * as q from "./db/queries.js";
 // Import to register the AI providers
 import "./gemini-live-service.js";
 import "./gemma4-service.js";
+import "./deepgram-stt-service.js";
 
 // --- Types ---
 
@@ -919,6 +920,7 @@ export class GuidanceOrchestrator {
     // Order matters: "gemma" before "gemini" to avoid false match
     if (primitiveId.includes("gemma")) return "gemma4";
     if (primitiveId.includes("gemini")) return "gemini-live";
+    if (primitiveId.includes("deepgram")) return "deepgram";
     if (primitiveId.includes("openai")) return "openai";
     // Default to gemini-live
     return "gemini-live";

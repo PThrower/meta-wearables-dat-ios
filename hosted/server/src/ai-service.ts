@@ -5,7 +5,7 @@
  * multimodal AI session that accepts video frames + audio and returns
  * spoken guidance audio + text events.
  *
- * Current providers: Gemini Live API
+ * Current providers: Gemini Live API, Gemma 4 (REST), Deepgram STT
  * Future: OpenAI Realtime, Anthropic, etc.
  */
 
