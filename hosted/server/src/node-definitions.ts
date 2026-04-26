@@ -67,14 +67,20 @@ export const TARGET_ROLE_SINK = "<sink>";
 /** Sentinel value in allowedTargets: expands to all current trigger types */
 export const TARGET_ROLE_TRIGGER = "<trigger>";
 
-/** Expand "<sink>" and "<trigger>" sentinels to concrete types */
-function expandTargets(targets: string[], sinkTypes: string[], triggerTypes: string[]): string[] {
+/** Sentinel value in allowedTargets: expands to all current source types */
+export const TARGET_ROLE_SOURCE = "<source>";
+
+/** Expand "<sink>", "<trigger>", and "<source>" sentinels to concrete types */
+function expandTargets(targets: string[], sinkTypes: string[], triggerTypes: string[], sourceTypes: string[]): string[] {
   let expanded = targets;
   if (expanded.includes(TARGET_ROLE_SINK)) {
     expanded = [...expanded.filter(t => t !== TARGET_ROLE_SINK), ...sinkTypes];
   }
   if (expanded.includes(TARGET_ROLE_TRIGGER)) {
     expanded = [...expanded.filter(t => t !== TARGET_ROLE_TRIGGER), ...triggerTypes];
+  }
+  if (expanded.includes(TARGET_ROLE_SOURCE)) {
+    expanded = [...expanded.filter(t => t !== TARGET_ROLE_SOURCE), ...sourceTypes];
   }
   return expanded;
 }
@@ -121,6 +127,73 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1, codec: "jpeg", onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null },
     defaultLabel: "Stream Input",
+    runtime: ["mobile"],
+  },
+  // --- Granular source nodes (preferred over monolithic stream-input) ---
+  {
+    type: "camera-source",
+    label: "Camera",
+    subtitle: "${codec} ${visionFps}fps",
+    color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "source",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "visionFps", label: "Vision FPS", min: 0.2, max: 2, step: 0.1 },
+      { kind: "select", key: "codec", label: "Video Codec", options: [
+        { value: "jpeg", label: "JPEG (compatible with AI models)" },
+        { value: "h264", label: "H.264 (lower bandwidth, viewer-only)" },
+      ]},
+    ],
+    defaultConfig: { visionFps: 1, codec: "jpeg" },
+    defaultLabel: "Camera",
+    runtime: ["mobile"],
+  },
+  {
+    type: "phone-mic-source",
+    label: "Phone Mic",
+    subtitle: "48kHz built-in",
+    color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    role: "source",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [],
+    defaultConfig: {},
+    defaultLabel: "Phone Mic",
+    runtime: ["mobile"],
+  },
+  {
+    type: "glasses-mic-source",
+    label: "Glasses Mic",
+    subtitle: "8kHz HFP",
+    color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK],
+    role: "source",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [],
+    defaultConfig: {},
+    defaultLabel: "Glasses Mic",
+    runtime: ["mobile"],
+  },
+  {
+    type: "gesture-source",
+    label: "Gestures",
+    subtitle: "hand gestures",
+    color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "source",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [],
+    defaultConfig: {},
+    defaultLabel: "Gestures",
     runtime: ["mobile"],
   },
   {
@@ -476,11 +549,14 @@ const SINK_TYPES = NODE_DEFINITIONS.filter(d => d.role === "sink").map(d => d.ty
 /** All current trigger type identifiers (derived from definitions) */
 const TRIGGER_TYPES = NODE_DEFINITIONS.filter(d => d.role === "trigger").map(d => d.type);
 
+/** All current source type identifiers (derived from definitions) */
+const SOURCE_TYPES = NODE_DEFINITIONS.filter(d => d.role === "source").map(d => d.type);
+
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
   for (const def of NODE_DEFINITIONS) {
-    map.set(def.type, new Set(expandTargets(def.allowedTargets, SINK_TYPES, TRIGGER_TYPES)));
+    map.set(def.type, new Set(expandTargets(def.allowedTargets, SINK_TYPES, TRIGGER_TYPES, SOURCE_TYPES)));
   }
   return map;
 }
@@ -488,6 +564,11 @@ export function buildAllowedEdgeMap(): Map<string, Set<string>> {
 /** Validate workflow DAG structure using role-based rules */
 export function validateStructure(nodes: Array<{ type: string }>): string | null {
   if (nodes.length === 0) return "Workflow must have at least 1 node";
+  const sourceCount = nodes.filter(n => {
+    const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
+    return role === "source";
+  }).length;
+  if (sourceCount < 1) return "Must have at least 1 source node";
   const sinkTransformTriggerCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
     return role === "sink" || role === "transform" || role === "trigger";
@@ -498,7 +579,6 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
 
 /** Resolve node types — maps old names to current definitions */
 const TYPE_ALIASES: Record<string, string> = {
-  "camera-source": "stream-input",
   "output-full": "viewers",
   "output-viewers": "viewers",
   "output-speaker": "local-tts",
@@ -520,4 +600,9 @@ export function isSinkType(type: string): boolean {
 /** Check if a node type is a trigger (resolves aliases first) */
 export function isTriggerType(type: string): boolean {
   return TRIGGER_TYPES.includes(resolveNodeType(type));
+}
+
+/** Check if a node type is a source (resolves aliases first) */
+export function isSourceType(type: string): boolean {
+  return SOURCE_TYPES.includes(resolveNodeType(type));
 }
