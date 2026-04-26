@@ -237,14 +237,22 @@ function buildMobileWorkflowConfig(
   });
   if (sinkNodes.length === 0) return null;
 
-  const inputNode = nodes.find(n => n.type === "stream-input");
+  const sourceNodes = nodes.filter(n => {
+    const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
+    return def?.role === "source";
+  });
+  // Resolve input config from source nodes via OR-merge (same as resolveSourceInput)
+  const hasCamera = sourceNodes.some(n => resolveNodeType(n.type) === "camera-source");
+  const hasPhoneMic = sourceNodes.some(n => resolveNodeType(n.type) === "phone-mic-source");
+  const hasGlassesMic = sourceNodes.some(n => resolveNodeType(n.type) === "glasses-mic-source");
+  const hasGestures = sourceNodes.some(n => resolveNodeType(n.type) === "gesture-source");
   return {
     sinks: sinkNodes.map(n => ({ type: n.type, config: n.config })),
-    input: inputNode ? {
-      video: inputNode.config.video !== false,
-      phoneMic: inputNode.config.phoneMic !== false,
-      glassesMic: inputNode.config.glassesMic === true,
-      gestures: inputNode.config.gestures !== false,
+    input: sourceNodes.length > 0 ? {
+      video: hasCamera,
+      phoneMic: hasPhoneMic,
+      glassesMic: hasGlassesMic,
+      gestures: hasGestures,
     } : undefined,
     edges: edges.map(e => ({ source: e.sourceNodeId, target: e.targetNodeId })),
   };
@@ -1156,7 +1164,7 @@ const server = Bun.serve<WsData>({
           session.appPipeline = null;
 
           // Request codec change if specified
-          const inputCodec = (nodes as any[]).find((n: any) => n.type === "stream-input")?.config?.codec as string | undefined;
+          const inputCodec = (nodes as any[]).find((n: any) => n.type === "camera-source")?.config?.codec as string | undefined;
           if (inputCodec && ["jpeg", "h264"].includes(inputCodec) && session.publisher?.ws?.readyState === WebSocket.OPEN) {
             session.publisher.ws.send(JSON.stringify({ type: "set_codec", codec: inputCodec }));
           }
@@ -1192,7 +1200,7 @@ const server = Bun.serve<WsData>({
         session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
 
         // Request codec change from publisher if workflow specifies one
-        const inputCodec = (nodes as any[]).find((n: any) => n.type === "stream-input")?.config?.codec as string | undefined;
+        const inputCodec = (nodes as any[]).find((n: any) => n.type === "camera-source")?.config?.codec as string | undefined;
         if (inputCodec && ["jpeg", "h264"].includes(inputCodec) && session.publisher?.ws?.readyState === WebSocket.OPEN) {
           session.publisher.ws.send(JSON.stringify({ type: "set_codec", codec: inputCodec }));
           console.log(`[relay] Codec change from workflow: codec=${inputCodec} session=${body.sessionId}`);

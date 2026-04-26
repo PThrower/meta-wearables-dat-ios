@@ -169,19 +169,8 @@ export function resolveWorkflowToApp(
     analysisIntervalSec: aiNode.config.analysisIntervalSec as number | undefined,
   };
 
-  // Read input config -- granular source nodes or monolithic stream-input
-  const input: InputConfig = hasGranularSources(nodes)
-    ? resolveSourceInput(aiNode.id, nodes, edges)
-    : (() => {
-        const inputNode = nodes.find(n => resolveNodeType(n.type) === "stream-input");
-        return {
-          video: inputNode?.config.video !== false,
-          phoneMic: inputNode?.config.phoneMic !== false,
-          glassesMic: inputNode?.config.glassesMic === true,
-          gestures: inputNode?.config.gestures !== false,
-          visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
-        };
-      })();
+  // Read input config from granular source nodes via DAG edges
+  const input: InputConfig = resolveSourceInput(aiNode.id, nodes, edges);
   config.visionFps = input.visionFps;
   config.input = input;
 
@@ -234,13 +223,17 @@ function findPromptForAiNode(aiNodeId: string, nodes: WorkflowNodeDef[], edges: 
   return (anyTextNode?.config.text as string) ?? "";
 }
 
-/** Extract lifecycle policy from the stream-input node config */
-export function extractLifecyclePolicy(inputNode: WorkflowNodeDef | undefined): LifecyclePolicy {
-  if (!inputNode) return { onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null };
+/** Extract lifecycle policy from any source node config that has lifecycle fields */
+export function extractLifecyclePolicy(nodes: WorkflowNodeDef[]): LifecyclePolicy {
+  const sourceNode = nodes.find(n => {
+    const resolved = resolveNodeType(n.type);
+    return isSourceType(resolved);
+  });
+  if (!sourceNode) return { onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null };
   return {
-    onDisconnect: (inputNode.config.onDisconnect as LifecyclePolicy["onDisconnect"]) ?? "stop",
-    onReconnect: (inputNode.config.onReconnect as LifecyclePolicy["onReconnect"]) ?? "restart",
-    autoDeactivateMin: (inputNode.config.autoDeactivateMin as number | null) ?? null,
+    onDisconnect: (sourceNode.config.onDisconnect as LifecyclePolicy["onDisconnect"]) ?? "stop",
+    onReconnect: (sourceNode.config.onReconnect as LifecyclePolicy["onReconnect"]) ?? "restart",
+    autoDeactivateMin: (sourceNode.config.autoDeactivateMin as number | null) ?? null,
   };
 }
 
@@ -325,10 +318,10 @@ function resolveSourceInput(
     }
   }
 
-  const hasCamera = connectedSources.has("camera-source") || connectedSources.has("stream-input");
-  const hasPhoneMic = connectedSources.has("phone-mic-source") || connectedSources.has("stream-input");
+  const hasCamera = connectedSources.has("camera-source");
+  const hasPhoneMic = connectedSources.has("phone-mic-source");
   const hasGlassesMic = connectedSources.has("glasses-mic-source");
-  const hasGestures = connectedSources.has("gesture-source") || connectedSources.has("stream-input");
+  const hasGestures = connectedSources.has("gesture-source");
 
   // Read visionFps from camera-source config if present
   const cameraNode = nodes.find(n => resolveNodeType(n.type) === "camera-source");
@@ -341,14 +334,6 @@ function resolveSourceInput(
     gestures: hasGestures,
     visionFps,
   };
-}
-
-/** Check if a workflow uses granular source nodes (camera-source, phone-mic-source, etc.) */
-function hasGranularSources(nodes: WorkflowNodeDef[]): boolean {
-  return nodes.some(n => {
-    const resolved = resolveNodeType(n.type);
-    return resolved !== "stream-input" && isSourceType(resolved);
-  });
 }
 
 /**
@@ -372,21 +357,10 @@ export function resolveWorkflowToPipeline(
   // Resolve trigger chains: map processorNodeId -> trigger metadata
   const triggerChains = resolveTriggerChains(nodes, edges);
 
-  // Detect source style: granular (camera-source, phone-mic-source, etc.) or monolithic (stream-input)
-  const useGranularSources = hasGranularSources(nodes);
-  const inputNode = nodes.find(n => resolveNodeType(n.type) === "stream-input");
-  const lifecycle = extractLifecyclePolicy(inputNode);
+  const lifecycle = extractLifecyclePolicy(nodes);
 
-  // Base input config (used for monolithic stream-input fallback and defaults)
-  const baseInput: InputConfig = useGranularSources
-    ? { video: false, phoneMic: false, glassesMic: false, gestures: false, visionFps: 1 }
-    : {
-        video: inputNode?.config.video !== false,
-        phoneMic: inputNode?.config.phoneMic !== false,
-        glassesMic: inputNode?.config.glassesMic === true,
-        gestures: inputNode?.config.gestures !== false,
-        visionFps: (inputNode?.config.visionFps as number) ?? 1,
-      };
+  // Base input config (defaults, overridden per-processor by resolveSourceInput)
+  const baseInput: InputConfig = { video: false, phoneMic: false, glassesMic: false, gestures: false, visionFps: 1 };
 
   // Shared output config from all sink nodes (OR-merge)
   const baseOutput = resolveSinkOutput(nodes);
@@ -398,17 +372,8 @@ export function resolveWorkflowToPipeline(
     const systemPrompt = isJepa ? "jepa-vision" : findPromptForAiNode(node.id, nodes, edges);
     const visionFps = (node.config.visionFps as number) ?? baseInput.visionFps;
 
-    // Per-node input config: granular sources resolve per-processor from DAG edges;
-    // monolithic stream-input resolves from shared base + per-node overrides
-    const input: InputConfig = useGranularSources
-      ? resolveSourceInput(node.id, nodes, edges)
-      : {
-          video: node.config.video !== undefined ? node.config.video as boolean : baseInput.video,
-          phoneMic: node.config.phoneMic !== undefined ? node.config.phoneMic as boolean : baseInput.phoneMic,
-          glassesMic: node.config.glassesMic !== undefined ? node.config.glassesMic as boolean : baseInput.glassesMic,
-          gestures: node.config.gestures !== undefined ? node.config.gestures as boolean : baseInput.gestures,
-          visionFps,
-        };
+    // Per-node input config: resolve from DAG edges connecting source nodes to this processor
+    const input: InputConfig = resolveSourceInput(node.id, nodes, edges);
 
     // Per-node output config
     const isPrimary = idx === 0 && !isJepa;

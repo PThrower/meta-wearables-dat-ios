@@ -88,48 +88,7 @@ function expandTargets(targets: string[], sinkTypes: string[], triggerTypes: str
 // --- Definitions ---
 
 export const NODE_DEFINITIONS: NodeDefinition[] = [
-  {
-    type: "stream-input",
-    label: "Stream Input",
-    subtitle: "${_modalities}",
-    color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
-    role: "source",
-    activationMode: null,
-    binding: null,
-    defaultModel: null,
-    configSchema: [
-      { kind: "text", key: "label", label: "Label" },
-      { kind: "checkbox-group", key: "modalities", label: "Modalities", fields: [
-        { key: "video", label: "Video (frames)" },
-        { key: "phoneMic", label: "Phone mic (48kHz)" },
-        { key: "glassesMic", label: "Glasses HFP mic (8kHz)" },
-        { key: "gestures", label: "Gestures" },
-      ]},
-      { kind: "range", key: "visionFps", label: "Vision FPS", min: 0.2, max: 2, step: 0.1 },
-      { kind: "select", key: "codec", label: "Video Codec", options: [
-        { value: "jpeg", label: "JPEG (compatible with AI models)" },
-        { value: "h264", label: "H.264 (lower bandwidth, viewer-only)" },
-      ]},
-      { kind: "section", label: "Lifecycle Policy", fields: [
-        { kind: "select", key: "onDisconnect", label: "On publisher disconnect", options: [
-          { value: "stop", label: "Stop AI" },
-          { value: "pause", label: "Pause AI" },
-          { value: "continue", label: "Continue until timeout" },
-        ]},
-        { kind: "select", key: "onReconnect", label: "On publisher reconnect", options: [
-          { value: "restart", label: "Restart AI" },
-          { value: "resume", label: "Resume AI" },
-          { value: "noop", label: "No-op" },
-        ]},
-        { kind: "number", key: "autoDeactivateMin", label: "Auto-deactivate after (min, 0 = never)", min: 0, max: 480, step: 5 },
-      ]},
-    ],
-    defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1, codec: "jpeg", onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null },
-    defaultLabel: "Stream Input",
-    runtime: ["mobile"],
-  },
-  // --- Granular source nodes (preferred over monolithic stream-input) ---
+  // --- Source nodes (granular input modalities) ---
   {
     type: "camera-source",
     label: "Camera",

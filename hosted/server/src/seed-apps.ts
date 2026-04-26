@@ -70,21 +70,20 @@ function buildWorkflowNodes(app: StaticApp, nodeInfo: { type: string; extraConfi
     ...(app.config.analysisIntervalSec != null ? { analysisIntervalSec: app.config.analysisIntervalSec } : {}),
   };
 
-  // Complete stream-input config matching current configSchema
-  const inputConfig: Record<string, unknown> = {
-    video: true,
-    phoneMic: !isJepa && nodeInfo.type !== "s2s-rest",
-    glassesMic: false,
-    gestures: !isJepa && !!app.config.gestures?.length,
+  // Source node configs for camera, phone-mic, and gesture modalities
+  const cameraConfig: Record<string, unknown> = {
     visionFps: app.config.visionFps ?? 1,
     codec: "jpeg",
-    onDisconnect: "stop",
-    onReconnect: "restart",
-    autoDeactivateMin: null,
   };
+  const needsPhoneMic = !isJepa && nodeInfo.type !== "s2s-rest";
+  const needsGestures = !isJepa && !!app.config.gestures?.length;
+  const phoneMicId = needsPhoneMic ? `n_mic_${s}` : null;
+  const gestureId = needsGestures ? `n_gest_${s}` : null;
 
   const nodes = [
-    { id: srcId, type: "stream-input", label: "Input", config: JSON.stringify(inputConfig), positionX: 100, positionY: 200 },
+    { id: srcId, type: "camera-source", label: "Camera", config: JSON.stringify(cameraConfig), positionX: 100, positionY: 200 },
+    ...(needsPhoneMic ? [{ id: phoneMicId!, type: "phone-mic-source", label: "Phone Mic", config: JSON.stringify({}), positionX: 100, positionY: 320 }] : []),
+    ...(needsGestures ? [{ id: gestureId!, type: "gesture-source", label: "Gestures", config: JSON.stringify({}), positionX: 100, positionY: 440 }] : []),
     { id: txtId, type: "text", label: "Prompt", config: JSON.stringify({ text: app.systemPrompt }), positionX: 400, positionY: 80 },
     { id: aiId, type: nodeInfo.type, label: app.name, config: JSON.stringify(processorConfig), positionX: 400, positionY: 250 },
     // Overlays sink for bbox annotations (replaces the old output node)
@@ -92,6 +91,8 @@ function buildWorkflowNodes(app: StaticApp, nodeInfo: { type: string; extraConfi
   ];
   const edges = [
     { id: `e_src_ai_${s}`, sourceNodeId: srcId, targetNodeId: aiId },
+    ...(needsPhoneMic ? [{ id: `e_mic_ai_${s}`, sourceNodeId: phoneMicId!, targetNodeId: aiId }] : []),
+    ...(needsGestures ? [{ id: `e_gest_ai_${s}`, sourceNodeId: gestureId!, targetNodeId: aiId }] : []),
     ...(isJepa ? [] : [{ id: `e_txt_ai_${s}`, sourceNodeId: txtId, targetNodeId: aiId }]),
     { id: `e_ai_sink_${s}`, sourceNodeId: aiId, targetNodeId: sinkId },
   ];
