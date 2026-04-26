@@ -1404,6 +1404,27 @@ const server = Bun.serve<WsData>({
       return new Response(null, { status: 204 });
     }
 
+    // --- Test: inject display_frame to publisher (for G2 glasses testing) ---
+    if (url.pathname === "/test/display" && req.method === "POST") {
+      const body = await req.json() as { lines?: string[]; session?: string };
+      const sessionId = body.session || "default";
+      const session = registry.get(sessionId);
+      if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
+        return Response.json({ error: "No publisher connected" }, { status: 404 });
+      }
+      // Force set displayViewer if not already set
+      if (!session.publisher.displayViewer) {
+        (session.publisher as any).displayViewer = { model: "even-g2", protocol: "protobuf" };
+        session.metadata.hasDisplayViewer = true;
+      }
+      const lines = body.lines || ["CaringMind", "Display Active"];
+      const frame = { type: "display_frame", target: "even-g2", lines, displayTarget: "main", priority: "normal" as const };
+      const payload = JSON.stringify(frame);
+      session.publisher.ws.send(payload);
+      console.log(`[test] Sent display_frame to session=${sessionId}: ${payload.substring(0, 120)}`);
+      return Response.json({ ok: true, sent: frame });
+    }
+
     // --- /view as HTML page (browser GET) or WebSocket upgrade ---
 
     const isPublish = url.pathname === "/publish";
@@ -1924,7 +1945,7 @@ const server = Bun.serve<WsData>({
             // Forward PCM payload to AI service (if active)
             if (audioHdr && session.activeAppId) {
               const pcmPayload = buf.slice(AUDIO_HEADER_SIZE);
-              orchestrator.sendAudio(sessionId, pcmPayload, audioHdr.codecType);
+              orchestrator.sendAudio(sessionId, pcmPayload, audioHdr.codecType, audioHdr.sampleRate);
             }
           } else if (isVideoFrame(buf)) {
             // Video frame (FRLY) — codec-aware routing
