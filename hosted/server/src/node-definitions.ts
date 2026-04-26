@@ -593,9 +593,9 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
   if (nodes.length === 0) return "Workflow must have at least 1 node";
   const sourceCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
-    return role === "source";
+    return role === "source" || role === "reference";
   }).length;
-  if (sourceCount < 1) return "Must have at least 1 source node";
+  if (sourceCount < 1) return "Must have at least 1 source or content node";
   const sinkTransformTriggerCount = nodes.filter(n => {
     const role = NODE_DEF_MAP.get(resolveNodeType(n.type))?.role;
     return role === "sink" || role === "transform" || role === "trigger";
