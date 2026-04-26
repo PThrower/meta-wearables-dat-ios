@@ -74,6 +74,9 @@ function buildWorkflowNodes(app: StaticApp, nodeInfo: { type: string; extraConfi
   const cameraConfig: Record<string, unknown> = {
     visionFps: app.config.visionFps ?? 1,
     codec: "jpeg",
+    onDisconnect: "stop",
+    onReconnect: "restart",
+    autoDeactivateMin: null,
   };
   const needsPhoneMic = !isJepa && nodeInfo.type !== "s2s-rest";
   const needsGestures = !isJepa && !!app.config.gestures?.length;

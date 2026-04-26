@@ -105,8 +105,21 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "jpeg", label: "JPEG (compatible with AI models)" },
         { value: "h264", label: "H.264 (lower bandwidth, viewer-only)" },
       ]},
+      { kind: "section", label: "Lifecycle Policy", fields: [
+        { kind: "select", key: "onDisconnect", label: "On publisher disconnect", options: [
+          { value: "stop", label: "Stop AI" },
+          { value: "pause", label: "Pause AI" },
+          { value: "continue", label: "Continue until timeout" },
+        ]},
+        { kind: "select", key: "onReconnect", label: "On publisher reconnect", options: [
+          { value: "restart", label: "Restart AI" },
+          { value: "resume", label: "Resume AI" },
+          { value: "noop", label: "No-op" },
+        ]},
+        { kind: "number", key: "autoDeactivateMin", label: "Auto-deactivate after (min, 0 = never)", min: 0, max: 480, step: 5 },
+      ]},
     ],
-    defaultConfig: { visionFps: 1, codec: "jpeg" },
+    defaultConfig: { visionFps: 1, codec: "jpeg", onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null },
     defaultLabel: "Camera",
     runtime: ["mobile"],
   },
