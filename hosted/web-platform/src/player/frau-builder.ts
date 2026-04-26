@@ -26,7 +26,7 @@ export function buildFrauFrame(
   bitsPerSample: number,
   pcmInt16: Int16Array
 ): ArrayBuffer {
-  const pcmBytes = new Uint8Array(pcmInt16.buffer, pcmInt16.byteOffset, pcmInt16.byteLength);
+  const pcmBytes = new Uint8Array(pcmInt16.buffer as ArrayBuffer, pcmInt16.byteOffset, pcmInt16.byteLength);
   const frame = buildAudioFrame(codecType, seqNum, sampleRate, channels, bitsPerSample, Date.now(), pcmBytes);
-  return frame.buffer;
+  return frame.buffer as ArrayBuffer;
 }

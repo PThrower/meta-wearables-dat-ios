@@ -187,6 +187,10 @@ class StreamSessionViewModel: ObservableObject {
   private let phoneCamera = PhoneCameraCapture()
   @Published var isPhoneCameraMode: Bool = false
 
+  // Even Realities BLE mode (audio + display, no camera)
+  @Published var isEvenRealitiesMode: Bool = false
+  @Published var evenRealitiesConnectionState: EvenRealitiesConnectionState = .disconnected
+
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
       videoCodec: VideoCodec.raw,
@@ -270,6 +274,7 @@ class StreamSessionViewModel: ObservableObject {
 
     // Clear phone camera mode when selecting a real SDK device
     isPhoneCameraMode = false
+    isEvenRealitiesMode = false
 
     // Stop monitoring old selector
     deviceMonitorTask?.cancel()
@@ -312,6 +317,7 @@ class StreamSessionViewModel: ObservableObject {
   func selectPhoneCamera() {
     guard !isStreaming else { return }
     isPhoneCameraMode = true
+    isEvenRealitiesMode = false
     selectedDeviceId = nil
     hasActiveDevice = true
 
@@ -329,6 +335,45 @@ class StreamSessionViewModel: ObservableObject {
     hasActiveDevice = false
 
     NSLog("[StreamSession] Phone camera deselected")
+  }
+
+  /// Select Even Realities BLE mode (audio + display, no camera).
+  func selectEvenRealities() {
+    guard !isStreaming else { return }
+    isEvenRealitiesMode = true
+    isPhoneCameraMode = false
+    selectedDeviceId = nil
+    hasActiveDevice = true
+
+    // Cancel SDK device monitor — Even Realities doesn't use it
+    deviceMonitorTask?.cancel()
+    deviceMonitorTask = nil
+
+    // Start BLE scanning + wire connection state to UI
+    Task {
+      await evenRealitiesManager.setOnConnectionStateChanged { [weak self] state in
+        Task { @MainActor [weak self] in
+          self?.evenRealitiesConnectionState = state
+        }
+      }
+      await evenRealitiesManager.startScanning()
+    }
+
+    NSLog("[StreamSession] Even Realities selected — BLE scanning started")
+  }
+
+  /// Deselect Even Realities mode.
+  func deselectEvenRealities() {
+    guard !isStreaming else { return }
+    isEvenRealitiesMode = false
+    hasActiveDevice = false
+    evenRealitiesConnectionState = .disconnected
+
+    Task {
+      await evenRealitiesManager.stop()
+    }
+
+    NSLog("[StreamSession] Even Realities deselected")
   }
 
   // MARK: - Config
@@ -969,6 +1014,10 @@ class StreamSessionViewModel: ObservableObject {
   /// Wire Even Realities BLE manager, audio source, and display bridge.
   /// If a device is already connected, passes its info to the relay hello message.
   private func wireEvenRealities() async {
+    // Only wire BLE mic + display when Even Realities mode is selected.
+    // Prevents BLE scanning/activation during DAT SDK or phone camera sessions.
+    guard isEvenRealitiesMode else { return }
+
     // Wire audio source to event bus (uses codecType=1, same as HFP mic)
     await evenAudioSource.setEventBus(audioEventBus)
 
@@ -1510,6 +1559,12 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
+    if isEvenRealitiesMode {
+      // Even Realities: audio + display only, no camera
+      await startEvenRealitiesSession()
+      return
+    }
+
     let permission = Permission.camera
     do {
       let status = try await wearables.checkPermissionStatus(permission)
@@ -1584,6 +1639,43 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] Phone camera session stopped")
   }
 
+  /// Start an Even Realities session: audio (BLE mic) + display bridge, no video.
+  private func startEvenRealitiesSession() async {
+    streamingStatus = .streaming
+
+    // Enable audio source and start BLE mic capture
+    await evenAudioSource.enable()
+
+    // Wire Even Realities audio + display bridge to relay
+    await wireEvenRealities()
+    await evenRealitiesManager.enableMicrophone()
+
+    // Start audio relay pipeline
+    await audioRelayStage.attachToEventBus(audioEventBus)
+    await startRelayAudioAndTelemetry()
+
+    NSLog("[StreamSession] Even Realities session started (audio + display, no video)")
+  }
+
+  /// Stop an Even Realities session.
+  private func stopEvenRealitiesSession() async {
+    await evenRealitiesManager.disableMicrophone()
+    await evenAudioSource.disable()
+    await audioRelayStage.detachFromEventBus(audioEventBus)
+    await audioStage.stop()
+    await glassesAudioStage.stop()
+    stopInboundAudioEngine()
+    telemetryPushTimer?.cancel()
+    telemetryPushTimer = nil
+
+    if relayMode == .active {
+      relayMode = .standby
+      await relayStage.sendJson(["type": "standby", "status": "ready"])
+    }
+
+    streamingStatus = .stopped
+  }
+
   private func showError(_ message: String) {
     errorMessage = message
     showError = true
@@ -1611,6 +1703,14 @@ class StreamSessionViewModel: ObservableObject {
         await relayStage.sendJson(["type": "standby", "status": "ready"])
       }
       await stopPhoneCameraSession()
+      let audioSession = AVAudioSession.sharedInstance()
+      try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+      return
+    }
+
+    // Even Realities path
+    if isEvenRealitiesMode {
+      await stopEvenRealitiesSession()
       let audioSession = AVAudioSession.sharedInstance()
       try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
       return

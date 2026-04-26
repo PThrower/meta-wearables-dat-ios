@@ -732,12 +732,12 @@ export class GuidancePanel {
 
     let html = '<div class="workflow-controls-bar">';
     if (hasRunning) {
-      html += `<button class="guidance-btn guidance-btn-sm" data-workflow-action="pause_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Pause All</button>`;
+      html += `<button class="guidance-btn guidance-btn-sm" data-workflow-action="pause_workflow" data-workflow-id="${esc(this.activeWorkflowId!)}">Pause All</button>`;
     }
     if (hasPaused) {
-      html += `<button class="guidance-btn guidance-btn-sm guidance-btn-activate" data-workflow-action="resume_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Resume All</button>`;
+      html += `<button class="guidance-btn guidance-btn-sm guidance-btn-activate" data-workflow-action="resume_workflow" data-workflow-id="${esc(this.activeWorkflowId!)}">Resume All</button>`;
     }
-    html += `<button class="guidance-btn guidance-btn-sm guidance-btn-deactivate" data-workflow-action="stop_workflow" data-workflow-id="${esc(this.activeWorkflowId)}">Stop</button>`;
+    html += `<button class="guidance-btn guidance-btn-sm guidance-btn-deactivate" data-workflow-action="stop_workflow" data-workflow-id="${esc(this.activeWorkflowId!)}">Stop</button>`;
     html += "</div>";
 
     // Node pipeline cards

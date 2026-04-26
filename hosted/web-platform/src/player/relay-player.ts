@@ -1110,21 +1110,23 @@ export class RelayPlayer {
     const x = 8, lineH = 14, pad = 4;
     const boxH = lines.length * lineH + pad * 2;
     const boxW = 200;
-    this.ctx.fillStyle = "rgba(0,0,0,0.75)";
-    this.ctx.fillRect(x, this.canvas.height - boxH - 8, boxW, boxH);
-    this.ctx.fillStyle = "#0f0";
-    this.ctx.font = "11px monospace";
-    this.ctx.textAlign = "left";
+    const ctx = this.ctx!;
+    const canvas = this.canvas!;
+    ctx.fillStyle = "rgba(0,0,0,0.75)";
+    ctx.fillRect(x, canvas.height - boxH - 8, boxW, boxH);
+    ctx.fillStyle = "#0f0";
+    ctx.font = "11px monospace";
+    ctx.textAlign = "left";
     lines.forEach((line, i) => {
-      this.ctx.fillStyle = line.startsWith("ERR") ? "#f55" : "#0f0";
-      this.ctx.fillText(line, x + pad, this.canvas.height - boxH - 8 + pad + lineH * (i + 1) - 3);
+      ctx.fillStyle = line.startsWith("ERR") ? "#f55" : "#0f0";
+      ctx.fillText(line, x + pad, canvas.height - boxH - 8 + pad + lineH * (i + 1) - 3);
     });
   }
 
   // --- JPEG rendering (legacy) ---
 
   private _renderJPEGFrame(jpegPayload: Uint8Array, width: number, height: number): void {
-    const blob = new Blob([jpegPayload], { type: "image/jpeg" });
+    const blob = new Blob([new Uint8Array(jpegPayload)], { type: "image/jpeg" });
     const url = URL.createObjectURL(blob);
     const img = new Image();
     img.onload = () => {
