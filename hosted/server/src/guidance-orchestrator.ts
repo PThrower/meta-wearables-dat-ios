@@ -299,7 +299,12 @@ export class GuidanceOrchestrator {
       return;
     }
 
-    const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
+    // STT services produce text (not audio) — default speaker=false to prevent
+    // transcription text from being pushed back to the publisher for TTS playback,
+    // which would create a feedback loop (mic picks up TTS → Deepgram → TTS → …).
+    const isSTT = provider === "deepgram";
+    const defaultSpeaker = isSTT ? false : true;
+    const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: defaultSpeaker, recording: true };
     const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, phoneMic: true, glassesMic: true, gestures: true, visionFps: app.config.visionFps ?? 1 };
     const dependsOn = app.config.dependsOn as string | undefined;
     console.log(`[orchestrator] activateWithConfig appId=${appId} speakerTarget=${output.speakerTarget} speaker=${output.speaker} dependsOn=${dependsOn ?? "none"}`);
