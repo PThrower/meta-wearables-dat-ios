@@ -125,6 +125,10 @@ interface SessionAIState {
   lastAudioAt: number;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   consecutiveReconnects: number;
+  /** If set, this app's activation is deferred until the upstream app produces its first output */
+  dependsOn?: string;
+  /** Whether this app has emitted its first output (used to unblock dependents) */
+  hasProducedOutput: boolean;
 }
 
 // --- Orchestrator ---
@@ -138,6 +142,8 @@ export class GuidanceOrchestrator {
   private eventHistory = new Map<string, GuidanceEvent[]>();
   private subscribers = new Map<string, Set<(msg: any) => void>>();
   private aiState = new Map<string, Map<string, SessionAIState>>();  // sessionId -> appId -> state
+  /** Pending activations waiting for upstream processor to produce first output */
+  private pendingActivations = new Map<string, Map<string, AppDefinition>>(); // sessionId -> upstreamAppId -> deferred app
   private workflowInstances = new Map<string, WorkflowInstanceState>(); // "sessionId:workflowId" -> state
 
   /** Callback to push AI audio response to relay's audio-in path */
@@ -284,7 +290,8 @@ export class GuidanceOrchestrator {
 
     const output: OutputConfig = (app.config.output as OutputConfig) ?? { viewers: true, overlays: true, speaker: true, recording: true };
     const input: InputConfig = (app.config.input as InputConfig) ?? { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: app.config.visionFps ?? 1 };
-    console.log(`[orchestrator] activateWithConfig appId=${appId} speakerTarget=${output.speakerTarget} speaker=${output.speaker}`);
+    const dependsOn = app.config.dependsOn as string | undefined;
+    console.log(`[orchestrator] activateWithConfig appId=${appId} speakerTarget=${output.speakerTarget} speaker=${output.speaker} dependsOn=${dependsOn ?? "none"}`);
     const state: SessionAIState = {
       service,
       appId,
@@ -293,6 +300,8 @@ export class GuidanceOrchestrator {
       lastAudioAt: 0,
       reconnectTimer: null,
       consecutiveReconnects: 0,
+      dependsOn,
+      hasProducedOutput: false,
     };
 
     // Store in multi-map: sessionId -> appId -> state
@@ -302,6 +311,25 @@ export class GuidanceOrchestrator {
       this.aiState.set(sessionId, sessionApps);
     }
     sessionApps.set(appId, state);
+
+    // Check if this app should be deferred until its upstream processor produces output
+    if (dependsOn) {
+      const upstreamState = sessionApps.get(dependsOn);
+      if (upstreamState && !upstreamState.hasProducedOutput) {
+        // Upstream hasn't produced output yet -- defer activation
+        console.log(`[orchestrator] Deferring ${appId} until upstream ${dependsOn} produces output`);
+        this.updateNodeState(sessionId, appId, "waiting");
+        let pending = this.pendingActivations.get(sessionId);
+        if (!pending) {
+          pending = new Map();
+          this.pendingActivations.set(sessionId, pending);
+        }
+        pending.set(dependsOn, app);
+        return;
+      }
+      // Upstream already produced output -- activate immediately
+      console.log(`[orchestrator] Upstream ${dependsOn} already active, activating ${appId} immediately`);
+    }
 
     // Wire AI service callbacks
     const callbacks: AIServiceCallbacks = {
@@ -815,6 +843,8 @@ export class GuidanceOrchestrator {
     }
     sessionApps.clear();
     this.aiState.delete(sessionId);
+    // Clear any pending activations for this session
+    this.pendingActivations.delete(sessionId);
   }
 
   private handleAIAudio(sessionId: string, appId: string, pcm: Uint8Array): void {
@@ -1174,9 +1204,20 @@ export class GuidanceOrchestrator {
     }
     history.push(event);
 
+    // Mark the source app as having produced output (unblocks dependent processors)
+    const sourceAppId = event.source;
+    const evtSession = this.aiState.get(sessionId);
+    if (evtSession) {
+      const sourceState = evtSession.get(sourceAppId);
+      if (sourceState && !sourceState.hasProducedOutput) {
+        sourceState.hasProducedOutput = true;
+        console.log(`[orchestrator] App ${sourceAppId} produced first output, checking pending dependents`);
+        this.activatePendingDependents(sessionId, sourceAppId);
+      }
+    }
+
     // Persist to R2 via callback (buffered by session-recorder)
     // Check if any app has recording enabled
-    const evtSession = this.aiState.get(sessionId);
     const anyRecording = evtSession && [...evtSession.values()].some(s => s.output.recording);
     if (this.guidancePersistFn && anyRecording) {
       this.guidancePersistFn(sessionId, event);
@@ -1195,6 +1236,21 @@ export class GuidanceOrchestrator {
         try { cb(msg); } catch { /* subscriber error, skip */ }
       }
     }
+  }
+
+  /** Activate any processors that were waiting for the given upstream app to produce output */
+  private activatePendingDependents(sessionId: string, upstreamAppId: string): void {
+    const pending = this.pendingActivations.get(sessionId);
+    if (!pending) return;
+    const deferredApp = pending.get(upstreamAppId);
+    if (!deferredApp) return;
+    pending.delete(upstreamAppId);
+    if (pending.size === 0) this.pendingActivations.delete(sessionId);
+    console.log(`[orchestrator] Activating deferred app ${deferredApp.id} now that upstream ${upstreamAppId} has output`);
+    // Fire-and-forget -- errors logged inside activateWithConfig
+    this.activateWithConfig(sessionId, deferredApp).catch(err => {
+      console.error(`[orchestrator] Failed to activate deferred app ${deferredApp.id}:`, err);
+    });
   }
 
   private broadcastStatus(sessionId: string): void {

@@ -357,6 +357,16 @@ export function resolveWorkflowToPipeline(
   // Resolve trigger chains: map processorNodeId -> trigger metadata
   const triggerChains = resolveTriggerChains(nodes, edges);
 
+  // Resolve processor-to-processor dependencies (sequential activation)
+  // If processor B has an incoming edge from processor A, B waits for A's first output
+  const processorIds = new Set(processableNodes.map(n => n.id));
+  const dependsOnMap = new Map<string, string>(); // processorNodeId -> upstream processorNodeId
+  for (const edge of edges) {
+    if (processorIds.has(edge.targetNodeId) && processorIds.has(edge.sourceNodeId)) {
+      dependsOnMap.set(edge.targetNodeId, edge.sourceNodeId);
+    }
+  }
+
   const lifecycle = extractLifecyclePolicy(nodes);
 
   // Base input config (defaults, overridden per-processor by resolveSourceInput)
@@ -395,6 +405,10 @@ export function resolveWorkflowToPipeline(
       input,
       output,
       lifecycle,
+      // Annotate with sequential dependency if this processor depends on another
+      ...(dependsOnMap.has(node.id) ? {
+        dependsOn: dependsOnMap.get(node.id),
+      } : {}),
       // Annotate with trigger chain if this processor is downstream of a trigger
       ...(triggerChains.has(node.id) ? {
         trigger: {
@@ -420,7 +434,7 @@ export function resolveWorkflowToPipeline(
     const nodeLabel = node.label ? ` - ${node.label}` : "";
     const suffix = processableNodes.length > 1 ? ` [${idx + 1}]` : "";
 
-    console.log(`[app-registry] Pipeline node ${idx}: type=${node.type} id=${node.id} speakerTarget=${speakerTarget} speaker=${output.speaker}`);
+    console.log(`[app-registry] Pipeline node ${idx}: type=${node.type} id=${node.id} speakerTarget=${speakerTarget} speaker=${output.speaker} dependsOn=${dependsOnMap.get(node.id) ?? "none"}`);
 
     return {
       id: processableNodes.length === 1 ? `wf-${workflow.id}` : `wf-${workflow.id}-${idx}`,
