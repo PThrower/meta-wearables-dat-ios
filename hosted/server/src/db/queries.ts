@@ -379,7 +379,7 @@ export function updateWorkflow(id: string, params: {
   description?: string;
   status?: string;
   canvasViewport?: string;
-  flowConfig?: string;
+  flowConfig?: string | null;
   nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
   edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
 }) {
@@ -387,16 +387,29 @@ export function updateWorkflow(id: string, params: {
     const db = getDbRaw();
     const ts = now();
     db.transaction(() => {
-      db.prepare(`
-        UPDATE workflows SET
-          name = COALESCE(?, name),
-          description = COALESCE(?, description),
-          status = COALESCE(?, status),
-          canvas_viewport = COALESCE(?, canvas_viewport),
-          flow_config = COALESCE(?, flow_config),
-          updated_at = ?
-        WHERE id = ?
-      `).run(params.name ?? null, params.description ?? null, params.status ?? null, params.canvasViewport ?? null, params.flowConfig ?? null, ts, id);
+      // Build dynamic SET clause — only update flow_config when explicitly provided
+      const setParts = [
+        "name = COALESCE(?, name)",
+        "description = COALESCE(?, description)",
+        "status = COALESCE(?, status)",
+        "canvas_viewport = COALESCE(?, canvas_viewport)",
+        "updated_at = ?",
+      ];
+      const values: (string | null)[] = [
+        params.name ?? null,
+        params.description ?? null,
+        params.status ?? null,
+        params.canvasViewport ?? null,
+        ts,
+      ];
+
+      if (params.flowConfig !== undefined) {
+        setParts.splice(4, 0, "flow_config = ?");
+        values.splice(4, 0, params.flowConfig ?? null);
+      }
+
+      db.prepare(`UPDATE workflows SET ${setParts.join(", ")} WHERE id = ?`)
+        .run(...values, id);
 
       if (params.nodes) {
         db.prepare("DELETE FROM workflow_nodes WHERE workflow_id = ?").run(id);

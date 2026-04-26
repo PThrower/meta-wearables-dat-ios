@@ -1017,6 +1017,7 @@ const server = Bun.serve<WsData>({
             id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId,
           })),
           canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
+          flowConfig: wf!.flowConfig ? JSON.parse(wf!.flowConfig) : null,
           createdAt: wf!.createdAt,
           updatedAt: wf!.updatedAt,
         }, { status: 201 });
@@ -1074,7 +1075,9 @@ const server = Bun.serve<WsData>({
             description: body.description,
             status: body.status,
             canvasViewport: body.canvasViewport,
-            flowConfig: body.flowConfig !== undefined ? JSON.stringify(body.flowConfig) : undefined,
+            flowConfig: body.flowConfig !== undefined
+              ? (body.flowConfig === null ? null : JSON.stringify(body.flowConfig))
+              : undefined,
             nodes: body.nodes?.map(n => ({ ...n, config: n.config ?? "{}" })),
             edges: body.edges,
           }));
