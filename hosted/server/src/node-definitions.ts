@@ -24,7 +24,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -328,6 +328,45 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "JEPA Vision",
     runtime: ["server", "mobile"],
   },
+  {
+    type: "deepgram-stt",
+    label: "Deepgram STT",
+    subtitle: "${model} | ${language}",
+    color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "stt",
+    binding: "deepgram-stt",
+    defaultModel: "nova-2",
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "select", key: "model", label: "Model", options: [
+        { value: "nova-2", label: "Nova-2 (best accuracy)" },
+        { value: "nova-3", label: "Nova-3 (latest)" },
+        { value: "enhanced", label: "Enhanced" },
+        { value: "base", label: "Base" },
+      ]},
+      { kind: "select", key: "language", label: "Language", options: [
+        { value: "en-US", label: "English (US)" },
+        { value: "en-GB", label: "English (UK)" },
+        { value: "es-ES", label: "Spanish" },
+        { value: "fr-FR", label: "French" },
+        { value: "de-DE", label: "German" },
+        { value: "it-IT", label: "Italian" },
+        { value: "pt-BR", label: "Portuguese (BR)" },
+        { value: "ja-JP", label: "Japanese" },
+        { value: "ko-KR", label: "Korean" },
+        { value: "zh-CN", label: "Chinese (Simplified)" },
+        { value: "multi", label: "Auto-detect" },
+      ]},
+      { kind: "checkbox", key: "punctuation", label: "Smart punctuation" },
+      { kind: "checkbox", key: "diarize", label: "Speaker diarization" },
+      { kind: "checkbox", key: "profanityFilter", label: "Profanity filter" },
+    ],
+    defaultConfig: { model: "nova-2", language: "en-US", punctuation: true, diarize: false, profanityFilter: false },
+    defaultLabel: "Deepgram STT",
+    runtime: ["server"],
+  },
   // --- Trigger nodes (event-driven conditional routers) ---
   //
   // Triggers are event-driven routers that bridge processors to other nodes.
@@ -509,7 +548,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   {
     type: "overlays",
     label: "Overlays",
-    subtitle: "bbox annotations",
+    subtitle: "bbox + ${transcription}",
     color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
     allowedTargets: [],
     role: "sink",
@@ -518,8 +557,10 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultModel: null,
     configSchema: [
       { kind: "text", key: "label", label: "Label" },
+      { kind: "checkbox", key: "bbox", label: "Bounding box annotations" },
+      { kind: "checkbox", key: "transcription", label: "Live transcription overlay" },
     ],
-    defaultConfig: {},
+    defaultConfig: { bbox: true, transcription: false },
     defaultLabel: "Overlays",
     runtime: ["mobile"],
   },
