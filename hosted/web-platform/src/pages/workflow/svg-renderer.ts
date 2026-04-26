@@ -66,6 +66,58 @@ export const NODE_STATUS_DOT_COLORS: Record<string, string> = {
   unknown: "#9ca3af",
 };
 
+/** Processor node types that participate in sequential activation. */
+const PROCESSOR_TYPES = new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "deepgram-stt"]);
+
+/** Compute execution phases for processor nodes from processor→processor edges.
+ *  Returns Map<nodeId, phase> where phase 1 = no upstream processor, phase 2+ = chained. */
+function computePhases(nodes: WorkflowNodeDef[], edges: WorkflowEdgeDef[]): Map<string, number> {
+  const phases = new Map<string, number>();
+  const processorIds = new Set(nodes.filter(n => PROCESSOR_TYPES.has(n.type)).map(n => n.id));
+  if (processorIds.size === 0) return phases;
+
+  // Build upstream map: processorId -> upstream processorId
+  const upstreamOf = new Map<string, string>();
+  for (const e of edges) {
+    if (processorIds.has(e.sourceNodeId) && processorIds.has(e.targetNodeId)) {
+      upstreamOf.set(e.targetNodeId, e.sourceNodeId);
+    }
+  }
+
+  // BFS from roots (processors with no upstream processor)
+  for (const id of processorIds) {
+    if (!upstreamOf.has(id)) phases.set(id, 1);
+  }
+
+  // Walk chains
+  const visited = new Set<string>();
+  const resolve = (id: string): number => {
+    if (phases.has(id)) return phases.get(id)!;
+    if (visited.has(id)) return 1; // cycle guard
+    visited.add(id);
+    const up = upstreamOf.get(id);
+    const phase = up ? resolve(up) + 1 : 1;
+    phases.set(id, phase);
+    return phase;
+  };
+  for (const id of processorIds) resolve(id);
+
+  return phases;
+}
+
+/** Render phase badge SVG on a processor node (top-left corner). */
+function phaseBadgeSVG(phase: number, scale: number): string {
+  if (phase <= 1) return ""; // Phase 1 has no badge (runs immediately)
+  const bx = 4 * scale;
+  const by = 2 * scale;
+  const bw = 18 * scale;
+  const bh = 14 * scale;
+  const br = 3 * scale;
+  return `
+    <rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="${br}" fill="#f59e0b" opacity="0.9"/>
+    <text x="${bx + bw / 2}" y="${by + 10 * scale}" text-anchor="middle" fill="#000" font-size="${8 * scale}" font-weight="700">P${phase}</text>`;
+}
+
 /**
  * Parameterized SVG builder — accepts explicit data instead of reading singleton state.
  * Used by MiniWorkflowEditor and the full editor.
@@ -86,6 +138,9 @@ export function buildSVGFromData(
   const r = NODE_R * scale;
   const gridId = svgId + "-grid";
 
+  // Compute execution phases for processor nodes
+  const phases = computePhases(nodes, edges);
+
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
     const c = def?.color ?? FALLBACK_COLOR;
@@ -95,9 +150,11 @@ export function buildSVGFromData(
     const statusDot = stateColor
       ? `<circle cx="${r}" cy="${r}" r="${5 * scale}" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
       : "";
+    const phaseBadge = phases.has(n.id) ? phaseBadgeSVG(phases.get(n.id)!, scale) : "";
     return `
       <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
         ${statusDot}
+        ${phaseBadge}
         <rect class="wf-node-bg" width="${w}" height="${h}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
         <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
         <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
@@ -110,10 +167,7 @@ export function buildSVGFromData(
     `;
   }).join("");
 
-  // Detect processor→processor edges for sequential styling
-  const processorTypes = new Set(["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "deepgram-stt"]);
-  const isProcessor = (type: string) => processorTypes.has(type);
-
+  // Edge rendering with sequential phase labels
   const edgeSVGs = edges.map(e => {
     const src = nodes.find(n => n.id === e.sourceNodeId);
     const tgt = nodes.find(n => n.id === e.targetNodeId);
@@ -124,13 +178,15 @@ export function buildSVGFromData(
     const ty = tgt.positionY * scale + h / 2;
     const mx = (sx + tx) / 2;
 
-    // Processor→processor edges are sequential dependencies
-    const isSequential = isProcessor(src.type) && isProcessor(tgt.type);
-    if (isSequential) {
+    // Processor→processor edge: show phase transition number
+    const srcPhase = phases.get(src.id);
+    const tgtPhase = phases.get(tgt.id);
+    if (srcPhase != null && tgtPhase != null && tgtPhase > srcPhase) {
       const labelX = mx;
       const labelY = (sy + ty) / 2 - (8 * scale);
+      const arrowLabel = `${srcPhase}→${tgtPhase}`;
       return `<path class="wf-edge wf-edge-seq" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="6 3" />` +
-        `<text x="${labelX}" y="${labelY}" text-anchor="middle" fill="#f59e0b" font-size="${9 * scale}" font-weight="600" pointer-events="none">SEQ</text>`;
+        `<text x="${labelX}" y="${labelY}" text-anchor="middle" fill="#f59e0b" font-size="${9 * scale}" font-weight="600" pointer-events="none">${arrowLabel}</text>`;
     }
     return `<path class="wf-edge" data-id="${e.id}" d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ty}, ${tx} ${ty}" fill="none" stroke="#64748b" stroke-width="2" />`;
   }).join("");
