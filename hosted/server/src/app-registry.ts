@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AppsConfig, AppDefinition, PrimitiveDefinition, AppPipeline, WorkflowNodeDef, WorkflowEdgeDef, AppConfig, InputConfig, OutputConfig, LifecyclePolicy } from "./app-types.js";
-import { NODE_DEF_MAP, resolveNodeType, isSinkType, isTriggerType } from "./node-definitions.js";
+import { NODE_DEF_MAP, resolveNodeType, isSinkType, isTriggerType, isSourceType } from "./node-definitions.js";
 
 export class AppRegistry {
   private primitives = new Map<string, PrimitiveDefinition>();
@@ -169,15 +169,19 @@ export function resolveWorkflowToApp(
     analysisIntervalSec: aiNode.config.analysisIntervalSec as number | undefined,
   };
 
-  // Read input node config for modality selection (device selection is stream-level)
-  const inputNode = nodes.find(n => n.type === "stream-input");
-  const input: InputConfig = {
-    video: inputNode?.config.video !== false,
-    phoneMic: inputNode?.config.phoneMic !== false,
-    glassesMic: inputNode?.config.glassesMic === true,
-    gestures: inputNode?.config.gestures !== false,
-    visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
-  };
+  // Read input config -- granular source nodes or monolithic stream-input
+  const input: InputConfig = hasGranularSources(nodes)
+    ? resolveSourceInput(aiNode.id, nodes, edges)
+    : (() => {
+        const inputNode = nodes.find(n => resolveNodeType(n.type) === "stream-input");
+        return {
+          video: inputNode?.config.video !== false,
+          phoneMic: inputNode?.config.phoneMic !== false,
+          glassesMic: inputNode?.config.glassesMic === true,
+          gestures: inputNode?.config.gestures !== false,
+          visionFps: (inputNode?.config.visionFps as number) ?? config.visionFps ?? 1,
+        };
+      })();
   config.visionFps = input.visionFps;
   config.input = input;
 
@@ -284,6 +288,70 @@ function resolveTriggerChains(
 }
 
 /**
+ * Resolve input config from granular source nodes via DAG edges.
+ * Walks edges backward from a processor to find connected source nodes,
+ * then OR-merges the source types into an InputConfig.
+ */
+function resolveSourceInput(
+  processorId: string,
+  nodes: WorkflowNodeDef[],
+  edges: WorkflowEdgeDef[],
+): InputConfig {
+  // Find source nodes directly connected to this processor (BFS backward through edges)
+  const connectedSources = new Set<string>();
+  const visited = new Set<string>();
+  const queue = [processorId];
+  visited.add(processorId);
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    for (const edge of edges) {
+      if (edge.targetNodeId !== currentId) continue;
+      if (visited.has(edge.sourceNodeId)) continue;
+      visited.add(edge.sourceNodeId);
+
+      const sourceNode = nodes.find(n => n.id === edge.sourceNodeId);
+      if (!sourceNode) continue;
+      const resolvedType = resolveNodeType(sourceNode.type);
+      const sourceDef = NODE_DEF_MAP.get(resolvedType);
+
+      if (sourceDef?.role === "source") {
+        connectedSources.add(resolvedType);
+      }
+      // Walk backward through non-source, non-sink nodes (transforms, triggers)
+      if (sourceDef?.role === "transform" || sourceDef?.role === "trigger") {
+        queue.push(edge.sourceNodeId);
+      }
+    }
+  }
+
+  const hasCamera = connectedSources.has("camera-source") || connectedSources.has("stream-input");
+  const hasPhoneMic = connectedSources.has("phone-mic-source") || connectedSources.has("stream-input");
+  const hasGlassesMic = connectedSources.has("glasses-mic-source");
+  const hasGestures = connectedSources.has("gesture-source") || connectedSources.has("stream-input");
+
+  // Read visionFps from camera-source config if present
+  const cameraNode = nodes.find(n => resolveNodeType(n.type) === "camera-source");
+  const visionFps = (cameraNode?.config.visionFps as number) ?? 1;
+
+  return {
+    video: hasCamera,
+    phoneMic: hasPhoneMic,
+    glassesMic: hasGlassesMic,
+    gestures: hasGestures,
+    visionFps,
+  };
+}
+
+/** Check if a workflow uses granular source nodes (camera-source, phone-mic-source, etc.) */
+function hasGranularSources(nodes: WorkflowNodeDef[]): boolean {
+  return nodes.some(n => {
+    const resolved = resolveNodeType(n.type);
+    return resolved !== "stream-input" && isSourceType(resolved);
+  });
+}
+
+/**
  * Resolve workflow into a multi-node pipeline.
  * Each processable node becomes its own AppDefinition with per-node prompt and config.
  * For single-node workflows, returns an array of one (backward compat with resolveWorkflowToApp).
@@ -304,16 +372,21 @@ export function resolveWorkflowToPipeline(
   // Resolve trigger chains: map processorNodeId -> trigger metadata
   const triggerChains = resolveTriggerChains(nodes, edges);
 
-  // Shared input config from stream-input node
-  const inputNode = nodes.find(n => n.type === "stream-input");
+  // Detect source style: granular (camera-source, phone-mic-source, etc.) or monolithic (stream-input)
+  const useGranularSources = hasGranularSources(nodes);
+  const inputNode = nodes.find(n => resolveNodeType(n.type) === "stream-input");
   const lifecycle = extractLifecyclePolicy(inputNode);
-  const baseInput: InputConfig = {
-    video: inputNode?.config.video !== false,
-    phoneMic: inputNode?.config.phoneMic !== false,
-    glassesMic: inputNode?.config.glassesMic === true,
-    gestures: inputNode?.config.gestures !== false,
-    visionFps: (inputNode?.config.visionFps as number) ?? 1,
-  };
+
+  // Base input config (used for monolithic stream-input fallback and defaults)
+  const baseInput: InputConfig = useGranularSources
+    ? { video: false, phoneMic: false, glassesMic: false, gestures: false, visionFps: 1 }
+    : {
+        video: inputNode?.config.video !== false,
+        phoneMic: inputNode?.config.phoneMic !== false,
+        glassesMic: inputNode?.config.glassesMic === true,
+        gestures: inputNode?.config.gestures !== false,
+        visionFps: (inputNode?.config.visionFps as number) ?? 1,
+      };
 
   // Shared output config from all sink nodes (OR-merge)
   const baseOutput = resolveSinkOutput(nodes);
@@ -325,14 +398,17 @@ export function resolveWorkflowToPipeline(
     const systemPrompt = isJepa ? "jepa-vision" : findPromptForAiNode(node.id, nodes, edges);
     const visionFps = (node.config.visionFps as number) ?? baseInput.visionFps;
 
-    // Per-node input config: each node can override the shared input
-    const input: InputConfig = {
-      video: node.config.video !== undefined ? node.config.video as boolean : baseInput.video,
-      phoneMic: node.config.phoneMic !== undefined ? node.config.phoneMic as boolean : baseInput.phoneMic,
-      glassesMic: node.config.glassesMic !== undefined ? node.config.glassesMic as boolean : baseInput.glassesMic,
-      gestures: node.config.gestures !== undefined ? node.config.gestures as boolean : baseInput.gestures,
-      visionFps,
-    };
+    // Per-node input config: granular sources resolve per-processor from DAG edges;
+    // monolithic stream-input resolves from shared base + per-node overrides
+    const input: InputConfig = useGranularSources
+      ? resolveSourceInput(node.id, nodes, edges)
+      : {
+          video: node.config.video !== undefined ? node.config.video as boolean : baseInput.video,
+          phoneMic: node.config.phoneMic !== undefined ? node.config.phoneMic as boolean : baseInput.phoneMic,
+          glassesMic: node.config.glassesMic !== undefined ? node.config.glassesMic as boolean : baseInput.glassesMic,
+          gestures: node.config.gestures !== undefined ? node.config.gestures as boolean : baseInput.gestures,
+          visionFps,
+        };
 
     // Per-node output config
     const isPrimary = idx === 0 && !isJepa;
