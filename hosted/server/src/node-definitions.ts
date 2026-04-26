@@ -551,6 +551,8 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
 
 /** Resolve node types — maps old names to current definitions */
 const TYPE_ALIASES: Record<string, string> = {
+  // Legacy monolithic source -> granular camera-source (lifecycle config lives there)
+  "stream-input": "camera-source",
   "output-full": "viewers",
   "output-viewers": "viewers",
   "output-speaker": "local-tts",

@@ -10,7 +10,7 @@ let _nodeDefMap = new Map<string, NodeDefinition>();
 
 /** Map old node type names to their current equivalents. */
 const TYPE_ALIASES: Record<string, string> = {
-  "camera-source": "stream-input",
+  "stream-input": "camera-source",
   "output-full": "viewers",
   "output-viewers": "viewers",
   "output-speaker": "local-tts",
@@ -21,7 +21,10 @@ const TYPE_ALIASES: Record<string, string> = {
 
 /** Static fallback palette — used when the /api/node-definitions fetch fails. */
 export const FALLBACK_PALETTE: NodeDefinition[] = [
-  { type: "stream-input", label: "Stream Input", subtitle: "${_modalities}", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>", "<trigger>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { video: true, phoneMic: true, glassesMic: false, gestures: true, visionFps: 1 }, defaultLabel: "Stream Input", runtime: ["mobile"] },
+  { type: "camera-source", label: "Camera", subtitle: "${codec} ${visionFps}fps", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "<sink>", "<trigger>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { visionFps: 1, codec: "jpeg" }, defaultLabel: "Camera", runtime: ["mobile"] },
+  { type: "phone-mic-source", label: "Phone Mic", subtitle: "48kHz built-in", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "<sink>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Phone Mic", runtime: ["mobile"] },
+  { type: "glasses-mic-source", label: "Glasses Mic", subtitle: "8kHz HFP", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "<sink>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Glasses Mic", runtime: ["mobile"] },
+  { type: "gesture-source", label: "Gestures", subtitle: "hand gestures", color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "<sink>", "<trigger>"], role: "source", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Gestures", runtime: ["mobile"] },
   { type: "text", label: "Text", subtitle: "${text}", color: { fill: "#1a1a2e", header: "#e2e8f0", stroke: "#94a3b8" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts"], role: "reference", activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { text: "" }, defaultLabel: "Text", runtime: ["server"] },
   { type: "s2s-live", label: "S2S Live", subtitle: "${model}", color: { fill: "#0d3320", header: "#22c55e", stroke: "#22c55e" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>", "<trigger>"], role: "processor", activationMode: "ai", binding: "s2s-gemini-live", defaultModel: "gemini-2.5-flash-native-audio-latest", configSchema: [], defaultConfig: { model: "gemini-2.5-flash-native-audio-latest" }, defaultLabel: "S2S Live", runtime: ["server"] },
   { type: "s2s-rest", label: "S2S REST", subtitle: "${model}", color: { fill: "#0d2040", header: "#3b82f6", stroke: "#3b82f6" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "<sink>", "<trigger>"], role: "processor", activationMode: "ai", binding: "s2s-gemma4-rest", defaultModel: "gemma-4-27b", configSchema: [], defaultConfig: { model: "gemma-4-27b" }, defaultLabel: "S2S REST", runtime: ["server"] },
