@@ -683,7 +683,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             let hardwareModel = Self.hardwareModelIdentifier()   // e.g. "iPhone14,4"
             let systemVersion = UIDevice.current.systemVersion
 
-            let hello: [String: Any] = [
+            var hello: [String: Any] = [
                 "type": "hello",
                 "deviceId": deviceId,
                 "deviceName": deviceName,
@@ -772,6 +772,18 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Called by StreamSessionViewModel before connecting.
     func setOnControlMessage(_ handler: @Sendable @escaping ([String: Any]) -> Void) {
         self.onControlMessage = handler
+    }
+
+    /// Set the callback for display_frame messages from the server.
+    /// Called by StreamSessionViewModel before connecting.
+    func setOnDisplayFrame(_ handler: @Sendable @escaping ([String: Any]) -> Void) {
+        self.onDisplayFrame = handler
+    }
+
+    /// Set the Even Realities display viewer model for hello message.
+    /// Called by StreamSessionViewModel when BLE device is detected.
+    func setDisplayViewerModel(_ model: String?) {
+        self.displayViewerModel = model
     }
 }
 

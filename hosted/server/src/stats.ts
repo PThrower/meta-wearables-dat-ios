@@ -91,6 +91,7 @@ export async function computeStats(src: StatsSource, params: StatsParams) {
           state: session.publisher.batteryState,
           lowPowerMode: session.publisher.lowPowerMode,
         },
+        displayViewer: session.publisher.displayViewer,
         video: {
           frames: session.publisher.frameCount,
           bytes: session.publisher.totalBytes,

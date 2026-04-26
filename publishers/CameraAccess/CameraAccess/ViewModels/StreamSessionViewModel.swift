@@ -169,6 +169,11 @@ class StreamSessionViewModel: ObservableObject {
   private let audioPlaybackStage = AudioPlaybackStage()
   private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage?
+
+  // Even Realities BLE (G1/G2 smart glasses display + mic)
+  private let evenRealitiesManager = EvenRealitiesManager()
+  private let evenAudioSource = EvenRealitiesAudioSource()
+  private let displayBridgeStage = DisplayBridgeStage()
   private var inboundAudioEngine: AVAudioEngine?
   private var inboundPlayerNode: AVAudioPlayerNode?
   private var inboundSampleRate: Double?
@@ -478,6 +483,9 @@ class StreamSessionViewModel: ObservableObject {
 
       // Wire control message callback
       await wireControlMessageHandler()
+
+      // Wire Even Realities BLE display bridge + audio
+      await wireEvenRealities()
 
       await relayStage.setOnReceivedAudio { [weak self] data in
         guard let parsed = WireProtocol.parseFRAU(data) else { return }
@@ -956,6 +964,37 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
     }
+  }
+
+  /// Wire Even Realities BLE manager, audio source, and display bridge.
+  /// If a device is already connected, passes its info to the relay hello message.
+  private func wireEvenRealities() async {
+    // Wire audio source to event bus (uses codecType=1, same as HFP mic)
+    await evenAudioSource.setEventBus(audioEventBus)
+
+    // Wire BLE audio callback to audio source
+    await evenRealitiesManager.setOnAudioData { [weak self] data in
+      // G1 sends LC3 data — EvenRealitiesAudioSource handles decode/buffer
+      Task { await self?.evenAudioSource.handleRawAudio(data, isLC3: true) }
+    }
+
+    // Wire display bridge to BLE manager
+    await displayBridgeStage.setManager(evenRealitiesManager)
+
+    // Wire display_frame callback from RelayStage → DisplayBridgeStage
+    await relayStage.setOnDisplayFrame { [weak self] json in
+      Task { await self?.displayBridgeStage.handleDisplayFrame(json) }
+    }
+
+    // If a device is already connected, set display viewer on relay stage
+    let displayInfo = await evenRealitiesManager.displayViewerInfo()
+    if let info = displayInfo {
+      await relayStage.setDisplayViewerModel(info.model)
+      NSLog("[StreamSession] Even Realities display viewer: \(info.model) protocol=\(info.protocol)")
+    }
+
+    // Start BLE scanning for G1/G2 devices
+    await evenRealitiesManager.startScanning()
   }
 
   /// Start audio capture, telemetry push, and audio tap client.
