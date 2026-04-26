@@ -6,7 +6,6 @@ import {
   fetchWorkflow, updateWorkflow, deleteWorkflow,
   activateWorkflow, fetchSessions, esc,
 } from "../../core/api-client.js";
-import type { FlowExecutionConfig, FlowExecutionMode } from "../../core/api-client.js";
 import {
   getContainer, getWorkflow, setWorkflow,
   isDirty, setDirty, setViewX, setViewY, setZoom,
@@ -17,8 +16,7 @@ import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import { buildSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown } from "./interactions.js";
 import { refreshSVG } from "./svg-renderer.js";
-import { renderConfigPanel } from "./config-panel.js";
-import { detectFlows, buildDefaultFlowConfig } from "./flow-detection.js";
+import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
 export async function renderEditor(isNew: boolean): Promise<void> {
@@ -91,7 +89,6 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-activate-btn">Activate</button>
       </div>
-      ${buildFlowControlsHTML(workflow)}
     </div>
   `;
 
@@ -125,100 +122,6 @@ function buildPaletteHTML(): string {
                   </button>`;
     }).join("")}`;
   }).join("");
-}
-
-/** Build flow execution control bar HTML — only visible when >1 flow detected. */
-function buildFlowControlsHTML(workflow: { nodes: Array<{ id: string; type: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>; flowConfig?: FlowExecutionConfig | null }): string {
-  const flows = detectFlows(workflow.nodes, workflow.edges);
-  if (flows.length <= 1) return "";
-
-  const config = workflow.flowConfig ?? buildDefaultFlowConfig(flows);
-  const mode: FlowExecutionMode = config?.mode ?? "parallel";
-  const flowOrder: string[] = config?.flowOrder ?? flows.map(f => f.flowId);
-
-  const flowList = flowOrder.map(fid => {
-    const f = flows.find(fl => fl.flowId === fid);
-    if (!f) return "";
-    return `<div class="wf-flow-item" data-flow-id="${f.flowId}" style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:grab;">
-      <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${f.color};flex-shrink:0;"></span>
-      <span style="font-size:11px;color:var(--text-secondary);flex:1;">${esc(f.label)}</span>
-      <span style="cursor:pointer;color:var(--text-tertiary);font-size:12px;" class="wf-flow-up" data-flow-id="${f.flowId}">&#9650;</span>
-      <span style="cursor:pointer;color:var(--text-tertiary);font-size:12px;" class="wf-flow-down" data-flow-id="${f.flowId}">&#9660;</span>
-    </div>`;
-  }).join("");
-
-  return `
-    <div id="wf-flow-controls" style="display:flex;align-items:center;gap:10px;padding:4px 12px;background:rgba(15,23,42,0.5);border-top:1px solid rgba(255,255,255,0.06);font-size:12px;">
-      <div style="display:flex;align-items:center;gap:4px;">
-        <button class="btn ${mode === "parallel" ? "btn-primary" : ""}" id="wf-flow-parallel" style="font-size:11px;padding:2px 8px;">Parallel</button>
-        <button class="btn ${mode === "sequential" ? "btn-primary" : ""}" id="wf-flow-sequential" style="font-size:11px;padding:2px 8px;">Sequential</button>
-      </div>
-      <div id="wf-flow-list" style="display:flex;align-items:center;gap:4px;${mode === "sequential" ? "" : "opacity:0.4;pointer-events:none;"}">
-        ${flowList}
-      </div>
-    </div>`;
-}
-
-/** Wire flow control bar events (mode toggle, flow reorder). */
-function wireFlowControlEvents(): void {
-  const container = getContainer();
-  if (!container) return;
-
-  const parallelBtn = container.querySelector("#wf-flow-parallel");
-  const sequentialBtn = container.querySelector("#wf-flow-sequential");
-  const flowList = container.querySelector("#wf-flow-list");
-
-  const setMode = (mode: FlowExecutionMode) => {
-    const workflow = getWorkflow();
-    if (!workflow) return;
-    const flows = detectFlows(workflow.nodes, workflow.edges);
-    const currentConfig = workflow.flowConfig ?? buildDefaultFlowConfig(flows);
-    workflow.flowConfig = { mode, flowOrder: currentConfig?.flowOrder ?? flows.map(f => f.flowId) };
-    setDirty(true);
-    autoSave();
-    // Re-render flow controls
-    const fc = container.querySelector("#wf-flow-controls");
-    if (fc) fc.outerHTML = buildFlowControlsHTML(workflow);
-    wireFlowControlEvents();
-  };
-
-  parallelBtn?.addEventListener("click", () => setMode("parallel"));
-  sequentialBtn?.addEventListener("click", () => setMode("sequential"));
-
-  // Flow reorder arrows
-  flowList?.querySelectorAll(".wf-flow-up").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const fid = (btn as HTMLElement).dataset.flowId!;
-      reorderFlow(fid, -1);
-    });
-  });
-  flowList?.querySelectorAll(".wf-flow-down").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const fid = (btn as HTMLElement).dataset.flowId!;
-      reorderFlow(fid, 1);
-    });
-  });
-}
-
-/** Move a flow up/down in the order. */
-function reorderFlow(flowId: string, direction: -1 | 1): void {
-  const workflow = getWorkflow();
-  if (!workflow?.flowConfig) return;
-  const order = [...workflow.flowConfig.flowOrder];
-  const idx = order.indexOf(flowId);
-  if (idx < 0) return;
-  const newIdx = idx + direction;
-  if (newIdx < 0 || newIdx >= order.length) return;
-  [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
-  workflow.flowConfig = { ...workflow.flowConfig, flowOrder: order };
-  setDirty(true);
-  autoSave();
-  const container = getContainer();
-  const fc = container?.querySelector("#wf-flow-controls");
-  if (fc) fc.outerHTML = buildFlowControlsHTML(workflow);
-  wireFlowControlEvents();
 }
 
 /** Wire toolbar buttons, palette clicks, and keyboard events. */
@@ -349,6 +252,12 @@ function wireEditorEvents(): void {
   // Keyboard: delete selected node
   document.addEventListener("keydown", onKeyDown);
 
-  // Flow controls
-  wireFlowControlEvents();
+  // Flow dot click on SVG canvas — opens flow config panel
+  getContainer()?.addEventListener("click", (e) => {
+    const dot = (e.target as HTMLElement).closest(".wf-flow-dot");
+    if (dot) {
+      e.stopPropagation();
+      setFlowConfigActive(true);
+    }
+  });
 }
