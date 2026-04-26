@@ -191,6 +191,11 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
+    // --- Test: G2 glasses display injection ---
+    if (pathname === "/test/display" && req.method === "POST") {
+      return proxyRequest(req, pathname);
+    }
+
     // --- Sessions ---
 
     if (pathname === "/sessions") {
