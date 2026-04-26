@@ -109,8 +109,8 @@ export function detectFlows(
 
     const first = nodeMap.get(topoSorted[0]);
     const last = nodeMap.get(topoSorted[topoSorted.length - 1]);
-    const firstLabel = first?.type?.replace(/-/g, " ") ?? first?.id ?? "?";
-    const lastLabel = last?.type?.replace(/-/g, " ") ?? last?.id ?? "?";
+    const firstLabel = first?.label || first?.type?.replace(/-/g, " ") || "?";
+    const lastLabel = last?.label || last?.type?.replace(/-/g, " ") || "?";
     const label = nodeIds.length === 1 ? firstLabel : `${firstLabel} → ${lastLabel}`;
 
     flows.push({

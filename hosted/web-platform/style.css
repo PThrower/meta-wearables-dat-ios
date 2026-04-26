@@ -3124,6 +3124,193 @@ select.wf-config-input {
   accent-color: #22c55e;
 }
 
+/* Flow config panel */
+.wf-flow-config {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-flow-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.wf-flow-config-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wf-flow-config-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Flow mode toggle — same pattern as mic-selector */
+.wf-flow-mode-selector {
+  display: flex;
+  gap: 2px;
+  width: 100%;
+}
+
+.wf-flow-mode-btn {
+  flex: 1;
+  background: var(--border);
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.wf-flow-mode-btn:hover {
+  background: var(--border);
+  color: var(--text-secondary);
+}
+
+.wf-flow-mode-btn.active {
+  background: rgba(0,255,255,0.15);
+  border-color: rgba(0,255,255,0.4);
+  color: #0ff;
+  font-weight: 600;
+}
+
+/* Flow order list */
+.wf-flow-order {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-flow-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: grab;
+  transition: background 0.15s, box-shadow 0.15s;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.wf-flow-order-item:hover {
+  background: var(--border);
+}
+
+.wf-flow-order-item.dragging {
+  opacity: 0.5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.wf-flow-order-item .wf-flow-drag-handle {
+  color: var(--text-tertiary);
+  cursor: grab;
+  font-size: 12px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.wf-flow-order-item .wf-flow-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wf-flow-order-item .wf-flow-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-flow-order.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Flow link in empty state */
+.wf-flow-link {
+  font-size: 11px;
+  color: #0ff;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  margin-top: 4px;
+}
+
+.wf-flow-link:hover {
+  color: #0dd;
+}
+
+/* Flow back button */
+.wf-flow-back {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-flow-back:hover {
+  color: var(--text-secondary);
+}
+
+/* SVG canvas flow highlighting */
+.wf-flow-highlight-dim .wf-node:not([data-flow-id]) {
+  opacity: 0.2;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-dim .wf-edge {
+  opacity: 0.1;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-dim .wf-step {
+  opacity: 0.1;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-dim .wf-node[data-flow-id] {
+  opacity: 0.2;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-active .wf-node {
+  opacity: 0.2;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-active .wf-edge {
+  opacity: 0.1;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-active .wf-step {
+  opacity: 0.1;
+  transition: opacity 0.2s;
+}
+
+.wf-flow-highlight-active .wf-node[data-flow-id] {
+  opacity: 0.2;
+}
+
 /* Toolbar */
 .wf-toolbar {
   display: flex;

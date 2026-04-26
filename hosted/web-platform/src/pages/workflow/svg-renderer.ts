@@ -154,11 +154,13 @@ export function buildSVGFromData(
       ? `<circle cx="${r}" cy="${r}" r="${5 * scale}" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
       : "";
     // Flow indicator badge (small colored dot in top-left, only when multi-flow)
-    const flowDot = multiFlow && nodeFlowColor.has(n.id)
-      ? `<circle cx="${8 * scale}" cy="${8 * scale}" r="${4 * scale}" fill="${nodeFlowColor.get(n.id)}" stroke="#0a0a0a" stroke-width="1" />`
+    const flowColor = nodeFlowColor.get(n.id);
+    const flowDot = multiFlow && flowColor
+      ? `<circle class="wf-flow-dot" data-flow-id="${detectedFlows.find(f => f.nodeIds.includes(n.id))?.flowId ?? ""}" cx="${8 * scale}" cy="${8 * scale}" r="${4 * scale}" fill="${flowColor}" stroke="#0a0a0a" stroke-width="1" style="cursor:pointer" />`
       : "";
+    const flowAttr = multiFlow && flowColor ? ` data-flow-id="${detectedFlows.find(f => f.nodeIds.includes(n.id))?.flowId ?? ""}"` : "";
     return `
-      <g class="wf-node" data-id="${n.id}" transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
+      <g class="wf-node" data-id="${n.id}"${flowAttr} transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
         ${statusDot}
         ${flowDot}
         <rect class="wf-node-bg" width="${w}" height="${h}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
