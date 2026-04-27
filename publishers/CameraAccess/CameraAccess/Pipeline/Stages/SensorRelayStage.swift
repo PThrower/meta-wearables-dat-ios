@@ -78,6 +78,6 @@ actor SensorRelayStage {
             return
         }
 
-        relayStage.sendRawData(frame)
+        await relayStage.sendRawData(frame)
     }
 }

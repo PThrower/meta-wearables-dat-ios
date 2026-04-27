@@ -146,7 +146,7 @@ enum SensorWireProtocol {
                 "fps": snapshot.frame.effectiveFPS,
                 "jitter": snapshot.frame.jitterMs ?? 0,
                 "totalFrames": snapshot.frame.totalFramesReceived,
-                "encodeTimeEma": snapshot.relay.map { 0.0 } ?? 0,
+                "encodeTimeEma": snapshot.relay.map { _ in 0.0 } ?? 0,
             ]
         }
 
