@@ -7,12 +7,13 @@
 import { GuidancePanel, NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeState } from "../guidance.js";
 import { fetchWorkflow, updateWorkflow, esc } from "../core/api-client.js";
-import type { WorkflowDetail, WorkflowNodeDef } from "../core/api-client.js";
+import type { WorkflowDetail } from "../core/api-client.js";
 import { NODE_STATUS_DOT_COLORS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
-import { detectFlows, DEFAULT_EDGE_COLOR, buildDefaultFlowConfig } from "../pages/workflow/flow-detection.js";
-import type { FlowExecutionConfig, FlowExecutionMode, DetectedFlow } from "../core/api-client.js";
+import { detectFlows, DEFAULT_EDGE_COLOR } from "../pages/workflow/flow-detection.js";
+import { renderFlowConfigHTML, wireFlowConfigEvents } from "../pages/workflow/shared-config.js";
+import type { FlowConfigCallbacks, ConfigFieldCallbacks } from "../pages/workflow/shared-config.js";
 import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.js";
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";
@@ -53,6 +54,24 @@ export class MiniWorkflowEditor {
   // Interaction cleanup
   private cleanupInteractions: (() => void) | null = null;
   private cleanupPalette: (() => void) | null = null;
+
+  // Shared flow config callbacks
+  private _flowCallbacks: FlowConfigCallbacks = {
+    getWorkflow: () => this.workflow,
+    setFlowConfig: (config) => { if (this.workflow) this.workflow.flowConfig = config; },
+    setDirty: () => { this.dirty = true; },
+    autoSave: () => this.autoSave(),
+    rerender: () => this.renderFlowConfig(),
+  };
+
+  // Shared config field callbacks
+  private _configCallbacks: ConfigFieldCallbacks = {
+    getWorkflow: () => this.workflow,
+    getSelectedNodeId: () => this.selectedNodeId,
+    setDirty: () => { this.dirty = true; },
+    autoSave: () => this.autoSave(),
+    refreshSVG: () => this.render(),
+  };
 
   constructor(container: HTMLElement, guidancePanel: GuidancePanel, sendFn: (msg: object) => void) {
     this.container = container;
@@ -312,7 +331,7 @@ export class MiniWorkflowEditor {
       node,
       def,
       state,
-      (field, value) => this.onConfigChange(field, value),
+      this._configCallbacks,
       (nodeId) => this.deleteNode(nodeId),
       (action, nodeId) => this.onNodeAction(action, nodeId),
       this.workflow.nodes,
@@ -331,96 +350,8 @@ export class MiniWorkflowEditor {
       this.configPanel.innerHTML = '<span class="mini-editor-hint">Only one flow — nothing to configure</span>';
       return;
     }
-    const config = this.workflow.flowConfig ?? buildDefaultFlowConfig(flows);
-    const mode: FlowExecutionMode = config?.mode ?? "parallel";
-    const flowOrder: string[] = config?.flowOrder ?? flows.map(f => f.flowId);
-
-    const flowList = flowOrder.map(fid => {
-      const f = flows.find(fl => fl.flowId === fid);
-      if (!f) return "";
-      return `<div class="wf-flow-order-item" data-flow-id="${f.flowId}" draggable="${mode === "sequential"}">
-        <span class="wf-flow-drag-handle">${mode === "sequential" ? "⋮⋮" : "●"}</span>
-        <span class="wf-flow-color-dot" style="background:${f.color}"></span>
-        <span class="wf-flow-label">${esc(f.label)}</span>
-      </div>`;
-    }).join("");
-
-    this.configPanel.innerHTML = `
-      <div class="wf-flow-config">
-        <div class="wf-flow-config-header">
-          <span class="wf-flow-config-title">Flows</span>
-          <span class="wf-flow-config-count">${flows.length} found</span>
-        </div>
-        <div class="wf-flow-mode-selector">
-          <button class="wf-flow-mode-btn ${mode === "parallel" ? "active" : ""}" data-mode="parallel">Parallel</button>
-          <button class="wf-flow-mode-btn ${mode === "sequential" ? "active" : ""}" data-mode="sequential">Sequential</button>
-        </div>
-        <div class="wf-flow-order ${mode === "parallel" ? "disabled" : ""}" id="mini-wf-flow-order">
-          ${flowList}
-        </div>
-      </div>
-    `;
-
-    this.wireFlowConfigEvents(flows);
-  }
-
-  /** Wire flow config events for the mini-editor. */
-  private wireFlowConfigEvents(flows: DetectedFlow[]): void {
-    const panel = this.configPanel;
-
-    // Mode toggle
-    panel.querySelectorAll(".wf-flow-mode-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const mode = (btn as HTMLElement).dataset.mode as FlowExecutionMode;
-        if (!this.workflow) return;
-        const currentConfig = this.workflow.flowConfig ?? buildDefaultFlowConfig(flows);
-        this.workflow.flowConfig = { mode, flowOrder: currentConfig?.flowOrder ?? flows.map(f => f.flowId) };
-        this.dirty = true;
-        this.autoSave();
-        this.renderFlowConfig();
-      });
-    });
-
-    // Drag-and-drop reorder
-    const orderEl = panel.querySelector("#mini-wf-flow-order");
-    if (orderEl) {
-      let draggedId: string | null = null;
-
-      orderEl.querySelectorAll(".wf-flow-order-item").forEach(item => {
-        item.addEventListener("dragstart", (e) => {
-          draggedId = (item as HTMLElement).dataset.flowId ?? null;
-          item.classList.add("dragging");
-          (e as DragEvent).dataTransfer!.effectAllowed = "move";
-        });
-
-        item.addEventListener("dragend", () => {
-          item.classList.remove("dragging");
-          draggedId = null;
-        });
-
-        item.addEventListener("dragover", (e) => {
-          e.preventDefault();
-          (e as DragEvent).dataTransfer!.dropEffect = "move";
-        });
-
-        item.addEventListener("drop", (e) => {
-          e.preventDefault();
-          const targetId = (item as HTMLElement).dataset.flowId;
-          if (!draggedId || !targetId || draggedId === targetId) return;
-          if (!this.workflow?.flowConfig) return;
-          const order = [...this.workflow.flowConfig.flowOrder];
-          const fromIdx = order.indexOf(draggedId);
-          const toIdx = order.indexOf(targetId);
-          if (fromIdx < 0 || toIdx < 0) return;
-          order.splice(fromIdx, 1);
-          order.splice(toIdx, 0, draggedId);
-          this.workflow.flowConfig = { ...this.workflow.flowConfig, flowOrder: order };
-          this.dirty = true;
-          this.autoSave();
-          this.renderFlowConfig();
-        });
-      });
-    }
+    this.configPanel.innerHTML = renderFlowConfigHTML(flows, this.workflow.flowConfig, "mini-wf");
+    wireFlowConfigEvents(this.configPanel, flows, this._flowCallbacks);
   }
 
   /** Show or hide the flows tab based on flow count. */
@@ -433,21 +364,6 @@ export class MiniWorkflowEditor {
     }
     const flows = detectFlows(this.workflow.nodes, this.workflow.edges);
     flowsTab.classList.toggle("hidden", flows.length <= 1);
-  }
-
-  private onConfigChange(field: string, value: unknown): void {
-    if (!this.workflow || !this.selectedNodeId) return;
-    const node = this.workflow.nodes.find(n => n.id === this.selectedNodeId);
-    if (!node) return;
-    if (field.startsWith("config.")) {
-      const key = field.slice(7);
-      node.config[key] = value;
-    } else if (field === "label") {
-      node.label = String(value);
-    }
-    this.dirty = true;
-    this.autoSave();
-    this.render();
   }
 
   private onNodeAction(action: string, nodeId: string): void {

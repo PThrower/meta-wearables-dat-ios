@@ -4,53 +4,12 @@
  */
 
 import { esc } from "../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, NodeDefinition, DetectedFlow } from "../core/api-client.js";
+import type { WorkflowNodeDef, NodeDefinition } from "../core/api-client.js";
 import { NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeExecutionState } from "../guidance.js";
 import { detectFlows } from "../pages/workflow/flow-detection.js";
-
-/** Render a single config field based on its schema kind. */
-function renderField(field: ConfigFieldSchema, node: WorkflowNodeDef): string {
-  switch (field.kind) {
-    case "text": {
-      const val = field.key === "label" ? node.label : String(node.config[field.key] ?? "");
-      const dataField = field.key === "label" ? "label" : `config.${field.key}`;
-      return `<div class="mini-config-field"><label>${esc(field.label)}</label><input type="text" class="mini-config-input" data-field="${dataField}" value="${esc(val)}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""} /></div>`;
-    }
-    case "textarea": {
-      const val = String(node.config[field.key] ?? "");
-      return `<div class="mini-config-field"><label>${esc(field.label)}</label><textarea class="mini-config-input" data-field="config.${field.key}" rows="${field.rows ?? 3}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""}>${esc(val)}</textarea></div>`;
-    }
-    case "select": {
-      const val = String(node.config[field.key] ?? "");
-      const options = field.options.map(o => `<option value="${esc(o.value)}" ${val === o.value ? "selected" : ""}>${esc(o.label)}</option>`).join("");
-      return `<div class="mini-config-field"><label>${esc(field.label)}</label><select class="mini-config-input" data-field="config.${field.key}">${options}</select></div>`;
-    }
-    case "range": {
-      const val = (node.config[field.key] as number) ?? field.min;
-      return `<div class="mini-config-field"><label>${esc(field.label)}: ${val}${field.unit ?? ""}</label><input type="range" min="${field.min}" max="${field.max}" step="${field.step}" data-field="config.${field.key}" value="${val}" /></div>`;
-    }
-    case "checkbox": {
-      const checked = node.config[field.key] === true;
-      return `<div class="mini-config-field"><label><input type="checkbox" data-field="config.${field.key}" ${checked ? "checked" : ""} /> ${esc(field.label)}</label></div>`;
-    }
-    case "checkbox-group": {
-      const checks = field.fields.map(f => {
-        const checked = node.config[f.key] !== false;
-        return `<label><input type="checkbox" data-field="config.${f.key}" ${checked ? "checked" : ""} /> ${esc(f.label)}</label>`;
-      }).join("");
-      return `<div class="mini-config-field"><label>${esc(field.label)}</label><div class="mini-config-checks">${checks}</div></div>`;
-    }
-    case "number": {
-      const val = (node.config[field.key] as number) ?? 0;
-      return `<div class="mini-config-field"><label>${esc(field.label)}</label><input type="number" class="mini-config-input" data-field="config.${field.key}" min="${field.min ?? ""}" max="${field.max ?? ""}" step="${field.step ?? 1}" value="${val}" /></div>`;
-    }
-    case "section": {
-      const inner = field.fields.map(f => renderField(f, node)).join("");
-      return `<div class="mini-config-field" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--player-border)"><label style="font-weight:600;margin-bottom:4px;display:block">${esc(field.label)}</label>${inner}</div>`;
-    }
-  }
-}
+import { renderConfigField, wireConfigFieldInputs } from "../pages/workflow/shared-config.js";
+import type { ConfigFieldCallbacks } from "../pages/workflow/shared-config.js";
 
 /** Render config panel with schema-driven form + exec controls + delete button. */
 export function renderMiniConfigPanel(
@@ -58,7 +17,7 @@ export function renderMiniConfigPanel(
   node: WorkflowNodeDef,
   nodeDef: NodeDefinition | undefined,
   nodeState: string | undefined,
-  onChange: (field: string, value: unknown) => void,
+  callbacks: ConfigFieldCallbacks,
   onDelete: (nodeId: string) => void,
   onNodeAction: (action: string, nodeId: string) => void,
   allNodes?: Array<{ id: string; type?: string; label?: string }>,
@@ -85,9 +44,9 @@ export function renderMiniConfigPanel(
     ${nodeState ? `<span class="mini-config-state" style="background:${stateColor}30;color:${stateColor}">${nodeState}</span>` : ""}
   </div>`;
 
-  // Schema-driven form fields
+  // Schema-driven form fields (shared rendering with mini-config prefix)
   if (def?.configSchema?.length) {
-    html += def.configSchema.map(field => renderField(field, node)).join("");
+    html += def.configSchema.map(field => renderConfigField(field, node, "mini-config")).join("");
   } else {
     // Fallback: show config keys as text inputs
     for (const [key, val] of Object.entries(node.config)) {
@@ -96,7 +55,7 @@ export function renderMiniConfigPanel(
     }
   }
 
-  // Per-node execution actions
+  // Per-node execution actions (mini-only feature)
   const state = (nodeState ?? "unknown") as NodeExecutionState;
   const actions: string[] = [];
   if (state === "running") actions.push(`<button class="btn-warn" data-node-action="skip_node" data-node-id="${node.id}">Skip</button>`);
@@ -111,21 +70,10 @@ export function renderMiniConfigPanel(
   html += `<div class="mini-editor-node-actions">${actions.join("")}</div>`;
   panel.innerHTML = html;
 
-  // Wire field change events
-  panel.querySelectorAll("[data-field]").forEach(input => {
-    input.addEventListener("change", () => {
-      const field = (input as HTMLElement).dataset.field!;
-      const el = input as HTMLInputElement;
-      let value: unknown;
-      if (el.type === "range") value = parseFloat(el.value);
-      else if (el.type === "checkbox") value = el.checked;
-      else if (el.type === "number") value = parseFloat(el.value);
-      else value = el.value;
-      onChange(field, value);
-    });
-  });
+  // Wire field change events (shared wiring)
+  wireConfigFieldInputs(panel, callbacks);
 
-  // Wire per-node exec action buttons
+  // Wire per-node exec action buttons (mini-only)
   panel.querySelectorAll("[data-node-action]").forEach(btn => {
     btn.addEventListener("click", () => {
       const action = (btn as HTMLElement).dataset.nodeAction!;
