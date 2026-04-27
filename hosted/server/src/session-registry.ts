@@ -116,7 +116,7 @@ export class SessionRegistry {
           deviceId: null,
           systemVersion: null,
           wearableType: null,
-          hasDisplayViewer: false,
+
           appVersion: null,
           buildNumber: null,
           resolution: null,
@@ -315,7 +315,7 @@ export class SessionRegistry {
       batteryState: null,
       lowPowerMode: false,
       standby: true,
-      displayViewer: null,
+
     };
     session.publisher = publisher;
     session.publisherClaiming = false;

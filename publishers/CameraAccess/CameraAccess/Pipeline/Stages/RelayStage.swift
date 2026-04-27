@@ -60,6 +60,11 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     nonisolated let stageId = "relay"
     var config: FrameStageConfig
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "relay", label: "Relay")
+    private var lastPreviewPublish: ContinuousClock.Instant?
+
     // Connection state
     private var webSocketTask: URLSessionWebSocketTask?
     private var isConnected = false
@@ -97,14 +102,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// Set by StreamSessionViewModel before connecting.
     var onControlMessage: (@Sendable ([String: Any]) -> Void)?
 
-    /// Callback for display_frame messages from the server.
-    /// Set by StreamSessionViewModel before connecting.
-    var onDisplayFrame: (@Sendable ([String: Any]) -> Void)?
-
-    /// Connected Even Realities device model (e.g. "even-g1", "even-g2").
-    /// Set by StreamSessionViewModel when BLE device is detected.
-    var displayViewerModel: String?
-
     // Frame pacing — time-based throttle using config.targetFPS
     private var lastRelayTime: ContinuousClock.Instant?
 
@@ -135,6 +132,34 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         self.config = config
         self.adaptiveQuality = jpegQuality
         self.encoder = JPEGFrameEncoder(quality: jpegQuality)
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
+    }
+
+    /// Publish relay stats as preview events (throttled to ~1Hz).
+    private func publishPreview() {
+        guard let previewBus else { return }
+        let now = ContinuousClock.Instant.now
+        if let last = lastPreviewPublish {
+            let elapsed = now - last
+            let ms = Double(elapsed.components.seconds) * 1000.0 + Double(elapsed.components.attoseconds) / 1e15
+            guard ms >= 1000 else { return }
+        }
+        lastPreviewPublish = now
+
+        let src = previewSource
+        Task {
+            await previewBus.publish(.status(source: src, label: isConnected ? "Connected" : "Disconnected", state: isConnected ? .active : .idle))
+            await previewBus.publish(.numeric(source: src, label: "Frames Sent", value: Double(framesSent), unit: ""))
+            await previewBus.publish(.numeric(source: src, label: "Encode EMA", value: encodeTimeEmaMs ?? 0, unit: "ms"))
+            await previewBus.publish(.numeric(source: src, label: "Latency", value: relayLatencyMs ?? 0, unit: "ms"))
+            await previewBus.publish(.numeric(source: src, label: "Dropped", value: Double(framesDropped), unit: ""))
+            await previewBus.publish(.numeric(source: src, label: "Adaptive FPS", value: effectiveTargetFps, unit: "fps"))
+            await previewBus.publish(.numeric(source: src, label: "Frame Size", value: Double(lastFrameSizeBytes), unit: "B"))
+            await previewBus.publish(.numeric(source: src, label: "Quality", value: Double(adaptiveQuality), unit: ""))
+        }
     }
 
     /// Set a different encoder before connecting.
@@ -283,12 +308,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                                let targetFps = json["targetFps"] as? Double {
                                 NSLog("[RelayStage] Backpressure from server: targetFps=\(targetFps)")
                                 await self.handleBackpressure(targetFps: targetFps)
-                            }
-                            // Handle display_frame from server (for smart glasses display)
-                            if json["type"] as? String == "display_frame" {
-                                if let handler = await self.onDisplayFrame {
-                                    handler(json)
-                                }
                             }
                             if let handler = await self.onControlMessage {
                                 handler(json)
@@ -499,6 +518,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         if framesSent % 50 == 1 {
             NSLog("[RelayStage] Frames sent: \(framesSent), encodeEma=\(String(format: "%.1f", encodeTimeEmaMs ?? 0))ms, adaptiveFps=\(String(format: "%.1f", effectiveTargetFps))")
         }
+        publishPreview()
     }
 
     private func onSendError(_ error: Error) {
@@ -671,7 +691,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         guard let wsTask = webSocketTask else { return }
         let capturedWearableId = wearableId
         let capturedWearableType = wearableType
-        let capturedDisplayViewerModel = displayViewerModel
 
         // UIDevice.current is @MainActor-isolated in iOS 17+.
         // Dispatch to main to read device info, then send using captured wsTask.
@@ -706,15 +725,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                 "lowPowerMode": ProcessInfo.processInfo.isLowPowerModeEnabled,
                 "videoCodec": capturedCodec,
             ] as [String: Any]
-
-            // Add display_viewer if Even Realities device is connected
-            if let model = capturedDisplayViewerModel {
-                let proto = model == "even-g1" ? "uart" : "protobuf"
-                hello["display_viewer"] = [
-                    "model": model,
-                    "protocol": proto,
-                ]
-            }
 
             guard let data = try? JSONSerialization.data(withJSONObject: hello),
                   let str = String(data: data, encoding: .utf8) else { return }
@@ -774,17 +784,6 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         self.onControlMessage = handler
     }
 
-    /// Set the callback for display_frame messages from the server.
-    /// Called by StreamSessionViewModel before connecting.
-    func setOnDisplayFrame(_ handler: @Sendable @escaping ([String: Any]) -> Void) {
-        self.onDisplayFrame = handler
-    }
-
-    /// Set the Even Realities display viewer model for hello message.
-    /// Called by StreamSessionViewModel when BLE device is detected.
-    func setDisplayViewerModel(_ model: String?) {
-        self.displayViewerModel = model
-    }
 }
 
 // MARK: - Errors

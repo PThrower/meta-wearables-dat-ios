@@ -66,30 +66,14 @@
 		PIPEMSRC01 /* AudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEMSRC02 /* AudioSource.swift */; };
 		PIPEREMF01 /* RemoteAudioFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEREMF02 /* RemoteAudioFrame.swift */; };
 		PIPETAPC01 /* AudioTapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPETAPC02 /* AudioTapClient.swift */; };
-		EVBLEG1B01 /* G1Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEG1F01 /* G1Protocol.swift */; };
-		EVBLEG2B01 /* G2Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEG2F01 /* G2Protocol.swift */; };
-		EVBLEMGRB01 /* EvenRealitiesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEMGRF01 /* EvenRealitiesManager.swift */; };
-		EVBLEAUDB01 /* EvenRealitiesAudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */; };
-		PIPEDSPB01 /* DisplayBridgeStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDSPF01 /* DisplayBridgeStage.swift */; };
-		EVLC3B01 /* LC3Decoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVLC3F01 /* LC3Decoder.swift */; };
-		LC3C001B /* lc3.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C001F /* lc3.c */; };
-		LC3C002B /* bits.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C002F /* bits.c */; };
-		LC3C003B /* attdet.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C003F /* attdet.c */; };
-		LC3C004B /* bwdet.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C004F /* bwdet.c */; };
-		LC3C005B /* energy.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C005F /* energy.c */; };
-		LC3C006B /* ltpf.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C006F /* ltpf.c */; };
-		LC3C007B /* mdct.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C007F /* mdct.c */; };
-		LC3C008B /* plc.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C008F /* plc.c */; };
-		LC3C009B /* sns.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C009F /* sns.c */; };
-		LC3C010B /* tns.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C010F /* tns.c */; };
-		LC3C011B /* tables.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C011F /* tables.c */; };
-		LC3C012B /* spec.c in Sources */ = {isa = PBXBuildFile; fileRef = LC3C012F /* spec.c */; };
 		BRHDRB01 /* CameraAccess-Bridging-Header.h in Sources */ = {isa = PBXBuildFile; fileRef = BRHDRF01 /* CameraAccess-Bridging-Header.h */; };
 		SETT00012EB4D53A00E7FE5D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SETT00022EB4D53A00E7FE5D /* SettingsView.swift */; };
 		TELE00012EB918740097D0E1 /* TelemetryTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00022EB918740097D0E1 /* TelemetryTypes.swift */; };
 		TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00042EB918740097D0E1 /* TelemetryLogger.swift */; };
 		TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00062EB918740097D0E1 /* TelemetryService.swift */; };
 		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
+		PRVBSBLD001 /* PreviewBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRVBSFLE001 /* PreviewBus.swift */; };
+		NDPRVBLD001 /* NodePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NDPRVFLE001 /* NodePreviewView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -184,24 +168,6 @@
 		PIPEMSRC02 /* AudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSource.swift; sourceTree = "<group>"; };
 		PIPEREMF02 /* RemoteAudioFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAudioFrame.swift; sourceTree = "<group>"; };
 		PIPETAPC02 /* AudioTapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTapClient.swift; sourceTree = "<group>"; };
-		EVBLEG1F01 /* G1Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G1Protocol.swift; sourceTree = "<group>"; };
-		EVBLEG2F01 /* G2Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G2Protocol.swift; sourceTree = "<group>"; };
-		EVBLEMGRF01 /* EvenRealitiesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvenRealitiesManager.swift; sourceTree = "<group>"; };
-		EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvenRealitiesAudioSource.swift; sourceTree = "<group>"; };
-		PIPEDSPF01 /* DisplayBridgeStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayBridgeStage.swift; sourceTree = "<group>"; };
-		EVLC3F01 /* LC3Decoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LC3Decoder.swift; sourceTree = "<group>"; };
-		LC3C001F /* lc3.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = lc3.c; sourceTree = "<group>"; };
-		LC3C002F /* bits.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bits.c; sourceTree = "<group>"; };
-		LC3C003F /* attdet.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = attdet.c; sourceTree = "<group>"; };
-		LC3C004F /* bwdet.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = bwdet.c; sourceTree = "<group>"; };
-		LC3C005F /* energy.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = energy.c; sourceTree = "<group>"; };
-		LC3C006F /* ltpf.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ltpf.c; sourceTree = "<group>"; };
-		LC3C007F /* mdct.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = mdct.c; sourceTree = "<group>"; };
-		LC3C008F /* plc.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = plc.c; sourceTree = "<group>"; };
-		LC3C009F /* sns.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = sns.c; sourceTree = "<group>"; };
-		LC3C010F /* tns.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = tns.c; sourceTree = "<group>"; };
-		LC3C011F /* tables.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = tables.c; sourceTree = "<group>"; };
-		LC3C012F /* spec.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = spec.c; sourceTree = "<group>"; };
 		BRHDRF01 /* CameraAccess-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "CameraAccess-Bridging-Header.h"; sourceTree = "<group>"; };
 		SETT00022EB4D53A00E7FE5D /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		TELE00022EB918740097D0E1 /* TelemetryTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryTypes.swift; sourceTree = "<group>"; };
@@ -209,6 +175,8 @@
 		TELE00062EB918740097D0E1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
 		TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryHUDView.swift; sourceTree = "<group>"; };
 		V1V1V1V1V1V1V1V1V1V1V1V1 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
+		PRVBSFLE001 /* PreviewBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewBus.swift; sourceTree = "<group>"; };
+		NDPRVFLE001 /* NodePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodePreviewView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -314,6 +282,7 @@
 				SETT00022EB4D53A00E7FE5D /* SettingsView.swift */,
 				TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */,
 				ED96E78FFA3F17CBBE7BA3E3 /* AppPickerSheet.swift */,
+				NDPRVFLE001 /* NodePreviewView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -322,7 +291,6 @@
 			isa = PBXGroup;
 			children = (
 				E66CC01A2F3E1A9300B07379 /* TestResources */,
-				EVBLE00012E91BLE01 /* BLE */,
 				PIPE00B02E91PIPE01 /* Pipeline */,
 				TELE00092EB918740097D0E1 /* Services */,
 				8FD96B702E6F0A9800F56AB1 /* ViewModels */,
@@ -388,6 +356,7 @@
 				PIPEDECO02 /* AudioPacket.swift */,
 				PIPEDECO04 /* AudioTransport.swift */,
 				PIPEDECO06 /* AudioEventBus.swift */,
+				PRVBSFLE001 /* PreviewBus.swift */,
 				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
 				PIPEREMF02 /* RemoteAudioFrame.swift */,
@@ -414,41 +383,8 @@
 				PHNCAM00000002 /* PhoneCameraCapture.swift */,
 				PIPEJPEGR01 /* JPEGFrameEncoder.swift */,
 				PIPEH264R01 /* H264FrameEncoder.swift */,
-				PIPEDSPF01 /* DisplayBridgeStage.swift */,
 			);
 			path = Stages;
-			sourceTree = "<group>";
-		};
-		EVBLE00012E91BLE01 /* BLE */ = {
-			isa = PBXGroup;
-			children = (
-				EVBLEG1F01 /* G1Protocol.swift */,
-				EVBLEG2F01 /* G2Protocol.swift */,
-				EVBLEMGRF01 /* EvenRealitiesManager.swift */,
-				EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */,
-				EVLC3F01 /* LC3Decoder.swift */,
-				LC3GRP00000001 /* lc3 */,
-			);
-			path = BLE;
-			sourceTree = "<group>";
-		};
-		LC3GRP00000001 /* lc3 */ = {
-			isa = PBXGroup;
-			children = (
-				LC3C001F /* lc3.c */,
-				LC3C002F /* bits.c */,
-				LC3C003F /* attdet.c */,
-				LC3C004F /* bwdet.c */,
-				LC3C005F /* energy.c */,
-				LC3C006F /* ltpf.c */,
-				LC3C007F /* mdct.c */,
-				LC3C008F /* plc.c */,
-				LC3C009F /* sns.c */,
-				LC3C010F /* tns.c */,
-				LC3C011F /* tables.c */,
-				LC3C012F /* spec.c */,
-			);
-			path = lc3;
 			sourceTree = "<group>";
 		};
 		TELE00092EB918740097D0E1 /* Services */ = {
@@ -659,6 +595,7 @@
 				PN001PN002EB918740097D0E1 /* PushNotificationService.swift in Sources */,
 				DI001DI002EB918740097D0E1 /* DeviceIdentity.swift in Sources */,
 				TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */,
+				NDPRVBLD001 /* NodePreviewView.swift in Sources */,
 				PIPE00102E91PIPE01 /* FramePipelineTypes.swift in Sources */,
 				PIPE00302E91PIPE01 /* FramePipelineManager.swift in Sources */,
 				PIPE00502E91PIPE01 /* ThrottledStage.swift in Sources */,
@@ -675,6 +612,7 @@
 				PIPEDECO01 /* AudioPacket.swift in Sources */,
 				PIPEDECO03 /* AudioTransport.swift in Sources */,
 				PIPEDECO05 /* AudioEventBus.swift in Sources */,
+				PRVBSBLD001 /* PreviewBus.swift in Sources */,
 				F47A0D21CEA44E2FB838F81B /* AudioProcessingConfig.swift in Sources */,
 				PIPEDECO07 /* AudioRelayStage.swift in Sources */,
 				PIPEMSRC01 /* AudioSource.swift in Sources */,
@@ -686,24 +624,6 @@
 				PCMSWP00000002 /* SensorWireProtocol.swift in Sources */,
 				PCMSRS00000002 /* SensorRelayStage.swift in Sources */,
 				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
-				EVBLEG1B01 /* G1Protocol.swift in Sources */,
-				EVBLEG2B01 /* G2Protocol.swift in Sources */,
-				EVBLEMGRB01 /* EvenRealitiesManager.swift in Sources */,
-				EVBLEAUDB01 /* EvenRealitiesAudioSource.swift in Sources */,
-				PIPEDSPB01 /* DisplayBridgeStage.swift in Sources */,
-				EVLC3B01 /* LC3Decoder.swift in Sources */,
-				LC3C001B /* lc3.c in Sources */,
-				LC3C002B /* bits.c in Sources */,
-				LC3C003B /* attdet.c in Sources */,
-				LC3C004B /* bwdet.c in Sources */,
-				LC3C005B /* energy.c in Sources */,
-				LC3C006B /* ltpf.c in Sources */,
-				LC3C007B /* mdct.c in Sources */,
-				LC3C008B /* plc.c in Sources */,
-				LC3C009B /* sns.c in Sources */,
-				LC3C010B /* tns.c in Sources */,
-				LC3C011B /* tables.c in Sources */,
-				LC3C012B /* spec.c in Sources */,
 				2B91A102B3169469B14BC1C4 /* AppPickerSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -752,7 +672,6 @@
 				DEVELOPMENT_TEAM = 42R8ZPM5N8;
 				ENABLE_PREVIEWS = YES;
 				FRAMEWORK_SEARCH_PATHS = "";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/CameraAccess/BLE/lc3";
 				INFOPLIST_FILE = CameraAccess/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -781,7 +700,6 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				DEVELOPMENT_TEAM = 42R8ZPM5N8;
 				ENABLE_PREVIEWS = YES;
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/CameraAccess/BLE/lc3";
 				INFOPLIST_FILE = CameraAccess/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (

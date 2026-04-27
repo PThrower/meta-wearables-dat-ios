@@ -236,39 +236,6 @@ struct DevicePickerSection: View {
         .cornerRadius(8)
       }
 
-      // Even Realities option (BLE mic + display, no camera)
-      Button {
-        if viewModel.isEvenRealitiesMode {
-          viewModel.deselectEvenRealities()
-        } else {
-          viewModel.selectEvenRealities()
-        }
-      } label: {
-        HStack(spacing: 10) {
-          Image(systemName: "vision.pro")
-            .foregroundColor(.primary)
-            .frame(width: 20)
-
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Even Realities")
-              .font(.system(size: 14, weight: .medium))
-              .foregroundColor(.primary)
-            evenRealitiesBadge(viewModel.evenRealitiesConnectionState)
-          }
-
-          Spacer()
-
-          if viewModel.isEvenRealitiesMode {
-            Image(systemName: "checkmark.circle.fill")
-              .foregroundColor(.blue)
-          }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(viewModel.isEvenRealitiesMode ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
-        .cornerRadius(8)
-      }
-
       // Auto-select option
       Button {
         viewModel.selectDevice(nil)
@@ -375,28 +342,6 @@ struct DevicePickerSection: View {
     case .oakleyMetaHSTN, .oakleyMetaVanguard: return "goggles"
     default: return "questionmark.glasses"
     }
-  }
-
-  @ViewBuilder
-  private func evenRealitiesBadge(_ state: EvenRealitiesConnectionState) -> some View {
-    let pair: (Color, String)
-    switch state {
-    case .disconnected:
-      pair = (.gray, "OFF")
-    case .scanning:
-      pair = (.orange, "SCANNING")
-    case .connecting:
-      pair = (.orange, "CONNECTING")
-    case .connected(let model):
-      pair = (.green, model == "even-g1" ? "G1 CONNECTED" : "G2 CONNECTED")
-    }
-    return Text(pair.1)
-      .font(.system(size: 9, weight: .semibold, design: .monospaced))
-      .foregroundColor(pair.0)
-      .padding(.horizontal, 4)
-      .padding(.vertical, 1)
-      .background(pair.0.opacity(0.2))
-      .cornerRadius(3)
   }
 
   private func linkStateBadge(_ state: LinkState?) -> some View {

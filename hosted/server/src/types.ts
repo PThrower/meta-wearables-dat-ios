@@ -8,7 +8,7 @@ import type { ServerWebSocket } from "bun";
 import type { FrameTiming as FrameTimingType, QualityPreset as QualityPresetType } from "@ebowwa/relay-protocol";
 import type { AppPipeline } from "./app-types.js";
 import type { SessionState, PublisherDropReason, SessionFlags } from "./session-state.js";
-import type { DisplayViewerInfo } from "./display-types.js";
+
 import { QUALITY_PRESETS, DEFAULT_QUALITY } from "@ebowwa/relay-protocol";
 
 // --- Token Bucket Rate Limiter ---
@@ -122,7 +122,7 @@ export interface Publisher {
   batteryState: string | null;
   lowPowerMode: boolean;
   standby: boolean;
-  displayViewer: DisplayViewerInfo | null;
+
   sensorCount?: number;
   sensorBytes?: number;
 }
@@ -152,7 +152,7 @@ export interface SessionMetadata {
   deviceId: string | null;
   systemVersion: string | null;
   wearableType: string | null;
-  hasDisplayViewer: boolean;
+
   appVersion: string | null;
   buildNumber: string | null;
   resolution: { width: number; height: number } | null;

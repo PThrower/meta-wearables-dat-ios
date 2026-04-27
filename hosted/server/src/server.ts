@@ -108,8 +108,7 @@ dbWriter.start();
 
 // --- Seed pre-built apps as published workflows ---
 import { seedAppsAsWorkflows } from "./seed-apps.js";
-import { displayRenderer } from "./display-renderer.js";
-import type { DisplayViewerInfo } from "./display-types.js";
+
 seedAppsAsWorkflows();
 
 // --- Session Registry ---
@@ -432,15 +431,6 @@ orchestrator.setGuidanceTextPushFn((sessionId: string, text: string, preferGlass
   const session = registry.get(sessionId);
   if (session?.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
     session.publisher.ws.send(JSON.stringify({ type: "guidance_text", text, preferGlasses }));
-
-    // If publisher has a display viewer (Even Realities G1/G2), render and send display_frame
-    const dv = session.publisher.displayViewer;
-    if (dv) {
-      const frame = displayRenderer.render(sessionId, text, dv.model);
-      if (frame) {
-        session.publisher.ws.send(JSON.stringify({ type: "display_frame", ...frame }));
-      }
-    }
   }
 });
 
@@ -1540,27 +1530,6 @@ const server = Bun.serve<WsData>({
       return new Response(null, { status: 204 });
     }
 
-    // --- Test: inject display_frame to publisher (for G2 glasses testing) ---
-    if (url.pathname === "/test/display" && req.method === "POST") {
-      const body = await req.json() as { lines?: string[]; session?: string };
-      const sessionId = body.session || "default";
-      const session = registry.get(sessionId);
-      if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
-        return Response.json({ error: "No publisher connected" }, { status: 404 });
-      }
-      // Force set displayViewer if not already set
-      if (!session.publisher.displayViewer) {
-        (session.publisher as any).displayViewer = { model: "even-g2", protocol: "protobuf" };
-        session.metadata.hasDisplayViewer = true;
-      }
-      const lines = body.lines || ["CaringMind", "Display Active"];
-      const frame = { type: "display_frame", target: "even-g2", lines, displayTarget: "main", priority: "normal" as const };
-      const payload = JSON.stringify(frame);
-      session.publisher.ws.send(payload);
-      console.log(`[test] Sent display_frame to session=${sessionId}: ${payload.substring(0, 120)}`);
-      return Response.json({ ok: true, sent: frame });
-    }
-
     // --- /view as HTML page (browser GET) or WebSocket upgrade ---
 
     const isPublish = url.pathname === "/publish";
@@ -1738,20 +1707,6 @@ const server = Bun.serve<WsData>({
               session.publisher.batteryLevel = typeof cmd.batteryLevel === "number" ? cmd.batteryLevel : null;
               session.publisher.batteryState = strField(cmd.batteryState);
               session.publisher.lowPowerMode = !!cmd.lowPowerMode;
-
-              // Parse display_viewer info (Even Realities G1/G2 smart glasses display)
-              if (cmd.display_viewer && typeof cmd.display_viewer === "object") {
-                const dv = cmd.display_viewer as Record<string, unknown>;
-                const model = typeof dv.model === "string" ? dv.model : null;
-                const protocol = typeof dv.protocol === "string" ? dv.protocol : null;
-                if (model && (protocol === "uart" || protocol === "protobuf")) {
-                  session.publisher.displayViewer = { model, protocol } as DisplayViewerInfo;
-                  session.metadata.hasDisplayViewer = true;
-                }
-              } else {
-                session.publisher.displayViewer = null;
-                session.metadata.hasDisplayViewer = false;
-              }
 
               // Update session metadata
               session.metadata.deviceName = strField(cmd.deviceName);
@@ -2446,9 +2401,6 @@ const server = Bun.serve<WsData>({
       }
 
       if (role === "publish") {
-        // Clean up display renderer throttle state
-        displayRenderer.clearSession(sessionId);
-
         // Check lifecycle policy before deciding AI behavior on disconnect
         const session = registry.get(sessionId);
         if (session?.activeAppId) {

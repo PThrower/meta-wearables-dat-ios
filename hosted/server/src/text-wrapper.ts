@@ -5,8 +5,6 @@
  * Breaks at word boundaries when possible, falls back to character breaks.
  */
 
-import { G1_LINE_CAPACITY, G2_LINE_CAPACITY } from "./display-profiles.js";
-
 /**
  * Wrap text into lines that fit a given character capacity.
  * Respects existing newlines, breaks at word boundaries, hard-breaks long words.
@@ -60,16 +58,4 @@ export function wrapText(text: string, maxCharsPerLine: number): string[] {
   }
 
   return allLines;
-}
-
-/** Wrap text for G1 display (~80 chars per line) */
-export function wrapForG1(text: string, maxLines = 5): string[] {
-  const lines = wrapText(text, G1_LINE_CAPACITY);
-  return lines.slice(0, maxLines);
-}
-
-/** Wrap text for G2 display (~96 chars per line) */
-export function wrapForG2(text: string, maxLines = 5): string[] {
-  const lines = wrapText(text, G2_LINE_CAPACITY);
-  return lines.slice(0, maxLines);
 }
