@@ -19,6 +19,7 @@ import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
 import { createAIService } from "./ai-service.js";
+import { resamplePcm } from "./pcm-resample.js";
 import { dbWriter } from "./db/db-writer.js";
 import * as q from "./db/queries.js";
 // Import to register the AI providers
@@ -807,14 +808,20 @@ export class GuidanceOrchestrator {
   }
 
   /** Forward PCM audio from the relay to all active AI services for this session */
-  sendAudio(sessionId: string, pcm: Uint8Array, codecType?: number): void {
+  sendAudio(sessionId: string, pcm: Uint8Array, codecType?: number, sampleRate?: number): void {
     const sessionApps = this.aiState.get(sessionId);
     if (!sessionApps) return;
     for (const state of sessionApps.values()) {
       if (state.service.status !== "connected") continue;
       if (codecType === 0 && !state.input.phoneMic) continue;
       if (codecType === 1 && !state.input.glassesMic) continue;
-      state.service.sendAudio(pcm);
+
+      const targetRate = state.service.expectedInputSampleRate;
+      const pcmForService = (sampleRate && targetRate && sampleRate !== targetRate)
+        ? resamplePcm(pcm, sampleRate, targetRate)
+        : pcm;
+
+      state.service.sendAudio(pcmForService);
     }
   }
 

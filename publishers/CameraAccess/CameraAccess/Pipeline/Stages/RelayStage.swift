@@ -286,8 +286,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
                             }
                             // Handle display_frame from server (for smart glasses display)
                             if json["type"] as? String == "display_frame" {
+                                NSLog("[RelayStage] Received display_frame from server")
                                 if let handler = await self.onDisplayFrame {
+                                    NSLog("[RelayStage] Calling onDisplayFrame handler")
                                     handler(json)
+                                } else {
+                                    NSLog("[RelayStage] ERROR: onDisplayFrame handler is nil")
                                 }
                             }
                             if let handler = await self.onControlMessage {

@@ -30,6 +30,7 @@ struct NonStreamView: View {
   #endif
   @State private var sheetHeight: CGFloat = 300
   @State private var showSettings = false
+  @State private var showBLELog = false
 
   var body: some View {
     ZStack {
@@ -77,6 +78,7 @@ struct NonStreamView: View {
         DevicePickerSection(
           viewModel: viewModel,
           wearablesVM: wearablesVM,
+          showBLELog: $showBLELog,
           mockDeviceVM: mockDeviceVM
         )
         .padding(.horizontal, 24)
@@ -84,7 +86,8 @@ struct NonStreamView: View {
         #else
         DevicePickerSection(
           viewModel: viewModel,
-          wearablesVM: wearablesVM
+          wearablesVM: wearablesVM,
+          showBLELog: $showBLELog
         )
         .padding(.horizontal, 24)
         .padding(.bottom, 8)
@@ -141,6 +144,11 @@ struct NonStreamView: View {
         GettingStartedSheetView(height: $sheetHeight)
       }
     }
+    .fullScreenCover(isPresented: $showBLELog) {
+      BLELogView(log: viewModel.evenRealitiesLog) {
+        showBLELog = false
+      }
+    }
   }
 }
 
@@ -149,6 +157,7 @@ struct NonStreamView: View {
 struct DevicePickerSection: View {
   @ObservedObject var viewModel: StreamSessionViewModel
   @ObservedObject var wearablesVM: WearablesViewModel
+  @Binding var showBLELog: Bool
   #if DEBUG
   @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
   #endif
@@ -267,6 +276,19 @@ struct DevicePickerSection: View {
         .padding(.vertical, 8)
         .background(viewModel.isEvenRealitiesMode ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(8)
+      }
+
+      // Debug: BLE log button when Even Realities is selected
+      if viewModel.isEvenRealitiesMode && !viewModel.evenRealitiesLog.isEmpty {
+        Button { showBLELog = true } label: {
+          Text("BLE Log (\(viewModel.evenRealitiesLog.count))")
+            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+            .foregroundColor(.green)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.black)
+            .cornerRadius(6)
+        }
       }
 
       // Auto-select option
@@ -583,5 +605,50 @@ struct TipItemView: View {
         .fixedSize(horizontal: false, vertical: true)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
+// MARK: - BLE Log Full Screen
+
+struct BLELogView: View {
+  let log: [String]
+  let onDismiss: () -> Void
+
+  var body: some View {
+    ZStack(alignment: .topTrailing) {
+      Color.black.ignoresSafeArea()
+
+      VStack(spacing: 0) {
+        HStack {
+          Text("BLE Log")
+            .font(.system(size: 18, weight: .bold, design: .monospaced))
+            .foregroundColor(.green)
+          Spacer()
+          Button("Close") { onDismiss() }
+            .foregroundColor(.green)
+            .font(.system(size: 16, weight: .semibold))
+        }
+        .padding(16)
+
+        ScrollViewReader { proxy in
+          ScrollView {
+            LazyVStack(alignment: .leading, spacing: 3) {
+              ForEach(log.indices, id: \.self) { i in
+                Text(log[i])
+                  .font(.system(size: 14, weight: .medium, design: .monospaced))
+                  .foregroundColor(.green)
+                  .id(i)
+              }
+            }
+            .padding(.horizontal, 16)
+          }
+          .onChange(of: log.count) { _ in
+            if !log.isEmpty {
+              proxy.scrollTo(log.count - 1, anchor: .bottom)
+            }
+          }
+        }
+      }
+    }
   }
 }

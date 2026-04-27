@@ -69,6 +69,7 @@ interface GeminiGenerateResponse {
 // --- Service ---
 
 export class Gemma4Service implements AIService {
+  readonly expectedInputSampleRate = 16000;
   private _status: AIServiceStatus = "disconnected";
   private callbacks: AIServiceCallbacks | null = null;
   private config: AIServiceConfig | null = null;

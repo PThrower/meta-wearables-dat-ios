@@ -190,6 +190,8 @@ class StreamSessionViewModel: ObservableObject {
   // Even Realities BLE mode (audio + display, no camera)
   @Published var isEvenRealitiesMode: Bool = false
   @Published var evenRealitiesConnectionState: EvenRealitiesConnectionState = .disconnected
+  @Published var evenRealitiesDebugInfo: String = ""
+  @Published var evenRealitiesLog: [String] = []
 
   private var streamConfig: StreamSessionConfig {
     StreamSessionConfig(
@@ -357,6 +359,16 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
       await evenRealitiesManager.startScanning()
+
+      // Periodically update debug info
+      Task { @MainActor [weak self] in
+        while self != nil {
+          let info = await self?.evenRealitiesManager.debugInfo() ?? ""
+          self?.evenRealitiesDebugInfo = info
+          self?.evenRealitiesLog = await self?.evenRealitiesManager.getBLELog() ?? []
+          try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+      }
     }
 
     NSLog("[StreamSession] Even Realities selected — BLE scanning started")
@@ -1016,7 +1028,11 @@ class StreamSessionViewModel: ObservableObject {
   private func wireEvenRealities() async {
     // Only wire BLE mic + display when Even Realities mode is selected.
     // Prevents BLE scanning/activation during DAT SDK or phone camera sessions.
-    guard isEvenRealitiesMode else { return }
+    guard isEvenRealitiesMode else {
+      NSLog("[StreamSession] wireEvenRealities skipped — isEvenRealitiesMode=false")
+      return
+    }
+    NSLog("[StreamSession] wireEvenRealities: wiring display bridge + BLE manager")
 
     // Wire audio source to event bus (uses codecType=1, same as HFP mic)
     await evenAudioSource.setEventBus(audioEventBus)
@@ -1653,6 +1669,9 @@ class StreamSessionViewModel: ObservableObject {
     // Start audio relay pipeline
     await audioRelayStage.attachToEventBus(audioEventBus)
     await startRelayAudioAndTelemetry()
+
+    // Send startup message to glasses (will be queued if auth not done yet)
+    await evenRealitiesManager.sendDisplayContent(lines: ["stream starting"])
 
     NSLog("[StreamSession] Even Realities session started (audio + display, no video)")
   }

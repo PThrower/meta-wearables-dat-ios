@@ -113,6 +113,7 @@ function resample24to16(input: Int16Array): Int16Array {
 // --- Service ---
 
 export class GeminiLiveService implements AIService {
+  readonly expectedInputSampleRate = INPUT_PCM_RATE; // 16000
   private ws: WebSocket | null = null;
   private _status: AIServiceStatus = "disconnected";
   private callbacks: AIServiceCallbacks | null = null;

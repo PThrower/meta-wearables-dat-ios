@@ -1,17 +1,22 @@
 /*
  * G2Protocol.swift
  *
- * BLE display protocol for Even Realities G2 smart glasses.
- * Uses a custom Even Realities BLE service with protobuf-encoded payloads
- * and CRC-16/CCITT packet integrity.
+ * BLE protocol for Even Realities G2 smart glasses.
+ * Implements the full teleprompter protocol from i-soxi/even-g2-protocol:
  *
- * G2 packet structure:
- * [0xAA] [Type] [Seq] [Len] [PktTot] [PktSer] [SvcHi] [SvcLo] [Payload...] [CRCLo] [CRCHi]
+ *   1. Auth handshake (7 packets)
+ *   2. Display config (0x0E-20)
+ *   3. Teleprompter init (0x06-20, type=1)
+ *   4. Content pages 0-9 (0x06-20, type=3)
+ *   5. Mid-stream marker (0x06-20, type=0xFF)
+ *   6. Content pages 10-11
+ *   7. Sync trigger (0x80-00, type=14)
+ *   8. Remaining pages
  *
- * G2 uses container-based UI (TextContainer, ListContainer) managed via
- * EvenHub SDK commands (createStartUpPageContainer, textContainerUpgrade).
+ * Packet structure:
+ *   [0xAA] [Type] [Seq] [Len] [PktTot] [PktSer] [SvcHi] [SvcLo] [Payload...] [CRCLo] [CRCHi]
  *
- * Protocol reference: community RE from i-soxi/even-g2-protocol.
+ * Reference: https://github.com/i-soxi/even-g2-protocol
  */
 
 import CoreBluetooth
@@ -20,9 +25,8 @@ import Foundation
 // MARK: - G2 Service UUIDs
 
 enum G2UUID {
-    // Base pattern: 00002760-08C2-11E1-9073-0E8AC72E{XXXX}
     static let service = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E0000")
-    static let write = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5401")   // Commands
+    static let write = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5401")   // Commands (Write Without Response)
     static let notify = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E5402")  // Responses
     static let display = CBUUID(string: "00002760-08C2-11E1-9073-0E8AC72E6402") // Rendering
 }
@@ -31,114 +35,339 @@ enum G2UUID {
 
 enum G2Protocol {
 
-    // Packet type
-    static let packetTypeCommand: UInt8 = 0x21  // Phone -> Glasses
-    static let packetTypeResponse: UInt8 = 0x12 // Glasses -> Phone
-
-    // Packet header magic
     static let magic: UInt8 = 0xAA
+    static let packetTypeCommand: UInt8 = 0x21
+    static let packetTypeResponse: UInt8 = 0x12
 
-    // Service IDs (big-endian in packet)
-    static let serviceDisplayWake: (UInt8, UInt8) = (0x04, 0x20)
-    static let serviceTeleprompter: (UInt8, UInt8) = (0x06, 0x20)
-    static let serviceDashboard: (UInt8, UInt8) = (0x07, 0x20)
+    // Service IDs (hi, lo)
+    static let svcAuthControl: (UInt8, UInt8) = (0x80, 0x00)
+    static let svcAuthData: (UInt8, UInt8) = (0x80, 0x20)
+    static let svcDisplayWake: (UInt8, UInt8) = (0x04, 0x20)
+    static let svcTeleprompter: (UInt8, UInt8) = (0x06, 0x20)
+    static let svcDisplayConfig: (UInt8, UInt8) = (0x0E, 0x20)
+
+    // MARK: - Varint Encoding (protobuf-style)
+
+    static func encodeVarint(_ value: Int) -> Data {
+        var result = Data()
+        var v = value
+        repeat {
+            var byte = UInt8(v & 0x7F)
+            v >>= 7
+            if v > 0 { byte |= 0x80 }
+            result.append(byte)
+        } while v > 0
+        return result
+    }
 
     // MARK: - Packet Builder
 
-    /// Build a G2 BLE packet with header + CRC.
-    /// Payload is the service-specific data (already encoded).
     static func buildPacket(
-        type: UInt8 = packetTypeCommand,
-        sequence: UInt8,
-        serviceId: (UInt8, UInt8),
+        seq: UInt8,
+        service: (UInt8, UInt8),
         payload: Data
     ) -> Data {
-        var packet = Data()
-        packet.append(magic)                 // [0] Magic: 0xAA
-        packet.append(type)                  // [1] Type
-        packet.append(sequence)              // [2] Sequence (0-255, rolling)
-        // Length = payload.count + 2 (CRC) + 2 (service ID)
-        let totalPayloadLen = UInt8(payload.count + 2 + 2)
-        packet.append(totalPayloadLen)       // [3] Length
-        packet.append(0x01)                  // [4] Packet total (1 = single packet)
-        packet.append(0x01)                  // [5] Packet serial (1 = first)
-        packet.append(serviceId.0)           // [6] Service ID high
-        packet.append(serviceId.1)           // [7] Service ID low
-        packet.append(payload)               // [8..N-3] Service payload
-
-        // CRC-16/CCITT over the payload bytes only (skip 8-byte header)
-        let payloadForCRC = packet.suffix(from: 8)
-        let crc = crc16CCITT(payloadForCRC)
-        packet.append(UInt8(crc & 0xFF))     // CRC low
-        packet.append(UInt8((crc >> 8) & 0xFF)) // CRC high
-
-        return packet
+        let header = Data([
+            magic,
+            packetTypeCommand,
+            seq,
+            UInt8(payload.count + 2), // length = payload + CRC
+            0x01, 0x01,               // single packet
+            service.0, service.1
+        ])
+        let body = header + payload
+        let crc = crc16CCITT(payload)
+        return body + Data([UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)])
     }
 
-    // MARK: - Teleprompter (Text Display)
+    // MARK: - Auth Handshake (7 packets)
 
-    /// Build a teleprompter command to display text lines.
-    /// Uses simple text payload format compatible with G2 firmware.
-    static func buildTeleprompterDisplay(
-        lines: [String],
-        sequence: UInt8
-    ) -> Data {
-        // Join lines, UTF-8 encode, limit to ~500 chars for single packet
-        let text = lines.joined(separator: "\n")
-        var textData = Data(text.utf8)
-        let maxLen = 490 // 512 MTU - header - CRC
-        if textData.count > maxLen {
-            textData = textData.prefix(maxLen)
+    static func buildAuthSequence() -> [Data] {
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let tsVarint = encodeVarint(timestamp)
+        let txid = Data([0xE8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01])
+
+        var packets: [Data] = []
+
+        // Auth 1: Capability query (svc 0x80-00)
+        packets.append(addCRC(Data([
+            0xAA, 0x21, 0x01, 0x0C, 0x01, 0x01, 0x80, 0x00,
+            0x08, 0x04, 0x10, 0x0C, 0x1A, 0x04, 0x08, 0x01, 0x10, 0x04
+        ])))
+
+        // Auth 2: Capability response request (svc 0x80-20)
+        packets.append(addCRC(Data([
+            0xAA, 0x21, 0x02, 0x0A, 0x01, 0x01, 0x80, 0x20,
+            0x08, 0x05, 0x10, 0x0E, 0x22, 0x02, 0x08, 0x02
+        ])))
+
+        // Auth 3: Time sync with transaction ID (svc 0x80-20)
+        let auth3Payload = Data([0x08, 0x80, 0x01, 0x10, 0x0F, 0x82, 0x08, 0x11, 0x08]) + tsVarint + Data([0x10]) + txid
+        packets.append(addCRC(Data([0xAA, 0x21, 0x03, UInt8(auth3Payload.count + 2), 0x01, 0x01, 0x80, 0x20]) + auth3Payload))
+
+        // Auth 4: Capability (svc 0x80-00)
+        packets.append(addCRC(Data([
+            0xAA, 0x21, 0x04, 0x0C, 0x01, 0x01, 0x80, 0x00,
+            0x08, 0x04, 0x10, 0x10, 0x1A, 0x04, 0x08, 0x01, 0x10, 0x04
+        ])))
+
+        // Auth 5: Capability (svc 0x80-00)
+        packets.append(addCRC(Data([
+            0xAA, 0x21, 0x05, 0x0C, 0x01, 0x01, 0x80, 0x00,
+            0x08, 0x04, 0x10, 0x11, 0x1A, 0x04, 0x08, 0x01, 0x10, 0x04
+        ])))
+
+        // Auth 6: Capability (svc 0x80-20)
+        packets.append(addCRC(Data([
+            0xAA, 0x21, 0x06, 0x0A, 0x01, 0x01, 0x80, 0x20,
+            0x08, 0x05, 0x10, 0x12, 0x22, 0x02, 0x08, 0x01
+        ])))
+
+        // Auth 7: Final time sync (svc 0x80-20)
+        let auth7Payload = Data([0x08, 0x80, 0x01, 0x10, 0x13, 0x82, 0x08, 0x11, 0x08]) + tsVarint + Data([0x10]) + txid
+        packets.append(addCRC(Data([0xAA, 0x21, 0x07, UInt8(auth7Payload.count + 2), 0x01, 0x01, 0x80, 0x20]) + auth7Payload))
+
+        return packets
+    }
+
+    // MARK: - Display Config (0x0E-20, type=2)
+
+    static func buildDisplayConfig(seq: UInt8, msgId: Int) -> Data {
+        // Fixed config blob from protocol capture
+        let config = Data([
+            0x08, 0x01, 0x12, 0x13, 0x08, 0x02, 0x10, 0x90,
+            0x4E, 0x1D, 0x00, 0xE0, 0x94, 0x44, 0x25, 0x00,
+            0x00, 0x00, 0x00, 0x28, 0x00, 0x30, 0x00, 0x12, 0x13,
+            0x08, 0x03, 0x10, 0x0D, 0x0F, 0x1D, 0x00, 0x40,
+            0x8D, 0x44, 0x25, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x30, 0x00,
+            0x12, 0x12, 0x08, 0x04, 0x10, 0x00, 0x1D, 0x00, 0x00, 0x88, 0x42,
+            0x25, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x30, 0x00,
+            0x12, 0x12, 0x08, 0x05, 0x10, 0x00, 0x1D, 0x00, 0x00, 0x92, 0x42,
+            0x25, 0x00, 0x00, 0xA2, 0x42, 0x28, 0x00, 0x30, 0x00,
+            0x12, 0x12, 0x08, 0x06, 0x10, 0x00, 0x1D, 0x00, 0x00, 0xC6, 0x42,
+            0x25, 0x00, 0x00, 0xC4, 0x42, 0x28, 0x00, 0x30, 0x00,
+            0x18, 0x00
+        ])
+
+        var payload = Data([0x08, 0x02, 0x10])
+        payload.append(encodeVarint(msgId))
+        payload.append(0x22)
+        payload.append(encodeVarint(config.count))
+        payload.append(config)
+
+        return buildPacket(seq: seq, service: svcDisplayConfig, payload: payload)
+    }
+
+    // MARK: - Teleprompter Init (0x06-20, type=1)
+
+    static func buildTeleprompterInit(seq: UInt8, msgId: Int, totalLines: Int = 10, manualMode: Bool = true) -> Data {
+        let mode: UInt8 = manualMode ? 0x00 : 0x01
+
+        // Scale content height: 140 lines = 2665 units
+        let contentHeight = max(1, (totalLines * 2665) / 140)
+
+        // Display settings sub-block
+        var display = Data([0x08, 0x01, 0x10, 0x00, 0x18, 0x00, 0x20, 0x8B, 0x02])
+        display.append(0x28)
+        display.append(encodeVarint(contentHeight))
+        display.append(Data([0x30, 0xE6, 0x01]))   // line height = 230
+        display.append(Data([0x38, 0x8E, 0x0A]))   // viewport = 1294
+        display.append(Data([0x40, 0x05, 0x48, mode])) // font size + mode
+
+        var settings = Data([0x08, 0x01, 0x12])
+        settings.append(encodeVarint(display.count))
+        settings.append(display)
+
+        var payload = Data([0x08, 0x01, 0x10])
+        payload.append(encodeVarint(msgId))
+        payload.append(0x1A)
+        payload.append(encodeVarint(settings.count))
+        payload.append(settings)
+
+        return buildPacket(seq: seq, service: svcTeleprompter, payload: payload)
+    }
+
+    // MARK: - Content Page (0x06-20, type=3)
+
+    static func buildContentPage(seq: UInt8, msgId: Int, pageNum: Int, text: String) -> Data {
+        // Text starts with \n prefix
+        let textBytes = Data(("\n" + text).utf8)
+
+        // Inner block: page_num + line_count(10) + text
+        var inner = Data([0x08])
+        inner.append(encodeVarint(pageNum))
+        inner.append(Data([0x10, 0x0A]))  // 10 lines
+        inner.append(0x1A)
+        inner.append(encodeVarint(textBytes.count))
+        inner.append(textBytes)
+
+        // Content wrapper
+        var content = Data([0x2A])
+        content.append(encodeVarint(inner.count))
+        content.append(inner)
+
+        // Full payload: type=3 + msg_id + content
+        var payload = Data([0x08, 0x03, 0x10])
+        payload.append(encodeVarint(msgId))
+        payload.append(content)
+
+        return buildPacket(seq: seq, service: svcTeleprompter, payload: payload)
+    }
+
+    // MARK: - Mid-Stream Marker (0x06-20, type=255)
+
+    static func buildMarker(seq: UInt8, msgId: Int) -> Data {
+        // Type 255 varint = 0xFF 0x01
+        var payload = Data([0x08, 0xFF, 0x01, 0x10])
+        payload.append(encodeVarint(msgId))
+        payload.append(Data([0x6A, 0x04, 0x08, 0x00, 0x10, 0x06]))
+
+        return buildPacket(seq: seq, service: svcTeleprompter, payload: payload)
+    }
+
+    // MARK: - Sync Trigger (0x80-00, type=14)
+
+    static func buildSync(seq: UInt8, msgId: Int) -> Data {
+        var payload = Data([0x08, 0x0E, 0x10])
+        payload.append(encodeVarint(msgId))
+        payload.append(Data([0x6A, 0x00]))
+
+        return buildPacket(seq: seq, service: svcAuthControl, payload: payload)
+    }
+
+    // MARK: - Display Wake (0x04-20)
+
+    static func buildDisplayWake(seq: UInt8) -> Data {
+        return buildPacket(seq: seq, service: svcDisplayWake, payload: Data([0x08, 0x01]))
+    }
+
+    // MARK: - Text Formatting
+
+    /// Format raw text lines into teleprompter pages (10 lines/page, ~25 chars/line).
+    /// Returns minimum 14 pages as required by G2 firmware.
+    static func formatPages(from lines: [String]) -> [String] {
+        let charsPerLine = 25
+        let linesPerPage = 10
+
+        // Wrap long lines
+        var wrapped: [String] = []
+        for line in lines {
+            if line.isEmpty {
+                wrapped.append(" ")
+                continue
+            }
+            let words = line.split(separator: " ", omittingEmptySubsequences: false)
+            var current = ""
+            for word in words {
+                if current.isEmpty {
+                    current = String(word)
+                } else if current.count + 1 + word.count <= charsPerLine {
+                    current += " " + word
+                } else {
+                    wrapped.append(current)
+                    current = String(word)
+                }
+            }
+            if !current.isEmpty { wrapped.append(current) }
         }
 
-        // Simple text payload: [textLen(2)] [text UTF-8]
-        var payload = Data()
-        let textLen = UInt16(textData.count)
-        payload.append(UInt8(textLen & 0xFF))
-        payload.append(UInt8((textLen >> 8) & 0xFF))
-        payload.append(textData)
+        // Ensure minimum lines
+        while wrapped.count < linesPerPage {
+            wrapped.append(" ")
+        }
 
-        return buildPacket(
-            sequence: sequence,
-            serviceId: serviceTeleprompter,
-            payload: payload
-        )
+        // Split into pages
+        var pages: [String] = []
+        for i in stride(from: 0, to: wrapped.count, by: linesPerPage) {
+            let slice = Array(wrapped[i..<min(i + linesPerPage, wrapped.count)])
+            let padded = slice + Array(repeating: " ", count: linesPerPage - slice.count)
+            pages.append(padded.joined(separator: "\n") + " \n")
+        }
+
+        // Minimum 14 pages
+        let emptyPage = Array(repeating: " ", count: linesPerPage).joined(separator: "\n") + " \n"
+        while pages.count < 14 {
+            pages.append(emptyPage)
+        }
+
+        return pages
     }
 
-    // MARK: - Display Wake
+    // MARK: - Full Display Sequence
 
-    static func buildDisplayWake(sequence: UInt8) -> Data {
-        return buildPacket(
-            sequence: sequence,
-            serviceId: serviceDisplayWake,
-            payload: Data([0x01])
-        )
+    /// Build the complete packet sequence to display text on G2 glasses.
+    /// Returns an ordered array of packets to send sequentially with ~100ms delays.
+    static func buildFullDisplaySequence(lines: [String]) -> [Data] {
+        var packets: [Data] = []
+        var seq: UInt8 = 0x01
+        var msgId: Int = 0x0C
+
+        // 1. Auth handshake (7 packets)
+        let authPackets = buildAuthSequence()
+        packets.append(contentsOf: authPackets)
+        seq = 0x08
+        msgId = 0x14
+
+        // 2. Display config
+        packets.append(buildDisplayConfig(seq: seq, msgId: msgId))
+        seq &+= 1; msgId += 1
+
+        // 3. Format pages and init teleprompter
+        let pages = formatPages(from: lines)
+        packets.append(buildTeleprompterInit(seq: seq, msgId: msgId, totalLines: pages.count * 10))
+        seq &+= 1; msgId += 1
+
+        // 4. Content pages 0-9
+        for i in 0..<min(10, pages.count) {
+            packets.append(buildContentPage(seq: seq, msgId: msgId, pageNum: i, text: pages[i]))
+            seq &+= 1; msgId += 1
+        }
+
+        // 5. Mid-stream marker
+        packets.append(buildMarker(seq: seq, msgId: msgId))
+        seq &+= 1; msgId += 1
+
+        // 6. Pages 10-11
+        for i in 10..<min(12, pages.count) {
+            packets.append(buildContentPage(seq: seq, msgId: msgId, pageNum: i, text: pages[i]))
+            seq &+= 1; msgId += 1
+        }
+
+        // 7. Sync trigger
+        packets.append(buildSync(seq: seq, msgId: msgId))
+        seq &+= 1; msgId += 1
+
+        // 8. Remaining pages
+        for i in 12..<pages.count {
+            packets.append(buildContentPage(seq: seq, msgId: msgId, pageNum: i, text: pages[i]))
+            seq &+= 1; msgId += 1
+        }
+
+        return packets
     }
 
     // MARK: - CRC-16/CCITT
-    //
-    // Init: 0xFFFF, Polynomial: 0x1021
-    // Computed over payload bytes only (skip the 8-byte header).
 
     static func crc16CCITT(_ data: Data) -> UInt16 {
         var crc: UInt16 = 0xFFFF
         for byte in data {
             crc ^= UInt16(byte) << 8
             for _ in 0..<8 {
-                if crc & 0x8000 != 0 {
-                    crc = (crc << 1) ^ 0x1021
-                } else {
-                    crc <<= 1
-                }
+                crc = (crc & 0x8000 != 0) ? (crc << 1) ^ 0x1021 : crc << 1
                 crc &= 0xFFFF
             }
         }
         return crc
     }
 
+    /// Append CRC to an already-formed packet (for auth packets built with raw bytes).
+    static func addCRC(_ packet: Data) -> Data {
+        let crc = crc16CCITT(packet.suffix(from: 8))
+        return packet + Data([UInt8(crc & 0xFF), UInt8((crc >> 8) & 0xFF)])
+    }
+
     // MARK: - Response Parsing
 
-    /// Parse a G2 response packet. Returns (serviceId, payload) or nil.
     static func parseResponse(_ data: Data) -> (serviceId: UInt16, payload: Data)? {
         guard data.count >= 10 else { return nil }
         guard data[0] == magic else { return nil }
@@ -148,15 +377,13 @@ enum G2Protocol {
         let svcLo = UInt16(data[7])
         let serviceId = svcHi | svcLo
 
-        // Payload is between header (8 bytes) and CRC (2 bytes)
         let payloadStart = 8
         let payloadEnd = data.count - 2
         guard payloadEnd > payloadStart else { return nil }
 
-        // Verify CRC
         let payloadBytes = data[payloadStart..<payloadEnd]
         let receivedCRC = UInt16(data[payloadEnd]) | (UInt16(data[payloadEnd + 1]) << 8)
-        let computedCRC = crc16CCITT(payloadBytes)
+        let computedCRC = crc16CCITT(Data(payloadBytes))
         guard receivedCRC == computedCRC else { return nil }
 
         return (serviceId, Data(payloadBytes))

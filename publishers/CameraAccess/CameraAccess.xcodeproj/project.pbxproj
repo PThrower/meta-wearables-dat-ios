@@ -66,6 +66,7 @@
 		PIPETAPC01 /* AudioTapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPETAPC02 /* AudioTapClient.swift */; };
 		EVBLEG1B01 /* G1Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEG1F01 /* G1Protocol.swift */; };
 		EVBLEG2B01 /* G2Protocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEG2F01 /* G2Protocol.swift */; };
+		EVBLEG2EHB01 /* G2EvenHubProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEG2EHF01 /* G2EvenHubProtocol.swift */; };
 		EVBLEMGRB01 /* EvenRealitiesManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEMGRF01 /* EvenRealitiesManager.swift */; };
 		EVBLEAUDB01 /* EvenRealitiesAudioSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */; };
 		PIPEDSPB01 /* DisplayBridgeStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPEDSPF01 /* DisplayBridgeStage.swift */; };
@@ -182,6 +183,7 @@
 		PIPETAPC02 /* AudioTapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioTapClient.swift; sourceTree = "<group>"; };
 		EVBLEG1F01 /* G1Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G1Protocol.swift; sourceTree = "<group>"; };
 		EVBLEG2F01 /* G2Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G2Protocol.swift; sourceTree = "<group>"; };
+		EVBLEG2EHF01 /* G2EvenHubProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = G2EvenHubProtocol.swift; sourceTree = "<group>"; };
 		EVBLEMGRF01 /* EvenRealitiesManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvenRealitiesManager.swift; sourceTree = "<group>"; };
 		EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvenRealitiesAudioSource.swift; sourceTree = "<group>"; };
 		PIPEDSPF01 /* DisplayBridgeStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayBridgeStage.swift; sourceTree = "<group>"; };
@@ -418,6 +420,7 @@
 			children = (
 				EVBLEG1F01 /* G1Protocol.swift */,
 				EVBLEG2F01 /* G2Protocol.swift */,
+				EVBLEG2EHF01 /* G2EvenHubProtocol.swift */,
 				EVBLEMGRF01 /* EvenRealitiesManager.swift */,
 				EVBLEAUDF01 /* EvenRealitiesAudioSource.swift */,
 				EVLC3F01 /* LC3Decoder.swift */,
@@ -680,6 +683,7 @@
 				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
 				EVBLEG1B01 /* G1Protocol.swift in Sources */,
 				EVBLEG2B01 /* G2Protocol.swift in Sources */,
+				EVBLEG2EHB01 /* G2EvenHubProtocol.swift in Sources */,
 				EVBLEMGRB01 /* EvenRealitiesManager.swift in Sources */,
 				EVBLEAUDB01 /* EvenRealitiesAudioSource.swift in Sources */,
 				PIPEDSPB01 /* DisplayBridgeStage.swift in Sources */,

@@ -48,6 +48,7 @@ interface DeepgramMessage {
 }
 
 export class DeepgramSTTService implements AIService {
+  readonly expectedInputSampleRate = 48000;
   private _status: AIServiceStatus = "disconnected";
   private ws: WebSocket | null = null;
   private callbacks: AIServiceCallbacks | null = null;

@@ -55,7 +55,12 @@ actor DisplayBridgeStage: @preconcurrency FramePipelineStage {
     /// Handle a display_frame message from the relay server.
     /// Extracts text lines and sends to the BLE manager.
     func handleDisplayFrame(_ json: [String: Any]) {
-        guard let manager = manager else { return }
+        NSLog("[DisplayBridge] handleDisplayFrame called: \(json)")
+
+        guard let manager = manager else {
+            NSLog("[DisplayBridge] ERROR: manager is nil — setManager was never called")
+            return
+        }
 
         // Throttle check
         let now = ContinuousClock.Instant.now
@@ -64,14 +69,19 @@ actor DisplayBridgeStage: @preconcurrency FramePipelineStage {
             let elapsedMs = Double(elapsed.components.seconds) * 1000.0
                 + Double(elapsed.components.attoseconds) / 1e15
             if elapsedMs < minIntervalMs {
-                return // Skip — too soon
+                NSLog("[DisplayBridge] Throttled — skipping")
+                return
             }
         }
         lastUpdateTime = now
 
         // Extract lines from display_frame
-        guard let lines = json["lines"] as? [String], !lines.isEmpty else { return }
+        guard let lines = json["lines"] as? [String], !lines.isEmpty else {
+            NSLog("[DisplayBridge] ERROR: no lines in display_frame")
+            return
+        }
 
+        NSLog("[DisplayBridge] Forwarding \(lines.count) lines to BLE manager: \(lines)")
         Task {
             await manager.sendDisplayContent(lines: lines)
         }
