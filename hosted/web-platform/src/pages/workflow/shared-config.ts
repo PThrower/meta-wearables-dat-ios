@@ -5,7 +5,7 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, FlowExecutionConfig, FlowExecutionMode, DetectedFlow } from "../../core/api-client.js";
+import type { WorkflowNodeDef, ConfigFieldSchema, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow } from "../../core/api-client.js";
 import { buildDefaultFlowConfig } from "./flow-detection.js";
 
 /* ── Callback interfaces ── */
@@ -94,14 +94,19 @@ export function renderFlowConfigHTML(
   const effectiveConfig = config ?? buildDefaultFlowConfig(flows);
   const mode: FlowExecutionMode = effectiveConfig?.mode ?? "parallel";
   const flowOrder: string[] = effectiveConfig?.flowOrder ?? flows.map(f => f.flowId);
+  const flowTriggers = effectiveConfig?.flowTriggers ?? {};
 
   const flowList = flowOrder.map(fid => {
     const f = flows.find(fl => fl.flowId === fid);
     if (!f) return "";
+    const triggerRow = mode === "event-driven"
+      ? renderFlowTriggerField(fid, flows, flowTriggers[fid])
+      : "";
     return `<div class="wf-flow-order-item" data-flow-id="${f.flowId}" draggable="${mode === "sequential"}">
       <span class="wf-flow-drag-handle">${mode === "sequential" ? "⋮⋮" : "●"}</span>
       <span class="wf-flow-color-dot" style="background:${f.color}"></span>
       <span class="wf-flow-label">${esc(f.label)}</span>
+      ${triggerRow}
     </div>`;
   }).join("");
 
@@ -113,6 +118,7 @@ export function renderFlowConfigHTML(
     <div class="wf-flow-mode-selector">
       <button class="wf-flow-mode-btn ${mode === "parallel" ? "active" : ""}" data-mode="parallel">Parallel</button>
       <button class="wf-flow-mode-btn ${mode === "sequential" ? "active" : ""}" data-mode="sequential">Sequential</button>
+      <button class="wf-flow-mode-btn ${mode === "event-driven" ? "active" : ""}" data-mode="event-driven">Event-Driven</button>
     </div>
     <div class="wf-flow-order ${mode === "parallel" ? "disabled" : ""}" id="${prefix}-flow-order">
       ${flowList}
@@ -121,9 +127,66 @@ export function renderFlowConfigHTML(
   </div>`;
 }
 
+/** Render trigger config for a single flow in event-driven mode */
+function renderFlowTriggerField(flowId: string, flows: DetectedFlow[], trigger?: FlowTrigger): string {
+  const triggerType = trigger?.type ?? "";
+  const otherFlows = flows.filter(f => f.flowId !== flowId);
+
+  const typeOptions = [
+    { value: "", label: "Start immediately" },
+    { value: "on_flow_complete", label: "On flow complete" },
+    { value: "on_condition", label: "On condition" },
+    { value: "on_timer", label: "On timer" },
+    { value: "on_jepa_event", label: "On JEPA event" },
+  ].map(o => `<option value="${o.value}" ${triggerType === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+
+  let subFields = "";
+
+  if (triggerType === "on_flow_complete" || triggerType === "on_condition") {
+    const sourceFlowOptions = otherFlows.map(f =>
+      `<option value="${f.flowId}" ${trigger?.sourceFlowId === f.flowId || trigger?.condition?.sourceFlowId === f.flowId ? "selected" : ""}>${esc(f.label)}</option>`
+    ).join("");
+    subFields += `<select class="wf-trigger-subfield" data-trigger-field="sourceFlowId" data-flow-id="${flowId}">
+      <option value="">Select source flow</option>${sourceFlowOptions}
+    </select>`;
+  }
+
+  if (triggerType === "on_condition") {
+    const cond = trigger?.condition;
+    const operators = [
+      { value: "gt", label: ">" }, { value: "gte", label: ">=" },
+      { value: "lt", label: "<" }, { value: "lte", label: "<=" },
+      { value: "eq", label: "==" }, { value: "neq", label: "!=" },
+    ].map(o => `<option value="${o.value}" ${cond?.operator === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+
+    subFields += `<input type="text" class="wf-trigger-subfield" data-trigger-field="conditionField" data-flow-id="${flowId}" placeholder="Field name" value="${esc(cond?.field ?? "")}" />`;
+    subFields += `<select class="wf-trigger-subfield" data-trigger-field="conditionOperator" data-flow-id="${flowId}">${operators}</select>`;
+    subFields += `<input type="number" class="wf-trigger-subfield" data-trigger-field="conditionValue" data-flow-id="${flowId}" placeholder="Value" value="${cond?.value ?? ""}" step="any" />`;
+  }
+
+  if (triggerType === "on_timer") {
+    subFields += `<input type="number" class="wf-trigger-subfield" data-trigger-field="intervalSec" data-flow-id="${flowId}" placeholder="Interval (seconds)" value="${trigger?.intervalSec ?? ""}" min="1" step="1" />`;
+  }
+
+  if (triggerType === "on_jepa_event") {
+    const eventOptions = [
+      { value: "any", label: "Any event" },
+      { value: "anomaly", label: "Anomaly" },
+      { value: "action", label: "Action" },
+    ].map(o => `<option value="${o.value}" ${trigger?.jepaEvent === o.value ? "selected" : ""}>${o.label}</option>`).join("");
+    subFields += `<select class="wf-trigger-subfield" data-trigger-field="jepaEvent" data-flow-id="${flowId}">${eventOptions}</select>`;
+    subFields += `<input type="number" class="wf-trigger-subfield" data-trigger-field="jepaConfidenceThreshold" data-flow-id="${flowId}" placeholder="Min confidence" value="${trigger?.jepaConfidenceThreshold ?? ""}" min="0" max="1" step="0.1" />`;
+  }
+
+  return `<div class="wf-flow-trigger-row" data-flow-id="${flowId}">
+    <select class="wf-trigger-type" data-flow-id="${flowId}">${typeOptions}</select>
+    ${subFields ? `<div class="wf-trigger-subfields">${subFields}</div>` : ""}
+  </div>`;
+}
+
 /* ── Flow config event wiring ── */
 
-/** Wire flow config panel events — mode toggle, drag reorder, hover highlight, back button. */
+/** Wire flow config panel events — mode toggle, drag reorder, hover highlight, trigger config, back button. */
 export function wireFlowConfigEvents(panel: Element, flows: DetectedFlow[], callbacks: FlowConfigCallbacks): void {
   // Mode toggle
   panel.querySelectorAll(".wf-flow-mode-btn").forEach(btn => {
@@ -132,12 +195,19 @@ export function wireFlowConfigEvents(panel: Element, flows: DetectedFlow[], call
       const workflow = callbacks.getWorkflow();
       if (!workflow) return;
       const currentConfig = workflow.flowConfig ?? buildDefaultFlowConfig(flows);
-      callbacks.setFlowConfig({ mode, flowOrder: currentConfig?.flowOrder ?? flows.map(f => f.flowId) });
+      callbacks.setFlowConfig({
+        mode,
+        flowOrder: currentConfig?.flowOrder ?? flows.map(f => f.flowId),
+        flowTriggers: mode === "event-driven" ? (currentConfig as any)?.flowTriggers ?? {} : undefined,
+      });
       callbacks.setDirty();
       callbacks.autoSave();
       callbacks.rerender();
     });
   });
+
+  // Trigger type dropdown change — re-render sub-fields
+  wireFlowTriggerEvents(panel, flows, callbacks);
 
   // Back button (optional — only rendered when showBack is true)
   panel.querySelector("#wf-flow-back")?.addEventListener("click", () => callbacks.onBack?.());
@@ -257,6 +327,86 @@ export function wireConfigFieldInputs(container: Element, callbacks: ConfigField
       callbacks.setDirty();
       callbacks.autoSave();
       callbacks.refreshSVG();
+    });
+  });
+}
+
+/* ── Flow trigger event wiring ── */
+
+/** Wire trigger type dropdown and sub-field change events */
+function wireFlowTriggerEvents(panel: Element, flows: DetectedFlow[], callbacks: FlowConfigCallbacks): void {
+  // Trigger type dropdown
+  panel.querySelectorAll(".wf-trigger-type").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const flowId = (sel as HTMLElement).dataset.flowId!;
+      const triggerType = (sel as HTMLSelectElement).value as FlowTriggerType | "";
+      const workflow = callbacks.getWorkflow();
+      if (!workflow?.flowConfig) return;
+
+      const currentTriggers = { ...(workflow.flowConfig as any).flowTriggers };
+
+      if (!triggerType) {
+        delete currentTriggers[flowId];
+      } else {
+        currentTriggers[flowId] = { type: triggerType };
+      }
+
+      callbacks.setFlowConfig({
+        ...workflow.flowConfig,
+        flowTriggers: currentTriggers,
+      });
+      callbacks.setDirty();
+      callbacks.autoSave();
+      callbacks.rerender();
+    });
+  });
+
+  // Trigger sub-field changes
+  panel.querySelectorAll(".wf-trigger-subfield").forEach(input => {
+    input.addEventListener("change", () => {
+      const el = input as HTMLInputElement | HTMLSelectElement;
+      const flowId = el.dataset.flowId!;
+      const field = el.dataset.triggerField!;
+      const workflow = callbacks.getWorkflow();
+      if (!workflow?.flowConfig) return;
+
+      const currentTriggers = { ...((workflow.flowConfig as any).flowTriggers ?? {}) };
+      const currentTrigger: FlowTrigger = currentTriggers[flowId] ?? { type: "" as FlowTriggerType };
+      currentTriggers[flowId] = currentTrigger;
+
+      switch (field) {
+        case "sourceFlowId":
+          currentTrigger.sourceFlowId = el.value;
+          break;
+        case "conditionField":
+          if (!currentTrigger.condition) currentTrigger.condition = { sourceFlowId: "", field: "", operator: "gt", value: 0 };
+          currentTrigger.condition.field = el.value;
+          break;
+        case "conditionOperator":
+          if (!currentTrigger.condition) currentTrigger.condition = { sourceFlowId: "", field: "", operator: "gt", value: 0 };
+          currentTrigger.condition.operator = el.value as FlowTrigger["condition"] extends infer C | undefined ? C extends { operator: infer O } ? O : never : never;
+          break;
+        case "conditionValue":
+          if (!currentTrigger.condition) currentTrigger.condition = { sourceFlowId: "", field: "", operator: "gt", value: 0 };
+          currentTrigger.condition.value = parseFloat(el.value) || 0;
+          break;
+        case "intervalSec":
+          currentTrigger.intervalSec = parseFloat(el.value) || 1;
+          break;
+        case "jepaEvent":
+          currentTrigger.jepaEvent = el.value as "anomaly" | "action" | "any";
+          break;
+        case "jepaConfidenceThreshold":
+          currentTrigger.jepaConfidenceThreshold = parseFloat(el.value) || 0;
+          break;
+      }
+
+      callbacks.setFlowConfig({
+        ...workflow.flowConfig,
+        flowTriggers: currentTriggers,
+      });
+      callbacks.setDirty();
+      callbacks.autoSave();
     });
   });
 }

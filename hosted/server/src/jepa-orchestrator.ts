@@ -72,6 +72,7 @@ interface SessionJEPAState {
 export type JEPAEventFanoutFn = (sessionId: string, event: GuidanceEvent) => void;
 export type JEPAGuidancePushFn = (sessionId: string, event: GuidanceEvent) => void;
 export type JEPAPersistFn = (sessionId: string, event: GuidanceEvent) => void;
+export type JEPAFlowTriggerFn = (sessionId: string, event: GuidanceEvent) => void;
 
 // --- Orchestrator ---
 
@@ -87,6 +88,9 @@ export class JEPAOrchestrator {
   /** Persist JEPA events to R2 */
   private persistFn: JEPAPersistFn | null = null;
 
+  /** Push JEPA events to flow trigger evaluation engine */
+  private flowTriggerFn: JEPAFlowTriggerFn | null = null;
+
   // --- Setters for wiring ---
 
   setEventFanoutFn(fn: JEPAEventFanoutFn): void {
@@ -99,6 +103,10 @@ export class JEPAOrchestrator {
 
   setPersistFn(fn: JEPAPersistFn): void {
     this.persistFn = fn;
+  }
+
+  setFlowTriggerFn(fn: JEPAFlowTriggerFn): void {
+    this.flowTriggerFn = fn;
   }
 
   // --- Lifecycle ---
@@ -248,6 +256,11 @@ export class JEPAOrchestrator {
     };
 
     this.emitEvent(sessionId, event);
+
+    // Notify flow trigger engine
+    if (this.flowTriggerFn) {
+      this.flowTriggerFn(sessionId, event);
+    }
   }
 
   private handleAnomaly(sessionId: string, anomaly: JEPAomaly): void {
@@ -275,6 +288,11 @@ export class JEPAOrchestrator {
     // Push anomaly alert to publisher (for audio cue) if warning or critical
     if (severity !== "info" && this.guidancePushFn) {
       this.guidancePushFn(sessionId, event);
+    }
+
+    // Notify flow trigger engine
+    if (this.flowTriggerFn) {
+      this.flowTriggerFn(sessionId, event);
     }
   }
 

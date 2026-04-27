@@ -201,14 +201,30 @@ function resolveSinkTarget(
   return false;
 }
 
+/** Estimate speech duration for a group of TTS chains (ms).
+ *  ~150 wpm average, ~5 chars/word → ~12.5 chars/sec → 80ms/char.
+ *  Adds 500ms buffer per chain for synthesis startup overhead. */
+function estimateGroupDuration(chains: Array<{ textContent: string }>): number {
+  let totalMs = 0;
+  for (const chain of chains) {
+    totalMs += Math.max(chain.textContent.length * 80, 1500); // floor of 1.5s per chain
+    totalMs += 500; // synthesis buffer
+  }
+  return totalMs;
+}
+
 /** Push text→local-tts→speaker chains for passive workflows to the publisher */
 function pushPassiveTTSChains(
   nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
   edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
   publisherWs: { send: (data: string) => void; readyState: number },
   sessionId: string,
+  flowConfig?: FlowExecutionConfig | null,
 ): void {
   if (publisherWs.readyState !== 1) return; // WebSocket.OPEN
+
+  // Build all text→tts chains, keyed by the text node's flow
+  const chains: Array<{ textNodeId: string; textContent: string; ttsNodeId: string; preferGlasses: boolean; flowId: string }> = [];
   for (const node of nodes) {
     if (node.type !== "text") continue;
     const textContent = node.config?.text as string | undefined;
@@ -220,11 +236,96 @@ function pushPassiveTTSChains(
       const ttsDef = NODE_DEF_MAP.get(resolveNodeType(ttsNode.type));
       if (ttsDef?.type !== "local-tts") continue;
       const preferGlasses = resolveSinkTarget(ttsNode.id, nodes, edges);
-      publisherWs.send(JSON.stringify({ type: "audio_route", preferGlasses }));
-      publisherWs.send(JSON.stringify({ type: "guidance_text", text: textContent, preferGlasses }));
-      console.log(`[relay] Passive TTS: pushed text (${textContent.length} chars) preferGlasses=${preferGlasses} session=${sessionId}`);
+      // Determine flowId from the text node (lexicographically smallest node in its component)
+      const flowId = getFlowIdForNode(node.id, nodes, edges);
+      chains.push({ textNodeId: node.id, textContent, ttsNodeId: ttsNode.id, preferGlasses, flowId });
     }
   }
+
+  // Determine push order
+  const flowOrder = flowConfig?.flowOrder;
+  if (flowOrder && flowOrder.length > 1) {
+    // Sort chains by their flow's position in flowOrder
+    const orderMap = new Map(flowOrder.map((fid, idx) => [fid, idx]));
+    chains.sort((a, b) => (orderMap.get(a.flowId) ?? 999) - (orderMap.get(b.flowId) ?? 999));
+  }
+
+  // For sequential mode: push all chains but with inter-flow delays
+  const mode = flowConfig?.mode ?? "parallel";
+  if (mode === "sequential" && chains.length > 1) {
+    // Group chains by flowId, preserving configured flow order
+    const flowGroups = new Map<string, typeof chains>();
+    for (const chain of chains) {
+      if (!flowGroups.has(chain.flowId)) flowGroups.set(chain.flowId, []);
+      flowGroups.get(chain.flowId)!.push(chain);
+    }
+    const groups = [...flowGroups.values()];
+
+    // Push first flow's chains immediately
+    for (const chain of groups[0]) {
+      publisherWs.send(JSON.stringify({ type: "audio_route", preferGlasses: chain.preferGlasses }));
+      publisherWs.send(JSON.stringify({ type: "guidance_text", text: chain.textContent, preferGlasses: chain.preferGlasses }));
+      console.log(`[relay] Passive TTS (sequential flow 0): pushed text (${chain.textContent.length} chars) preferGlasses=${chain.preferGlasses} session=${sessionId}`);
+    }
+
+    // Subsequent flows delayed by estimated speech duration of prior flows
+    // ~150 wpm average TTS speed, ~5 chars/word → ~12.5 chars/sec → 80ms/char
+    // Add 500ms buffer per chain for synthesis overhead
+    let delayMs = estimateGroupDuration(groups[0]);
+    for (let gi = 1; gi < groups.length; gi++) {
+      const group = groups[gi];
+      const capturedDelay = delayMs;
+      const giLabel = gi;
+      setTimeout(() => {
+        for (const chain of group) {
+          publisherWs.send(JSON.stringify({ type: "audio_route", preferGlasses: chain.preferGlasses }));
+          publisherWs.send(JSON.stringify({ type: "guidance_text", text: chain.textContent, preferGlasses: chain.preferGlasses }));
+          console.log(`[relay] Passive TTS (sequential flow ${giLabel}, delayed ${capturedDelay}ms): pushed text (${chain.textContent.length} chars) preferGlasses=${chain.preferGlasses} session=${sessionId}`);
+        }
+      }, delayMs);
+      delayMs += estimateGroupDuration(group);
+    }
+    return;
+  }
+
+  // Parallel or default: push all immediately in order
+  for (const chain of chains) {
+    publisherWs.send(JSON.stringify({ type: "audio_route", preferGlasses: chain.preferGlasses }));
+    publisherWs.send(JSON.stringify({ type: "guidance_text", text: chain.textContent, preferGlasses: chain.preferGlasses }));
+    console.log(`[relay] Passive TTS: pushed text (${chain.textContent.length} chars) preferGlasses=${chain.preferGlasses} session=${sessionId}`);
+  }
+}
+
+/** Determine the flowId for a node using the same algorithm as detectFlows (lexicographically smallest node in the connected component) */
+function getFlowIdForNode(
+  targetNodeId: string,
+  nodes: Array<{ id: string }>,
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+): string {
+  // BFS from targetNodeId to find all nodes in its connected component
+  const adjacency = new Map<string, string[]>();
+  for (const n of nodes) adjacency.set(n.id, []);
+  for (const e of edges) {
+    if (adjacency.has(e.sourceNodeId) && adjacency.has(e.targetNodeId)) {
+      adjacency.get(e.sourceNodeId)!.push(e.targetNodeId);
+      adjacency.get(e.targetNodeId)!.push(e.sourceNodeId);
+    }
+  }
+  const visited = new Set<string>();
+  const queue = [targetNodeId];
+  visited.add(targetNodeId);
+  let smallest = targetNodeId;
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current < smallest) smallest = current;
+    for (const neighbor of (adjacency.get(current) ?? [])) {
+      if (!visited.has(neighbor)) {
+        visited.add(neighbor);
+        queue.push(neighbor);
+      }
+    }
+  }
+  return `flow_${smallest}`;
 }
 
 /** Build mobile-side config for passive workflows (no AI, just sinks/transforms) */
@@ -1061,7 +1162,7 @@ const server = Bun.serve<WsData>({
           const body = await req.json() as {
             name?: string; description?: string; status?: string;
             canvasViewport?: string;
-            flowConfig?: { mode: string; flowOrder: string[] } | null;
+            flowConfig?: { mode: string; flowOrder: string[]; flowTriggers?: Record<string, FlowTrigger> } | null;
             nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
             edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
           };
@@ -1213,26 +1314,26 @@ const server = Bun.serve<WsData>({
         if (flowConfig?.mode === "event-driven" && flows.length > 1) {
           const triggers = flowConfig.flowTriggers ?? {};
           const triggeredFlowMap = new Map<string, AppDefinition[]>();
+          const immediateFlows: Array<{ flowId: string; apps: AppDefinition[] }> = [];
 
-          // Flows without a trigger activate immediately (like parallel)
-          appsToActivate = pipelineApps.filter(app => {
-            const flowId = (app.config as Record<string, unknown>).flowId as string | undefined;
-            return !flowId || !triggers[flowId];
-          });
-
-          // Flows with a trigger are registered as pending
           for (const fid of flowConfig.flowOrder) {
-            const trigger = triggers[fid];
-            if (!trigger) continue;
             const flowApps = pipelineApps.filter(app => (app.config as Record<string, unknown>).flowId === fid);
-            if (flowApps.length > 0) {
-              triggeredFlowMap.set(fid, flowApps);
+            const trigger = triggers[fid];
+            if (!trigger) {
+              immediateFlows.push({ flowId: fid, apps: flowApps });
+            } else {
+              if (flowApps.length > 0) {
+                triggeredFlowMap.set(fid, flowApps);
+              }
             }
           }
+
+          appsToActivate = immediateFlows.flatMap(f => f.apps);
 
           orchestrator.registerEventDrivenFlows(
             body.sessionId,
             wfId,
+            immediateFlows,
             triggeredFlowMap,
             triggers,
           );
@@ -1270,7 +1371,7 @@ const server = Bun.serve<WsData>({
 
           // For passive workflows with text→local-tts→speaker chains, push text as guidance_text
           if (session.publisher?.ws) {
-            pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, body.sessionId);
+            pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, body.sessionId, flowConfig);
           }
 
           return Response.json({ appId: null, status: "passive", apps: [] });
@@ -1784,7 +1885,8 @@ const server = Bun.serve<WsData>({
                   } else {
                     ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
                     if (session.publisher?.ws) {
-                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                      const publisherFlowConfig: FlowExecutionConfig | null = wf.flowConfig ? JSON.parse(wf.flowConfig) : null;
+                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId, publisherFlowConfig);
                     }
                   }
                 } catch (e) {
@@ -1869,7 +1971,8 @@ const server = Bun.serve<WsData>({
                 }
                 ws.send(JSON.stringify({ type: "workflow_activated", appId: primaryApp?.id ?? "passive" }));
                 if (!primaryApp && session.publisher?.ws) {
-                  pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                  const viewerFlowConfig: FlowExecutionConfig | null = wf.flowConfig ? JSON.parse(wf.flowConfig) : null;
+                  pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId, viewerFlowConfig);
                 }
                 const ic = orchestrator.getInputConfig(sessionId);
                 if (ic && session.publisher) session.publisher.ws.send(JSON.stringify({ type: "configure_sources", input: ic }));
@@ -2120,7 +2223,8 @@ const server = Bun.serve<WsData>({
                   } else {
                     ws.send(JSON.stringify({ type: "app_status", appId, status: "active", info: "passive pipeline" }));
                     if (session.publisher?.ws) {
-                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId);
+                      const publisherFlowConfig: FlowExecutionConfig | null = wf.flowConfig ? JSON.parse(wf.flowConfig) : null;
+                      pushPassiveTTSChains(nodes as any, edges as any, session.publisher.ws, sessionId, publisherFlowConfig);
                     }
                   }
                 } catch (e) {

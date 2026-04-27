@@ -14,7 +14,7 @@
  * 5. Broadcasts GuidanceEvent to viewers and pushes audio to /audio-in
  */
 
-import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig, NodeExecutionState, NodeExecutionInfo, WorkflowInstanceState, WorkflowControlAction, WorkflowNodeType, NodeStatesMessage, FlowExecutionConfig } from "./app-types.js";
+import type { ControlEvent, AppConfig, AppPipeline, AppDefinition, InputConfig, OutputConfig, NodeExecutionState, NodeExecutionInfo, WorkflowInstanceState, WorkflowControlAction, WorkflowNodeType, NodeStatesMessage, FlowExecutionConfig, FlowTrigger } from "./app-types.js";
 import type { ControlEventBus } from "./control-event-bus.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
@@ -138,6 +138,19 @@ interface SessionAIState {
 
 // --- Orchestrator ---
 
+/** Compare a field value against a threshold using the given operator */
+function compareValues(fieldValue: number, operator: string, threshold: number): boolean {
+  switch (operator) {
+    case "gt": return fieldValue > threshold;
+    case "gte": return fieldValue >= threshold;
+    case "lt": return fieldValue < threshold;
+    case "lte": return fieldValue <= threshold;
+    case "eq": return fieldValue === threshold;
+    case "neq": return fieldValue !== threshold;
+    default: return false;
+  }
+}
+
 export class GuidanceOrchestrator {
   private controlBus: ControlEventBus;
   private appRegistry: AppRegistry;
@@ -159,6 +172,21 @@ export class GuidanceOrchestrator {
     sessionId: string;
     workflowId: string;
   }>();
+
+  // --- Event-driven flow trigger state ---
+
+  /** Per-flow trigger configs (sessionId -> flowId -> trigger) */
+  private flowTriggers = new Map<string, Map<string, FlowTrigger>>();
+  /** Per-flow last output for condition evaluation (sessionId -> flowId -> last event) */
+  private flowLastOutput = new Map<string, Map<string, GuidanceEvent>>();
+  /** Active timer handles for cleanup (sessionId -> timer handles) */
+  private flowTimers = new Map<string, ReturnType<typeof setInterval>[]>();
+  /** Flows waiting for trigger activation (sessionId -> flowId -> apps[]) */
+  private triggeredFlows = new Map<string, Map<string, AppDefinition[]>>();
+  /** Workflow ID for each event-driven session (sessionId -> workflowId) */
+  private flowWorkflowIds = new Map<string, string>();
+  /** Reverse mapping: appId -> flowId for event-driven sessions (sessionId -> appId -> flowId) */
+  private nodeAppFlowMap = new Map<string, Map<string, string>>();
 
   /** Callback to push AI audio response to relay's audio-in path */
   private audioPushFn: AudioPushFn | null = null;
@@ -580,6 +608,172 @@ export class GuidanceOrchestrator {
     this.pendingFlows.delete(sessionId);
   }
 
+  // --- Event-driven flow trigger engine ---
+
+  /** Register event-driven flow triggers for a session */
+  registerEventDrivenFlows(
+    sessionId: string,
+    workflowId: string,
+    immediateFlows: Array<{ flowId: string; apps: AppDefinition[] }>,
+    triggeredFlowMap: Map<string, AppDefinition[]>,
+    triggers: Record<string, FlowTrigger>,
+  ): void {
+    this.flowWorkflowIds.set(sessionId, workflowId);
+    const triggerMap = new Map<string, FlowTrigger>();
+    for (const [flowId, trigger] of Object.entries(triggers)) {
+      triggerMap.set(flowId, trigger);
+    }
+    this.flowTriggers.set(sessionId, triggerMap);
+    this.triggeredFlows.set(sessionId, new Map(triggeredFlowMap));
+    this.flowLastOutput.set(sessionId, new Map());
+    this.flowTimers.set(sessionId, []);
+
+    // Build reverse map: appId -> flowId (for both immediate and triggered flows)
+    const appFlowMap = new Map<string, string>();
+    for (const { flowId, apps } of immediateFlows) {
+      for (const app of apps) appFlowMap.set(app.id, flowId);
+    }
+    for (const [flowId, apps] of triggeredFlowMap) {
+      for (const app of apps) appFlowMap.set(app.id, flowId);
+    }
+    this.nodeAppFlowMap.set(sessionId, appFlowMap);
+
+    // Start timer triggers
+    for (const [flowId, trigger] of triggerMap) {
+      if (trigger.type === "on_timer" && trigger.intervalSec) {
+        const handle = setInterval(() => {
+          this.checkFlowTriggers(sessionId, "timer", {});
+        }, trigger.intervalSec * 1000);
+        this.flowTimers.get(sessionId)!.push(handle);
+        console.log(`[orchestrator] Timer trigger started: session=${sessionId} flowId=${flowId} interval=${trigger.intervalSec}s`);
+      }
+    }
+
+    console.log(`[orchestrator] Event-driven flows registered: session=${sessionId} triggers=${triggerMap.size} pending=${triggeredFlowMap.size}`);
+  }
+
+  /** Check all flow triggers for a session after an event */
+  checkFlowTriggers(
+    sessionId: string,
+    eventType: "flow_complete" | "output" | "timer" | "jepa",
+    payload: { flowId?: string; event?: GuidanceEvent },
+  ): void {
+    const triggers = this.flowTriggers.get(sessionId);
+    if (!triggers) return;
+    const pending = this.triggeredFlows.get(sessionId);
+    if (!pending || pending.size === 0) return;
+
+    for (const [targetFlowId, trigger] of triggers) {
+      if (!pending.has(targetFlowId)) continue; // already activated
+      if (this.evaluateTrigger(sessionId, trigger, eventType, payload)) {
+        this.activateTriggeredFlow(sessionId, targetFlowId);
+      }
+    }
+  }
+
+  /** Evaluate a single trigger against the current event */
+  private evaluateTrigger(
+    sessionId: string,
+    trigger: FlowTrigger,
+    eventType: string,
+    payload: { flowId?: string; event?: GuidanceEvent },
+  ): boolean {
+    switch (trigger.type) {
+      case "on_flow_complete":
+        return eventType === "flow_complete" && payload?.flowId === trigger.sourceFlowId;
+      case "on_condition": {
+        if (eventType !== "output" || !trigger.condition) return false;
+        const cond = trigger.condition;
+        const lastOutput = this.flowLastOutput.get(sessionId)?.get(cond.sourceFlowId);
+        if (!lastOutput) return false;
+        const fieldValue = (lastOutput.metadata as Record<string, unknown>)?.[cond.field]
+          ?? (lastOutput as unknown as Record<string, unknown>)[cond.field] as number | undefined;
+        if (fieldValue == null) return false;
+        return compareValues(fieldValue as number, cond.operator, cond.value);
+      }
+      case "on_timer":
+        return eventType === "timer";
+      case "on_jepa_event": {
+        if (eventType !== "jepa" || !payload?.event) return false;
+        const jepaTrigger = trigger.jepaEvent ?? "any";
+        if (jepaTrigger !== "any" && payload.event.trigger !== jepaTrigger) return false;
+        const threshold = trigger.jepaConfidenceThreshold ?? 0;
+        return (payload.event.confidence ?? 0) >= threshold;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** Activate a triggered flow that was pending */
+  private activateTriggeredFlow(sessionId: string, flowId: string): void {
+    const pending = this.triggeredFlows.get(sessionId);
+    const apps = pending?.get(flowId);
+    if (!apps) return;
+    pending!.delete(flowId);
+
+    console.log(`[orchestrator] Triggered flow activated: session=${sessionId} flowId=${flowId} apps=${apps.length}`);
+
+    for (const app of apps) {
+      this.appRegistry.registerTransientApp(app);
+      const pDef = app.config as Record<string, unknown>;
+      if (pDef?.jepa) {
+        // JEPA apps handled externally — skip here
+      } else {
+        // Fire-and-forget activation
+        this.activateWithConfig(sessionId, app).catch(err => {
+          console.error(`[orchestrator] Failed to activate triggered app ${app.id}:`, err);
+        });
+      }
+    }
+
+    const workflowId = this.flowWorkflowIds.get(sessionId);
+    if (workflowId) this.broadcastNodeStates(sessionId, workflowId);
+
+    // Clean up if all triggered flows have been activated
+    if (pending!.size === 0) {
+      this.cleanupEventDrivenState(sessionId);
+    }
+  }
+
+  /** Look up the flow ID for a given app in a session */
+  private getFlowIdForApp(sessionId: string, appId: string): string | undefined {
+    return this.nodeAppFlowMap.get(sessionId)?.get(appId);
+  }
+
+  /** Check if all apps in a flow have reached terminal state */
+  private isFlowComplete(sessionId: string, flowId: string): boolean {
+    const terminalStates: NodeExecutionState[] = ["completed", "skipped", "errored"];
+    for (const [, instance] of this.workflowInstances) {
+      if (instance.sessionId !== sessionId) continue;
+      for (const [, node] of instance.nodes) {
+        if ((node as any).flowId === flowId && !terminalStates.includes(node.state)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  /** Clean up all event-driven state for a session */
+  private cleanupEventDrivenState(sessionId: string): void {
+    this.flowTriggers.delete(sessionId);
+    this.flowLastOutput.delete(sessionId);
+    this.triggeredFlows.delete(sessionId);
+    this.flowWorkflowIds.delete(sessionId);
+    this.nodeAppFlowMap.delete(sessionId);
+    const timers = this.flowTimers.get(sessionId);
+    if (timers) {
+      for (const handle of timers) clearInterval(handle);
+      this.flowTimers.delete(sessionId);
+    }
+  }
+
+  /** Clean up event-driven state for a session (public, for stopWorkflow) */
+  clearEventDrivenState(sessionId: string): void {
+    this.cleanupEventDrivenState(sessionId);
+  }
+
   /** Update a node's execution state. Called from activateWithConfig on success/error. */
   updateNodeState(sessionId: string, appId: string, state: NodeExecutionState, error?: string): void {
     for (const [, instance] of this.workflowInstances) {
@@ -599,6 +793,14 @@ export class GuidanceOrchestrator {
         // Check if sequential flow should advance after a terminal state
         if ((state === "completed" || state === "skipped" || state === "errored") && this.hasPendingFlows(sessionId)) {
           this.checkSequentialFlowCompletion(sessionId, instance);
+        }
+
+        // Check event-driven flow triggers when a node reaches terminal state
+        if ((state === "completed" || state === "skipped" || state === "errored") && this.flowTriggers.has(sessionId)) {
+          const flowId = (node as any).flowId as string | undefined;
+          if (flowId && this.isFlowComplete(sessionId, flowId)) {
+            this.checkFlowTriggers(sessionId, "flow_complete", { flowId });
+          }
         }
 
         return;
@@ -700,6 +902,7 @@ export class GuidanceOrchestrator {
       }
     }
     this.disconnectAI(instance.sessionId);
+    this.cleanupEventDrivenState(instance.sessionId);
     const key = this.workflowInstanceKey(instance.sessionId, instance.workflowId);
     this.workflowInstances.delete(key);
     this.broadcastNodeStates(instance.sessionId, instance.workflowId);
@@ -983,6 +1186,8 @@ export class GuidanceOrchestrator {
     this.aiState.delete(sessionId);
     // Clear any pending activations for this session
     this.pendingActivations.delete(sessionId);
+    // Clean up event-driven trigger state
+    this.cleanupEventDrivenState(sessionId);
   }
 
   private handleAIAudio(sessionId: string, appId: string, pcm: Uint8Array): void {
@@ -1351,6 +1556,17 @@ export class GuidanceOrchestrator {
         sourceState.hasProducedOutput = true;
         console.log(`[orchestrator] App ${sourceAppId} produced first output, checking pending dependents`);
         this.activatePendingDependents(sessionId, sourceAppId);
+      }
+    }
+
+    // Track last output per flow for event-driven condition evaluation
+    if (this.flowTriggers.has(sessionId)) {
+      const sourceFlowId = this.getFlowIdForApp(sessionId, sourceAppId);
+      if (sourceFlowId) {
+        let flowOutputs = this.flowLastOutput.get(sessionId);
+        if (!flowOutputs) { flowOutputs = new Map(); this.flowLastOutput.set(sessionId, flowOutputs); }
+        flowOutputs.set(sourceFlowId, event);
+        this.checkFlowTriggers(sessionId, "output", { flowId: sourceFlowId, event });
       }
     }
 
