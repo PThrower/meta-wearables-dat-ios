@@ -40,7 +40,8 @@ export type GuidanceEventType =
   | "guidance.bbox"
   | "guidance.jepa.embedding"
   | "guidance.jepa.prediction"
-  | "guidance.jepa.anomaly";
+  | "guidance.jepa.anomaly"
+  | "guidance.sensor";
 
 export interface BoundingBox {
   y1: number;
@@ -62,6 +63,7 @@ export interface GuidanceEvent {
     stepNumber?: number;
     severity?: "info" | "warning" | "critical";
     objectLabel?: string;
+    sensorFlags?: number;
   };
   boundingBoxes?: BoundingBox[];
 }
@@ -834,6 +836,19 @@ export class GuidanceOrchestrator {
       if (text.startsWith("[Gesture detected:") && !state.input.gestures) continue;
       state.service.sendText(text);
     }
+  }
+
+  /** Forward sensor telemetry (FRSE) to subscribers for this session */
+  sendSensor(sessionId: string, jsonPayload: object, sensorFlags: number): void {
+    this.emitGuidanceEvent(sessionId, {
+      type: "guidance.sensor",
+      content: JSON.stringify(jsonPayload),
+      confidence: 1.0,
+      source: "sensor-relay",
+      trigger: "sensor_telemetry",
+      timestampMs: Date.now(),
+      metadata: { sensorFlags },
+    });
   }
 
   /** Update vision FPS for all active AI services at runtime */

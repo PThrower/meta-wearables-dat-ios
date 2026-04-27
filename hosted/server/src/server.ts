@@ -45,7 +45,7 @@ import { createObjectStore, type ObjectStore } from "@ebowwa/object-store";
 import type { WsData, QualityPreset, AccessLevel, AclEntry, Session } from "./types.js";
 import { QUALITY_PRESETS, createTokenBucket } from "./types.js";
 import { dropReasonFromCloseCode } from "./session-state.js";
-import { HEADER_SIZE, AUDIO_HEADER_SIZE, isAudioFrame, isVideoFrame, parseAudioHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
+import { HEADER_SIZE, AUDIO_HEADER_SIZE, SENSOR_HEADER_SIZE, isAudioFrame, isVideoFrame, isSensorFrame, parseAudioHeader, parseSensorHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
 import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
@@ -1980,6 +1980,17 @@ const server = Bun.serve<WsData>({
               if (!decoder.active) decoder.start();
               decoder.feed(buf.slice(HEADER_SIZE));
             }
+          } else if (isSensorFrame(buf)) {
+            // Sensor telemetry frame (FRSE) — fan-out to viewers + forward to orchestrator
+            const sensorHdr = parseSensorHeader(buf);
+            registry.fanout(sessionId, buf);
+
+            if (sensorHdr && session.activeAppId) {
+              orchestrator.sendSensor(sessionId, sensorHdr.json, sensorHdr.sensorFlags);
+            }
+
+            session.publisher.sensorCount = (session.publisher.sensorCount ?? 0) + 1;
+            session.publisher.sensorBytes = (session.publisher.sensorBytes ?? 0) + buf.length;
           }
         }
       } else if (role === "view") {

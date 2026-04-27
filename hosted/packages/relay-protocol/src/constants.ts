@@ -51,8 +51,33 @@ export function isKnownCodecType(v: number): v is CodecType {
   return (KNOWN_CODEC_TYPES as readonly number[]).includes(v);
 }
 
-// --- CRC offset (same for both headers) ---
+// --- CRC offset (same for FRLY and FRAU headers) ---
 
 export const CRC_OFFSET = 34;
 export const CRC_SIZE = 2;
 export const HEADER_BEFORE_CRC = CRC_OFFSET; // bytes 0..33 are covered by CRC
+
+// --- FRSE (Sensor) ---
+
+export const FRSE_MAGIC = [0x46, 0x52, 0x53, 0x45]; // "FRSE"
+export const SENSOR_HEADER_SIZE = 36;  // FRSE v1: 4 + 1 + 4 + 8 + 4 + 1 + 4 + 8 + 2
+// CRC is at byte 34 for FRSE (same offset as FRLY/FRAU — header bytes 0..33 covered)
+export const SENSOR_CRC_OFFSET = 34;
+export const SENSOR_HEADER_BEFORE_CRC = SENSOR_CRC_OFFSET;
+
+// --- Sensor flags bitmask ---
+
+export const SENSOR_FLAG_MOTION        = 0x0001;
+export const SENSOR_FLAG_GYRO          = 0x0002;
+export const SENSOR_FLAG_MAGNETOMETER  = 0x0004;
+export const SENSOR_FLAG_BAROMETER     = 0x0008;
+export const SENSOR_FLAG_LOCATION      = 0x0010;
+export const SENSOR_FLAG_PROXIMITY     = 0x0020;
+export const SENSOR_FLAG_BATTERY       = 0x0040;
+export const SENSOR_FLAG_NETWORK       = 0x0080;
+export const SENSOR_FLAG_THERMAL       = 0x0100;
+export const SENSOR_FLAG_ORIENTATION   = 0x0200;
+export const SENSOR_FLAG_MEMORY        = 0x0400;
+export const SENSOR_FLAG_CPU           = 0x0800;
+export const SENSOR_FLAG_DISK          = 0x1000;
+export const SENSOR_FLAG_STREAM_METRICS = 0x2000;

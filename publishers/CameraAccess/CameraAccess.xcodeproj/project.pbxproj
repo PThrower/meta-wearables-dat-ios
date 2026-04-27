@@ -44,6 +44,8 @@
 		PCMCRC0000002 /* CRC16.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMCRC0000001 /* CRC16.swift */; };
 		PCMPCV0000002 /* PCMConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMPCV0000001 /* PCMConvert.swift */; };
 		PCMWP00000002 /* WireProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMWP00000001 /* WireProtocol.swift */; };
+		PCMSWP00000002 /* SensorWireProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMSWP00000001 /* SensorWireProtocol.swift */; };
+		PCMSRS00000002 /* SensorRelayStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMSRS00000001 /* SensorRelayStage.swift */; };
 		PIPE00102E91PIPE01 /* FramePipelineTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00202E91PIPE01 /* FramePipelineTypes.swift */; };
 		PIPE00302E91PIPE01 /* FramePipelineManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00402E91PIPE01 /* FramePipelineManager.swift */; };
 		PIPE00502E91PIPE01 /* ThrottledStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = PIPE00602E91PIPE01 /* ThrottledStage.swift */; };
@@ -160,6 +162,8 @@
 		PCMCRC0000001 /* CRC16.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRC16.swift; sourceTree = "<group>"; };
 		PCMPCV0000001 /* PCMConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConvert.swift; sourceTree = "<group>"; };
 		PCMWP00000001 /* WireProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireProtocol.swift; sourceTree = "<group>"; };
+		PCMSWP00000001 /* SensorWireProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorWireProtocol.swift; sourceTree = "<group>"; };
+		PCMSRS00000001 /* SensorRelayStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorRelayStage.swift; sourceTree = "<group>"; };
 		PIPE00202E91PIPE01 /* FramePipelineTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePipelineTypes.swift; sourceTree = "<group>"; };
 		PIPE00402E91PIPE01 /* FramePipelineManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FramePipelineManager.swift; sourceTree = "<group>"; };
 		PIPE00602E91PIPE01 /* ThrottledStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThrottledStage.swift; sourceTree = "<group>"; };
@@ -390,6 +394,7 @@
 				PCMPCV0000001 /* PCMConvert.swift */,
 				PCMCRC0000001 /* CRC16.swift */,
 				PCMWP00000001 /* WireProtocol.swift */,
+				PCMSWP00000001 /* SensorWireProtocol.swift */,
 				PCMAP00000001 /* PCMAudioProcessing.swift */,
 			);
 			path = Pipeline;
@@ -404,6 +409,7 @@
 				PIPE00E02E91PIPE03 /* AudioStage.swift */,
 				PIPEAOFILREF01 /* AudioPlaybackStage.swift */,
 				PIPEDECO08 /* AudioRelayStage.swift */,
+				PCMSRS00000001 /* SensorRelayStage.swift */,
 				PIPETAPC02 /* AudioTapClient.swift */,
 				PHNCAM00000002 /* PhoneCameraCapture.swift */,
 				PIPEJPEGR01 /* JPEGFrameEncoder.swift */,
@@ -677,6 +683,8 @@
 				PCMPCV0000002 /* PCMConvert.swift in Sources */,
 				PCMCRC0000002 /* CRC16.swift in Sources */,
 				PCMWP00000002 /* WireProtocol.swift in Sources */,
+				PCMSWP00000002 /* SensorWireProtocol.swift in Sources */,
+				PCMSRS00000002 /* SensorRelayStage.swift in Sources */,
 				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
 				EVBLEG1B01 /* G1Protocol.swift in Sources */,
 				EVBLEG2B01 /* G2Protocol.swift in Sources */,

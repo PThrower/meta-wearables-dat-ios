@@ -123,6 +123,8 @@ export interface Publisher {
   lowPowerMode: boolean;
   standby: boolean;
   displayViewer: DisplayViewerInfo | null;
+  sensorCount?: number;
+  sensorBytes?: number;
 }
 
 // --- Viewer ---

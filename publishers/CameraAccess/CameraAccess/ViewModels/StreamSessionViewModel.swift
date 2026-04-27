@@ -169,6 +169,7 @@ class StreamSessionViewModel: ObservableObject {
   private let audioPlaybackStage = AudioPlaybackStage()
   private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage?
+  private let sensorRelayStage = SensorRelayStage()
 
   // Even Realities BLE (G1/G2 smart glasses display + mic)
   private let evenRealitiesManager = EvenRealitiesManager()
@@ -239,6 +240,9 @@ class StreamSessionViewModel: ObservableObject {
       await glassesAudioStage.setEventBus(audioEventBus)
       await audioPlaybackStage.setEventBus(audioEventBus)
       await audioRelayStage.setRelayStage(relayStage)
+      if let telemetryService {
+        await sensorRelayStage.configure(relayStage: relayStage, telemetryService: telemetryService)
+      }
     }
 
     setupSessionListeners()
@@ -1087,12 +1091,18 @@ class StreamSessionViewModel: ObservableObject {
         await self.pushTelemetry()
       }
     }
+
+    // Start sensor relay (FRSE frames at 1Hz)
+    await sensorRelayStage.start()
   }
 
   func stopRelay() async {
     // Cancel telemetry push timer
     telemetryPushTimer?.cancel()
     telemetryPushTimer = nil
+
+    // Stop sensor relay (FRSE frames)
+    await sensorRelayStage.stop()
 
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
