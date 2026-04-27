@@ -11,6 +11,7 @@ import { refreshSVG } from "./svg-renderer.js";
 import { detectFlows } from "./flow-detection.js";
 import { renderConfigField, renderFlowConfigHTML, wireFlowConfigEvents, wireConfigFieldInputs } from "./shared-config.js";
 import type { FlowConfigCallbacks, ConfigFieldCallbacks } from "./shared-config.js";
+import { getNodePreview, renderNodePreviewHTML } from "./editor-preview.js";
 
 /** Track whether flow config panel is active */
 let _flowConfigActive = false;
@@ -96,10 +97,15 @@ function renderNodeConfigPanel(panel: Element, workflow: { nodes: import("../../
 
   const c = def.color;
   const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node, "wf-config")).join("");
+
+  // Live preview section (only when preview data exists for this node)
+  const previewHtml = renderNodePreviewHTML(selectedId);
+
   panel.innerHTML = `
     <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
       <span class="wf-config-type">${esc(def.label)}</span>
     </div>
+    ${previewHtml}
     ${fieldsHtml}
     <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
   `;

@@ -51,7 +51,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
-import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, DetectedFlow } from "./app-types.js";
+import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow } from "./app-types.js";
 import { detectFlows } from "./flow-detection.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
@@ -393,6 +393,11 @@ jepaOrchestrator.setPersistFn((sessionId: string, event) => {
   session?.recorder?.appendGuidanceEvent(event);
 });
 
+// JEPA events feed into flow trigger evaluation engine
+jepaOrchestrator.setFlowTriggerFn((sessionId: string, event) => {
+  orchestrator.checkFlowTriggers(sessionId, "jepa", { event });
+});
+
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)
 
@@ -603,6 +608,7 @@ const server = Bun.serve<WsData>({
           viewerCount: s.viewerCount,
           metadata: s.metadata,
           uptimeMs: s.uptimeMs,
+          activeWorkflowId: s.activeWorkflowId ?? null,
         })),
         ...historicalSessionIds
           .filter(id => !activeIds.has(id))
@@ -1200,6 +1206,35 @@ const server = Bun.serve<WsData>({
             wfId,
             [{ flowId: firstFlowId, apps: appsToActivate }, ...remainingFlows],
             flowConfig,
+          );
+        }
+
+        // For event-driven mode: separate immediate (no trigger) and pending (has trigger) flows
+        if (flowConfig?.mode === "event-driven" && flows.length > 1) {
+          const triggers = flowConfig.flowTriggers ?? {};
+          const triggeredFlowMap = new Map<string, AppDefinition[]>();
+
+          // Flows without a trigger activate immediately (like parallel)
+          appsToActivate = pipelineApps.filter(app => {
+            const flowId = (app.config as Record<string, unknown>).flowId as string | undefined;
+            return !flowId || !triggers[flowId];
+          });
+
+          // Flows with a trigger are registered as pending
+          for (const fid of flowConfig.flowOrder) {
+            const trigger = triggers[fid];
+            if (!trigger) continue;
+            const flowApps = pipelineApps.filter(app => (app.config as Record<string, unknown>).flowId === fid);
+            if (flowApps.length > 0) {
+              triggeredFlowMap.set(fid, flowApps);
+            }
+          }
+
+          orchestrator.registerEventDrivenFlows(
+            body.sessionId,
+            wfId,
+            triggeredFlowMap,
+            triggers,
           );
         }
 

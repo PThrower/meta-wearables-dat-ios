@@ -8,7 +8,7 @@ import {
 } from "./state.js";
 import { resetInteractions, onKeyDown } from "./interactions.js";
 import { renderList } from "./list-view.js";
-import { renderEditor } from "./editor-view.js";
+import { renderEditor, destroyEditorPreview } from "./editor-view.js";
 
 export const page: PageModule = {
   init(container) {
@@ -19,6 +19,7 @@ export const page: PageModule = {
     const poll = getPollTimer();
     if (poll) { clearInterval(poll); setPollTimer(null); }
     document.removeEventListener("keydown", onKeyDown);
+    destroyEditorPreview();
     resetState();
     resetInteractions();
   },

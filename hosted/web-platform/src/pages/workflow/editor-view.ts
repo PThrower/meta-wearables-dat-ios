@@ -9,14 +9,19 @@ import {
 import {
   getContainer, getWorkflow, setWorkflow,
   isDirty, setDirty, setViewX, setViewY, setZoom,
-  setSelectedNodeId, autoSave, doSave, updateSaveIndicator,
-  nanoid, getWorkflowId,
+  setSelectedNodeId, getSelectedNodeId, autoSave, doSave, updateSaveIndicator,
+  nanoid, getWorkflowId, getViewBox,
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
-import { buildSVG } from "./svg-renderer.js";
+import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown } from "./interactions.js";
-import { refreshSVG } from "./svg-renderer.js";
 import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
+import {
+  findActiveSession, connectPreview, disconnectPreview,
+  startSessionPolling, stopSessionPolling, destroyPreview,
+  addPreviewListener, removePreviewListener, getNodePreviews,
+  isPreviewConnected,
+} from "./editor-preview.js";
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
 export async function renderEditor(isNew: boolean): Promise<void> {
@@ -67,6 +72,9 @@ export async function renderEditor(isNew: boolean): Promise<void> {
 
   const workflow = getWorkflow()!;
 
+  // Check for live preview session
+  const liveSessionId = workflow.id ? await findActiveSession(workflow.id) : null;
+
   container.innerHTML = `
     <div class="page workflow-editor-page">
       <div class="wf-editor-layout">
@@ -88,11 +96,16 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn" id="wf-publish-btn">${workflow.status === "published" ? "Unpublish" : "Publish"}</button>
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-activate-btn">Activate</button>
+        <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
+          <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
+          <span style="color:#4ade80;vertical-align:middle">LIVE</span>
+        </span>
       </div>
     </div>
   `;
 
   wireEditorEvents();
+  wirePreview(liveSessionId, workflow.id);
 }
 
 /** Build palette sidebar HTML from node definitions grouped by role. */
@@ -260,4 +273,69 @@ function wireEditorEvents(): void {
       setFlowConfigActive(true);
     }
   });
+}
+
+// --- Preview wiring ---
+
+let _previewListener: (() => void) | null = null;
+
+/** Connect to live preview data and set up re-render listener. */
+function wirePreview(liveSessionId: string | null, workflowId: string | null): void {
+  // Clean up previous preview connection
+  if (_previewListener) {
+    removePreviewListener(_previewListener);
+    _previewListener = null;
+  }
+  destroyPreview();
+
+  if (!workflowId) return;
+
+  // If we found a live session, connect immediately
+  if (liveSessionId) {
+    connectPreview(liveSessionId);
+  }
+
+  // Poll for active sessions in case the workflow gets activated while editing
+  startSessionPolling(workflowId);
+
+  // Listen for preview data changes and re-render
+  _previewListener = () => {
+    // Re-render SVG with node states
+    const workflow = getWorkflow();
+    const container = getContainer();
+    if (!workflow || !container) return;
+
+    const wrap = container.querySelector("#wf-canvas-wrap");
+    if (!wrap) return;
+
+    const previews = getNodePreviews();
+    const nodeStates = new Map<string, string>();
+    for (const [, p] of previews) {
+      nodeStates.set(p.nodeId, p.executionState);
+    }
+
+    if (nodeStates.size > 0) {
+      wrap.innerHTML = buildSVGFromData(workflow, getViewBox(), getSelectedNodeId(), nodeStates);
+      wireSVGEvents();
+    }
+
+    // Update preview status indicator
+    const statusEl = container.querySelector("#wf-preview-status");
+    if (statusEl) {
+      (statusEl as HTMLElement).style.display = isPreviewConnected() ? "" : "none";
+    }
+
+    // Re-render config panel to update preview section
+    renderConfigPanel();
+  };
+  addPreviewListener(_previewListener);
+}
+
+/** Disconnect preview and clean up. Called from page.destroy. */
+export function destroyEditorPreview(): void {
+  if (_previewListener) {
+    removePreviewListener(_previewListener);
+    _previewListener = null;
+  }
+  destroyPreview();
 }

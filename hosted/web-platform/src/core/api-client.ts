@@ -45,6 +45,7 @@ export interface SessionInfo {
   owner?: string;
   viewerCount?: number;
   uptimeMs?: number;
+  activeWorkflowId?: string | null;
 }
 
 export interface DeviceInfo {
@@ -197,6 +198,7 @@ export function fetchSessions(): Promise<SessionInfo[]> {
       device: (s.metadata as Record<string, unknown>) ?? s.device as SessionInfo["device"],
       viewerCount: s.viewerCount as number | undefined,
       uptimeMs: s.uptimeMs as number | undefined,
+      activeWorkflowId: (s.activeWorkflowId ?? null) as string | null | undefined,
     }));
   });
 }
@@ -326,13 +328,33 @@ export interface WorkflowEdgeDef {
 }
 
 /** Execution mode for multi-flow workflows */
-export type FlowExecutionMode = "parallel" | "sequential";
+export type FlowExecutionMode = "parallel" | "sequential" | "event-driven";
+
+/** Trigger type for event-driven flow activation */
+export type FlowTriggerType = "on_flow_complete" | "on_condition" | "on_timer" | "on_jepa_event";
+
+/** Trigger configuration for event-driven flow activation */
+export interface FlowTrigger {
+  type: FlowTriggerType;
+  sourceFlowId?: string;
+  condition?: {
+    sourceFlowId: string;
+    field: string;
+    operator: "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
+    value: number;
+  };
+  intervalSec?: number;
+  jepaEvent?: "anomaly" | "action" | "any";
+  jepaConfidenceThreshold?: number;
+}
 
 /** Persisted per-workflow config for flow execution */
 export interface FlowExecutionConfig {
   mode: FlowExecutionMode;
-  /** Ordered flow IDs — only meaningful when mode is "sequential" */
+  /** Ordered flow IDs — meaningful when mode is "sequential" */
   flowOrder: string[];
+  /** Per-flow triggers — only meaningful when mode is "event-driven" */
+  flowTriggers?: Record<string, FlowTrigger>;
 }
 
 /** A detected flow = weakly connected component of the DAG */
