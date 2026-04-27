@@ -79,11 +79,15 @@ jobs:
             cd /root/relay-server/hosted/gateway
             /root/.bun/bin/bun install
 
-            echo ">>> Injecting APNs secrets into relay .env"
+            echo ">>> Injecting secrets into relay .env"
             cd /root/relay-server/hosted/server
             if [ -n "${{ secrets.APNS_KEY_B64 }}" ]; then
               grep -q '^APNS_KEY_B64=' .env && sed -i "s|^APNS_KEY_B64=.*|APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}|" .env || echo "APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}" >> .env
               echo "APNS_KEY_B64 injected"
+            fi
+            if [ -n "${{ secrets.DEEPGRAM_API_KEY }}" ]; then
+              grep -q '^DEEPGRAM_API_KEY=' .env && sed -i "s|^DEEPGRAM_API_KEY=.*|DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}|" .env || echo "DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}" >> .env
+              echo "DEEPGRAM_API_KEY injected"
             fi
 
             echo ">>> Syncing infra configs"

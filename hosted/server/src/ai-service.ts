@@ -80,6 +80,9 @@ export interface AIService {
 
   /** Current connection status */
   readonly status: AIServiceStatus;
+
+  /** Expected input PCM sample rate (Hz). Orchestrator resamples to match. */
+  readonly expectedInputSampleRate?: number;
 }
 
 // --- Factory registry ---
