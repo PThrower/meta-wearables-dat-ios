@@ -45,7 +45,9 @@ struct StreamView: View {
           // Bounding box overlay from AI annotations
           BoundingBoxOverlayView(
             boxes: viewModel.boundingBoxes,
-            showOverlay: viewModel.showBboxOverlay
+            showOverlay: viewModel.showBboxOverlay,
+            visionDetections: viewModel.visionDetections,
+            sceneLabel: viewModel.visionSceneLabel
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }

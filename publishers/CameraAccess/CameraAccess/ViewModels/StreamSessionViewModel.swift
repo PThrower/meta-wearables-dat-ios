@@ -114,6 +114,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var relayURL: String = "wss://relay.simulationapi.com/publish"
   @Published var videoCodec: RelayVideoCodec = .jpeg
   @Published var boundingBoxes: [BoundingBox] = []
+  @Published var visionDetections: [VisionDetection] = []
+  @Published var visionSceneLabel: String?
   @Published var showBboxOverlay: Bool = true
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
@@ -170,6 +172,7 @@ class StreamSessionViewModel: ObservableObject {
   private let audioTapClient: AudioTapClient
   private var displayStage: DisplayStage?
   private let sensorRelayStage = SensorRelayStage()
+  private var visionStage: VisionStage?
 
   // Preview system
   #if DEBUG
@@ -741,6 +744,67 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] Relayed backed to standby mode")
   }
 
+  // MARK: - Vision Stage
+
+  /// Configure and register a VisionStage based on server-sent config.
+  private func configureVisionStage(config: [String: Any]) async {
+    // Unregister existing vision stage if any
+    if let existing = visionStage {
+      await existing.stop()
+      pipeline.unregister(stageId: existing.stageId)
+      visionStage = nil
+      visionDetections = []
+      visionSceneLabel = nil
+    }
+
+    // Parse detection types from nodeType
+    guard let nodeType = config["nodeType"] as? String else { return }
+    guard let detType = VisionDetectionType(rawValue: nodeType) else { return }
+
+    let confidence = config["confidence"] as? Double ?? 0.5
+    let targetFPS = config["targetFPS"] as? UInt ?? 5
+    let maxResults = config["maxResults"] as? Int ?? 0
+    let language = config["language"] as? String ?? "en-US"
+    let maxLabels = config["maxLabels"] as? Int ?? 5
+
+    let symbologies: [String] = (config["symbologies"] as? [String]) ?? ["qr"]
+
+    let visionConfig = VisionStageConfig(
+      detectionTypes: [detType],
+      confidence: confidence,
+      targetFPS: targetFPS,
+      maxResults: maxResults,
+      language: language,
+      symbologies: symbologies,
+      maxLabels: maxLabels
+    )
+
+    let stage = VisionStage(config: visionConfig)
+
+    // Wire result callback to update overlay
+    await stage.setOnResult { [weak self] result in
+      await MainActor.run {
+        self?.visionDetections = result.detections
+        // Extract scene label if present
+        for det in result.detections {
+          if case .scene(let cls) = det, let first = cls.labels.first {
+            self?.visionSceneLabel = "\(first.label) \(Int(first.confidence * 100))%"
+          }
+        }
+      }
+    }
+
+    #if DEBUG
+    await stage.setPreviewBus(previewBus)
+    #endif
+
+    pipeline.register(stage)
+    await stage.start()
+    visionStage = stage
+
+    NSLog("[StreamSession] VisionStage registered: \(nodeType) confidence=\(confidence) fps=\(targetFPS)")
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -861,6 +925,14 @@ class StreamSessionViewModel: ObservableObject {
         let sinks = config["sinks"] as? [[String: Any]] ?? []
         let sinkTypes = sinks.compactMap { $0["type"] as? String }
         NSLog("[StreamSession] Workflow config: sinks=\(sinkTypes)")
+      }
+
+      // Vision stage config from server — register on-device VisionStage
+      if msgType == "vision_stage_config" {
+        Task { @MainActor [weak self] in
+          guard let self else { return }
+          await self.configureVisionStage(config: msg)
+        }
       }
 
       // Audio gain control from viewer
