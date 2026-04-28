@@ -16,6 +16,7 @@ import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown } from "./interactions.js";
 import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
+import { isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import {
   findActiveSession, connectPreview, disconnectPreview,
   startSessionPolling, stopSessionPolling, destroyPreview,
@@ -96,6 +97,7 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <span id="wf-save-status" style="font-size:11px;color:var(--text-tertiary);margin-left:4px;">Saved</span>
         <button class="btn" id="wf-publish-btn">${workflow.status === "published" ? "Unpublish" : "Publish"}</button>
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
+        <button class="btn" id="wf-settings-btn">Settings</button>
         <button class="btn" id="wf-activate-btn">Activate</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
@@ -205,6 +207,13 @@ function wireEditorEvents(): void {
     if (!confirm("Delete this workflow?")) return;
     await deleteWorkflow(workflow.id);
     location.hash = "/workflows";
+  });
+
+  // Toolbar: settings — toggle workflow settings panel
+  getContainer()?.querySelector("#wf-settings-btn")?.addEventListener("click", () => {
+    const active = isSettingsPanelActive();
+    setSettingsPanelActive(!active);
+    renderConfigPanel();
   });
 
   // Toolbar: activate — inline session dropdown
