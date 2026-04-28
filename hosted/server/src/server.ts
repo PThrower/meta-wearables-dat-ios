@@ -1411,70 +1411,101 @@ const server = Bun.serve<WsData>({
         if ((nodes as any[]).length > 1) {
           orchestrator.activateWorkflow(body.sessionId, wfId, wf.name, nodeEntries);
         }
+        // --- Parallel activation dispatch ---
+        // Categorize processable nodes by dispatch type.
+        // Independent nodes activate concurrently; dependsOn handles ordering
+        // internally via the deferred activation mechanism in GuidanceOrchestrator.
+        const sid = body.sessionId; // Guaranteed non-null by guard above
+        const enhanceIdx: number[] = [];
+        const visionIdx: number[] = [];
+        const jepaIdx: number[] = [];
+        const aiIdx: number[] = [];
+
         for (let i = 0; i < appsToActivate.length; i++) {
-          const app = appsToActivate[i];
           const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
+          if (pDef?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
+          if (pDef?.activationMode === "vision") { visionIdx.push(i); continue; }
+          if (pDef?.activationMode === "jepa")   { jepaIdx.push(i);   continue; }
+          aiIdx.push(i);
+        }
 
-          // Skip enhance nodes here — they're collected and sent as one combined config after the loop
-          if (pDef?.activationMode === "enhance") continue;
-
-          if (pDef?.activationMode === "jepa" && app.config?.jepa) {
-            const jc = app.config.jepa as any;
-            await jepaOrchestrator.activate(body.sessionId, {
-              provider: jc.provider,
-              model: jc.model ?? app.config.model,
-              gpu: jc.gpu,
-              clipLength: jc.clipLength,
-              sampleFps: jc.sampleFps,
-              resolution: jc.resolution,
-              tasks: jc.tasks,
-              sessionId: body.sessionId,
-            });
-          } else if (pDef?.activationMode === "vision") {
-            // Vision nodes execute on-device -- send config to iOS publisher
-            // No server-side AI service created. Config message tells iOS to
-            // register a VisionStage in the pipeline.
-            const visionConfig = {
-              type: "vision_stage_config" as const,
-              nodeType: processableNodes[i].type,
-              detectionTypes: [processableNodes[i].type],
-              confidence: (processableNodes[i].config as any)?.confidence ?? 0.5,
-              targetFPS: (processableNodes[i].config as any)?.targetFPS ?? 5,
-              maxResults: (processableNodes[i].config as any)?.maxFaces
-                ?? (processableNodes[i].config as any)?.maxPersons ?? 0,
-              language: (processableNodes[i].config as any)?.language ?? "en-US",
-              symbologies: Object.entries(
-                (processableNodes[i].config as any)?.symbologies ?? { qr: true }
-              ).filter(([, v]) => v).map(([k]) => k),
-              maxLabels: (processableNodes[i].config as any)?.maxLabels ?? 5,
-            };
-            // Send as control message to the publisher WebSocket
-            if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
-              session.publisher.ws.send(JSON.stringify(visionConfig));
-            }
-          } else {
-            await orchestrator.activateWithConfig(body.sessionId, app);
+        // 1. Fire-and-forget: send all vision configs to iOS immediately
+        for (const i of visionIdx) {
+          const visionConfig = {
+            type: "vision_stage_config" as const,
+            nodeType: processableNodes[i].type,
+            detectionTypes: [processableNodes[i].type],
+            confidence: (processableNodes[i].config as any)?.confidence ?? 0.5,
+            targetFPS: (processableNodes[i].config as any)?.targetFPS ?? 5,
+            maxResults: (processableNodes[i].config as any)?.maxFaces
+              ?? (processableNodes[i].config as any)?.maxPersons ?? 0,
+            language: (processableNodes[i].config as any)?.language ?? "en-US",
+            symbologies: Object.entries(
+              (processableNodes[i].config as any)?.symbologies ?? { qr: true }
+            ).filter(([, v]) => v).map(([k]) => k),
+            maxLabels: (processableNodes[i].config as any)?.maxLabels ?? 5,
+          };
+          if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify(visionConfig));
           }
-          activatedAppIds.push(app.id);
+          activatedAppIds.push(appsToActivate[i].id);
         }
 
-        // Collect all enhance nodes and send one combined config to iOS
-        const enhanceFilters: Array<{ type: string; params: Record<string, number> }> = [];
-        for (let i = 0; i < appsToActivate.length; i++) {
-          const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
-          if (pDef?.activationMode !== "enhance") continue;
-          enhanceFilters.push({
-            type: processableNodes[i].type,
-            params: (appsToActivate[i].config ?? {}) as Record<string, number>,
-          });
+        // 2. Activate all AI nodes in parallel (dependsOn defers internally)
+        if (aiIdx.length > 0) {
+          console.log(`[relay] Activating ${aiIdx.length} AI node(s) in parallel session=${sid}`);
+          const aiResults = await Promise.allSettled(
+            aiIdx.map(i => orchestrator.activateWithConfig(sid, appsToActivate[i]))
+          );
+          for (let r = 0; r < aiResults.length; r++) {
+            if (aiResults[r].status === "fulfilled") {
+              activatedAppIds.push(appsToActivate[aiIdx[r]].id);
+            } else {
+              console.error(`[relay] AI activation failed: ${appsToActivate[aiIdx[r]].id}`, (aiResults[r] as PromiseRejectedResult).reason);
+            }
+          }
         }
-        if (enhanceFilters.length > 0 && session.publisher?.ws?.readyState === WebSocket.OPEN) {
-          session.publisher.ws.send(JSON.stringify({
-            type: "enhance_stage_config",
-            filters: enhanceFilters,
-            enabled: true,
-          }));
-          console.log(`[relay] Sent enhance config with ${enhanceFilters.length} filters session=${body.sessionId}`);
+
+        // 3. Activate all JEPA nodes in parallel
+        if (jepaIdx.length > 0) {
+          console.log(`[relay] Activating ${jepaIdx.length} JEPA node(s) in parallel session=${sid}`);
+          const jepaResults = await Promise.allSettled(
+            jepaIdx.map(i => {
+              const app = appsToActivate[i];
+              const jc = app.config.jepa as any;
+              activatedAppIds.push(app.id);
+              return jepaOrchestrator.activate(sid, {
+                provider: jc.provider,
+                model: jc.model ?? app.config.model,
+                gpu: jc.gpu,
+                clipLength: jc.clipLength,
+                sampleFps: jc.sampleFps,
+                resolution: jc.resolution,
+                tasks: jc.tasks,
+                sessionId: sid,
+              });
+            })
+          );
+        }
+
+        // 4. Collect all enhance nodes and send one combined config to iOS
+        if (enhanceIdx.length > 0) {
+          const enhanceFilters: Array<{ type: string; params: Record<string, number> }> = [];
+          for (const i of enhanceIdx) {
+            enhanceFilters.push({
+              type: processableNodes[i].type,
+              params: (appsToActivate[i].config ?? {}) as Record<string, number>,
+            });
+            activatedAppIds.push(appsToActivate[i].id);
+          }
+          if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify({
+              type: "enhance_stage_config",
+              filters: enhanceFilters,
+              enabled: true,
+            }));
+            console.log(`[relay] Sent enhance config with ${enhanceFilters.length} filters session=${sid}`);
+          }
         }
 
         // Send cached frame to AI for immediate context
