@@ -136,10 +136,27 @@ const WORKFLOW_SETTINGS_SCHEMA: ConfigFieldSchema[] = [
     kind: "section", label: "Device Wake & Stream", fields: [
       { kind: "checkbox", key: "wakeOnActivate", label: "Push notification on activate (APNs wake)" },
       { kind: "checkbox", key: "autoStartStream", label: "Auto-start stream when publisher connects" },
-      { kind: "text", key: "targetDeviceId", label: "Target Device ID (blank = any)", placeholder: "Auto-detect" },
+      { kind: "select", key: "targetDeviceId", label: "Target Device", options: [
+        { value: "", label: "Auto-detect" },
+      ] },
     ],
   },
 ];
+
+/** Update the targetDeviceId select options from fleet devices. */
+export function updateDeviceOptions(devices: Array<{ id: string; name: string | null; model: string | null }>): void {
+  const deviceSection = WORKFLOW_SETTINGS_SCHEMA.find(s => s.kind === "section" && s.label === "Device Wake & Stream");
+  if (!deviceSection || deviceSection.kind !== "section") return;
+  const field = deviceSection.fields.find(f => f.kind === "select" && "key" in f && f.key === "targetDeviceId");
+  if (!field || field.kind !== "select") return;
+  field.options = [
+    { value: "", label: "Auto-detect" },
+    ...devices.map(d => ({
+      value: d.id,
+      label: `${d.name || d.model || d.id.slice(0, 8)}`,
+    })),
+  ];
+}
 
 /** Render workflow settings HTML using the synthetic-node trick. */
 export function renderWorkflowSettingsHTML(settings: WorkflowSettings | null): string {

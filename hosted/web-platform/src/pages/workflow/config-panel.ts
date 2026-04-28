@@ -3,14 +3,14 @@
  * Four-state: settings / flow-config / node-config / empty.
  */
 
-import { esc } from "../../core/api-client.js";
+import { esc, fetchDevices } from "../../core/api-client.js";
 import type { FlowExecutionConfig, WorkflowSettings } from "../../core/api-client.js";
 import { DEFAULT_WORKFLOW_SETTINGS } from "../../core/api-client.js";
 import { getContainer, getWorkflow, getSelectedNodeId, setSelectedNodeId, setDirty, autoSave, isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG } from "./svg-renderer.js";
 import { detectFlows } from "./flow-detection.js";
-import { renderConfigField, renderFlowConfigHTML, wireFlowConfigEvents, wireConfigFieldInputs, renderWorkflowSettingsHTML, wireSettingsFieldInputs } from "./shared-config.js";
+import { renderConfigField, renderFlowConfigHTML, wireFlowConfigEvents, wireConfigFieldInputs, renderWorkflowSettingsHTML, wireSettingsFieldInputs, updateDeviceOptions } from "./shared-config.js";
 import type { FlowConfigCallbacks, ConfigFieldCallbacks, SettingsCallbacks } from "./shared-config.js";
 import { getNodePreview, renderNodePreviewHTML } from "./editor-preview.js";
 
@@ -72,6 +72,21 @@ export function renderConfigPanel(): void {
 
   // State 0: Workflow settings panel
   if (isSettingsPanelActive()) {
+    // Fetch fleet devices to populate target device dropdown
+    fetchDevices().then(devices => {
+      if (devices.length > 0) {
+        updateDeviceOptions(devices.map(d => ({
+          id: d.device_id,
+          name: d.deviceName ?? null,
+          model: d.deviceModel ?? d.device_model ?? null,
+        })));
+        // Re-render if still on settings panel
+        if (isSettingsPanelActive()) {
+          const p = getContainer()?.querySelector("#wf-config-panel");
+          if (p) { p.innerHTML = renderWorkflowSettingsHTML(workflow.settings); wireSettingsFieldInputs(p, settingsCallbacks); }
+        }
+      }
+    });
     panel.innerHTML = renderWorkflowSettingsHTML(workflow.settings);
     wireSettingsFieldInputs(panel, settingsCallbacks);
     return;
