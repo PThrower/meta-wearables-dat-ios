@@ -1,8 +1,11 @@
 //
 // BoundingBoxOverlayView.swift
 //
-// SwiftUI overlay that renders AI-detected bounding boxes on top of the camera preview.
-// Coordinates are 0-1 normalized (converted from 1024-space at parse time).
+// SwiftUI overlay that renders bounding boxes on top of the camera preview.
+// Handles both AI server detections (BoundingBox) and on-device Vision
+// framework detections (VisionDetection).
+//
+// Coordinates are 0-1 normalized.
 //
 
 import SwiftUI
@@ -21,12 +24,19 @@ struct BoundingBoxOverlayView: View {
   var boxes: [BoundingBox]
   var showOverlay: Bool
 
+  /// On-device Vision framework detections (rendered alongside server boxes).
+  var visionDetections: [VisionDetection] = []
+
+  /// Scene classification label to display (if any).
+  var sceneLabel: String?
+
   var body: some View {
-    if showOverlay && !boxes.isEmpty {
+    if showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil) {
       GeometryReader { geometry in
         ZStack {
+          // Server AI bounding boxes (existing)
           ForEach(Array(boxes.enumerated()), id: \.element.id) { index, box in
-            let color = colorForIndex(index)
+            let color = aiColor
             let rect = CGRect(
               x: box.x1 * geometry.size.width,
               y: box.y1 * geometry.size.height,
@@ -52,9 +62,84 @@ struct BoundingBoxOverlayView: View {
                 y: max(10, rect.minY - 8)
               )
           }
+
+          // Vision framework detections (on-device)
+          ForEach(Array(visionDetections.enumerated()), id: \.offset) { index, detection in
+            if let bb = detection.boundingBox {
+              let color = visionColor(for: detection.detectionType)
+              let rect = CGRect(
+                x: bb.x1 * geometry.size.width,
+                y: bb.y1 * geometry.size.height,
+                width: bb.width * geometry.size.width,
+                height: bb.height * geometry.size.height
+              )
+
+              // Dashed bounding box for Vision detections (vs solid for AI)
+              Rectangle()
+                .stroke(color, style: StrokeStyle(lineWidth: 1.5, dash: [4, 2]))
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+
+              // OCR text shown inside the box, other labels above
+              if case .ocr(let ocrResult) = detection {
+                // Truncate long OCR text for display
+                let displayText = ocrResult.text.count > 30
+                  ? String(ocrResult.text.prefix(30)) + "..."
+                  : ocrResult.text
+                Text(displayText)
+                  .font(.system(size: 8, weight: .medium, design: .monospaced))
+                  .foregroundColor(.white)
+                  .padding(.horizontal, 3)
+                  .padding(.vertical, 1)
+                  .background(Color.black.opacity(0.7))
+                  .position(x: rect.midX, y: rect.minY - 8)
+              } else {
+                // Label badge (Face, Person, Barcode)
+                Text("\(detection.displayLabel) \(Int(detection.confidence * 100))%")
+                  .font(.system(size: 8, weight: .bold, design: .monospaced))
+                  .foregroundColor(.black)
+                  .padding(.horizontal, 3)
+                  .padding(.vertical, 1)
+                  .background(color)
+                  .position(
+                    x: rect.minX + 25,
+                    y: max(8, rect.minY - 6)
+                  )
+              }
+            }
+          }
+
+          // Scene classification label (top-right corner)
+          if let label = sceneLabel {
+            Text(label)
+              .font(.system(size: 10, weight: .semibold, design: .monospaced))
+              .foregroundColor(.white)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(Color.purple.opacity(0.85))
+              .cornerRadius(4)
+              .position(
+                x: geometry.size.width - 60,
+                y: 14
+              )
+          }
         }
       }
       .allowsHitTesting(false)
+    }
+  }
+
+  // MARK: - Colors
+
+  private let aiColor: Color = .green
+
+  private func visionColor(for type: VisionDetectionType) -> Color {
+    switch type {
+    case .faceDetect: return .purple
+    case .barcodeScan: return .cyan
+    case .ocr: return .yellow
+    case .sceneClassify: return .purple
+    case .personDetect: return .orange
     }
   }
 

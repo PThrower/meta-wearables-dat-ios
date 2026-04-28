@@ -75,6 +75,8 @@
 		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
 		PRVBSBLD001 /* PreviewBus.swift in Sources */ = {isa = PBXBuildFile; fileRef = PRVBSFLE001 /* PreviewBus.swift */; };
 		NDPRVBLD001 /* NodePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = NDPRVFLE001 /* NodePreviewView.swift */; };
+		VISNTYPBLD01 /* VisionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNTYPFLE01 /* VisionTypes.swift */; };
+		VISNSTGBLD01 /* VisionStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNSTGFLE01 /* VisionStage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -179,6 +181,8 @@
 		V1V1V1V1V1V1V1V1V1V1V1V1 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		PRVBSFLE001 /* PreviewBus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewBus.swift; sourceTree = "<group>"; };
 		NDPRVFLE001 /* NodePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodePreviewView.swift; sourceTree = "<group>"; };
+		VISNTYPFLE01 /* VisionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTypes.swift; sourceTree = "<group>"; };
+		VISNSTGFLE01 /* VisionStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -359,6 +363,7 @@
 				PIPEDECO04 /* AudioTransport.swift */,
 				PIPEDECO06 /* AudioEventBus.swift */,
 				PRVBSFLE001 /* PreviewBus.swift */,
+				VISNTYPFLE01 /* VisionTypes.swift */,
 				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
 				PIPEREMF02 /* RemoteAudioFrame.swift */,
@@ -386,6 +391,7 @@
 				PHNCAM00000002 /* PhoneCameraCapture.swift */,
 				PIPEJPEGR01 /* JPEGFrameEncoder.swift */,
 				PIPEH264R01 /* H264FrameEncoder.swift */,
+				VISNSTGFLE01 /* VisionStage.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -629,6 +635,8 @@
 				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
 				OPUSENCBLD01 /* OpusEncoder.swift in Sources */,
 				2B91A102B3169469B14BC1C4 /* AppPickerSheet.swift in Sources */,
+				VISNTYPBLD01 /* VisionTypes.swift in Sources */,
+				VISNSTGBLD01 /* VisionStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

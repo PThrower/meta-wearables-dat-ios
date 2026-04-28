@@ -1427,6 +1427,28 @@ const server = Bun.serve<WsData>({
               tasks: jc.tasks,
               sessionId: body.sessionId,
             });
+          } else if (pDef?.activationMode === "vision") {
+            // Vision nodes execute on-device -- send config to iOS publisher
+            // No server-side AI service created. Config message tells iOS to
+            // register a VisionStage in the pipeline.
+            const visionConfig = {
+              type: "vision_stage_config" as const,
+              nodeType: processableNodes[i].type,
+              detectionTypes: [processableNodes[i].type],
+              confidence: (processableNodes[i].config as any)?.confidence ?? 0.5,
+              targetFPS: (processableNodes[i].config as any)?.targetFPS ?? 5,
+              maxResults: (processableNodes[i].config as any)?.maxFaces
+                ?? (processableNodes[i].config as any)?.maxPersons ?? 0,
+              language: (processableNodes[i].config as any)?.language ?? "en-US",
+              symbologies: Object.entries(
+                (processableNodes[i].config as any)?.symbologies ?? { qr: true }
+              ).filter(([, v]) => v).map(([k]) => k),
+              maxLabels: (processableNodes[i].config as any)?.maxLabels ?? 5,
+            };
+            // Send as control message to the publisher WebSocket
+            if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+              session.publisher.ws.send(JSON.stringify(visionConfig));
+            }
           } else {
             await orchestrator.activateWithConfig(body.sessionId, app);
           }
