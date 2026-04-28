@@ -132,6 +132,13 @@ const WORKFLOW_SETTINGS_SCHEMA: ConfigFieldSchema[] = [
       { kind: "number", key: "telemetryIntervalSec", label: "Interval (seconds)", min: 1, max: 60, step: 1 },
     ],
   },
+  {
+    kind: "section", label: "Device Wake & Stream", fields: [
+      { kind: "checkbox", key: "wakeOnActivate", label: "Push notification on activate (APNs wake)" },
+      { kind: "checkbox", key: "autoStartStream", label: "Auto-start stream when publisher connects" },
+      { kind: "text", key: "targetDeviceId", label: "Target Device ID (blank = any)", placeholder: "Auto-detect" },
+    ],
+  },
 ];
 
 /** Render workflow settings HTML using the synthetic-node trick. */

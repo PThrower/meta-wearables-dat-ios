@@ -376,6 +376,10 @@ export interface WorkflowSettings {
   recordingEnabled: boolean;
   viewerAccess: "owner" | "team" | "public";
   telemetryIntervalSec: number;
+  // Device wake & stream
+  wakeOnActivate: boolean;
+  autoStartStream: boolean;
+  targetDeviceId: string | null;
 }
 
 export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
@@ -386,6 +390,9 @@ export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   recordingEnabled: true,
   viewerAccess: "owner",
   telemetryIntervalSec: 10,
+  wakeOnActivate: false,
+  autoStartStream: false,
+  targetDeviceId: null,
 };
 
 export interface WorkflowDetail {

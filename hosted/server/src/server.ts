@@ -1425,6 +1425,29 @@ const server = Bun.serve<WsData>({
           }, maxDur * 60 * 1000);
         }
 
+        // Device wake: send APNs push to trigger device to open app / start session
+        if (parsedSettings?.wakeOnActivate && isApnsConfigured()) {
+          const targetDeviceId = parsedSettings.targetDeviceId || session.metadata?.deviceId;
+          if (targetDeviceId) {
+            const deviceToken = q.getDeviceToken(targetDeviceId);
+            if (deviceToken) {
+              console.log(`[wake] Sending wake push to device ${targetDeviceId.slice(0, 8)}... on activate`);
+              sendSilentWake(deviceToken, body.sessionId).then(r => {
+                if (!r.success) console.warn(`[wake] Silent push failed: ${r.reason}`);
+                else console.log(`[wake] Silent push delivered to ${targetDeviceId.slice(0, 8)}...`);
+              }).catch(() => {});
+            } else {
+              console.warn(`[wake] No APNs token for target device ${targetDeviceId.slice(0, 8)}...`);
+            }
+          }
+        }
+
+        // Auto-start stream: if publisher is connected, send start_stream immediately
+        if (parsedSettings?.autoStartStream && session.publisher?.ws && session.publisher.ws.readyState === 1) {
+          console.log(`[activate] Auto-starting stream for session ${body.sessionId}`);
+          session.publisher.ws.send(JSON.stringify({ type: "start_stream" }));
+        }
+
         const nodeEntries = (nodes as any[]).map((n: any) => ({
           nodeId: n.id,
           appId: n.id,

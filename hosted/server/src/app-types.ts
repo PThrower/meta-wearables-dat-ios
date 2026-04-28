@@ -149,6 +149,10 @@ export interface WorkflowSettings {
   recordingEnabled: boolean;
   viewerAccess: "owner" | "team" | "public";
   telemetryIntervalSec: number;
+  // Device wake & stream
+  wakeOnActivate: boolean;           // Send APNs push to device when workflow activates
+  autoStartStream: boolean;          // Send start_stream to publisher WebSocket on activate
+  targetDeviceId: string | null;     // Specific device to target (null = any online device)
 }
 
 export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
@@ -159,6 +163,9 @@ export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
   recordingEnabled: true,
   viewerAccess: "owner",
   telemetryIntervalSec: 10,
+  wakeOnActivate: false,
+  autoStartStream: false,
+  targetDeviceId: null,
 };
 
 // --- Workflow Execution Controls ---
