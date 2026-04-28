@@ -19,6 +19,7 @@ enum VisionDetectionType: String, Sendable, Codable, CaseIterable {
     case ocr = "vision-ocr"
     case sceneClassify = "vision-scene-classify"
     case personDetect = "vision-person-detect"
+    case bodyPose = "vision-body-pose"
 }
 
 // MARK: - Bounding Box (normalized 0-1)
@@ -77,6 +78,21 @@ struct PersonDetection: Sendable, Codable, Identifiable {
     let confidence: Double
 }
 
+struct JointPoint: Sendable, Codable, Identifiable {
+    let id = UUID()
+    let name: String
+    let x: Double  // normalized 0-1
+    let y: Double  // normalized 0-1
+    let confidence: Double
+}
+
+struct BodyPoseDetection: Sendable, Codable, Identifiable {
+    let id = UUID()
+    let boundingBox: NormalizedBoundingBox
+    let confidence: Double
+    let joints: [JointPoint]
+}
+
 // MARK: - VisionDetection (discriminated union)
 
 /// Single detection result from any Vision request.
@@ -86,6 +102,7 @@ enum VisionDetection: Sendable {
     case ocr(OCRResult)
     case scene(SceneClassification)
     case person(PersonDetection)
+    case bodyPose(BodyPoseDetection)
 
     var detectionType: VisionDetectionType {
         switch self {
@@ -94,6 +111,7 @@ enum VisionDetection: Sendable {
         case .ocr: return .ocr
         case .scene: return .sceneClassify
         case .person: return .personDetect
+        case .bodyPose: return .bodyPose
         }
     }
 
@@ -105,6 +123,7 @@ enum VisionDetection: Sendable {
         case .ocr(let d): return d.boundingBox
         case .scene: return nil
         case .person(let d): return d.boundingBox
+        case .bodyPose(let d): return d.boundingBox
         }
     }
 
@@ -116,6 +135,7 @@ enum VisionDetection: Sendable {
         case .ocr(let d): return d.text
         case .scene(let d): return d.labels.first?.label ?? "Scene"
         case .person: return "Person"
+        case .bodyPose: return "Body Pose"
         }
     }
 
@@ -127,6 +147,7 @@ enum VisionDetection: Sendable {
         case .ocr(let d): return d.confidence
         case .scene(let d): return d.labels.first?.confidence ?? 0
         case .person(let d): return d.confidence
+        case .bodyPose(let d): return d.confidence
         }
     }
 }
@@ -194,6 +215,15 @@ extension VisionFrameResult {
             if case .scene(let cls) = detection {
                 entry["labels"] = cls.labels.map { [
                     "label": $0.label,
+                    "confidence": $0.confidence,
+                ] }
+            }
+            // Body pose includes joint points
+            if case .bodyPose(let pose) = detection {
+                entry["joints"] = pose.joints.map { [
+                    "name": $0.name,
+                    "x": $0.x,
+                    "y": $0.y,
                     "confidence": $0.confidence,
                 ] }
             }

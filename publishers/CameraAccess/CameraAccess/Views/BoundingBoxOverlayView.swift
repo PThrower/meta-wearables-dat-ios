@@ -140,6 +140,7 @@ struct BoundingBoxOverlayView: View {
     case .ocr: return .yellow
     case .sceneClassify: return .purple
     case .personDetect: return .orange
+    case .bodyPose: return .pink
     }
   }
 

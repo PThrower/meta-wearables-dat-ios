@@ -1418,6 +1418,7 @@ const server = Bun.serve<WsData>({
         const sid = body.sessionId; // Guaranteed non-null by guard above
         const enhanceIdx: number[] = [];
         const visionIdx: number[] = [];
+        const sensorIdx: number[] = [];
         const jepaIdx: number[] = [];
         const aiIdx: number[] = [];
 
@@ -1425,6 +1426,7 @@ const server = Bun.serve<WsData>({
           const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
           if (pDef?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
           if (pDef?.activationMode === "vision") { visionIdx.push(i); continue; }
+          if (pDef?.activationMode === "sensor") { sensorIdx.push(i); continue; }
           if (pDef?.activationMode === "jepa")   { jepaIdx.push(i);   continue; }
           aiIdx.push(i);
         }
@@ -1507,6 +1509,26 @@ const server = Bun.serve<WsData>({
               enabled: true,
             }));
             console.log(`[relay] Sent enhance config with ${enhanceFilters.length} filters session=${sid}`);
+          }
+        }
+
+        // 5. Collect all sensor nodes and send one combined config to iOS
+        if (sensorIdx.length > 0) {
+          const sensorConfigs: Array<{ sensorType: string; config: Record<string, unknown> }> = [];
+          for (const i of sensorIdx) {
+            sensorConfigs.push({
+              sensorType: processableNodes[i].type,
+              config: (processableNodes[i].config ?? {}) as Record<string, unknown>,
+            });
+            activatedAppIds.push(appsToActivate[i].id);
+          }
+          if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify({
+              type: "sensor_stage_config",
+              sensors: sensorConfigs,
+              enabled: true,
+            }));
+            console.log(`[relay] Sent sensor config with ${sensorConfigs.length} sensors session=${sid}`);
           }
         }
 
@@ -2036,6 +2058,10 @@ const server = Bun.serve<WsData>({
                     return `Scene: ${labels}`;
                   }
                   if (d.type === "vision-person-detect") return `Person detected (confidence: ${(d.confidence * 100).toFixed(0)}%)`;
+                  if (d.type === "vision-body-pose") {
+                    const jointCount = (d.joints as any[] || []).length;
+                    return `Body pose detected (${jointCount} joints, confidence: ${(d.confidence * 100).toFixed(0)}%)`;
+                  }
                   return `${d.type}: ${d.label}`;
                 }).join("; ");
                 if (summary) {
@@ -2043,6 +2069,26 @@ const server = Bun.serve<WsData>({
                 }
               }
               // Fan out to viewers for overlay rendering
+              broadcastToViewers(session, cmd);
+            } else if (cmd.type === "sensor_result") {
+              // iOS sensor stage results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const sensorType = cmd.sensorType as string;
+                let summary = "";
+                if (sensorType === "sensor-sound") {
+                  const labels = (cmd.labels as any[] || []).map((l: any) => `${l.label} ${(l.confidence * 100).toFixed(0)}%`).join(", ");
+                  summary = `Sound: ${labels}`;
+                } else if (sensorType === "sensor-location") {
+                  const lat = (cmd.latitude as number)?.toFixed(6);
+                  const lon = (cmd.longitude as number)?.toFixed(6);
+                  const speed = (cmd.speed as number) >= 0 ? ` speed=${(cmd.speed as number).toFixed(1)}m/s` : "";
+                  summary = `Location: ${lat}, ${lon}${speed}`;
+                }
+                if (summary) {
+                  orchestrator.sendTrigger(sessionId, `[Sensor: ${summary}]`);
+                }
+              }
+              // Fan out to viewers
               broadcastToViewers(session, cmd);
             } else if (isBackpressureAckMessage(cmd)) {
               // Publisher acknowledges backpressure adjustment

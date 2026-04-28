@@ -53,6 +53,8 @@ actor VisionStage: @preconcurrency FramePipelineStage {
                 let req = VNDetectHumanRectanglesRequest()
                 req.upperBodyOnly = false
                 requests.append(req)
+            case .bodyPose:
+                requests.append(VNDetectHumanBodyPoseRequest())
             }
         }
         return requests
@@ -171,6 +173,8 @@ actor VisionStage: @preconcurrency FramePipelineStage {
                 detections.append(contentsOf: extractScene(request))
             case .personDetect:
                 detections.append(contentsOf: extractPersons(request))
+            case .bodyPose:
+                detections.append(contentsOf: extractBodyPose(request))
             }
         }
 
@@ -284,6 +288,48 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             return .person(PersonDetection(
                 boundingBox: converted,
                 confidence: Double(obs.confidence)
+            ))
+        }
+    }
+
+    private func extractBodyPose(_ request: VNRequest) -> [VisionDetection] {
+        guard let observations = request.results as? [VNHumanBodyPoseObservation] else { return [] }
+        return observations.compactMap { obs in
+            // Extract all recognized body joints
+            var joints: [JointPoint] = []
+            var minX = 1.0, minY = 1.0, maxX = 0.0, maxY = 0.0
+            if let allPoints = try? obs.recognizedPoints(.all) {
+                for (name, point) in allPoints {
+                    guard point.confidence > 0 else { continue }
+                    let px = Double(point.location.x)
+                    let py = Double(point.location.y)
+                    joints.append(JointPoint(
+                        name: String(describing: name),
+                        x: px,
+                        y: 1.0 - py,  // Convert Vision bottom-left to top-left
+                        confidence: Double(point.confidence)
+                    ))
+                    minX = min(minX, px)
+                    minY = min(minY, py)
+                    maxX = max(maxX, px)
+                    maxY = max(maxY, py)
+                }
+            }
+
+            guard !joints.isEmpty else { return nil }
+
+            // Compute bounding box from joint extremes (convert Vision coords to top-left)
+            let converted = NormalizedBoundingBox(
+                x1: minX,
+                y1: 1.0 - maxY,
+                x2: maxX,
+                y2: 1.0 - minY
+            )
+
+            return .bodyPose(BodyPoseDetection(
+                boundingBox: converted,
+                confidence: Double(obs.confidence),
+                joints: joints
             ))
         }
     }

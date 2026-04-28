@@ -79,6 +79,9 @@
 		VISNSTGBLD01 /* VisionStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNSTGFLE01 /* VisionStage.swift */; };
 		4262C65A32234AE595139B22 /* EnhanceTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A57B6CDBA9FB45D0B1AD3A97 /* EnhanceTypes.swift */; };
 		FFF5552C9C664A529B08A28E /* FrameTransformStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */; };
+		SNSRTYPBLD01 /* SensorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRTYPFLE01 /* SensorTypes.swift */; };
+		SNSRSNDBLD01 /* AudioClassificationStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRSNDFLE01 /* AudioClassificationStage.swift */; };
+		SNSRLOCBLD01 /* LocationStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRLOCFLE01 /* LocationStage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -187,6 +190,9 @@
 		VISNSTGFLE01 /* VisionStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionStage.swift; sourceTree = "<group>"; };
 		A57B6CDBA9FB45D0B1AD3A97 /* EnhanceTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnhanceTypes.swift; sourceTree = "<group>"; };
 		9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameTransformStage.swift; sourceTree = "<group>"; };
+		SNSRTYPFLE01 /* SensorTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorTypes.swift; sourceTree = "<group>"; };
+		SNSRSNDFLE01 /* AudioClassificationStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioClassificationStage.swift; sourceTree = "<group>"; };
+		SNSRLOCFLE01 /* LocationStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -368,6 +374,7 @@
 				PIPEDECO06 /* AudioEventBus.swift */,
 				PRVBSFLE001 /* PreviewBus.swift */,
 				VISNTYPFLE01 /* VisionTypes.swift */,
+				SNSRTYPFLE01 /* SensorTypes.swift */,
 				A57B6CDBA9FB45D0B1AD3A97 /* EnhanceTypes.swift */,
 				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
@@ -397,6 +404,8 @@
 				PIPEJPEGR01 /* JPEGFrameEncoder.swift */,
 				PIPEH264R01 /* H264FrameEncoder.swift */,
 				VISNSTGFLE01 /* VisionStage.swift */,
+				SNSRSNDFLE01 /* AudioClassificationStage.swift */,
+				SNSRLOCFLE01 /* LocationStage.swift */,
 				9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */,
 			);
 			path = Stages;
@@ -645,6 +654,9 @@
 				VISNSTGBLD01 /* VisionStage.swift in Sources */,
 				4262C65A32234AE595139B22 /* EnhanceTypes.swift in Sources */,
 				FFF5552C9C664A529B08A28E /* FrameTransformStage.swift in Sources */,
+				SNSRTYPBLD01 /* SensorTypes.swift in Sources */,
+				SNSRSNDBLD01 /* AudioClassificationStage.swift in Sources */,
+				SNSRLOCBLD01 /* LocationStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

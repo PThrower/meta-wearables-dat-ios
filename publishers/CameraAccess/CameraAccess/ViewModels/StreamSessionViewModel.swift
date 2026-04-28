@@ -174,6 +174,8 @@ class StreamSessionViewModel: ObservableObject {
   private let sensorRelayStage = SensorRelayStage()
   private var visionStage: VisionStage?
   private var enhanceStage: FrameTransformStage?
+  private var audioClassificationStage: AudioClassificationStage?
+  private var locationStage: LocationStage?
 
   // Preview system
   #if DEBUG
@@ -831,6 +833,58 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] EnhanceStage configured: \(enhanceConfig.filters.count) filters")
   }
 
+  // MARK: - Sensor Stages
+
+  /// Configure sensor stages (sound classification, GPS location) from server-sent config.
+  private func configureSensorStage(config: [String: Any]) async {
+    let sensorConfig = SensorStageConfig.fromServerConfig(config)
+
+    // Stop existing stages
+    if let audioStage = audioClassificationStage {
+      await audioStage.stop()
+      audioClassificationStage = nil
+    }
+    if let locStage = locationStage {
+      await locStage.stop()
+      locationStage = nil
+    }
+
+    for sensor in sensorConfig.sensors {
+      switch sensor.type {
+      case .sound:
+        let stage = AudioClassificationStage()
+        let cfg = sensor.config
+        await stage.configure(
+          windowDuration: cfg["windowDuration"] as? Double ?? 1.5,
+          overlapFactor: cfg["overlapFactor"] as? Double ?? 0.5,
+          confidence: cfg["confidence"] as? Double ?? 0.3,
+          maxLabels: cfg["maxLabels"] as? Int ?? 5
+        )
+        await stage.setOnResult { [weak self] classification in
+          await self?.relayStage.sendJson(classification.jsonDict)
+        }
+        await stage.start()
+        audioClassificationStage = stage
+        NSLog("[StreamSession] AudioClassificationStage started")
+
+      case .location:
+        let stage = LocationStage()
+        let cfg = sensor.config
+        await stage.configure(
+          accuracy: cfg["accuracy"] as? String ?? "best",
+          minDistance: cfg["minDistance"] as? Double ?? 5,
+          updateIntervalSec: cfg["updateIntervalSec"] as? Double ?? 5
+        )
+        await stage.setOnResult { [weak self] update in
+          await self?.relayStage.sendJson(update.jsonDict)
+        }
+        await stage.start()
+        locationStage = stage
+        NSLog("[StreamSession] LocationStage started")
+      }
+    }
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -965,6 +1019,13 @@ class StreamSessionViewModel: ObservableObject {
       if msgType == "enhance_stage_config" {
         Task { @MainActor [weak self] in
           self?.configureEnhanceStage(config: msg)
+        }
+      }
+
+      // Sensor stage config from server — configure sound/location stages
+      if msgType == "sensor_stage_config" {
+        Task { @MainActor [weak self] in
+          await self?.configureSensorStage(config: msg)
         }
       }
 
@@ -1147,6 +1208,16 @@ class StreamSessionViewModel: ObservableObject {
     // Cancel telemetry push timer
     telemetryPushTimer?.cancel()
     telemetryPushTimer = nil
+
+    // Stop sensor stages (sound classification, GPS location)
+    if let audioStage = audioClassificationStage {
+      await audioStage.stop()
+      audioClassificationStage = nil
+    }
+    if let locStage = locationStage {
+      await locStage.stop()
+      locationStage = nil
+    }
 
     // Stop sensor relay (FRSE frames)
     await sensorRelayStage.stop()

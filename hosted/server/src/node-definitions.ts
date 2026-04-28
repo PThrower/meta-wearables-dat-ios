@@ -24,7 +24,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -94,7 +94,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "sensor-sound", "sensor-location", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -484,6 +484,26 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "Person Detect",
     runtime: ["mobile"],
   },
+  {
+    type: "vision-body-pose",
+    label: "Body Pose",
+    subtitle: "${maxPoses} poses | ${confidence}",
+    color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "vision",
+    binding: "vision-body-pose",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "range", key: "confidence", label: "Confidence Threshold", min: 0, max: 1, step: 0.05 },
+      { kind: "number", key: "maxPoses", label: "Max Poses (0 = unlimited)", min: 0, max: 10, step: 1 },
+      { kind: "range", key: "targetFPS", label: "Detection FPS", min: 1, max: 15, step: 1 },
+    ],
+    defaultConfig: { confidence: 0.5, maxPoses: 0, targetFPS: 5 },
+    defaultLabel: "Body Pose",
+    runtime: ["mobile"],
+  },
   // --- Frame Enhancement nodes (on-device CIFilter transforms) ---
   //
   // Enhancement nodes apply CIFilter chains to video frames on the GPU.
@@ -495,7 +515,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Brightness",
     subtitle: "bright: ${brightness} | contrast: ${contrast}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-brightness",
@@ -514,7 +534,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Sharpen",
     subtitle: "sharpness: ${sharpness}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-sharpen",
@@ -531,7 +551,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "White Balance",
     subtitle: "warmth: ${warmth}K | tint: ${tint}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-white-balance",
@@ -549,7 +569,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Noise Reduce",
     subtitle: "noise: ${noiseLevel} | sharp: ${sharpness}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-noise-reduce",
@@ -567,7 +587,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Edge Detect",
     subtitle: "intensity: ${intensity}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-edge-detect",
@@ -584,7 +604,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Night Mode",
     subtitle: "bright: ${brightness} | gamma: ${gamma}",
     color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "enhance",
     binding: "enhance-night-mode",
@@ -596,6 +616,54 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { brightness: 0.15, gamma: 0.8, highlightAmount: 1.5 },
     defaultLabel: "Night Mode",
+    runtime: ["mobile"],
+  },
+  // --- Sensor nodes (on-device sound classification + location) ---
+  {
+    type: "sensor-sound",
+    label: "Sound Classify",
+    subtitle: "top ${maxLabels} | ${confidence}",
+    color: { fill: "#0d2d3d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "sensor",
+    binding: "sensor-sound",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "range", key: "windowDuration", label: "Window Duration", min: 0.5, max: 5, step: 0.5, unit: "s" },
+      { kind: "range", key: "overlapFactor", label: "Overlap Factor", min: 0, max: 0.9, step: 0.1 },
+      { kind: "range", key: "confidence", label: "Confidence Threshold", min: 0, max: 1, step: 0.05 },
+      { kind: "number", key: "maxLabels", label: "Max Labels", min: 1, max: 20, step: 1 },
+    ],
+    defaultConfig: { windowDuration: 1.5, overlapFactor: 0.5, confidence: 0.3, maxLabels: 5 },
+    defaultLabel: "Sound Classify",
+    runtime: ["mobile"],
+  },
+  {
+    type: "sensor-location",
+    label: "GPS Location",
+    subtitle: "${accuracy} | ${minDistance}m",
+    color: { fill: "#0d2d3d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "sensor",
+    binding: "sensor-location",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "select", key: "accuracy", label: "Accuracy", options: [
+        { value: "best", label: "Best for navigation" },
+        { value: "tenMeters", label: "10 meters" },
+        { value: "hundredMeters", label: "100 meters" },
+        { value: "kilometer", label: "1 kilometer" },
+        { value: "threeKilometers", label: "3 kilometers" },
+      ]},
+      { kind: "number", key: "minDistance", label: "Min Distance (meters)", min: 0, max: 1000, step: 1 },
+      { kind: "number", key: "updateIntervalSec", label: "Update Interval (sec)", min: 1, max: 300, step: 1 },
+    ],
+    defaultConfig: { accuracy: "best", minDistance: 5, updateIntervalSec: 5 },
+    defaultLabel: "GPS Location",
     runtime: ["mobile"],
   },
   // --- Trigger nodes (event-driven conditional routers) ---
