@@ -173,6 +173,7 @@ class StreamSessionViewModel: ObservableObject {
   private var displayStage: DisplayStage?
   private let sensorRelayStage = SensorRelayStage()
   private var visionStage: VisionStage?
+  private var enhanceStage: FrameTransformStage?
 
   // Preview system
   #if DEBUG
@@ -809,6 +810,27 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] VisionStage registered: \(nodeType) confidence=\(confidence) fps=\(targetFPS)")
   }
 
+  // MARK: - Enhance Stage
+
+  /// Configure the frame enhancement transform chain from server-sent config.
+  private func configureEnhanceStage(config: [String: Any]) {
+    let enhanceConfig = EnhanceStageConfig.fromServerConfig(config)
+
+    if enhanceConfig.filters.isEmpty {
+      // No filters — remove transform stage
+      pipeline.transformStage = nil
+      enhanceStage = nil
+      NSLog("[StreamSession] EnhanceStage removed (no filters)")
+      return
+    }
+
+    let stage = FrameTransformStage(config: enhanceConfig)
+    pipeline.transformStage = stage
+    enhanceStage = stage
+
+    NSLog("[StreamSession] EnhanceStage configured: \(enhanceConfig.filters.count) filters")
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -936,6 +958,13 @@ class StreamSessionViewModel: ObservableObject {
         Task { @MainActor [weak self] in
           guard let self else { return }
           await self.configureVisionStage(config: msg)
+        }
+      }
+
+      // Enhance stage config from server — configure CIFilter transform chain
+      if msgType == "enhance_stage_config" {
+        Task { @MainActor [weak self] in
+          self?.configureEnhanceStage(config: msg)
         }
       }
 

@@ -21,6 +21,9 @@ final class FramePipelineManager {
     private var sequenceNumber: UInt64 = 0
     private var listenerToken: AnyListenerToken?
 
+    // Pre-broadcast transform stage (frame enhancements). nil = no transform.
+    var transformStage: FrameTransformStage?
+
     // MARK: - Stage Registration
 
     func register(_ stage: any FramePipelineStage) {
@@ -62,8 +65,11 @@ final class FramePipelineManager {
     /// Stages receive identical FramePackets -- they cannot distinguish the source.
     func onRawSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         sequenceNumber += 1
+
+        let finalBuffer = applyTransform(sampleBuffer)
+
         let packet = FramePacket(
-            sampleBuffer: sampleBuffer,
+            sampleBuffer: finalBuffer,
             timestamp: .now,
             sequenceNumber: sequenceNumber
         )
@@ -80,21 +86,56 @@ final class FramePipelineManager {
 
     private func onVideoFrame(_ videoFrame: VideoFrame) {
         let sampleBuffer = videoFrame.sampleBuffer
-
         sequenceNumber += 1
+
+        // Apply pre-broadcast transform chain (frame enhancements) if configured.
+        // Transform is synchronous GPU work (<3ms) — runs inline before fan-out.
+        let finalBuffer = applyTransform(sampleBuffer)
+
         let packet = FramePacket(
-            sampleBuffer: sampleBuffer,
+            sampleBuffer: finalBuffer,
             timestamp: .now,
             sequenceNumber: sequenceNumber
         )
 
         for stage in stages {
             guard stage.config.isEnabled else { continue }
-            // Fire-and-forget to each stage actor — never blocks main thread
             Task.detached { [stage] in
                 await stage.processFrame(packet)
             }
         }
+    }
+
+    // MARK: - Transform Helper
+
+    /// Apply the enhancement transform chain to a CMSampleBuffer.
+    /// Returns enhanced buffer or the original if no transform is configured / on failure.
+    private func applyTransform(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer {
+        guard let transform = transformStage else { return sampleBuffer }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return sampleBuffer }
+
+        let enhanced = transform.transform(pixelBuffer)
+
+        // Same buffer = no enhancement applied (disabled or empty chain)
+        if enhanced === pixelBuffer { return sampleBuffer }
+
+        // Create new CMSampleBuffer from the enhanced pixel buffer
+        var newSampleBuffer: CMSampleBuffer?
+        var timingInfo = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sampleBuffer),
+            decodeTimeStamp: CMSampleBufferGetDecodeTimeStamp(sampleBuffer)
+        )
+
+        let status = CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: enhanced,
+            formatDescription: CMSampleBufferGetFormatDescription(sampleBuffer)!,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &newSampleBuffer
+        )
+
+        return status == noErr ? (newSampleBuffer ?? sampleBuffer) : sampleBuffer
     }
 
     // MARK: - Lifecycle

@@ -1415,6 +1415,9 @@ const server = Bun.serve<WsData>({
           const app = appsToActivate[i];
           const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
 
+          // Skip enhance nodes here — they're collected and sent as one combined config after the loop
+          if (pDef?.activationMode === "enhance") continue;
+
           if (pDef?.activationMode === "jepa" && app.config?.jepa) {
             const jc = app.config.jepa as any;
             await jepaOrchestrator.activate(body.sessionId, {
@@ -1453,6 +1456,25 @@ const server = Bun.serve<WsData>({
             await orchestrator.activateWithConfig(body.sessionId, app);
           }
           activatedAppIds.push(app.id);
+        }
+
+        // Collect all enhance nodes and send one combined config to iOS
+        const enhanceFilters: Array<{ type: string; params: Record<string, number> }> = [];
+        for (let i = 0; i < appsToActivate.length; i++) {
+          const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
+          if (pDef?.activationMode !== "enhance") continue;
+          enhanceFilters.push({
+            type: processableNodes[i].type,
+            params: (appsToActivate[i].config ?? {}) as Record<string, number>,
+          });
+        }
+        if (enhanceFilters.length > 0 && session.publisher?.ws?.readyState === WebSocket.OPEN) {
+          session.publisher.ws.send(JSON.stringify({
+            type: "enhance_stage_config",
+            filters: enhanceFilters,
+            enabled: true,
+          }));
+          console.log(`[relay] Sent enhance config with ${enhanceFilters.length} filters session=${body.sessionId}`);
         }
 
         // Send cached frame to AI for immediate context

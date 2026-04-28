@@ -24,7 +24,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -94,7 +94,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -482,6 +482,120 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { confidence: 0.5, maxPersons: 0, targetFPS: 5 },
     defaultLabel: "Person Detect",
+    runtime: ["mobile"],
+  },
+  // --- Frame Enhancement nodes (on-device CIFilter transforms) ---
+  //
+  // Enhancement nodes apply CIFilter chains to video frames on the GPU.
+  // They run as a pre-broadcast transform — all downstream stages see the
+  // enhanced frame. activationMode: "enhance" sends config to iOS publisher.
+  //
+  {
+    type: "enhance-brightness",
+    label: "Brightness",
+    subtitle: "bright: ${brightness} | contrast: ${contrast}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-brightness",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "brightness", label: "Brightness", min: -0.5, max: 0.5, step: 0.05 },
+      { kind: "range", key: "contrast", label: "Contrast", min: 0.5, max: 2.0, step: 0.05 },
+      { kind: "range", key: "saturation", label: "Saturation", min: 0, max: 2.0, step: 0.05 },
+    ],
+    defaultConfig: { brightness: 0.1, contrast: 1.0, saturation: 1.0 },
+    defaultLabel: "Brightness",
+    runtime: ["mobile"],
+  },
+  {
+    type: "enhance-sharpen",
+    label: "Sharpen",
+    subtitle: "sharpness: ${sharpness}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-sharpen",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "sharpness", label: "Sharpness", min: 0, max: 2.0, step: 0.05 },
+    ],
+    defaultConfig: { sharpness: 0.4 },
+    defaultLabel: "Sharpen",
+    runtime: ["mobile"],
+  },
+  {
+    type: "enhance-white-balance",
+    label: "White Balance",
+    subtitle: "warmth: ${warmth}K | tint: ${tint}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-white-balance",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "warmth", label: "Temperature (K)", min: 2000, max: 9000, step: 100 },
+      { kind: "range", key: "tint", label: "Tint", min: -100, max: 100, step: 5 },
+    ],
+    defaultConfig: { warmth: 5500, tint: 0 },
+    defaultLabel: "White Balance",
+    runtime: ["mobile"],
+  },
+  {
+    type: "enhance-noise-reduce",
+    label: "Noise Reduce",
+    subtitle: "noise: ${noiseLevel} | sharp: ${sharpness}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-noise-reduce",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "noiseLevel", label: "Noise Level", min: 0, max: 0.1, step: 0.005 },
+      { kind: "range", key: "sharpness", label: "Sharpness", min: 0, max: 2.0, step: 0.05 },
+    ],
+    defaultConfig: { noiseLevel: 0.02, sharpness: 0.4 },
+    defaultLabel: "Noise Reduce",
+    runtime: ["mobile"],
+  },
+  {
+    type: "enhance-edge-detect",
+    label: "Edge Detect",
+    subtitle: "intensity: ${intensity}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-edge-detect",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "intensity", label: "Intensity", min: 0, max: 5.0, step: 0.1 },
+    ],
+    defaultConfig: { intensity: 1.0 },
+    defaultLabel: "Edge Detect",
+    runtime: ["mobile"],
+  },
+  {
+    type: "enhance-night-mode",
+    label: "Night Mode",
+    subtitle: "bright: ${brightness} | gamma: ${gamma}",
+    color: { fill: "#1a2000", header: "#84cc16", stroke: "#84cc16" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "enhance",
+    binding: "enhance-night-mode",
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "brightness", label: "Brightness", min: 0, max: 0.5, step: 0.05 },
+      { kind: "range", key: "gamma", label: "Gamma", min: 0.3, max: 1.0, step: 0.05 },
+      { kind: "range", key: "highlightAmount", label: "Highlight Recovery", min: 0, max: 3.0, step: 0.1 },
+    ],
+    defaultConfig: { brightness: 0.15, gamma: 0.8, highlightAmount: 1.5 },
+    defaultLabel: "Night Mode",
     runtime: ["mobile"],
   },
   // --- Trigger nodes (event-driven conditional routers) ---
