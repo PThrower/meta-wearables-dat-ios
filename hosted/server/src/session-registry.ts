@@ -991,6 +991,7 @@ export class SessionRegistry {
     ownerEmail: string | undefined;
     accessLevel: AccessLevel;
     acl: AclEntry[];
+    activeWorkflowId: string | null;
   }> {
     const now = Date.now();
     return [...this.sessions.values()].map(s => ({
@@ -1003,6 +1004,7 @@ export class SessionRegistry {
       ownerEmail: s.ownerEmail,
       accessLevel: s.accessLevel,
       acl: s.acl,
+      activeWorkflowId: s.activeWorkflowId,
     }));
   }
 

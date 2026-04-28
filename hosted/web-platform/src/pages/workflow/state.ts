@@ -155,6 +155,7 @@ export function resetState(): void {
   _saving = false;
   _workflow = null;
   _selectedNodeId = null;
+  _settingsPanelActive = false;
   _viewX = 0;
   _viewY = 0;
   _zoom = 1;

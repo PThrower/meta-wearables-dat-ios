@@ -1004,11 +1004,14 @@ const server = Bun.serve<WsData>({
         .flatMap(w => {
           const nodes = q.getWorkflowNodes(w.id);
           const edges = q.getWorkflowEdges(w.id);
+          const wfRow = q.getWorkflow(w.id);
           try {
             return resolveWorkflowToPipeline(
               nodes.map(n => ({ ...n, config: JSON.parse(n.config) })) as any,
               edges as any,
               { id: w.id, name: w.name },
+              wfRow?.flowConfig ? JSON.parse(wfRow.flowConfig) : null,
+              wfRow?.settings ? JSON.parse(wfRow.settings) : null,
             );
           } catch { return []; }
         });
@@ -1116,6 +1119,7 @@ const server = Bun.serve<WsData>({
           })),
           canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
           flowConfig: wf!.flowConfig ? JSON.parse(wf!.flowConfig) : null,
+          settings: wf!.settings ? JSON.parse(wf!.settings) : null,
           createdAt: wf!.createdAt,
           updatedAt: wf!.updatedAt,
         }, { status: 201 });
@@ -1199,6 +1203,7 @@ const server = Bun.serve<WsData>({
             })),
             canvasViewport: JSON.parse(wf!.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
             flowConfig: wf!.flowConfig ? JSON.parse(wf!.flowConfig) : null,
+            settings: wf!.settings ? JSON.parse(wf!.settings) : null,
             createdAt: wf!.createdAt, updatedAt: wf!.updatedAt,
           });
         } catch (e) {
