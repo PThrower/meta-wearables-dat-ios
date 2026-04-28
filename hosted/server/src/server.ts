@@ -1964,7 +1964,13 @@ const server = Bun.serve<WsData>({
               orchestrator.setVisionFps(sessionId, fps);
               ws.send(JSON.stringify({ type: "vision_fps", fps }));
             } else if (cmd.type === "vision_result" && Array.isArray(cmd.detections)) {
-              // iOS VisionStage detection results — inject as context into active AI sessions
+              // iOS VisionStage detection results — inject as context into active AI sessions.
+              //
+              // NOTE: Vision runs at ~5fps by default, so this fires ~5x/sec. Each call
+              // sends a [Vision: ...] text trigger to every active AI service via sendText().
+              // If the AI context window becomes noisy, consider throttling the AI injection
+              // to e.g. 1 trigger every 2-3 seconds (deduplicate identical summaries, or
+              // only send on detection change). The viewer fan-out below is fine at 5fps.
               if (session.activeAppId) {
                 const summary = (cmd.detections as any[]).map((d: any) => {
                   if (d.type === "vision-face-detect") return `Face detected (confidence: ${(d.confidence * 100).toFixed(0)}%)`;
