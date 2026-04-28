@@ -28,6 +28,54 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     // Built VNRequests (rebuilt when config changes)
     private var requests: [VNRequest] = []
 
+    // Nonisolated request builder for init context
+    private static func buildRequests(config: VisionStageConfig) -> [VNRequest] {
+        var requests: [VNRequest] = []
+        for type in config.detectionTypes {
+            switch type {
+            case .faceDetect:
+                let req = VNDetectFaceRectanglesRequest()
+                req.revision = VNDetectFaceRectanglesRequestRevision2
+                requests.append(req)
+            case .barcodeScan:
+                let req = VNDetectBarcodesRequest()
+                configureBarcodeSymbologiesStatic(req, symbologies: config.symbologies)
+                requests.append(req)
+            case .ocr:
+                let req = VNRecognizeTextRequest()
+                req.recognitionLevel = .accurate
+                req.recognitionLanguages = [config.language]
+                req.usesLanguageCorrection = true
+                requests.append(req)
+            case .sceneClassify:
+                requests.append(VNClassifyImageRequest())
+            case .personDetect:
+                let req = VNDetectHumanRectanglesRequest()
+                req.upperBodyOnly = false
+                requests.append(req)
+            }
+        }
+        return requests
+    }
+
+    private static func configureBarcodeSymbologiesStatic(_ req: VNDetectBarcodesRequest, symbologies: [String]) {
+        var symbologyTypes: [VNBarcodeSymbology] = []
+        for sym in symbologies {
+            switch sym.lowercased() {
+            case "qr": symbologyTypes.append(.qr)
+            case "ean13": symbologyTypes.append(.ean13)
+            case "code128": symbologyTypes.append(.code128)
+            case "datamatrix": symbologyTypes.append(.dataMatrix)
+            case "pdf417": symbologyTypes.append(.pdf417)
+            case "aztec": symbologyTypes.append(.aztec)
+            default: break
+            }
+        }
+        if !symbologyTypes.isEmpty {
+            req.symbologies = symbologyTypes
+        }
+    }
+
     // FPS throttle
     private var lastProcessTime: ContinuousClock.Instant?
     private var frameInterval: Duration {
@@ -45,7 +93,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     init(config: VisionStageConfig = .default) {
         self.visionConfig = config
         self.config = FrameStageConfig(targetFPS: config.targetFPS, isEnabled: true)
-        buildRequests()
+        self.requests = Self.buildRequests(config: config)
     }
 
     func setPreviewBus(_ bus: PreviewBus) {
@@ -59,7 +107,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     func updateConfig(_ newConfig: VisionStageConfig) {
         self.visionConfig = newConfig
         self.config = FrameStageConfig(targetFPS: newConfig.targetFPS, isEnabled: true)
-        buildRequests()
+        self.requests = Self.buildRequests(config: newConfig)
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
@@ -77,55 +125,6 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     }
 
     // MARK: - Private
-
-    private func buildRequests() {
-        requests = []
-        for type in visionConfig.detectionTypes {
-            switch type {
-            case .faceDetect:
-                let req = VNDetectFaceRectanglesRequest()
-                req.revision = VNDetectFaceRectanglesRequestRevision2
-                requests.append(req)
-            case .barcodeScan:
-                let req = VNDetectBarcodesRequest()
-                configureBarcodeSymbologies(req)
-                requests.append(req)
-            case .ocr:
-                let req = VNRecognizeTextRequest()
-                req.recognitionLevel = .accurate
-                req.recognitionLanguages = [visionConfig.language]
-                req.usesLanguageCorrection = true
-                requests.append(req)
-            case .sceneClassify:
-                let req = VNClassifyImageRequest()
-                requests.append(req)
-            case .personDetect:
-                let req = VNDetectHumanRectanglesRequest()
-                req.upperBodyOnly = false
-                requests.append(req)
-            }
-        }
-    }
-
-    private func configureBarcodeSymbologies(_ req: VNDetectBarcodesRequest) {
-        var symbologyTypes: [VNBarcodeSymbology] = []
-        for sym in visionConfig.symbologies {
-            switch sym.lowercased() {
-            case "qr": symbologyTypes.append(.QR)
-            case "ean13": symbologyTypes.append(.EAN13)
-            case "code128": symbologyTypes.append(.code128)
-            case "datamatrix": symbologyTypes.append(.dataMatrix)
-            case "pdf417": symbologyTypes.append(.PDF417)
-            case "aztec": symbologyTypes.append(.aztec)
-            default: break
-            }
-        }
-        if symbologyTypes.isEmpty {
-            // Default: scan all supported symbologies
-            return
-        }
-        req.symbologies = symbologyTypes
-    }
 
     private func processFrameInternal(_ packet: FramePacket) {
         // FPS throttle
@@ -192,7 +191,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
         // Publish to PreviewBus for overlay rendering
         if let previewBus {
-            previewBus.publish(.json(source: previewSource, value: result.jsonDict))
+            Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict)) }
         }
 
         // Relay to server via callback
@@ -216,7 +215,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             )
             return .face(FaceDetection(
                 boundingBox: converted,
-                confidence: obs.confidence,
+                confidence: Double(obs.confidence),
                 landmarkCount: obs.landmarks?.allPoints?.pointCount ?? 0
             ))
         }
@@ -236,15 +235,16 @@ actor VisionStage: @preconcurrency FramePipelineStage {
                 boundingBox: converted,
                 payloadString: obs.payloadStringValue ?? "",
                 symbology: stringForSymbology(obs.symbology),
-                confidence: obs.confidence
+                confidence: Double(obs.confidence)
             ))
         }
     }
 
     private func extractOCR(_ request: VNRequest) -> [VisionDetection] {
         guard let observations = request.results as? [VNRecognizedTextObservation] else { return [] }
-        return observations.compactMap { obs in
-            guard let candidate = obs.topCandidates(1).first else { return nil }
+        var results: [VisionDetection] = []
+        for obs in observations {
+            guard let candidate = obs.topCandidates(1).first else { continue }
             let bb = obs.boundingBox
             let converted = NormalizedBoundingBox(
                 x1: bb.origin.x,
@@ -252,19 +252,20 @@ actor VisionStage: @preconcurrency FramePipelineStage {
                 x2: bb.origin.x + bb.width,
                 y2: 1.0 - bb.origin.y
             )
-            return .ocr(OCRResult(
+            results.append(.ocr(OCRResult(
                 boundingBox: converted,
                 text: candidate.string,
-                confidence: candidate.confidence
-            ))
+                confidence: Double(candidate.confidence)
+            )))
         }
+        return results
     }
 
     private func extractScene(_ request: VNRequest) -> [VisionDetection] {
         guard let observations = request.results as? [VNClassificationObservation] else { return [] }
         let filtered = observations.prefix(visionConfig.maxLabels)
         let labels = filtered.map { obs in
-            SceneLabel(label: obs.identifier, confidence: obs.confidence)
+            SceneLabel(label: obs.identifier, confidence: Double(obs.confidence))
         }
         guard !labels.isEmpty else { return [] }
         return [.scene(SceneClassification(labels: labels))]
@@ -282,7 +283,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             )
             return .person(PersonDetection(
                 boundingBox: converted,
-                confidence: obs.confidence
+                confidence: Double(obs.confidence)
             ))
         }
     }
