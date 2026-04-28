@@ -159,7 +159,8 @@ docs/prds/
 │   ├── PRD-004-session-persistence.md          S3 recording, gallery, MP4 export
 │   ├── PRD-005-browser-viewer-gallery.md       Browser viewer, directory, playback
 │   ├── prd-007-google-oauth.md                 Auth for all protected routes
-│   └── PRD-014-unified-telemetry-stats.md      Cross-channel telemetry, SDK version tracking
+│   ├── PRD-014-unified-telemetry-stats.md      Cross-channel telemetry, SDK version tracking
+│   └── pipeline-node-conventions.md             9 rules for pipeline node implementation
 ├── platform/                                   Layer 1: relay API surface + pipeline
 │   └── PRD-013-platform-api-surface.md         /api/v1, /media, /s/<id>, frame pipeline
 ├── developer-api/                              Layer 1.5: SDK wrapping Layer 1 internals
