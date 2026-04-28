@@ -2,13 +2,15 @@
  * DeviceIdentity.swift
  *
  * Provides a stable device identifier that survives app reinstalls.
- * Uses iOS Keychain to persist a UUID across app deletions and reinstalls.
  *
- * Keychain items with kSecAttrAccessibleAfterFirstUnlock survive app
- * reinstall and deletion (since iOS 10.3+). This gives us a persistent
- * device identity without requiring enterprise entitlements.
+ * Strategy (in priority order):
+ * 1. UIDevice.identifierForVendor — Apple-guaranteed stable per-device per-vendor.
+ *    Survives app reinstalls. Only resets if ALL apps from this vendor are deleted.
+ * 2. Keychain-persisted UUID — fallback for scenarios where identifierForVendor
+ *    is nil (rare: first launch before system settles).
  *
- * Pattern matches GoogleAuthService.swift and PushNotificationService.swift.
+ * Previously used random UUIDs persisted to Keychain keyed by bundleIdentifier,
+ * which created duplicate device rows when bundle ID changed or Keychain was cleared.
  */
 
 import Foundation
@@ -25,13 +27,21 @@ final class DeviceIdentity {
         keychainService = Bundle.main.bundleIdentifier ?? "com.mwdat-ios"
     }
 
-    /// Stable device ID that survives app reinstalls.
-    /// Returns Keychain-persisted UUID, falls back to identifierForVendor only
-    /// if Keychain is completely unavailable (e.g. device wiped).
+    /// Stable device ID — identifierForVendor (primary) with Keychain fallback.
     var stableDeviceId: String {
+        // Primary: Apple's per-device-per-vendor ID
+        if let ifv = UIDevice.current.identifierForVendor?.uuidString {
+            // Keep Keychain in sync so migration is transparent
+            if readFromKeychain() != ifv {
+                writeToKeychain(value: ifv)
+            }
+            return ifv
+        }
+        // Fallback: Keychain-persisted value (from previous session)
         if let existing = readFromKeychain() {
             return existing
         }
+        // Last resort: generate and persist (shouldn't normally happen)
         let newId = UUID().uuidString
         writeToKeychain(value: newId)
         return newId
