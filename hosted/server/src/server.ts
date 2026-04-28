@@ -1963,6 +1963,26 @@ const server = Bun.serve<WsData>({
               const fps = Math.max(0.1, Math.min(cmd.fps, 5));
               orchestrator.setVisionFps(sessionId, fps);
               ws.send(JSON.stringify({ type: "vision_fps", fps }));
+            } else if (cmd.type === "vision_result" && Array.isArray(cmd.detections)) {
+              // iOS VisionStage detection results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const summary = (cmd.detections as any[]).map((d: any) => {
+                  if (d.type === "vision-face-detect") return `Face detected (confidence: ${(d.confidence * 100).toFixed(0)}%)`;
+                  if (d.type === "vision-barcode-scan") return `Barcode: ${d.label}`;
+                  if (d.type === "vision-ocr") return `OCR text: ${d.label}`;
+                  if (d.type === "vision-scene-classify") {
+                    const labels = (d.labels as any[] || []).map((l: any) => `${l.label} ${(l.confidence * 100).toFixed(0)}%`).join(", ");
+                    return `Scene: ${labels}`;
+                  }
+                  if (d.type === "vision-person-detect") return `Person detected (confidence: ${(d.confidence * 100).toFixed(0)}%)`;
+                  return `${d.type}: ${d.label}`;
+                }).join("; ");
+                if (summary) {
+                  orchestrator.sendTrigger(sessionId, `[Vision: ${summary}]`);
+                }
+              }
+              // Fan out to viewers for overlay rendering
+              broadcastToViewers(session, cmd);
             } else if (isBackpressureAckMessage(cmd)) {
               // Publisher acknowledges backpressure adjustment
               console.log(`[relay] Backpressure ack from publisher: targetFps=${cmd.targetFps} session=${sessionId}`);

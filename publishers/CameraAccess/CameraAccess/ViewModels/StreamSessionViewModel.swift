@@ -781,7 +781,7 @@ class StreamSessionViewModel: ObservableObject {
 
     let stage = VisionStage(config: visionConfig)
 
-    // Wire result callback to update overlay
+    // Wire result callback to update overlay AND relay to server
     await stage.setOnResult { [weak self] result in
       await MainActor.run {
         self?.visionDetections = result.detections
@@ -791,6 +791,10 @@ class StreamSessionViewModel: ObservableObject {
             self?.visionSceneLabel = "\(first.label) \(Int(first.confidence * 100))%"
           }
         }
+      }
+      // Relay detection JSON to server for downstream AI context injection
+      if !result.isEmpty {
+        await self?.relayStage.sendJson(result.jsonDict)
       }
     }
 
