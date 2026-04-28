@@ -25,7 +25,9 @@ export interface AudioFrame {
   channels: number;
   bitsPerSample: number;
   timestampMs: number;
+  /** Raw payload bytes — PCM i16 LE when codecType 0-3, Opus when codecType 4 */
   pcm: Uint8Array;
+  isOpus?: boolean;
 }
 
 interface TapSubscriber {
@@ -132,6 +134,18 @@ export class AudioTapBus {
   }
 
   private parseFRAU(buf: Uint8Array): AudioFrame | null {
-    return parseAudioHeader(buf);
+    const hdr = parseAudioHeader(buf);
+    if (!hdr) return null;
+    return {
+      sessionId: undefined,
+      codecType: hdr.codecType,
+      sequence: hdr.sequence,
+      sampleRate: hdr.sampleRate,
+      channels: hdr.channels,
+      bitsPerSample: hdr.bitsPerSample,
+      timestampMs: hdr.timestampMs,
+      pcm: hdr.payload,
+      isOpus: hdr.isOpus,
+    };
   }
 }

@@ -20,6 +20,7 @@ export {
   isAudioFrame,
   isSensorFrame,
   isKnownCodecType,
+  CODEC_OPUS,
   parseVideoHeader,
   parseAudioHeader,
   parseSensorHeader,

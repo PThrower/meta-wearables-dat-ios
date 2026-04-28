@@ -22,8 +22,17 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
     private var outputFileURL: URL?
     private var isRecording = false
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "recording", label: "Recording")
+    private var recordedFrameCount: UInt64 = 0
+
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 30)) {
         self.config = config
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
     }
 
     // MARK: - Recording Control
@@ -34,13 +43,15 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
 
-        // Determine format from first available description — we set up the input
+        // Determine format from first available description -- we set up the input
         // lazily on the first frame when we can inspect the sample buffer.
         assetWriter = writer
         outputFileURL = url
         isRecording = false // Will flip to true once writer starts
+        recordedFrameCount = 0
 
         NSLog("[RecordingStage] Prepared writer for \(url.lastPathComponent)")
+        publishPreview()
     }
 
     /// Stop recording and finalize the file. Returns the output file URL.
@@ -128,6 +139,10 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
         // Append frame
         if let input = writerInput, input.isReadyForMoreMediaData {
             input.append(packet.sampleBuffer)
+            recordedFrameCount += 1
+            if recordedFrameCount % 30 == 0 {
+                publishPreview()
+            }
         }
     }
 
@@ -138,5 +153,19 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
         writerInput = nil
         outputFileURL = nil
         isRecording = false
+        recordedFrameCount = 0
+    }
+
+    // MARK: - Preview
+
+    private func publishPreview() {
+        guard let previewBus else { return }
+        let src = previewSource
+        let fileName = outputFileURL?.lastPathComponent ?? "--"
+        Task {
+            await previewBus.publish(.status(source: src, label: isRecording ? "Recording" : "Idle", state: isRecording ? .active : .idle))
+            await previewBus.publish(.numeric(source: src, label: "Frames", value: Double(recordedFrameCount), unit: ""))
+            await previewBus.publish(.text(source: src, value: fileName))
+        }
     }
 }

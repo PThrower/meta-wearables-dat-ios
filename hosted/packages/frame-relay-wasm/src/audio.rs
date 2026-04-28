@@ -4,14 +4,14 @@
 //!   [0:4]   magic "FRAU" (0x46, 0x52, 0x41, 0x55)
 //!   [4]     version    (u8) = 1
 //!   [5:9]   payloadLength (u32 LE)
-//!   [9]     codecType  (u8) -- 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound
+//!   [9]     codecType  (u8) -- 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound, 4=Opus
 //!   [10:18] sequence   (u64 LE)
 //!   [18:22] sampleRate (u32 LE)
 //!   [22:24] channels   (u16 LE)
 //!   [24:26] bitsPerSample (u16 LE)
 //!   [26:34] timestamp  (u64 LE, ms)
 //!   [34:36] header_crc16 (u16 LE) — CRC-16/CCITT-FALSE over bytes [0..33]
-//!   [36:]   PCM payload (i16 LE interleaved)
+//!   [36:]   payload (raw PCM i16 LE when codecType 0-3, Opus when codecType 4)
 
 use wasm_bindgen::prelude::*;
 
@@ -27,6 +27,7 @@ pub const CODEC_BUILTIN_MIC: u8 = 0;
 pub const CODEC_GLASSES_HFP: u8 = 1;
 pub const CODEC_TTS: u8 = 2;
 pub const CODEC_RELAY_INBOUND: u8 = 3;
+pub const CODEC_OPUS: u8 = 4;
 
 // --- Header ---
 
@@ -134,6 +135,35 @@ pub fn verify_audio_crc(buf: &[u8]) -> bool {
     };
     let expected_crc = u16::from_le_bytes(crc_bytes);
     crc16_ccitt_false(&buf[0..34]) == expected_crc
+}
+
+// --- Opus Codec Support ---
+
+/// Check if a codec type indicates Opus encoding.
+///
+/// When `is_opus_codec` returns true, the payload is Opus-encoded (not raw PCM).
+/// The JS viewer layer decodes Opus using the `opus-decoder` npm package
+/// (WASM build of libopus). The Rust WASM module does not decode Opus itself --
+/// it identifies the codec type so the JS host can route accordingly.
+#[wasm_bindgen]
+pub fn is_opus_codec(codec_type: u8) -> bool {
+    codec_type == CODEC_OPUS
+}
+
+/// Extract the Opus payload from a FRAU frame when codecType == 4.
+///
+/// Returns the raw Opus packet bytes (after the 36-byte FRAU header).
+/// The JS host is responsible for decoding these bytes with opus-decoder.
+#[wasm_bindgen]
+pub fn extract_opus_payload(buf: &[u8]) -> Vec<u8> {
+    if buf.len() <= FRAU_HEADER_SIZE || &buf[0..4] != FRAU_MAGIC {
+        return vec![];
+    }
+    // Verify it's actually Opus
+    if buf[9] != CODEC_OPUS {
+        return vec![];
+    }
+    buf[FRAU_HEADER_SIZE..].to_vec()
 }
 
 // --- Streaming Audio Resampler ---

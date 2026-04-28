@@ -43,8 +43,12 @@ export const H264_FLAG_KEYFRAME = 0x01;
 export const H264_FLAG_SPSPPS = 0x02;
 
 // --- Known audio codec types ---
+// 0 = built-in mic (raw PCM), 1 = glasses HFP (raw PCM), 2 = TTS (raw PCM),
+// 3 = relay inbound (raw PCM), 4 = Opus-encoded audio
 
-export const KNOWN_CODEC_TYPES = [0, 1, 2, 3] as const;
+export const CODEC_OPUS = 4;
+
+export const KNOWN_CODEC_TYPES = [0, 1, 2, 3, 4] as const;
 export type CodecType = (typeof KNOWN_CODEC_TYPES)[number];
 
 export function isKnownCodecType(v: number): v is CodecType {

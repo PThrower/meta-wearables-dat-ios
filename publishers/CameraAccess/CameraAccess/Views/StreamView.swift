@@ -24,6 +24,9 @@ struct StreamView: View {
   @State private var showErrorLog = false
   @State private var showSettings = false
   @Environment(\.scenePhase) private var scenePhase
+  #if DEBUG
+  @State private var showNodePreview = false
+  #endif
 
   var body: some View {
     ZStack {
@@ -77,6 +80,20 @@ struct StreamView: View {
       VStack {
         HStack {
           Spacer()
+          #if DEBUG
+          Button {
+            showNodePreview.toggle()
+          } label: {
+            Image(systemName: showNodePreview ? "square.grid.2x2.fill" : "square.grid.2x2")
+              .font(.system(size: 14))
+              .foregroundColor(showNodePreview ? .cyan : .white)
+              .padding(8)
+              .background(.ultraThinMaterial)
+              .clipShape(Circle())
+          }
+          .padding(.trailing, 4)
+          .padding(.top, 4)
+          #endif
           Button {
             showSettings = true
           } label: {
@@ -113,6 +130,20 @@ struct StreamView: View {
         ControlsView(viewModel: viewModel)
       }
       .padding(.all, 24)
+
+      // Node preview overlay (debug)
+      #if DEBUG
+      if showNodePreview {
+        VStack {
+          Spacer()
+          NodePreviewView(store: viewModel.previewStore)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 80)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .animation(.easeInOut(duration: 0.25), value: showNodePreview)
+      }
+      #endif
     }
     .onDisappear {
       guard scenePhase != .background else { return }

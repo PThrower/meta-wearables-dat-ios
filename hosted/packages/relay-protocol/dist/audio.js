@@ -5,16 +5,16 @@
  *   [0:4]   magic "FRAU"
  *   [4]     version      (u8) — must be 1
  *   [5:9]   payloadLen   (u32 LE)
- *   [9]     codecType    (u8) — must be 0, 1, 2, or 3
+ *   [9]     codecType    (u8) — 0..3 = raw PCM, 4 = Opus
  *   [10:18] sequence     (u64 LE)
  *   [18:22] sampleRate   (u32 LE)
  *   [22:24] channels     (u16 LE)
  *   [24:26] bitsPerSample (u16 LE)
  *   [26:34] timestamp    (u64 LE, ms)
  *   [34:36] headerCrc16  (u16 LE)
- *   [36:]   PCM payload
+ *   [36:]   payload      (raw PCM when codecType 0-3, Opus when codecType 4)
  */
-import { FRAU_MAGIC, AUDIO_HEADER_SIZE, PROTOCOL_VERSION, isKnownCodecType, CRC_OFFSET, HEADER_BEFORE_CRC } from "./constants.js";
+import { FRAU_MAGIC, AUDIO_HEADER_SIZE, PROTOCOL_VERSION, isKnownCodecType, CRC_OFFSET, HEADER_BEFORE_CRC, CODEC_OPUS } from "./constants.js";
 import { crc16 } from "./crc16.js";
 export function isAudioFrame(buf) {
     return buf.length >= 4 && buf[0] === FRAU_MAGIC[0] && buf[1] === FRAU_MAGIC[1] && buf[2] === FRAU_MAGIC[2] && buf[3] === FRAU_MAGIC[3];
@@ -46,15 +46,17 @@ export function parseAudioHeader(buf) {
         channels: view.getUint16(22, true),
         bitsPerSample: view.getUint16(24, true),
         timestampMs: Number(view.getBigUint64(26, true)),
-        pcm: buf.subarray(AUDIO_HEADER_SIZE),
+        payload: buf.subarray(AUDIO_HEADER_SIZE),
+        get isOpus() { return this.codecType === CODEC_OPUS; },
     };
 }
 /**
- * Build a FRAU v1 frame (header + PCM payload).
+ * Build a FRAU v1 frame (header + payload).
  * Returns the complete binary message ready for WebSocket send.
+ * Payload is opaque: raw PCM when codecType 0-3, Opus-encoded when codecType 4.
  */
-export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsPerSample, timestampMs, pcmPayload) {
-    const total = AUDIO_HEADER_SIZE + pcmPayload.length;
+export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsPerSample, timestampMs, payload) {
+    const total = AUDIO_HEADER_SIZE + payload.length;
     const buf = new Uint8Array(total);
     const view = new DataView(buf.buffer);
     // Magic
@@ -65,7 +67,7 @@ export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsP
     // Version
     buf[4] = PROTOCOL_VERSION;
     // Payload length
-    view.setUint32(5, pcmPayload.length, true);
+    view.setUint32(5, payload.length, true);
     // Codec type
     buf[9] = codecType;
     // Sequence
@@ -82,6 +84,6 @@ export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsP
     const crcVal = crc16(buf, 0, HEADER_BEFORE_CRC);
     view.setUint16(CRC_OFFSET, crcVal, true);
     // Payload
-    buf.set(pcmPayload, AUDIO_HEADER_SIZE);
+    buf.set(payload, AUDIO_HEADER_SIZE);
     return buf;
 }

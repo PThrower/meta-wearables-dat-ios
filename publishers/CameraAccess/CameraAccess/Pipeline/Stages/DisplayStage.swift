@@ -23,9 +23,19 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
     // Shared CIContext -- reused across frames for efficiency
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "display", label: "Camera Feed")
+    private var frameCount: UInt64 = 0
+    private var lastPreviewTime: ContinuousClock.Instant?
+
     init(config: FrameStageConfig = .maxFPS, onFrame: @escaping @MainActor @Sendable (UIImage) -> Void) {
         self.config = config
         self.onFrame = onFrame
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
@@ -42,6 +52,21 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
         Task { @MainActor in
             let image = UIImage(cgImage: cgImage)
             onFrame(image)
+        }
+
+        // Publish preview image (throttled to ~2fps to avoid flooding)
+        frameCount += 1
+        let now = ContinuousClock.Instant.now
+        if let last = lastPreviewTime {
+            let elapsed = now - last
+            let ms = Double(elapsed.components.seconds) * 1000.0 + Double(elapsed.components.attoseconds) / 1e15
+            guard ms >= 500 else { return }
+        }
+        lastPreviewTime = now
+
+        if let previewBus {
+            let previewImage = UIImage(cgImage: cgImage)
+            Task { await previewBus.publish(.image(source: previewSource, value: previewImage)) }
         }
     }
 

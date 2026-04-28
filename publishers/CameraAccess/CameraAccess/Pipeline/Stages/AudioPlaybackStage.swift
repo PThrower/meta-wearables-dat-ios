@@ -32,7 +32,7 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     private let speechRate: Float = 0.5
     private let language: String = "en-US"
 
-    // Reusable synthesizer — lazily created on @MainActor.
+    // Reusable synthesizer -- lazily created on @MainActor.
     @MainActor private var synth: AVSpeechSynthesizer?
 
     // Serial queue: ensures utterances play one at a time with correct routing
@@ -40,12 +40,22 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
     private var isSpeaking = false
     @MainActor private var activeDelegate: SpeechWaitDelegate?
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "audio-playback", label: "TTS Playback")
+    private var lastSpokenText: String = ""
+    private var utteranceCount: UInt64 = 0
+
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
     }
 
     func setEventBus(_ bus: AudioEventBus) {
         self.eventBus = bus
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
     }
 
     // MARK: - FramePipelineStage
@@ -78,6 +88,19 @@ actor AudioPlaybackStage: @preconcurrency FramePipelineStage {
         guard !text.isEmpty else { return }
         NSLog("[AudioPlayback] Queued: \"\(text.prefix(80))\" preferGlasses=\(preferGlasses)")
         queue.append((text, preferGlasses))
+
+        // Publish preview
+        lastSpokenText = text
+        utteranceCount += 1
+        if let previewBus {
+            let src = previewSource
+            Task {
+                await previewBus.publish(.text(source: src, value: text))
+                await previewBus.publish(.numeric(source: src, label: "Queue Depth", value: Double(queue.count), unit: ""))
+                await previewBus.publish(.status(source: src, label: preferGlasses ? "Glasses" : "Phone", state: .active))
+            }
+        }
+
         await drainQueue()
     }
 

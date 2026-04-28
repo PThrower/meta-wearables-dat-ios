@@ -13,6 +13,7 @@ import type { ObjectStore } from "@ebowwa/object-store";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
 import type { GuidanceEvent } from "./guidance-orchestrator.js";
 import { resamplePcm, TARGET_SAMPLE_RATE } from "./pcm-resample.js";
+import { isOpusCodec, decodeOpusFrame } from "./opus-decode.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest
@@ -260,8 +261,22 @@ export class SessionRecorder {
     if (this.resumedFromExisting) this.ensureResumed();
 
     const header = parseAudioHeader(frame);
-    const rawPcm = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
+    const rawPayload = frame.length > AUDIO_HEADER_SIZE ? frame.subarray(AUDIO_HEADER_SIZE) : frame;
 
+    // Handle Opus-encoded frames: decode to PCM before processing
+    if (header && header.isOpus) {
+      const pcmBytes = decodeOpusFrame(rawPayload, header.sampleRate, header.channels);
+      if (pcmBytes.length === 0) return; // decode failed, skip
+      this.appendDecodedPcm(pcmBytes, header.sampleRate, header.channels);
+      return;
+    }
+
+    // Raw PCM path (codecType 0-3)
+    this.appendDecodedPcm(rawPayload, header?.sampleRate ?? TARGET_SAMPLE_RATE, header?.channels ?? 1);
+  }
+
+  /** Internal: append decoded PCM bytes after resampling to target rate */
+  private appendDecodedPcm(rawPcm: Uint8Array, sourceSampleRate: number, channels: number) {
     // Diagnostic: log first 3 audio frames to verify PCM content
     if (this.audioFrameCount < 3) {
       this.audioFrameCount++;
@@ -270,22 +285,20 @@ export class SessionRecorder {
       for (let i = 0; i < Math.min(rawPcm.length / 2, 500); i++) {
         peak = Math.max(peak, Math.abs(view.getInt16(i * 2, true)));
       }
-      console.log(`[recorder] Audio frame #${this.audioFrameCount}: ${frame.length}B total, ${rawPcm.length}B PCM, rate=${header?.sampleRate ?? 'null'}, codec=${header?.codecType ?? 'null'}, peak=${peak}`);
+      console.log(`[recorder] Audio frame #${this.audioFrameCount}: ${rawPcm.length}B PCM, rate=${sourceSampleRate}, ch=${channels}, peak=${peak}`);
     }
 
-    if (header) {
-      // Resample to 48kHz so all sources produce uniform PCM for concatenation
-      const resampled = resamplePcm(rawPcm, header.sampleRate, TARGET_SAMPLE_RATE);
+    // Resample to 48kHz so all sources produce uniform PCM for concatenation
+    if (sourceSampleRate > 0 && sourceSampleRate !== TARGET_SAMPLE_RATE) {
+      const resampled = resamplePcm(rawPcm, sourceSampleRate, TARGET_SAMPLE_RATE);
       this.audioParts.push(Buffer.from(resampled));
-      this.chunkSampleRate = TARGET_SAMPLE_RATE;
-      this.chunkChannels = header.channels;
-      this.chunkSampleCount += Math.floor(resampled.length / (this.chunkChannels * 2));
+      this.chunkSampleCount += Math.floor(resampled.length / (channels * 2));
     } else {
-      // No FRAU header — assume already at target rate, push as-is
       this.audioParts.push(Buffer.from(rawPcm));
-      this.chunkSampleRate = TARGET_SAMPLE_RATE;
-      this.chunkSampleCount += Math.floor(rawPcm.length / 2);
+      this.chunkSampleCount += Math.floor(rawPcm.length / (channels * 2));
     }
+    this.chunkSampleRate = TARGET_SAMPLE_RATE;
+    this.chunkChannels = channels;
   }
 
   /** Append a bounding box annotation to the annotations JSONL sidecar file */

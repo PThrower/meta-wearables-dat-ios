@@ -28,8 +28,16 @@ actor SensorRelayStage {
 
     private let flags: SensorFlags
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "sensor", label: "Sensors")
+
     init(flags: SensorFlags = SensorRelayStage.defaultFlags) {
         self.flags = flags
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
     }
 
     /// Configure the relay stage and telemetry service references.
@@ -64,7 +72,7 @@ actor SensorRelayStage {
     private func tick() async {
         guard let relayStage, let telemetryService else { return }
 
-        // TelemetryService is @MainActor — hop to main to read snapshot
+        // TelemetryService is @MainActor -- hop to main to read snapshot
         let snapshot = await MainActor.run { telemetryService.snapshot }
         guard let snapshot else { return }
 
@@ -79,5 +87,35 @@ actor SensorRelayStage {
         }
 
         await relayStage.sendRawData(frame)
+
+        // Publish sensor preview
+        publishSensorPreview(snapshot: snapshot)
+    }
+
+    // MARK: - Preview
+
+    private func publishSensorPreview(snapshot: TelemetrySnapshot) {
+        guard let previewBus else { return }
+        let src = previewSource
+        Task {
+            await previewBus.publish(.status(source: src, label: "1Hz Active", state: .active))
+            await previewBus.publish(.numeric(source: src, label: "Battery", value: Double(snapshot.battery.level * 100), unit: "%"))
+            await previewBus.publish(.numeric(source: src, label: "CPU", value: snapshot.cpu.usagePercent, unit: "%"))
+            await previewBus.publish(.numeric(source: src, label: "Memory", value: snapshot.memory.availableMB, unit: "MB"))
+            await previewBus.publish(.numeric(source: src, label: "Disk", value: snapshot.disk.availableGB, unit: "GB"))
+            if let motion = snapshot.motion {
+                await previewBus.publish(.text(source: src, value: "Accel: \(String(format: "%.2f", motion.accelX)), \(String(format: "%.2f", motion.accelY)), \(String(format: "%.2f", motion.accelZ))"))
+            }
+            await previewBus.publish(.status(source: src, label: "Thermal", state: {
+                switch snapshot.thermal.state {
+                case "nominal": return .nominal
+                case "fair": return .warning
+                case "serious": return .error
+                case "critical": return .error
+                default: return .idle
+                }
+            }()))
+            await previewBus.publish(.text(source: src, value: "Network: \(snapshot.network.type)"))
+        }
     }
 }

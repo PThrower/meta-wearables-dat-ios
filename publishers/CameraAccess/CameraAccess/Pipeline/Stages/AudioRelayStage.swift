@@ -29,6 +29,10 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
     // Audio processing configuration -- mutated by viewer control messages
     private var processingConfig = AudioProcessingConfig()
 
+    // Opus encoding (optional, bandwidth optimization)
+    private var opusEncoder: OpusEncoder?
+    private(set) var useOpus: Bool = false
+
     // Noise suppression state per codecType -- EMA noise floor estimate
     private var noiseFloorEstimate: [UInt8: Float] = [0: 0.0, 1: 0.0]
     private let noiseFloorAlpha: Float = 0.95  // EMA decay (slow adaptation)
@@ -38,11 +42,20 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
     private var framesSent: UInt64 = 0
     private var lastLogTime: Date = .distantPast
 
+    // Preview
+    private var previewBus: PreviewBus?
+    private let previewSource = PreviewSource(stageId: "audio-relay", label: "Audio Relay")
+    private var lastPreviewTime: ContinuousClock.Instant?
+
     // Expose FRAU header size for tests (delegated to WireProtocol)
     static let frauHeaderSize = WireProtocol.frauHeaderSize
 
     init(config: FrameStageConfig = FrameStageConfig.maxFPS) {
         self.config = config
+    }
+
+    func setPreviewBus(_ bus: PreviewBus) {
+        self.previewBus = bus
     }
 
     func setRelayStage(_ stage: RelayStage) {
@@ -67,6 +80,23 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
         processingConfig.noiseSuppressionEnabled[codecType] = enabled
         if !enabled { noiseFloorEstimate[codecType] = 0.0 }
         NSLog("[AudioRelayStage] Noise suppression: codecType=\(codecType) enabled=\(enabled)")
+    }
+
+    func setOpusEnabled(_ enabled: Bool) {
+        useOpus = enabled
+        if enabled && opusEncoder == nil {
+            do {
+                opusEncoder = try OpusEncoder(sampleRate: 16000, channels: 1, bitrate: 16000)
+                NSLog("[AudioRelayStage] Opus encoder initialized: 16kHz mono 16kbps")
+            } catch {
+                NSLog("[AudioRelayStage] ERROR: Opus encoder init failed: \(error)")
+                useOpus = false
+            }
+        }
+        if !enabled {
+            opusEncoder?.reset()
+        }
+        NSLog("[AudioRelayStage] Opus encoding: \(enabled ? "enabled" : "disabled")")
     }
 
     func setMixEnabled(_ enabled: Bool, weightPhone: Float, weightGlasses: Float) {
@@ -158,6 +188,40 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
         }
 
         // Build FRAU with processed (or original) PCM data via WireProtocol
+        // Opus encoding: compress PCM to Opus for bandwidth reduction (~24x)
+        // The encoder may produce multiple Opus frames from one PCM packet
+        // (e.g., 1920 samples -> 2 frames of 960 samples each at 16kHz)
+        if useOpus, let encoder = opusEncoder, (ct == 0 || ct == 1) {
+            let opusFrames = encoder.encode(pcmData: processedData)
+            if !opusFrames.isEmpty {
+                var seq = packet.sequenceNumber
+                for opusFrame in opusFrames {
+                    let message = WireProtocol.buildFRAU(
+                        pcmData: opusFrame,
+                        codecType: 4,  // CODEC_OPUS
+                        sampleRate: 16000,  // Opus operates at 16kHz
+                        channels: packet.channels,
+                        bitsPerSample: 0,   // Not applicable for compressed audio
+                        sequenceNumber: seq,
+                        timestampMs: packet.timestampMs
+                    )
+                    await relayStage.sendRawData(message)
+                    framesSent += 1
+                    seq += 1
+                }
+
+                publishAudioPreview(ct: ct, pcmSize: processedData.count)
+
+                let now = Date()
+                if now.timeIntervalSince(lastLogTime) >= 2.0 {
+                    lastLogTime = now
+                    NSLog("[AudioRelayStage] sent=\(framesSent) suppressed=\(framesSuppressed) ct=\(ct) opusFrames=\(opusFrames.count) opusSize=\(opusFrames.first?.count ?? 0) pcmSize=\(processedData.count)")
+                }
+                return
+            }
+        }
+
+        // PCM path (codecType 0-3, or Opus encoding not enabled/failed)
         let message = WireProtocol.buildFRAU(
             pcmData: processedData,
             codecType: packet.codecType,
@@ -169,6 +233,9 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
         )
         await relayStage.sendRawData(message)
         framesSent += 1
+
+        // Publish preview (throttled ~2Hz)
+        publishAudioPreview(ct: ct, pcmSize: processedData.count)
 
         // Diagnostic: log every 2 seconds
         let now = Date()
@@ -182,5 +249,29 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
 
     nonisolated func processFrame(_ packet: FramePacket) async {
         // Audio relay stage ignores video frames
+    }
+
+    // MARK: - Preview
+
+    private func publishAudioPreview(ct: UInt8, pcmSize: Int) {
+        guard let previewBus else { return }
+        let now = ContinuousClock.Instant.now
+        if let last = lastPreviewTime {
+            let elapsed = now - last
+            let ms = Double(elapsed.components.seconds) * 1000.0 + Double(elapsed.components.attoseconds) / 1e15
+            guard ms >= 500 else { return }
+        }
+        lastPreviewTime = now
+
+        let src = previewSource
+        let sourceName = ct == 0 ? "Phone" : ct == 1 ? "Glasses" : ct == 2 ? "TTS" : "Other"
+        Task {
+            await previewBus.publish(.status(source: src, label: "Audio Relay (\(sourceName))", state: .active))
+            await previewBus.publish(.numeric(source: src, label: "Frames Sent", value: Double(framesSent), unit: ""))
+            await previewBus.publish(.numeric(source: src, label: "Suppressed", value: Double(framesSuppressed), unit: ""))
+            await previewBus.publish(.numeric(source: src, label: "Gain (\(sourceName))", value: Double(processingConfig.gainDb[ct] ?? 0), unit: "dB"))
+            await previewBus.publish(.status(source: src, label: "Noise Gate (\(sourceName))", state: (processingConfig.noiseGateThreshold[ct] ?? 0) > 0 ? .active : .disabled))
+            await previewBus.publish(.status(source: src, label: "Noise Suppression (\(sourceName))", state: processingConfig.noiseSuppressionEnabled[ct] == true ? .active : .disabled))
+        }
     }
 }
