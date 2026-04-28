@@ -451,17 +451,22 @@ export function deleteWorkflow(id: string): Promise<{ ok: boolean } | null> {
   return apiDelete<{ ok: boolean }>(`/workflows/${id}`);
 }
 
-/** Activate a workflow against a session (with conflict detection) */
+/** Activate a workflow against a session (with conflict detection) or wake a device */
 export async function activateWorkflow(
   workflowId: string,
-  sessionId: string,
-  options?: { override?: boolean; reason?: string },
+  sessionId?: string,
+  options?: { override?: boolean; reason?: string; deviceId?: string },
 ): Promise<{ appId: string; status: string; conflict?: { activeAppId: string | null; status: string; activatedAt: number | undefined } } | null> {
   try {
+    const body: Record<string, unknown> = {};
+    if (sessionId) body.sessionId = sessionId;
+    if (options?.deviceId) body.deviceId = options.deviceId;
+    if (options?.override) body.override = options.override;
+    if (options?.reason) body.reason = options.reason;
     const res = await authFetch(`/workflows/${workflowId}/activate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, override: options?.override, reason: options?.reason }),
+      body: JSON.stringify(body),
     });
     const data = await res.json() as any;
     if (res.status === 409) {

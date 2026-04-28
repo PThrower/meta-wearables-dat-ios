@@ -96,6 +96,9 @@ const PORT = parseInt(process.env.RELAY_PORT || "8080");
 const wifiIp = getWifiIp();
 const serverStartTime = Date.now();
 
+// --- Pending wake activations (deviceId → workflowId) ---
+const pendingWakeActivations = new Map<string, { workflowId: string; requestedAt: number }>();
+
 // --- Object Store ---
 
 const store: ObjectStore = createObjectStore();
@@ -1223,11 +1226,31 @@ const server = Bun.serve<WsData>({
     if (wfActivateMatch && req.method === "POST") {
       try {
         const wfId = wfActivateMatch[1];
-        const body = await req.json() as { sessionId?: string; override?: boolean; reason?: string };
-        if (!body.sessionId) return Response.json({ error: "sessionId required" }, { status: 400 });
+        const body = await req.json() as { sessionId?: string; deviceId?: string; override?: boolean; reason?: string };
 
         const wf = q.getWorkflow(wfId);
         if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
+
+        // Device-first activation: wake device, store pending, return immediately
+        if (!body.sessionId && body.deviceId) {
+          const wakeSettings = wf.settings ? JSON.parse(wf.settings) as WorkflowSettings : null;
+          if (!wakeSettings?.wakeOnActivate) {
+            return Response.json({ error: "wakeOnActivate not enabled in workflow settings" }, { status: 400 });
+          }
+          const deviceToken = q.getDeviceToken(body.deviceId);
+          if (!deviceToken) {
+            return Response.json({ error: "Device has no APNs token — cannot wake" }, { status: 400 });
+          }
+          pendingWakeActivations.set(body.deviceId, { workflowId: wfId, requestedAt: Date.now() });
+          sendSilentWake(deviceToken, `wake_${wfId}`).then(r => {
+            if (!r.success) console.warn(`[wake] Silent push failed: ${r.reason}`);
+            else console.log(`[wake] Sent wake for workflow ${wfId} to device ${body.deviceId!.slice(0, 8)}...`);
+          }).catch(() => {});
+          console.log(`[wake] Pending activation stored: device=${body.deviceId.slice(0, 8)}... workflow=${wfId}`);
+          return Response.json({ status: "wake_sent", deviceId: body.deviceId });
+        }
+
+        if (!body.sessionId) return Response.json({ error: "sessionId or deviceId required" }, { status: 400 });
 
         const nodes = q.getWorkflowNodes(wfId).map(n => ({
           ...n, config: JSON.parse(n.config),
@@ -1907,6 +1930,24 @@ const server = Bun.serve<WsData>({
                   id: sessionId,
                   publisherDeviceId: session.publisher.deviceId,
                 }));
+              }
+
+              // Auto-activate pending wake workflows when device connects
+              const pendingWake = session.publisher.deviceId ? pendingWakeActivations.get(session.publisher.deviceId) : null;
+              if (pendingWake) {
+                pendingWakeActivations.delete(session.publisher.deviceId!);
+                const pwId = pendingWake.workflowId;
+                console.log(`[wake-auto] Device ${session.publisher.deviceId!.slice(0, 8)}... connected, auto-activating workflow ${pwId}`);
+                // Internal activation via self-fetch to reuse all existing logic (conflicts, sequential, event-driven, etc.)
+                fetch(`http://127.0.0.1:${PORT}/workflows/${pwId}/activate`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sessionId }),
+                }).then(r => r.json()).then(result => {
+                  console.log(`[wake-auto] Activation result for ${pwId}:`, JSON.stringify(result));
+                }).catch(err => {
+                  console.error(`[wake-auto] Activation failed for ${pwId}:`, err);
+                });
               }
 
               // Broadcast session_info to all viewers (device info now available)

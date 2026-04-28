@@ -4,7 +4,7 @@
 
 import {
   fetchWorkflow, updateWorkflow, deleteWorkflow,
-  activateWorkflow, fetchSessions, esc,
+  activateWorkflow, fetchSessions, fetchDevices, esc,
 } from "../../core/api-client.js";
 import {
   getContainer, getWorkflow, setWorkflow,
@@ -216,16 +216,87 @@ function wireEditorEvents(): void {
     renderConfigPanel();
   });
 
-  // Toolbar: activate — inline session dropdown
+  // Toolbar: activate — device-first (wake) or session-based activation
   getContainer()?.querySelector("#wf-activate-btn")?.addEventListener("click", async () => {
     const workflow = getWorkflow();
     if (!workflow?.id) return;
     const existing = getContainer()?.querySelector(".wf-activate-dropdown");
     if (existing) { existing.remove(); return; }
 
+    const settings = workflow.settings;
+    const wakeMode = settings?.wakeOnActivate && settings?.targetDeviceId;
+
+    if (wakeMode) {
+      // Device-first mode: wake the target device via APNs
+      const dd = document.createElement("div");
+      dd.className = "wf-activate-dropdown";
+      dd.innerHTML = `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:11px;color:var(--text-secondary);">Wake &amp; activate:</span>
+          <span style="font-size:11px;color:var(--text-primary);">${esc(settings!.targetDeviceId!.slice(0, 8))}...</span>
+          <button class="wf-activate-go">Wake Device</button>
+        </div>
+      `;
+      (getContainer()?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
+
+      dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
+        dd.remove();
+        const result = await activateWorkflow(workflow!.id, undefined, { deviceId: settings!.targetDeviceId! });
+        if (!result) { alert("Wake failed"); return; }
+        if (result.status === "wake_sent") {
+          alert(`Wake sent to device ${settings!.targetDeviceId!.slice(0, 8)}... — it will auto-activate when connected.`);
+        } else {
+          alert(`Unexpected status: ${result.status}`);
+        }
+      });
+
+      const dismiss = (ev: MouseEvent) => {
+        if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
+      };
+      setTimeout(() => document.addEventListener("click", dismiss), 0);
+      return;
+    }
+
+    // Session-based mode: show live session picker
     const sessions = await fetchSessions();
     const liveSessions = sessions.filter(s => s.live);
-    if (liveSessions.length === 0) { alert("No live sessions available"); return; }
+    if (liveSessions.length === 0) {
+      // Check if we have devices we could wake instead
+      const devices = await fetchDevices();
+      if (devices.length > 0) {
+        const dd = document.createElement("div");
+        dd.className = "wf-activate-dropdown";
+        dd.innerHTML = `
+          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">No live sessions — wake a device:</div>
+          <select class="wf-activate-select">
+            ${devices.map(d => `<option value="${d.device_id}">${d.deviceName ?? d.device_id.slice(0, 8)} ${d.deviceModel ?? ""}</option>`).join("")}
+          </select>
+          <button class="wf-activate-go">Wake &amp; Activate</button>
+        `;
+        (getContainer()?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
+
+        dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
+          const deviceId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
+          if (!deviceId) return;
+          dd.remove();
+          const result = await activateWorkflow(workflow!.id, undefined, { deviceId });
+          if (!result) { alert("Wake failed"); return; }
+          if (result.status === "wake_sent") {
+            alert(`Wake sent — device will auto-activate when connected.`);
+          } else {
+            alert(`Status: ${result.status}`);
+          }
+        });
+
+        const dismiss = (ev: MouseEvent) => {
+          if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
+        };
+        setTimeout(() => document.addEventListener("click", dismiss), 0);
+      } else {
+        alert("No live sessions or registered devices available. Open the app on your device first.");
+      }
+      return;
+    }
 
     const dd = document.createElement("div");
     dd.className = "wf-activate-dropdown";
