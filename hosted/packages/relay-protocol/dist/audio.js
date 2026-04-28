@@ -5,16 +5,20 @@
  *   [0:4]   magic "FRAU"
  *   [4]     version      (u8) — must be 1
  *   [5:9]   payloadLen   (u32 LE)
- *   [9]     codecType    (u8) — 0..3 = raw PCM, 4 = Opus
+ *   [9]     codecByte    (u8) — top bit = encoding (PCM/Opus), bottom 7 bits = source (0-3)
  *   [10:18] sequence     (u64 LE)
  *   [18:22] sampleRate   (u32 LE)
  *   [22:24] channels     (u16 LE)
  *   [24:26] bitsPerSample (u16 LE)
  *   [26:34] timestamp    (u64 LE, ms)
  *   [34:36] headerCrc16  (u16 LE)
- *   [36:]   payload      (raw PCM when codecType 0-3, Opus when codecType 4)
+ *   [36:]   payload      (raw PCM i16 LE or Opus-encoded, per encoding bit)
+ *
+ * byte[9] layout:
+ *   bit 7   = encoding: 0 = raw PCM, 1 = Opus
+ *   bits 0-6 = source: 0 = phone mic, 1 = glasses HFP, 2 = TTS, 3 = relay inbound
  */
-import { FRAU_MAGIC, AUDIO_HEADER_SIZE, PROTOCOL_VERSION, isKnownCodecType, CRC_OFFSET, HEADER_BEFORE_CRC, CODEC_OPUS } from "./constants.js";
+import { FRAU_MAGIC, AUDIO_HEADER_SIZE, PROTOCOL_VERSION, isKnownCodecSource, CRC_OFFSET, HEADER_BEFORE_CRC, decodeCodecByte, AUDIO_ENCODING_OPUS } from "./constants.js";
 import { crc16 } from "./crc16.js";
 export function isAudioFrame(buf) {
     return buf.length >= 4 && buf[0] === FRAU_MAGIC[0] && buf[1] === FRAU_MAGIC[1] && buf[2] === FRAU_MAGIC[2] && buf[3] === FRAU_MAGIC[3];
@@ -33,29 +37,30 @@ export function parseAudioHeader(buf) {
     const computedCrc = crc16(buf, 0, HEADER_BEFORE_CRC);
     if (expectedCrc !== computedCrc)
         return null;
-    const codecType = buf[9];
-    if (!isKnownCodecType(codecType))
+    // Decode byte[9]: top bit = encoding, bottom 7 bits = source
+    const { source, isOpus } = decodeCodecByte(buf[9]);
+    if (!isKnownCodecSource(source))
         return null;
     const payloadLength = view.getUint32(5, true);
     return {
         version,
         payloadLength,
-        codecType,
+        codecType: source,
         sequence: Number(view.getBigUint64(10, true)),
         sampleRate: view.getUint32(18, true),
         channels: view.getUint16(22, true),
         bitsPerSample: view.getUint16(24, true),
         timestampMs: Number(view.getBigUint64(26, true)),
         payload: buf.subarray(AUDIO_HEADER_SIZE),
-        get isOpus() { return this.codecType === CODEC_OPUS; },
+        get isOpus() { return isOpus; },
     };
 }
 /**
  * Build a FRAU v1 frame (header + payload).
  * Returns the complete binary message ready for WebSocket send.
- * Payload is opaque: raw PCM when codecType 0-3, Opus-encoded when codecType 4.
+ * codecType is the source (0-3). isOpus controls the encoding bit in byte[9].
  */
-export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsPerSample, timestampMs, payload) {
+export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsPerSample, timestampMs, payload, isOpus = false) {
     const total = AUDIO_HEADER_SIZE + payload.length;
     const buf = new Uint8Array(total);
     const view = new DataView(buf.buffer);
@@ -68,8 +73,8 @@ export function buildAudioFrame(codecType, sequence, sampleRate, channels, bitsP
     buf[4] = PROTOCOL_VERSION;
     // Payload length
     view.setUint32(5, payload.length, true);
-    // Codec type
-    buf[9] = codecType;
+    // Codec byte: source (0-3) | encoding bit
+    buf[9] = isOpus ? (codecType | AUDIO_ENCODING_OPUS) : codecType;
     // Sequence
     view.setBigUint64(10, BigInt(sequence), true);
     // Sample rate

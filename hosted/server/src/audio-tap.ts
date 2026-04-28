@@ -25,7 +25,7 @@ export interface AudioFrame {
   channels: number;
   bitsPerSample: number;
   timestampMs: number;
-  /** Raw payload bytes — PCM i16 LE when codecType 0-3, Opus when codecType 4 */
+  /** Raw payload bytes — PCM i16 LE when !isOpus, Opus-encoded when isOpus */
   pcm: Uint8Array;
   isOpus?: boolean;
 }

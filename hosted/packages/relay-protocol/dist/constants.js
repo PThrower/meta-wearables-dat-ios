@@ -31,13 +31,28 @@ export const VIDEO_CODEC_H264 = 1;
 // --- Video codec flags (byte[25] bottom nibble) ---
 export const H264_FLAG_KEYFRAME = 0x01;
 export const H264_FLAG_SPSPPS = 0x02;
-// --- Known audio codec types ---
-// 0 = built-in mic (raw PCM), 1 = glasses HFP (raw PCM), 2 = TTS (raw PCM),
-// 3 = relay inbound (raw PCM), 4 = Opus-encoded audio
-export const CODEC_OPUS = 4;
-export const KNOWN_CODEC_TYPES = [0, 1, 2, 3, 4];
-export function isKnownCodecType(v) {
-    return KNOWN_CODEC_TYPES.includes(v);
+// --- Audio codec byte layout (byte[9]) ---
+// Top bit (0x80) = encoding: 0 = raw PCM, 0x80 = Opus
+// Bottom 7 bits (0x7F) = source: 0 = phone mic, 1 = glasses HFP, 2 = TTS, 3 = relay inbound
+//
+// Examples: 0x00 = phone mic PCM, 0x81 = glasses HFP Opus, 0x80 = phone mic Opus
+export const AUDIO_ENCODING_PCM = 0x00;
+export const AUDIO_ENCODING_OPUS = 0x80;
+export const KNOWN_CODEC_SOURCES = [0, 1, 2, 3];
+/** Check if a value is a valid audio source (0-3). */
+export function isKnownCodecSource(v) {
+    return KNOWN_CODEC_SOURCES.includes(v);
+}
+/** Encode source + encoding into the wire byte[9] value. */
+export function encodeCodecByte(source, isOpus) {
+    return (source & 0x7F) | (isOpus ? AUDIO_ENCODING_OPUS : AUDIO_ENCODING_PCM);
+}
+/** Decode wire byte[9] into source and encoding flag. */
+export function decodeCodecByte(byte) {
+    return {
+        source: byte & 0x7F,
+        isOpus: (byte & AUDIO_ENCODING_OPUS) !== 0,
+    };
 }
 // --- CRC offset (same for FRLY and FRAU headers) ---
 export const CRC_OFFSET = 34;

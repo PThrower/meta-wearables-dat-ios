@@ -164,16 +164,19 @@ enum WireProtocol {
     /// FRAU v1 header size: magic(4) + version(1) + payloadLen(4) + codec(1) + seq(8) + sampleRate(4) + channels(2) + bitsPerSample(2) + timestamp(8) + crc(2) = 36
     static let frauHeaderSize = 36
 
-    /// Build a FRAU v1 wire protocol message from PCM data.
-    static func buildFRAU(pcmData: Data, codecType: UInt8,
+    /// Build a FRAU v1 wire protocol message from audio payload.
+    /// `codecType` is the source (0-3). `isOpus` sets the encoding bit in byte[9].
+    static func buildFRAU(pcmData: Data, codecType: UInt8, isOpus: Bool = false,
                           sampleRate: UInt32, channels: UInt16,
                           bitsPerSample: UInt16, sequenceNumber: UInt64,
                           timestampMs: UInt64) -> Data {
+        // byte[9]: top bit = encoding (0x80 = Opus), bottom 7 bits = source (0-3)
+        let codecByte: UInt8 = isOpus ? (codecType | 0x80) : codecType
         var h = HeaderBuilder(capacity: frauHeaderSize)
         h.appendMagic([0x46, 0x52, 0x41, 0x55]) // "FRAU"
         h.appendUInt8(1) // version
         h.appendUInt32(UInt32(pcmData.count))
-        h.appendUInt8(codecType)
+        h.appendUInt8(codecByte)
         h.appendUInt64(sequenceNumber)
         h.appendUInt32(sampleRate)
         h.appendUInt16(channels)
@@ -186,9 +189,11 @@ enum WireProtocol {
 
     // MARK: - FRAU Parsing
 
-    /// Parse a FRAU v1 binary message into its header fields and PCM payload.
+    /// Parse a FRAU v1 binary message into its header fields and payload.
     /// Returns nil if the data is too short or the magic bytes don't match.
-    static func parseFRAU(_ data: Data) -> (codecType: UInt8, sequenceNumber: UInt64,
+    /// `codecType` is the source (0-3) extracted from bottom 7 bits of byte[9].
+    /// `isOpus` is true when the top bit of byte[9] is set.
+    static func parseFRAU(_ data: Data) -> (codecType: UInt8, isOpus: Bool, sequenceNumber: UInt64,
                                              sampleRate: UInt32, channels: UInt16,
                                              bitsPerSample: UInt16, timestampMs: UInt64,
                                              pcmData: Data)? {
@@ -208,7 +213,9 @@ enum WireProtocol {
         guard version == 1 else { return nil }
 
         let payloadLen = data.extractUInt32(at: 5)
-        let codecType = data[9]
+        let codecByte = data[9]
+        let codecType = codecByte & 0x7F  // source (0-3)
+        let isOpus = (codecByte & 0x80) != 0
         let sequenceNumber = data.extractUInt64(at: 10)
         let sampleRate = data.extractUInt32(at: 18)
         let channels = data.extractUInt16(at: 22)
@@ -219,7 +226,7 @@ enum WireProtocol {
         let pcmEnd = pcmStart + Int(payloadLen)
         guard pcmEnd <= data.count else { return nil }
 
-        return (codecType, sequenceNumber, sampleRate, channels, bitsPerSample, timestampMs, Data(data[pcmStart..<pcmEnd]))
+        return (codecType, isOpus, sequenceNumber, sampleRate, channels, bitsPerSample, timestampMs, Data(data[pcmStart..<pcmEnd]))
     }
 }
 

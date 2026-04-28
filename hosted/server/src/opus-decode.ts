@@ -1,14 +1,12 @@
 /**
  * Opus decoder for the Bun relay server
  *
- * Decodes Opus-encoded FRAU payloads (codecType 4) back to raw PCM (Int16 LE)
+ * Decodes Opus-encoded FRAU payloads back to raw PCM (Int16 LE)
  * for consumption by AI pipelines (Gemini Live, STT) and R2 session recording.
  *
  * Uses `opusscript` (pure JS Opus decoder backed by libopus compiled to JS).
  * Works in Bun without native module compilation.
  */
-
-import { CODEC_OPUS } from "@ebowwa/relay-protocol";
 
 // opusscript decoder instances keyed by sample rate
 const decoders = new Map<number, any>();
@@ -39,7 +37,7 @@ function getDecoder(sampleRate: number, channels: number = 1): any {
 /**
  * Decode a single Opus packet to raw PCM Int16 LE.
  *
- * @param payload - Opus-encoded bytes from FRAU frame (codecType 4)
+ * @param payload - Opus-encoded bytes from FRAU frame
  * @param sampleRate - Decoder sample rate (typically 16000)
  * @param channels - Number of channels (default 1)
  * @returns PCM Int16 LE as Uint8Array (ready for resampling / AI / R2)
@@ -75,11 +73,6 @@ export function decodeOpusToInt16(
   const bytes = decodeOpusFrame(payload, sampleRate, channels);
   if (bytes.length === 0) return new Int16Array(0);
   return new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2);
-}
-
-/** Check if a codecType indicates Opus encoding */
-export function isOpusCodec(codecType: number): boolean {
-  return codecType === CODEC_OPUS;
 }
 
 /** Int16Array to Uint8Array (PCM bytes) */

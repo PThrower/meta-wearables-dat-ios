@@ -13,7 +13,7 @@ import type { ObjectStore } from "@ebowwa/object-store";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, parseAudioHeader, parseHeader } from "./protocol.js";
 import type { GuidanceEvent } from "./guidance-orchestrator.js";
 import { resamplePcm, TARGET_SAMPLE_RATE } from "./pcm-resample.js";
-import { isOpusCodec, decodeOpusFrame } from "./opus-decode.js";
+import { decodeOpusFrame } from "./opus-decode.js";
 
 const SEGMENT_FLUSH_MS = 10_000; // flush buffered data every 10s
 const MAX_FAILED_PARTS = 5;     // max retry-buffered segments before dropping oldest

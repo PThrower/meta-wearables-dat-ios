@@ -4,14 +4,14 @@
 //!   [0:4]   magic "FRAU" (0x46, 0x52, 0x41, 0x55)
 //!   [4]     version    (u8) = 1
 //!   [5:9]   payloadLength (u32 LE)
-//!   [9]     codecType  (u8) -- 0=built-in mic, 1=glasses HFP, 2=TTS, 3=relay inbound, 4=Opus
+//!   [9]     codecByte  (u8) -- top bit = encoding (0=PCM, 0x80=Opus), bottom 7 bits = source (0-3)
 //!   [10:18] sequence   (u64 LE)
 //!   [18:22] sampleRate (u32 LE)
 //!   [22:24] channels   (u16 LE)
 //!   [24:26] bitsPerSample (u16 LE)
 //!   [26:34] timestamp  (u64 LE, ms)
 //!   [34:36] header_crc16 (u16 LE) — CRC-16/CCITT-FALSE over bytes [0..33]
-//!   [36:]   payload (raw PCM i16 LE when codecType 0-3, Opus when codecType 4)
+//!   [36:]   payload (raw PCM i16 LE or Opus-encoded, per encoding bit in byte[9])
 
 use wasm_bindgen::prelude::*;
 
@@ -21,13 +21,27 @@ pub const FRAU_MAGIC: &[u8; 4] = b"FRAU";
 pub const FRAU_VERSION: u8 = 1;
 pub const FRAU_HEADER_SIZE: usize = 36;
 
-// --- Codec type constants (match relay-protocol) ---
+// --- Audio codec byte layout (byte[9]) ---
+// Top bit (0x80) = encoding: 0 = raw PCM, 0x80 = Opus
+// Bottom 7 bits (0x7F) = source: 0-3
 
 pub const CODEC_BUILTIN_MIC: u8 = 0;
 pub const CODEC_GLASSES_HFP: u8 = 1;
 pub const CODEC_TTS: u8 = 2;
 pub const CODEC_RELAY_INBOUND: u8 = 3;
-pub const CODEC_OPUS: u8 = 4;
+
+pub const AUDIO_ENCODING_PCM: u8 = 0x00;
+pub const AUDIO_ENCODING_OPUS: u8 = 0x80;
+
+/// Extract source (0-3) from codec byte.
+pub fn codec_source(byte: u8) -> u8 {
+    byte & 0x7F
+}
+
+/// Check if codec byte indicates Opus encoding.
+pub fn codec_is_opus(byte: u8) -> bool {
+    (byte & AUDIO_ENCODING_OPUS) != 0
+}
 
 // --- Header ---
 
@@ -37,12 +51,15 @@ pub const CODEC_OPUS: u8 = 4;
 pub struct AudioHeader {
     pub version: u8,
     pub payload_length: u32,
+    /// Audio source (0-3), extracted from bottom 7 bits of byte[9].
     pub codec_type: u8,
     pub sequence: u64,
     pub sample_rate: u32,
     pub channels: u16,
     pub bits_per_sample: u16,
     pub timestamp_ms: u64,
+    /// True when top bit of byte[9] is set (Opus encoding).
+    pub is_opus: bool,
 }
 
 // --- Detection ---
@@ -55,22 +72,25 @@ pub fn is_audio_frame(buf: &[u8]) -> bool {
 
 // --- Encode ---
 
-/// Encode a complete FRAU v1 frame (36-byte header + PCM payload).
+/// Encode a complete FRAU v1 frame (36-byte header + payload).
+/// `codec_type` is the source (0-3). `is_opus` sets the encoding bit.
 #[wasm_bindgen]
 pub fn encode_audio_frame(
     codec_type: u8,
+    is_opus: bool,
     sequence: u64,
     sample_rate: u32,
     channels: u16,
     bits_per_sample: u16,
     timestamp_ms: u64,
-    pcm: &[u8],
+    payload: &[u8],
 ) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(FRAU_HEADER_SIZE + pcm.len());
+    let codec_byte = if is_opus { codec_type | AUDIO_ENCODING_OPUS } else { codec_type };
+    let mut buf = Vec::with_capacity(FRAU_HEADER_SIZE + payload.len());
     buf.extend_from_slice(FRAU_MAGIC);
     buf.push(FRAU_VERSION);
-    buf.extend_from_slice(&(pcm.len() as u32).to_le_bytes());
-    buf.push(codec_type);
+    buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    buf.push(codec_byte);
     buf.extend_from_slice(&sequence.to_le_bytes());
     buf.extend_from_slice(&sample_rate.to_le_bytes());
     buf.extend_from_slice(&channels.to_le_bytes());
@@ -79,7 +99,7 @@ pub fn encode_audio_frame(
     // CRC-16 over bytes [0..34]
     let crc = crc16_ccitt_false(&buf[0..34]);
     buf.extend_from_slice(&crc.to_le_bytes());
-    buf.extend_from_slice(pcm);
+    buf.extend_from_slice(payload);
     buf
 }
 
@@ -103,7 +123,8 @@ pub fn decode_audio_header(buf: &[u8]) -> Option<AudioHeader> {
     Some(AudioHeader {
         version: buf[4],
         payload_length: u32::from_le_bytes(buf[5..9].try_into().ok()?),
-        codec_type: buf[9],
+        codec_type: codec_source(buf[9]),
+        is_opus: codec_is_opus(buf[9]),
         sequence: u64::from_le_bytes(buf[10..18].try_into().ok()?),
         sample_rate: u32::from_le_bytes(buf[18..22].try_into().ok()?),
         channels: u16::from_le_bytes(buf[22..24].try_into().ok()?),
@@ -139,18 +160,13 @@ pub fn verify_audio_crc(buf: &[u8]) -> bool {
 
 // --- Opus Codec Support ---
 
-/// Check if a codec type indicates Opus encoding.
-///
-/// When `is_opus_codec` returns true, the payload is Opus-encoded (not raw PCM).
-/// The JS viewer layer decodes Opus using the `opus-decoder` npm package
-/// (WASM build of libopus). The Rust WASM module does not decode Opus itself --
-/// it identifies the codec type so the JS host can route accordingly.
+/// Check if a codec byte indicates Opus encoding.
 #[wasm_bindgen]
-pub fn is_opus_codec(codec_type: u8) -> bool {
-    codec_type == CODEC_OPUS
+pub fn is_opus_codec(codec_byte: u8) -> bool {
+    codec_is_opus(codec_byte)
 }
 
-/// Extract the Opus payload from a FRAU frame when codecType == 4.
+/// Extract the Opus payload from a FRAU frame when the encoding bit is set.
 ///
 /// Returns the raw Opus packet bytes (after the 36-byte FRAU header).
 /// The JS host is responsible for decoding these bytes with opus-decoder.
@@ -159,8 +175,8 @@ pub fn extract_opus_payload(buf: &[u8]) -> Vec<u8> {
     if buf.len() <= FRAU_HEADER_SIZE || &buf[0..4] != FRAU_MAGIC {
         return vec![];
     }
-    // Verify it's actually Opus
-    if buf[9] != CODEC_OPUS {
+    // Verify it's actually Opus (top bit of byte[9])
+    if !codec_is_opus(buf[9]) {
         return vec![];
     }
     buf[FRAU_HEADER_SIZE..].to_vec()

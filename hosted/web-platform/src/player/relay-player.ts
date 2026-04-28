@@ -4,7 +4,7 @@
  * Migrated from relay-player.js to TypeScript with shared protocol imports.
  */
 
-import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecType,
+import { FRLY_MAGIC, FRAU_MAGIC, HEADER_SIZE, AUDIO_HEADER_SIZE, isKnownCodecSource, decodeCodecByte,
          VIDEO_CODEC_JPEG, VIDEO_CODEC_H264, H264_FLAG_KEYFRAME } from "@ebowwa/relay-protocol";
 import { buildFrauFrame } from "./frau-builder.js";
 import { windowedSincResample } from "./resampler.js";
@@ -611,8 +611,13 @@ export class RelayPlayer {
     const view = new DataView(buf.buffer, buf.byteOffset);
 
     // v1 FRAU header fields (36 bytes total)
-    const codecType = view.getUint8(9);
-    if (!isKnownCodecType(codecType)) return;
+    // byte[9]: top bit = encoding (Opus), bottom 7 bits = source (0-3)
+    const codecByte = view.getUint8(9);
+    const { source: codecType, isOpus } = decodeCodecByte(codecByte);
+    if (!isKnownCodecSource(codecType)) return;
+
+    // Skip Opus-encoded frames (viewer doesn't decode Opus yet)
+    if (isOpus) return;
 
     const payloadLength = view.getUint32(5, true);
     const sampleRate = view.getUint32(18, true);

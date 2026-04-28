@@ -198,7 +198,8 @@ actor AudioRelayStage: @preconcurrency FramePipelineStage, @preconcurrency Audio
                 for opusFrame in opusFrames {
                     let message = WireProtocol.buildFRAU(
                         pcmData: opusFrame,
-                        codecType: 4,  // CODEC_OPUS
+                        codecType: ct,  // source identity preserved (0 or 1)
+                        isOpus: true,
                         sampleRate: 16000,  // Opus operates at 16kHz
                         channels: packet.channels,
                         bitsPerSample: 0,   // Not applicable for compressed audio

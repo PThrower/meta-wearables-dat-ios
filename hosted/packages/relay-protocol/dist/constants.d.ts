@@ -26,10 +26,19 @@ export declare const VIDEO_CODEC_JPEG = 0;
 export declare const VIDEO_CODEC_H264 = 1;
 export declare const H264_FLAG_KEYFRAME = 1;
 export declare const H264_FLAG_SPSPPS = 2;
-export declare const CODEC_OPUS = 4;
-export declare const KNOWN_CODEC_TYPES: readonly [0, 1, 2, 3, 4];
-export type CodecType = (typeof KNOWN_CODEC_TYPES)[number];
-export declare function isKnownCodecType(v: number): v is CodecType;
+export declare const AUDIO_ENCODING_PCM = 0;
+export declare const AUDIO_ENCODING_OPUS = 128;
+export declare const KNOWN_CODEC_SOURCES: readonly [0, 1, 2, 3];
+export type CodecSource = (typeof KNOWN_CODEC_SOURCES)[number];
+/** Check if a value is a valid audio source (0-3). */
+export declare function isKnownCodecSource(v: number): v is CodecSource;
+/** Encode source + encoding into the wire byte[9] value. */
+export declare function encodeCodecByte(source: number, isOpus: boolean): number;
+/** Decode wire byte[9] into source and encoding flag. */
+export declare function decodeCodecByte(byte: number): {
+    source: number;
+    isOpus: boolean;
+};
 export declare const CRC_OFFSET = 34;
 export declare const CRC_SIZE = 2;
 export declare const HEADER_BEFORE_CRC = 34;

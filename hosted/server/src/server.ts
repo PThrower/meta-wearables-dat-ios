@@ -46,7 +46,7 @@ import type { WsData, QualityPreset, AccessLevel, AclEntry, Session } from "./ty
 import { QUALITY_PRESETS, createTokenBucket } from "./types.js";
 import { dropReasonFromCloseCode } from "./session-state.js";
 import { HEADER_SIZE, AUDIO_HEADER_SIZE, SENSOR_HEADER_SIZE, isAudioFrame, isVideoFrame, isSensorFrame, parseAudioHeader, parseSensorHeader, isBackpressureMessage, isBackpressureAckMessage, buildAudioFrame, PROTOCOL_VERSION } from "./protocol.js";
-import { isOpusCodec, decodeOpusFrame } from "./opus-decode.js";
+import { decodeOpusFrame } from "./opus-decode.js";
 import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
@@ -2043,7 +2043,8 @@ const server = Bun.serve<WsData>({
                 const opusPayload = buf.slice(AUDIO_HEADER_SIZE);
                 const pcmBytes = decodeOpusFrame(opusPayload, audioHdr.sampleRate);
                 if (pcmBytes.length > 0) {
-                  orchestrator.sendAudio(sessionId, pcmBytes, 0, audioHdr.sampleRate);
+                  // codecType is now the source (0-3), preserved through Opus encoding
+                  orchestrator.sendAudio(sessionId, pcmBytes, audioHdr.codecType, audioHdr.sampleRate);
                 }
               } else {
                 const pcmPayload = buf.slice(AUDIO_HEADER_SIZE);

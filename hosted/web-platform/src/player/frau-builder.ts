@@ -6,7 +6,7 @@
  *   [0:4]   magic "FRAU"
  *   [4]     version      (u8) — 1
  *   [5:9]   payloadLen   (u32 LE)
- *   [9]     codecType    (u8) — 0..3
+ *   [9]     codecByte    (u8) — top bit = encoding (PCM/Opus), bottom 7 bits = source (0-3)
  *   [10:18] sequence     (u64 LE)
  *   [18:22] sampleRate   (u32 LE)
  *   [22:24] channels     (u16 LE)
