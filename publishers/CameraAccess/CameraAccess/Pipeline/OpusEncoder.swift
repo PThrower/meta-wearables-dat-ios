@@ -35,8 +35,10 @@ final class OpusEncoder {
     private var sampleBuffer: [Int16] = []
 
     // Source buffer pointer for AudioConverter callback
-    private var sourceBuffer: UnsafePointer<UInt8>?
-    private var sourceBytesRemaining: UInt32 = 0
+    // fileprivate so the free function callback can access them
+    fileprivate var sourceBuffer: UnsafePointer<UInt8>?
+    fileprivate var sourceBytesRemaining: UInt32 = 0
+    fileprivate let _channels: Int  // callback needs this
 
     // MARK: - Initialization
 
@@ -45,6 +47,7 @@ final class OpusEncoder {
         self.channels = channels
         self.bitrate = bitrate
         self.frameSize = frameSize
+        self._channels = channels
 
         try setupConverter()
     }
@@ -141,7 +144,7 @@ final class OpusEncoder {
 
     /// Encode a single Opus frame using AudioConverterFillComplexBuffer.
     private func encodeFrame(_ converter: AudioConverterRef, samples: [Int16]) -> Data? {
-        let frameByteCount = UInt32(samples.count * 2)
+        var frameByteCount = UInt32(samples.count * 2)
 
         // Set up source buffer for the callback
         let sampleData = samples.withUnsafeBufferPointer { ptr in
@@ -233,13 +236,13 @@ private func encoderInputCallback(
     guard bytesToProvide > 0, let source = encoder.sourceBuffer else {
         ioNumberDataPackets.pointee = 0
         ioData.pointee.mBuffers.mDataByteSize = 0
-        return kAudioConverterErr_NoDataNow  // Signal: no more input data for this frame
+        return 168_416_881  // '!dat' — no more input data for this frame
     }
 
     ioData.pointee.mNumberBuffers = 1
     ioData.pointee.mBuffers.mData = UnsafeMutableRawPointer(mutating: source)
     ioData.pointee.mBuffers.mDataByteSize = bytesToProvide
-    ioData.pointee.mBuffers.mNumberChannels = UInt32(encoder.channels)
+    ioData.pointee.mBuffers.mNumberChannels = UInt32(encoder._channels)
 
     // Advance buffer pointer
     encoder.sourceBuffer = source.advanced(by: Int(bytesToProvide))

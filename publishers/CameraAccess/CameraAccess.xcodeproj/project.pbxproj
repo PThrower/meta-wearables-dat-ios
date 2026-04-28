@@ -41,6 +41,7 @@
 		E6FD3BCE2EB4D53A00E7FE5D /* NonStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FD3BCD2EB4D53A00E7FE5D /* NonStreamView.swift */; };
 		F47A0D21CEA44E2FB838F81B /* AudioProcessingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */; };
 		PCMAP00000002 /* PCMAudioProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMAP00000001 /* PCMAudioProcessing.swift */; };
+		OPUSENCBLD01 /* OpusEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = OPUSENCFL01 /* OpusEncoder.swift */; };
 		PCMCRC0000002 /* CRC16.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMCRC0000001 /* CRC16.swift */; };
 		PCMPCV0000002 /* PCMConvert.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMPCV0000001 /* PCMConvert.swift */; };
 		PCMWP00000002 /* WireProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = PCMWP00000001 /* WireProtocol.swift */; };
@@ -143,6 +144,7 @@
 		PN002PN002EB918740097D0E1 /* PushNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationService.swift; sourceTree = "<group>"; };
 		DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceIdentity.swift; sourceTree = "<group>"; };
 		PCMAP00000001 /* PCMAudioProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMAudioProcessing.swift; sourceTree = "<group>"; };
+		OPUSENCFL01 /* OpusEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpusEncoder.swift; sourceTree = "<group>"; };
 		PCMCRC0000001 /* CRC16.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CRC16.swift; sourceTree = "<group>"; };
 		PCMPCV0000001 /* PCMConvert.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PCMConvert.swift; sourceTree = "<group>"; };
 		PCMWP00000001 /* WireProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WireProtocol.swift; sourceTree = "<group>"; };
@@ -365,6 +367,7 @@
 				PCMWP00000001 /* WireProtocol.swift */,
 				PCMSWP00000001 /* SensorWireProtocol.swift */,
 				PCMAP00000001 /* PCMAudioProcessing.swift */,
+				OPUSENCFL01 /* OpusEncoder.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -624,6 +627,7 @@
 				PCMSWP00000002 /* SensorWireProtocol.swift in Sources */,
 				PCMSRS00000002 /* SensorRelayStage.swift in Sources */,
 				PCMAP00000002 /* PCMAudioProcessing.swift in Sources */,
+				OPUSENCBLD01 /* OpusEncoder.swift in Sources */,
 				2B91A102B3169469B14BC1C4 /* AppPickerSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
