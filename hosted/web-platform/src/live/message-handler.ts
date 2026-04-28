@@ -169,6 +169,7 @@ function handleTelemetry(m: Record<string, unknown>): void {
   const proximity = m.proximity as Record<string, unknown> | undefined;
   const background = m.background as Record<string, unknown> | undefined;
   const throughput = m.throughput as Record<string, unknown> | undefined;
+  const activity = m.activity as Record<string, unknown> | undefined;
 
   const set = (id: string, text: string) => { const el = document.getElementById(id); if (el) el.textContent = text; };
 
@@ -307,4 +308,18 @@ function handleTelemetry(m: Record<string, unknown>): void {
     const kbps = bps / 1024;
     set("t-throughput", (kbps > 1024 ? (kbps / 1024).toFixed(1) + "MB/s" : kbps.toFixed(0) + "KB/s") + " " + totalMB + "MB");
   } else { set("t-throughput", "--"); }
+
+  if (activity && typeof activity.type === "string") {
+    const t = activity.type as string;
+    const c = typeof activity.confidence === "string" ? " [" + (activity.confidence as string).charAt(0).toUpperCase() + "]" : "";
+    const el = document.getElementById("t-activity");
+    if (el) {
+      el.textContent = t + c;
+      el.style.color = t === "walking" || t === "running" ? "#50fa7b"
+        : t === "automotive" ? "#8be9fd"
+        : t === "cycling" ? "#f1fa8c"
+        : t === "stationary" ? "#6272a4"
+        : "";
+    }
+  } else { set("t-activity", "--"); }
 }

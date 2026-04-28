@@ -1281,6 +1281,10 @@ class StreamSessionViewModel: ObservableObject {
         "bytesPerSec": snap.throughput?.bytesPerSec as Any,
         "totalMB": snap.throughput?.totalMB as Any,
       ] as [String: Any],
+      "activity": [
+        "type": snap.activity?.type.rawValue as Any,
+        "confidence": snap.activity?.confidence as Any,
+      ] as [String: Any],
     ]
 
     // Now Playing removed — iOS 18 blocks MediaRemote for third-party apps
