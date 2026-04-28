@@ -119,7 +119,17 @@ final class FramePipelineManager {
         // Same buffer = no enhancement applied (disabled or empty chain)
         if enhanced === pixelBuffer { return sampleBuffer }
 
-        // Create new CMSampleBuffer from the enhanced pixel buffer
+        // Create new CMSampleBuffer from the enhanced pixel buffer.
+        // Must derive format description from the enhanced buffer (BGRA) rather than
+        // reusing the original's format description (may be a different pixel format).
+        var formatDescription: CMVideoFormatDescription?
+        CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: enhanced,
+            formatDescriptionOut: &formatDescription
+        )
+        guard let fmtDesc = formatDescription else { return sampleBuffer }
+
         var newSampleBuffer: CMSampleBuffer?
         var timingInfo = CMSampleTimingInfo(
             duration: CMSampleBufferGetDuration(sampleBuffer),
@@ -130,7 +140,7 @@ final class FramePipelineManager {
         let status = CMSampleBufferCreateReadyWithImageBuffer(
             allocator: kCFAllocatorDefault,
             imageBuffer: enhanced,
-            formatDescription: CMSampleBufferGetFormatDescription(sampleBuffer)!,
+            formatDescription: fmtDesc,
             sampleTiming: &timingInfo,
             sampleBufferOut: &newSampleBuffer
         )

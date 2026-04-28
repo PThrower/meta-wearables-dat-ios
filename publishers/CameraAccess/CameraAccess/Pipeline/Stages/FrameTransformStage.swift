@@ -7,6 +7,10 @@
  *
  * Not a FramePipelineStage — it's a synchronous pre-processor, not an observer.
  * Sub-millisecond per filter on Apple GPU. Zero overhead when filter chain is empty.
+ *
+ * IMPORTANT: A fresh CVPixelBuffer is allocated per frame. Downstream stages
+ * (VisionStage, RelayStage, etc.) process frames asynchronously via Task.detached,
+ * so buffer reuse would create a read-write race on the pixel data.
  */
 
 import CoreImage
@@ -17,11 +21,6 @@ import Foundation
 final class FrameTransformStage: @unchecked Sendable {
     private var config: EnhanceStageConfig
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private let lock = NSLock()
-
-    // Reusable output buffer pool
-    private var outputBuffer: CVPixelBuffer?
-    private var outputBufferSize: CGSize = .zero
 
     init(config: EnhanceStageConfig = .empty) {
         self.config = config
@@ -35,6 +34,7 @@ final class FrameTransformStage: @unchecked Sendable {
     }
 
     /// Apply the filter chain to a CVPixelBuffer. Returns the original if chain is empty/disabled.
+    /// Each call allocates a fresh output buffer so downstream async stages don't race.
     func transform(_ pixelBuffer: CVPixelBuffer) -> CVPixelBuffer {
         guard isEnabled else { return pixelBuffer }
 
@@ -50,16 +50,29 @@ final class FrameTransformStage: @unchecked Sendable {
             }
         }
 
-        // Ensure output buffer matches dimensions
+        // Allocate a fresh output buffer per frame.
+        // Reuse would cause a race: main actor renders frame N+1 into the buffer
+        // while VisionStage (Task.detached) is still reading frame N for OCR.
         let size = CGSize(width: width, height: height)
-        ensureOutputBuffer(size: size)
+        var outBuffer: CVPixelBuffer?
+        let attrs: [String: Any] = [
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+        ]
+        // Use BGRA — native CIImage/CGImage format, no RGB→YCbCr conversion,
+        // directly compatible with display pipeline and Vision framework.
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            Int(size.width), Int(size.height),
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &outBuffer
+        )
+        guard status == kCVReturnSuccess, let outBuffer else { return pixelBuffer }
 
-        guard let outBuffer = outputBuffer else { return pixelBuffer }
-
-        // Render to output CVPixelBuffer (GPU → GPU, no copy to CPU)
-        CVPixelBufferLockBaseAddress(outBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(outBuffer, []) }
-
+        // Render to output CVPixelBuffer (GPU → GPU, no copy to CPU).
+        // No CVPixelBufferLockBaseAddress needed — CIContext.render writes
+        // directly to the IOSurface backing via GPU, lock only maps for CPU access.
         ciContext.render(ciImage, to: outBuffer, bounds: CGRect(origin: .zero, size: size), colorSpace: ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB())
 
         return outBuffer
@@ -135,8 +148,7 @@ final class FrameTransformStage: @unchecked Sendable {
             if let out = brightFilter.outputImage { result = out }
         }
 
-        // Step 2: Gamma correction (via CIColorMatrix approximation)
-        // CIExposureAdjust is simpler and more effective for night mode
+        // Step 2: Gamma correction
         if let gammaFilter = CIFilter(name: "CIGammaAdjust") {
             gammaFilter.setValue(result, forKey: kCIInputImageKey)
             gammaFilter.setValue(config.params["gamma"] ?? 0.8, forKey: "inputPower")
@@ -152,32 +164,5 @@ final class FrameTransformStage: @unchecked Sendable {
         }
 
         return result
-    }
-
-    // MARK: - Buffer Management
-
-    private func ensureOutputBuffer(size: CGSize) {
-        if let existing = outputBuffer,
-           CVPixelBufferGetWidth(existing) == Int(size.width),
-           CVPixelBufferGetHeight(existing) == Int(size.height) {
-            return
-        }
-
-        var newBuffer: CVPixelBuffer?
-        let attrs: [String: Any] = [
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            Int(size.width), Int(size.height),
-            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            attrs as CFDictionary,
-            &newBuffer
-        )
-        if status == kCVReturnSuccess {
-            outputBuffer = newBuffer
-            outputBufferSize = size
-        }
     }
 }

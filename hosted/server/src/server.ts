@@ -1489,12 +1489,14 @@ const server = Bun.serve<WsData>({
         }
 
         // 4. Collect all enhance nodes and send one combined config to iOS
+        // IMPORTANT: use processableNodes[i].config (raw node config with brightness/contrast/saturation)
+        // NOT appsToActivate[i].config (resolved AppConfig with model/voice/input/output)
         if (enhanceIdx.length > 0) {
           const enhanceFilters: Array<{ type: string; params: Record<string, number> }> = [];
           for (const i of enhanceIdx) {
             enhanceFilters.push({
               type: processableNodes[i].type,
-              params: (appsToActivate[i].config ?? {}) as Record<string, number>,
+              params: (processableNodes[i].config ?? {}) as Record<string, number>,
             });
             activatedAppIds.push(appsToActivate[i].id);
           }
