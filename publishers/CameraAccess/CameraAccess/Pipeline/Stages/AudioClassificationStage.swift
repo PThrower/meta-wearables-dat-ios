@@ -23,6 +23,7 @@ actor AudioClassificationStage {
     private var overlapFactor: Double = 0.5
     private var confidenceThreshold: Double = 0.3
     private var maxLabels: Int = 5
+    private var targetLabels: Set<String>? = nil  // nil = all labels, non-nil = filter to these only
     private var isEnabled = false
 
     // Callback for relaying results
@@ -32,11 +33,12 @@ actor AudioClassificationStage {
         self.onResult = handler
     }
 
-    func configure(windowDuration: Double, overlapFactor: Double, confidence: Double, maxLabels: Int) {
+    func configure(windowDuration: Double, overlapFactor: Double, confidence: Double, maxLabels: Int, targetLabels: [String]?) {
         self.windowDuration = windowDuration
         self.overlapFactor = overlapFactor
         self.confidenceThreshold = confidence
         self.maxLabels = maxLabels
+        self.targetLabels = (targetLabels != nil && !targetLabels!.isEmpty) ? Set(targetLabels!) : nil
     }
 
     func start() async {
@@ -93,7 +95,7 @@ actor AudioClassificationStage {
         do {
             try engine.start()
             self.audioEngine = engine
-            NSLog("[AudioClassification] Started: window=\(windowDuration)s overlap=\(overlapFactor) confidence=\(confidenceThreshold) maxLabels=\(maxLabels)")
+            NSLog("[AudioClassification] Started: window=\(windowDuration)s overlap=\(overlapFactor) confidence=\(confidenceThreshold) maxLabels=\(maxLabels) targetLabels=\(targetLabels?.sorted().joined(separator: ", ") ?? "all")")
         } catch {
             NSLog("[AudioClassification] Failed to start audio engine: \(error)")
         }
@@ -124,8 +126,15 @@ actor AudioClassificationStage {
     private func handleResults(_ results: [SNClassificationResult]) {
         guard isEnabled, let topResult = results.first else { return }
 
-        let filtered = topResult.classifications
+        var classifications = topResult.classifications
             .filter { $0.confidence >= confidenceThreshold }
+
+        // Optional target label filtering — only keep labels the user cares about
+        if let targets = targetLabels {
+            classifications = classifications.filter { targets.contains($0.identifier) }
+        }
+
+        let filtered = classifications
             .prefix(maxLabels)
             .map { SoundLabel(label: $0.identifier, confidence: Double($0.confidence)) }
 

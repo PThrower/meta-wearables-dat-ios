@@ -1517,9 +1517,17 @@ const server = Bun.serve<WsData>({
         if (sensorIdx.length > 0) {
           const sensorConfigs: Array<{ sensorType: string; config: Record<string, unknown> }> = [];
           for (const i of sensorIdx) {
+            const rawConfig = { ...(processableNodes[i].config ?? {}) as Record<string, unknown> };
+
+            // Parse targetLabels from comma-separated string to array for sound classifier
+            if (processableNodes[i].type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
+              const parsed = (rawConfig.targetLabels as string).split(",").map(s => s.trim()).filter(s => s.length > 0);
+              rawConfig.targetLabels = parsed.length > 0 ? parsed : undefined;
+            }
+
             sensorConfigs.push({
               sensorType: processableNodes[i].type,
-              config: (processableNodes[i].config ?? {}) as Record<string, unknown>,
+              config: rawConfig,
             });
             activatedAppIds.push(appsToActivate[i].id);
           }
@@ -2080,10 +2088,21 @@ const server = Bun.serve<WsData>({
                   const labels = (cmd.labels as any[] || []).map((l: any) => `${l.label} ${(l.confidence * 100).toFixed(0)}%`).join(", ");
                   summary = `Sound: ${labels}`;
                 } else if (sensorType === "sensor-location") {
+                  const eventType = cmd.eventType as string ?? "location_update";
                   const lat = (cmd.latitude as number)?.toFixed(6);
                   const lon = (cmd.longitude as number)?.toFixed(6);
-                  const speed = (cmd.speed as number) >= 0 ? ` speed=${(cmd.speed as number).toFixed(1)}m/s` : "";
-                  summary = `Location: ${lat}, ${lon}${speed}`;
+                  if (eventType === "geofence_enter") {
+                    const label = cmd.regionLabel ?? cmd.regionId ?? "unknown";
+                    summary = `Geofence entered: ${label} (${lat}, ${lon})`;
+                  } else if (eventType === "geofence_exit") {
+                    const label = cmd.regionLabel ?? cmd.regionId ?? "unknown";
+                    summary = `Geofence exited: ${label} (${lat}, ${lon})`;
+                  } else if (eventType === "visit_detected") {
+                    summary = `Visit detected at ${lat}, ${lon}`;
+                  } else {
+                    const speed = (cmd.speed as number) >= 0 ? ` speed=${(cmd.speed as number).toFixed(1)}m/s` : "";
+                    summary = `Location: ${lat}, ${lon}${speed}`;
+                  }
                 }
                 if (summary) {
                   orchestrator.sendTrigger(sessionId, `[Sensor: ${summary}]`);

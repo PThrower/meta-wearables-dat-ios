@@ -854,11 +854,13 @@ class StreamSessionViewModel: ObservableObject {
       case .sound:
         let stage = AudioClassificationStage()
         let cfg = sensor.config
+        let targetLabels = cfg["targetLabels"] as? [String]
         await stage.configure(
           windowDuration: cfg["windowDuration"] as? Double ?? 1.5,
           overlapFactor: cfg["overlapFactor"] as? Double ?? 0.5,
           confidence: cfg["confidence"] as? Double ?? 0.3,
-          maxLabels: cfg["maxLabels"] as? Int ?? 5
+          maxLabels: cfg["maxLabels"] as? Int ?? 5,
+          targetLabels: targetLabels
         )
         await stage.setOnResult { [weak self] classification in
           await self?.relayStage.sendJson(classification.jsonDict)
@@ -873,7 +875,9 @@ class StreamSessionViewModel: ObservableObject {
         await stage.configure(
           accuracy: cfg["accuracy"] as? String ?? "best",
           minDistance: cfg["minDistance"] as? Double ?? 5,
-          updateIntervalSec: cfg["updateIntervalSec"] as? Double ?? 5
+          updateIntervalSec: cfg["updateIntervalSec"] as? Double ?? 5,
+          mode: cfg["mode"] as? String,
+          geofences: cfg["geofences"] as? [[String: Any]]
         )
         await stage.setOnResult { [weak self] update in
           await self?.relayStage.sendJson(update.jsonDict)

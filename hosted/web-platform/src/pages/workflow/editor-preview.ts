@@ -262,7 +262,18 @@ function handlePreviewMessage(msg: Record<string, any>): void {
       if (msg.sensorType === "sensor-location" && preview.nodeType === "sensor-location") {
         const lat = typeof msg.latitude === "number" ? msg.latitude.toFixed(5) : "?";
         const lon = typeof msg.longitude === "number" ? msg.longitude.toFixed(5) : "?";
-        preview.lastText = `${lat}, ${lon}`;
+        const eventType = msg.eventType as string ?? "location_update";
+        if (eventType === "geofence_enter") {
+          const label = msg.regionLabel ?? msg.regionId ?? "region";
+          preview.lastText = `Entered: ${label} (${lat}, ${lon})`;
+        } else if (eventType === "geofence_exit") {
+          const label = msg.regionLabel ?? msg.regionId ?? "region";
+          preview.lastText = `Exited: ${label} (${lat}, ${lon})`;
+        } else if (eventType === "visit_detected") {
+          preview.lastText = `Visit: ${lat}, ${lon}`;
+        } else {
+          preview.lastText = `${lat}, ${lon}`;
+        }
         preview.lastTextTime = now;
         preview.updated = now;
       }

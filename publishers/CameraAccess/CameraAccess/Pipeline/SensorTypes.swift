@@ -31,13 +31,22 @@ struct SoundClassification: Sendable, Codable {
 // MARK: - Location Update
 
 struct LocationUpdate: Sendable, Codable {
+    let eventType: String       // "location_update", "significant_change", "visit_detected", "geofence_enter", "geofence_exit"
     let latitude: Double
     let longitude: Double
     let altitude: Double
     let horizontalAccuracy: Double
-    let speed: Double       // m/s, -1 if unavailable
-    let course: Double      // degrees, -1 if unavailable
-    let timestamp: Double   // Unix epoch seconds
+    let speed: Double           // m/s, -1 if unavailable
+    let course: Double          // degrees, -1 if unavailable
+    let timestamp: Double       // Unix epoch seconds
+
+    // Geofence fields (only set for geofence_enter / geofence_exit)
+    var regionId: String?
+    var regionLabel: String?
+
+    // Visit fields (only set for visit_detected)
+    var visitArrival: Double?
+    var visitDeparture: Double?
 }
 
 // MARK: - SensorStageConfig
@@ -82,9 +91,10 @@ extension SoundClassification {
 
 extension LocationUpdate {
     var jsonDict: [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "type": "sensor_result",
             "sensorType": "sensor-location",
+            "eventType": eventType,
             "latitude": latitude,
             "longitude": longitude,
             "altitude": altitude,
@@ -92,6 +102,11 @@ extension LocationUpdate {
             "speed": speed,
             "course": course,
             "timestamp": timestamp,
-        ] as [String: Any]
+        ]
+        if let regionId { dict["regionId"] = regionId }
+        if let regionLabel { dict["regionLabel"] = regionLabel }
+        if let visitArrival { dict["visitArrival"] = visitArrival }
+        if let visitDeparture { dict["visitDeparture"] = visitDeparture }
+        return dict
     }
 }
