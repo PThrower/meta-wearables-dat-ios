@@ -1009,23 +1009,60 @@ class StreamSessionViewModel: ObservableObject {
 
       // Vision stage config from server — register on-device VisionStage
       if msgType == "vision_stage_config" {
-        Task { @MainActor [weak self] in
-          guard let self else { return }
-          await self.configureVisionStage(config: msg)
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            guard let self, let existing = visionStage else { return }
+            await existing.stop()
+            pipeline.unregister(stageId: existing.stageId)
+            visionStage = nil
+            visionDetections = []
+            visionSceneLabel = nil
+            NSLog("[StreamSession] VisionStage disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.configureVisionStage(config: msg)
+          }
         }
       }
 
       // Enhance stage config from server — configure CIFilter transform chain
       if msgType == "enhance_stage_config" {
-        Task { @MainActor [weak self] in
-          self?.configureEnhanceStage(config: msg)
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            self?.pipeline.transformStage = nil
+            self?.enhanceStage = nil
+            NSLog("[StreamSession] EnhanceStage disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            self?.configureEnhanceStage(config: msg)
+          }
         }
       }
 
       // Sensor stage config from server — configure sound/location stages
       if msgType == "sensor_stage_config" {
-        Task { @MainActor [weak self] in
-          await self?.configureSensorStage(config: msg)
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            if let audioStage = self?.audioClassificationStage {
+              await audioStage.stop()
+              self?.audioClassificationStage = nil
+            }
+            if let locStage = self?.locationStage {
+              await locStage.stop()
+              self?.locationStage = nil
+            }
+            NSLog("[StreamSession] Sensor stages disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            await self?.configureSensorStage(config: msg)
+          }
         }
       }
 

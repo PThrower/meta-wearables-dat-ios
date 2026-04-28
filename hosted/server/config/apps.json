@@ -64,6 +64,31 @@
         { "format": "jepa-anomaly" },
         { "format": "jepa-prediction" }
       ]
+    },
+    {
+      "id": "vision-body-pose",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "body-pose-detection" }
+      ]
+    },
+    {
+      "id": "sensor-sound",
+      "inputs": [
+        { "format": "pcm-audio" }
+      ],
+      "outputs": [
+        { "format": "sound-classification" }
+      ]
+    },
+    {
+      "id": "sensor-location",
+      "inputs": [],
+      "outputs": [
+        { "format": "location-update" }
+      ]
     }
   ],
   "apps": [

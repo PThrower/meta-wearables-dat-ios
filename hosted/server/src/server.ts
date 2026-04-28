@@ -1440,7 +1440,8 @@ const server = Bun.serve<WsData>({
             confidence: (processableNodes[i].config as any)?.confidence ?? 0.5,
             targetFPS: (processableNodes[i].config as any)?.targetFPS ?? 5,
             maxResults: (processableNodes[i].config as any)?.maxFaces
-              ?? (processableNodes[i].config as any)?.maxPersons ?? 0,
+              ?? (processableNodes[i].config as any)?.maxPersons
+              ?? (processableNodes[i].config as any)?.maxPoses ?? 0,
             language: (processableNodes[i].config as any)?.language ?? "en-US",
             symbologies: Object.entries(
               (processableNodes[i].config as any)?.symbologies ?? { qr: true }
@@ -2110,6 +2111,12 @@ const server = Bun.serve<WsData>({
                   session.appPipeline = null;
                   dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
                   dbWriter.flushNow();
+                  // Disable on-device stages (vision, enhance, sensor)
+                  if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+                    session.publisher.ws.send(JSON.stringify({ type: "vision_stage_config", enabled: false }));
+                    session.publisher.ws.send(JSON.stringify({ type: "enhance_stage_config", enabled: false }));
+                    session.publisher.ws.send(JSON.stringify({ type: "sensor_stage_config", enabled: false }));
+                  }
                   broadcastToViewers(session, { type: "app_status", appId: null, status: "inactive" });
                 }
               }
