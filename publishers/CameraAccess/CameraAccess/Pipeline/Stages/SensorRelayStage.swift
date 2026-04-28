@@ -23,7 +23,7 @@ actor SensorRelayStage {
         .motion, .gyro, .magnetometer, .barometer,
         .location, .proximity, .battery, .network,
         .thermal, .orientation, .memory, .cpu, .disk,
-        .streamMetrics,
+        .streamMetrics, .activity,
     ]
 
     private let flags: SensorFlags
@@ -105,6 +105,9 @@ actor SensorRelayStage {
             await previewBus.publish(.numeric(source: src, label: "Disk", value: snapshot.disk.availableGB, unit: "GB"))
             if let motion = snapshot.motion {
                 await previewBus.publish(.text(source: src, value: "Accel: \(String(format: "%.2f", motion.accelX)), \(String(format: "%.2f", motion.accelY)), \(String(format: "%.2f", motion.accelZ))"))
+            }
+            if let activity = snapshot.activity {
+                await previewBus.publish(.text(source: src, value: "Activity: \(activity.type.rawValue) [\(activity.confidence)]"))
             }
             await previewBus.publish(.status(source: src, label: "Thermal", state: {
                 switch snapshot.thermal.state {

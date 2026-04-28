@@ -78,7 +78,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used for telemetry metrics (speed, altitude) displayed to viewers.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Motion data (accelerometer, gyroscope, magnetometer, barometer) is used for telemetry metrics displayed to viewers.</string>
+	<string>Motion and activity data (accelerometer, gyroscope, magnetometer, barometer, activity detection) is used for telemetry metrics and workflow state triggers.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>UIApplicationSceneManifest</key>

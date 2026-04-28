@@ -39,6 +39,7 @@ struct SensorFlags: OptionSet, Sendable {
     static let cpu           = SensorFlags(rawValue: 0x0800)
     static let disk          = SensorFlags(rawValue: 0x1000)
     static let streamMetrics = SensorFlags(rawValue: 0x2000)
+    static let activity     = SensorFlags(rawValue: 0x4000)
 }
 
 // MARK: - FRSE Builder
@@ -147,6 +148,13 @@ enum SensorWireProtocol {
                 "jitter": snapshot.frame.jitterMs ?? 0,
                 "totalFrames": snapshot.frame.totalFramesReceived,
                 "encodeTimeEma": snapshot.relay.map { _ in 0.0 } ?? 0,
+            ]
+        }
+
+        if flags.contains(.activity), let activity = snapshot.activity {
+            payload["activity"] = [
+                "type": activity.type.rawValue,
+                "confidence": activity.confidence,
             ]
         }
 

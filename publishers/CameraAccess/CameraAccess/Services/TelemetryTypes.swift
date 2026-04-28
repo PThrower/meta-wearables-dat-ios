@@ -143,6 +143,21 @@ struct MotionMetrics: Sendable {
     let isStationary: Bool
 }
 
+/// Detected user activity type from CoreMotion activity classification.
+enum ActivityType: String, Sendable, Codable {
+    case unknown
+    case stationary
+    case walking
+    case running
+    case automotive
+    case cycling
+}
+
+struct ActivityMetrics: Sendable {
+    let type: ActivityType
+    let confidence: String  // "low", "medium", "high"
+}
+
 struct BluetoothMetrics: Sendable {
     let state: String  // "poweredOn", "poweredOff", "unauthorized", etc.
 }
@@ -214,6 +229,7 @@ struct TelemetrySnapshot: Sendable {
     let camera: CameraMetrics?
     let orientation: OrientationMetrics
     let motion: MotionMetrics?
+    let activity: ActivityMetrics?
     let bluetooth: BluetoothMetrics
     let cpu: CPUMetrics
     let location: LocationMetrics?

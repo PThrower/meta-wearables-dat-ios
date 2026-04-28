@@ -86,6 +86,8 @@ final class TelemetryService: ObservableObject {
     @Published private(set) var proximityText: String = "--"
     @Published private(set) var backgroundText: String = "--"
     @Published private(set) var throughputText: String = "--"
+    @Published private(set) var activityText: String = "--"
+    @Published private(set) var currentActivity: ActivityType = .unknown
 
     // MARK: - Frame Tracking
 
@@ -178,6 +180,11 @@ final class TelemetryService: ObservableObject {
     // Barometer
     private let altimeter = CMAltimeter()
     private var currentPressureKPa: Double?
+
+    // Activity detection
+    private let activityManager = CMMotionActivityManager()
+    private var lastActivityType: ActivityType = .unknown
+    private var lastActivityConfidence: String = "low"
 
     // Audio level provider (set by ViewModel)
     var audioLevelProvider: (@MainActor () -> (peakDb: Float, averageDb: Float)?)?
@@ -294,6 +301,33 @@ final class TelemetryService: ObservableObject {
             }
         }
         NSLog("[TelemetryService] barometer OK")
+
+        // Activity detection
+        if CMMotionActivityManager.isActivityAvailable() {
+            activityManager.startActivityUpdates(to: .main) { [weak self] activity in
+                guard let self, let activity else { return }
+                let type: ActivityType
+                if activity.walking { type = .walking }
+                else if activity.running { type = .running }
+                else if activity.automotive { type = .automotive }
+                else if activity.cycling { type = .cycling }
+                else if activity.stationary { type = .stationary }
+                else { type = .unknown }
+
+                let confidence: String
+                switch activity.confidence {
+                case .low: confidence = "low"
+                case .medium: confidence = "medium"
+                case .high: confidence = "high"
+                @unknown default: confidence = "low"
+                }
+
+                self.lastActivityType = type
+                self.lastActivityConfidence = confidence
+                self.currentActivity = type
+            }
+            NSLog("[TelemetryService] activity detection OK")
+        }
 
         // Proximity monitoring
         UIDevice.current.isProximityMonitoringEnabled = true
@@ -765,6 +799,16 @@ final class TelemetryService: ObservableObject {
         let btMetrics = BluetoothMetrics(state: currentBTState)
         bluetoothText = currentBTState
 
+        // Activity detection
+        let activityMetrics: ActivityMetrics?
+        if CMMotionActivityManager.isActivityAvailable() {
+            activityMetrics = ActivityMetrics(type: lastActivityType, confidence: lastActivityConfidence)
+            activityText = "\(lastActivityType.rawValue) (\(lastActivityConfidence))"
+        } else {
+            activityMetrics = nil
+            activityText = "--"
+        }
+
         // CPU usage (app process)
         let cpuUsage = computeCPUUsage()
         let cpuMetrics = CPUMetrics(usagePercent: cpuUsage)
@@ -917,6 +961,7 @@ final class TelemetryService: ObservableObject {
             camera: cameraMetrics,
             orientation: orientationMetrics,
             motion: motionMetrics,
+            activity: activityMetrics,
             bluetooth: btMetrics,
             cpu: cpuMetrics,
             location: locationMetrics,
