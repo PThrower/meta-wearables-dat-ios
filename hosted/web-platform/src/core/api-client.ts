@@ -367,6 +367,27 @@ export interface DetectedFlow {
   label: string;
 }
 
+/** Workflow-level settings — applies to the entire session lifecycle */
+export interface WorkflowSettings {
+  onDisconnect: "stop" | "pause" | "continue";
+  onReconnect: "restart" | "resume" | "noop";
+  autoDeactivateMin: number | null;
+  maxSessionDuration: number | null;
+  recordingEnabled: boolean;
+  viewerAccess: "owner" | "team" | "public";
+  telemetryIntervalSec: number;
+}
+
+export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
+  onDisconnect: "stop",
+  onReconnect: "restart",
+  autoDeactivateMin: null,
+  maxSessionDuration: null,
+  recordingEnabled: true,
+  viewerAccess: "owner",
+  telemetryIntervalSec: 10,
+};
+
 export interface WorkflowDetail {
   id: string;
   name: string;
@@ -377,6 +398,7 @@ export interface WorkflowDetail {
   edges: WorkflowEdgeDef[];
   canvasViewport: { x: number; y: number; zoom: number };
   flowConfig: FlowExecutionConfig | null;
+  settings: WorkflowSettings | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -410,6 +432,7 @@ export function updateWorkflow(id: string, data: {
   status?: string;
   canvasViewport?: string;
   flowConfig?: FlowExecutionConfig | null;
+  settings?: WorkflowSettings | null;
   nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
   edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
 }): Promise<WorkflowDetail | null> {

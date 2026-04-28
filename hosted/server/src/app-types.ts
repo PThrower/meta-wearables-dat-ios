@@ -135,9 +135,31 @@ export interface WorkflowDefinition {
   nodes: WorkflowNodeDef[];
   edges: WorkflowEdgeDef[];
   canvasViewport: { x: number; y: number; zoom: number };
+  settings?: WorkflowSettings | null;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Workflow-level settings — applies to the entire session lifecycle */
+export interface WorkflowSettings {
+  onDisconnect: "stop" | "pause" | "continue";
+  onReconnect: "restart" | "resume" | "noop";
+  autoDeactivateMin: number | null;
+  maxSessionDuration: number | null;
+  recordingEnabled: boolean;
+  viewerAccess: "owner" | "team" | "public";
+  telemetryIntervalSec: number;
+}
+
+export const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
+  onDisconnect: "stop",
+  onReconnect: "restart",
+  autoDeactivateMin: null,
+  maxSessionDuration: null,
+  recordingEnabled: true,
+  viewerAccess: "owner",
+  telemetryIntervalSec: 10,
+};
 
 // --- Workflow Execution Controls ---
 

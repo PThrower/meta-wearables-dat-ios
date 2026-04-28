@@ -59,6 +59,7 @@ export async function renderEditor(isNew: boolean): Promise<void> {
       ],
       canvasViewport: { x: 0, y: 0, zoom: 1 },
       flowConfig: null,
+      settings: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

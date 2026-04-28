@@ -52,7 +52,7 @@ import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
-import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow } from "./app-types.js";
+import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow, WorkflowSettings } from "./app-types.js";
 import { detectFlows } from "./flow-detection.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
@@ -1144,6 +1144,7 @@ const server = Bun.serve<WsData>({
           })),
           canvasViewport: JSON.parse(wf.canvasViewport ?? '{"x":0,"y":0,"zoom":1}'),
           flowConfig: wf.flowConfig ? JSON.parse(wf.flowConfig) : null,
+          settings: wf.settings ? JSON.parse(wf.settings) : null,
           createdAt: wf.createdAt, updatedAt: wf.updatedAt,
         });
       }
@@ -1154,6 +1155,7 @@ const server = Bun.serve<WsData>({
             name?: string; description?: string; status?: string;
             canvasViewport?: string;
             flowConfig?: { mode: string; flowOrder: string[]; flowTriggers?: Record<string, FlowTrigger> } | null;
+            settings?: WorkflowSettings | null;
             nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
             edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
           };
@@ -1175,6 +1177,9 @@ const server = Bun.serve<WsData>({
             canvasViewport: body.canvasViewport,
             flowConfig: body.flowConfig !== undefined
               ? (body.flowConfig === null ? null : JSON.stringify(body.flowConfig))
+              : undefined,
+            settings: body.settings !== undefined
+              ? (body.settings === null ? null : JSON.stringify(body.settings))
               : undefined,
             nodes: body.nodes?.map(n => ({ ...n, config: n.config ?? "{}" })),
             edges: body.edges,
@@ -1253,11 +1258,13 @@ const server = Bun.serve<WsData>({
           orchestrator.forceDeactivate(body.sessionId);
         }
 
-        const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name }, wf.flowConfig ? JSON.parse(wf.flowConfig) : null);
+        const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name }, wf.flowConfig ? JSON.parse(wf.flowConfig) : null, wf.settings ? JSON.parse(wf.settings) : null);
         const primaryApp = pipelineApps[0];  // undefined for passive pipelines (no AI processor)
         for (const app of pipelineApps) {
           appRegistry.registerTransientApp(app);
         }
+
+        const parsedSettings: WorkflowSettings | null = wf.settings ? JSON.parse(wf.settings) : null;
 
         const session = registry.get(body.sessionId);
         if (!session) {
@@ -1401,6 +1408,18 @@ const server = Bun.serve<WsData>({
 
         // Register workflow instance for execution controls
         session.activeWorkflowId = wfId;
+
+        // Max session duration enforcement
+        const maxDur = parsedSettings?.maxSessionDuration;
+        if (maxDur && maxDur > 0) {
+          setTimeout(() => {
+            const sid = body.sessionId;
+            if (!sid) return;
+            orchestrator.handleWorkflowControl(sid, "stop_workflow", wfId, undefined, "system").catch(() => {});
+            console.log(`[relay] Auto-deactivated (max session duration ${maxDur}min) session=${sid}`);
+          }, maxDur * 60 * 1000);
+        }
+
         const nodeEntries = (nodes as any[]).map((n: any) => ({
           nodeId: n.id,
           appId: n.id,
@@ -1918,7 +1937,7 @@ const server = Bun.serve<WsData>({
                   if (!wf) throw new Error("Workflow not found");
                   const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                   const edges = q.getWorkflowEdges(wfId);
-                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name }, undefined, wf.settings ? JSON.parse(wf.settings) : null);
                   const primaryApp = pipelineApps[0];
                   for (const app of pipelineApps) {
                     appRegistry.registerTransientApp(app);
@@ -1993,7 +2012,7 @@ const server = Bun.serve<WsData>({
                 if (!wf) { ws.send(JSON.stringify({ type: "workflow_error", error: "Workflow not found" })); return; }
                 const nodes = q.getWorkflowNodes(workflowId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                 const edges = q.getWorkflowEdges(workflowId);
-                const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: workflowId, name: wf.name });
+                const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: workflowId, name: wf.name }, undefined, wf.settings ? JSON.parse(wf.settings) : null);
                 const primaryApp = pipelineApps[0];
                 for (const app of pipelineApps) {
                   appRegistry.registerTransientApp(app);
@@ -2317,7 +2336,7 @@ const server = Bun.serve<WsData>({
                   if (!wf) throw new Error("Workflow not found");
                   const nodes = q.getWorkflowNodes(wfId).map(n => ({ ...n, config: JSON.parse(n.config) }));
                   const edges = q.getWorkflowEdges(wfId);
-                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name });
+                  const pipelineApps = resolveWorkflowToPipeline(nodes as any, edges as any, { id: wfId, name: wf.name }, undefined, wf.settings ? JSON.parse(wf.settings) : null);
                   const primaryApp = pipelineApps[0];
                   for (const app of pipelineApps) {
                     appRegistry.registerTransientApp(app);

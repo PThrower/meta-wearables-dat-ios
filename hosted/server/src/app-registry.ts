@@ -225,8 +225,17 @@ function findPromptForAiNode(aiNodeId: string, nodes: WorkflowNodeDef[], edges: 
   return (anyTextNode?.config.text as string) ?? "";
 }
 
-/** Extract lifecycle policy from any source node config that has lifecycle fields */
-export function extractLifecyclePolicy(nodes: WorkflowNodeDef[]): LifecyclePolicy {
+/** Extract lifecycle policy: workflow settings > source node config > defaults */
+export function extractLifecyclePolicy(nodes: WorkflowNodeDef[], settings?: import("./app-types.js").WorkflowSettings | null): LifecyclePolicy {
+  // Priority 1: workflow-level settings
+  if (settings) {
+    return {
+      onDisconnect: settings.onDisconnect,
+      onReconnect: settings.onReconnect,
+      autoDeactivateMin: settings.autoDeactivateMin,
+    };
+  }
+  // Priority 2: source node config (legacy)
   const sourceNode = nodes.find(n => {
     const resolved = resolveNodeType(n.type);
     return isSourceType(resolved);
@@ -351,6 +360,7 @@ export function resolveWorkflowToPipeline(
   edges: WorkflowEdgeDef[],
   workflow: { id: string; name: string },
   flowConfig?: FlowExecutionConfig | null,
+  settings?: import("./app-types.js").WorkflowSettings | null,
 ): AppDefinition[] {
   const processableNodes = nodes.filter(n => {
     const def = NODE_DEF_MAP.get(resolveNodeType(n.type));
@@ -382,7 +392,7 @@ export function resolveWorkflowToPipeline(
     }
   }
 
-  const lifecycle = extractLifecyclePolicy(nodes);
+  const lifecycle = extractLifecyclePolicy(nodes, settings);
 
   // Base input config (defaults, overridden per-processor by resolveSourceInput)
   const baseInput: InputConfig = { video: false, phoneMic: false, glassesMic: false, gestures: false, visionFps: 1 };

@@ -5,7 +5,8 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow } from "../../core/api-client.js";
+import type { WorkflowNodeDef, ConfigFieldSchema, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow, WorkflowSettings } from "../../core/api-client.js";
+import { DEFAULT_WORKFLOW_SETTINGS } from "../../core/api-client.js";
 import { buildDefaultFlowConfig } from "./flow-detection.js";
 
 /* ── Callback interfaces ── */
@@ -80,6 +81,106 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
       return `<div class="${prefix}-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"><label style="font-weight: 600; margin-bottom: 6px; display: block;">${esc(field.label)}</label>${inner}</div>`;
     }
   }
+}
+
+/* ── Workflow settings callbacks ── */
+
+/** Callbacks for workflow settings panel events. */
+export interface SettingsCallbacks {
+  getWorkflow: () => { settings?: WorkflowSettings | null } | null;
+  setSettings: (settings: WorkflowSettings) => void;
+  setDirty: () => void;
+  autoSave: () => void;
+  onBack?: () => void;
+}
+
+/* ── Workflow settings schema ── */
+
+const WORKFLOW_SETTINGS_SCHEMA: ConfigFieldSchema[] = [
+  {
+    kind: "section", label: "Lifecycle Policy", fields: [
+      { kind: "select", key: "onDisconnect", label: "On Disconnect", options: [
+        { value: "stop", label: "Stop session" },
+        { value: "pause", label: "Pause session" },
+        { value: "continue", label: "Continue running" },
+      ] },
+      { kind: "select", key: "onReconnect", label: "On Reconnect", options: [
+        { value: "restart", label: "Restart session" },
+        { value: "resume", label: "Resume paused" },
+        { value: "noop", label: "No action" },
+      ] },
+      { kind: "number", key: "autoDeactivateMin", label: "Auto-Deactivate (min, 0 = never)", min: 0, max: 480, step: 5 },
+    ],
+  },
+  {
+    kind: "section", label: "Session Limits", fields: [
+      { kind: "number", key: "maxSessionDuration", label: "Max Duration (min, 0 = unlimited)", min: 0, max: 1440, step: 5 },
+    ],
+  },
+  {
+    kind: "section", label: "Access & Privacy", fields: [
+      { kind: "select", key: "viewerAccess", label: "Viewer Access", options: [
+        { value: "owner", label: "Owner only" },
+        { value: "team", label: "Team members" },
+        { value: "public", label: "Public" },
+      ] },
+      { kind: "checkbox", key: "recordingEnabled", label: "Enable Recording" },
+    ],
+  },
+  {
+    kind: "section", label: "Telemetry", fields: [
+      { kind: "number", key: "telemetryIntervalSec", label: "Interval (seconds)", min: 1, max: 60, step: 1 },
+    ],
+  },
+];
+
+/** Render workflow settings HTML using the synthetic-node trick. */
+export function renderWorkflowSettingsHTML(settings: WorkflowSettings | null): string {
+  const merged = { ...DEFAULT_WORKFLOW_SETTINGS, ...settings };
+  // Synthetic node where config = settings object — reuses renderConfigField()
+  const syntheticNode: WorkflowNodeDef = {
+    id: "__settings__",
+    type: "__settings__",
+    label: "",
+    config: merged as unknown as Record<string, unknown>,
+    positionX: 0,
+    positionY: 0,
+  };
+  const fieldsHtml = WORKFLOW_SETTINGS_SCHEMA.map(field => renderConfigField(field, syntheticNode, "wf-settings")).join("");
+  return `<div class="wf-settings-panel">
+    <div class="wf-flow-config-header">
+      <span class="wf-flow-config-title">Workflow Settings</span>
+      <span class="wf-flow-config-count">Global</span>
+    </div>
+    ${fieldsHtml}
+    <button class="wf-flow-back" id="wf-settings-back">&larr; Back</button>
+  </div>`;
+}
+
+/** Wire workflow settings field inputs. */
+export function wireSettingsFieldInputs(container: Element, callbacks: SettingsCallbacks): void {
+  container.querySelectorAll("[data-field]").forEach(input => {
+    input.addEventListener("change", () => {
+      const wf = callbacks.getWorkflow();
+      if (!wf) return;
+      const current = { ...DEFAULT_WORKFLOW_SETTINGS, ...wf.settings };
+      const el = input as HTMLInputElement;
+      const field = el.dataset.field!;
+      if (!field.startsWith("config.")) return;
+      const key = field.slice(7);
+
+      if (el.type === "checkbox") (current as any)[key] = el.checked;
+      else if (el.type === "number") (current as any)[key] = el.value === "" ? null : parseFloat(el.value);
+      else (current as any)[key] = el.value;
+
+      callbacks.setSettings(current);
+      callbacks.setDirty();
+      callbacks.autoSave();
+    });
+  });
+
+  // Back button
+  container.querySelector("#wf-settings-back")?.addEventListener("click", () => callbacks.onBack?.());
 }
 
 /* ── Flow config rendering ── */

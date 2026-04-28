@@ -218,6 +218,7 @@ export const workflows = sqliteTable("workflows", {
   status: text("status").notNull().default("draft"),  // draft, published, archived
   canvasViewport: text("canvas_viewport").default('{"x":0,"y":0,"zoom":1}'),
   flowConfig: text("flow_config"),
+  settings: text("settings"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [

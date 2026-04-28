@@ -380,6 +380,7 @@ export function updateWorkflow(id: string, params: {
   status?: string;
   canvasViewport?: string;
   flowConfig?: string | null;
+  settings?: string | null;
   nodes?: Array<{ id: string; type: string; label?: string; config?: string; positionX?: number; positionY?: number }>;
   edges?: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
 }) {
@@ -406,6 +407,11 @@ export function updateWorkflow(id: string, params: {
       if (params.flowConfig !== undefined) {
         setParts.splice(4, 0, "flow_config = ?");
         values.splice(4, 0, params.flowConfig ?? null);
+      }
+
+      if (params.settings !== undefined) {
+        setParts.splice(5, 0, "settings = ?");
+        values.splice(5, 0, params.settings ?? null);
       }
 
       db.prepare(`UPDATE workflows SET ${setParts.join(", ")} WHERE id = ?`)
@@ -444,12 +450,12 @@ export function deleteWorkflow(id: string) {
 /** Get a single workflow by ID */
 export function getWorkflow(id: string): {
   id: string; name: string; description: string; ownerId: string | null;
-  status: string; canvasViewport: string; flowConfig: string | null; createdAt: string; updatedAt: string;
+  status: string; canvasViewport: string; flowConfig: string | null; settings: string | null; createdAt: string; updatedAt: string;
 } | null {
   const db = getDbRaw();
   return db.prepare(`
     SELECT id, name, description, owner_id as ownerId, status,
-      canvas_viewport as canvasViewport, flow_config as flowConfig,
+      canvas_viewport as canvasViewport, flow_config as flowConfig, settings,
       created_at as createdAt, updated_at as updatedAt
     FROM workflows WHERE id = ?
   `).get(id) as any ?? null;

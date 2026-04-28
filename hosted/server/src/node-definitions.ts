@@ -105,7 +105,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "jpeg", label: "JPEG (compatible with AI models)" },
         { value: "h264", label: "H.264 (lower bandwidth, viewer-only)" },
       ]},
-      { kind: "section", label: "Lifecycle Policy", fields: [
+      { kind: "section", label: "Lifecycle (managed in Workflow Settings)", fields: [
         { kind: "select", key: "onDisconnect", label: "On publisher disconnect", options: [
           { value: "stop", label: "Stop AI" },
           { value: "pause", label: "Pause AI" },

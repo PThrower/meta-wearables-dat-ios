@@ -19,6 +19,7 @@ let _dirty = false;
 let _saving = false;
 let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let _selectedNodeId: string | null = null;
+let _settingsPanelActive = false;
 let _viewX = 0;
 let _viewY = 0;
 let _zoom = 1;
@@ -50,6 +51,13 @@ export function setViewY(y: number): void { _viewY = y; }
 
 export function getZoom(): number { return _zoom; }
 export function setZoom(z: number): void { _zoom = z; }
+
+/** Check if workflow settings panel is active */
+export function isSettingsPanelActive(): boolean { return _settingsPanelActive; }
+export function setSettingsPanelActive(active: boolean): void {
+  _settingsPanelActive = active;
+  if (active) setSelectedNodeId(null);
+}
 
 export function getViewBox(): { x: number; y: number; zoom: number } {
   return { x: _viewX, y: _viewY, zoom: _zoom };
@@ -100,6 +108,7 @@ export async function doSave(): Promise<void> {
         edges: _workflow.edges,
         canvasViewport: JSON.stringify({ x: _viewX, y: _viewY, zoom: _zoom }),
         flowConfig: _workflow.flowConfig ?? undefined,
+        settings: _workflow.settings ?? undefined,
       });
       if (result) {
         _workflow = result;
