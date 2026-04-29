@@ -13,6 +13,10 @@ import UserNotifications
 @MainActor
 final class PushNotificationService: ObservableObject {
 
+  /// Set to true when a wake notification is tapped while app was not running.
+  /// StreamSessionView checks this on appear and triggers wake if needed.
+  @Published var pendingWake: Bool = false
+
   /// Called when a silent push with wake:"standby" is received.
   var onWakeFromPush: (() -> Void)?
 

@@ -77,6 +77,14 @@ struct StreamSessionView: View {
             viewModel?.handleWakeFromPush()
           }
         }
+        // Cold-launch from notification tap: callback wasn't wired when delegate fired,
+        // so a pendingWake flag was set. Pick it up now.
+        if pushService.pendingWake {
+          NSLog("[StreamSessionView] Detected pendingWake — triggering wake from push")
+          pushService.pendingWake = false
+          Task { await viewModel.handleWakeFromPush() }
+          return
+        }
       }
       if viewModel.isStreaming {
         OrientationLock.shared.unlock()

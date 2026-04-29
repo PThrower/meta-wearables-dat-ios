@@ -83,9 +83,16 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     // This handles the case where the user taps the "Stream Ready" fallback notification.
     let wakeType = userInfo["wake"] as? String
     if wakeType == "standby" {
-      NSLog("[PushNotification] Wake notification tapped — triggering standby connect")
+      NSLog("[PushNotification] Wake notification tapped — setting pendingWake flag")
       Task { @MainActor in
-        pushService.onWakeFromPush?()
+        // If callback is already wired (app was backgrounded), call it directly
+        if let callback = pushService.onWakeFromPush {
+          callback()
+        } else {
+          // App cold-launched from notification — callback not wired yet.
+          // Set flag so StreamSessionView.onAppear picks it up.
+          pushService.pendingWake = true
+        }
       }
     }
 
