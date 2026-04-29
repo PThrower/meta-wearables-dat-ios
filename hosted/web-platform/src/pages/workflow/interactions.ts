@@ -217,8 +217,8 @@ export function wireSVGEvents(): void {
         refreshSVG();
       }
 
-      // Pan: middle click, ctrl/cmd+drag, or touch
-      if (pe.button === 1 || pe.ctrlKey || pe.metaKey || pe.pointerType === "touch") {
+      // Pan: any drag on background
+      if (pe.button === 0 || pe.button === 1) {
         _panState = { startX: pe.clientX, startY: pe.clientY, viewX: getViewX(), viewY: getViewY() };
         svg.setPointerCapture(pe.pointerId);
 
