@@ -608,9 +608,8 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   /// Handle wake from APNs push notification.
-  /// Reconnects standby relay if currently disconnected (app was killed).
-  /// If already in standby (app was backgrounded), activates stream directly.
-  /// Requests background time so the WebSocket stays alive long enough to receive start_stream.
+  /// Connects standby relay so the server can detect the device and auto-activate.
+  /// The server sends `start_stream` after auto-activation — we don't activate locally.
   @MainActor
   func handleWakeFromPush() {
     NSLog("[StreamSession] Wake push received — relayMode=\(relayMode)")
@@ -632,19 +631,15 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     if relayMode == .standby {
-      // Already connected — just activate (start camera + streaming)
-      NSLog("[StreamSession] Already in standby — activating stream")
-      Task {
-        await activateFromStandby()
-      }
+      // Already connected — server will send start_stream on auto-activate
+      NSLog("[StreamSession] Already in standby — waiting for server start_stream")
     } else {
-      // Disconnected — connect standby then activate
-      NSLog("[StreamSession] Connecting standby then activating stream")
+      // Disconnected — connect standby so server can auto-activate
+      NSLog("[StreamSession] Connecting standby for server auto-activation")
       Task {
         await startStandbyRelay()
-        if relayMode == .standby {
-          await activateFromStandby()
-        }
+        // Don't activate locally — the server will send start_stream
+        // after detecting the device connection via pendingWakeActivations
       }
     }
   }

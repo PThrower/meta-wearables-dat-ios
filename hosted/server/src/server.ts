@@ -1226,7 +1226,7 @@ const server = Bun.serve<WsData>({
     if (wfActivateMatch && req.method === "POST") {
       try {
         const wfId = wfActivateMatch[1];
-        const body = await req.json() as { sessionId?: string; deviceId?: string; override?: boolean; reason?: string };
+        const body = await req.json() as { sessionId?: string; deviceId?: string; override?: boolean; reason?: string; wakeActivation?: boolean };
 
         const wf = q.getWorkflow(wfId);
         if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
@@ -1475,8 +1475,9 @@ const server = Bun.serve<WsData>({
         }
 
         // Auto-start stream: if publisher is connected, send start_stream immediately
-        if (parsedSettings?.autoStartStream && session.publisher?.ws && session.publisher.ws.readyState === 1) {
-          console.log(`[activate] Auto-starting stream for session ${body.sessionId}`);
+        // Triggered by autoStartStream setting OR wakeActivation (device was woken via APNs)
+        if ((parsedSettings?.autoStartStream || body.wakeActivation) && session.publisher?.ws && session.publisher.ws.readyState === 1) {
+          console.log(`[activate] Auto-starting stream for session ${body.sessionId} (wakeActivation=${!!body.wakeActivation})`);
           session.publisher.ws.send(JSON.stringify({ type: "start_stream" }));
         }
 
@@ -1948,10 +1949,11 @@ const server = Bun.serve<WsData>({
                 const pwId = pendingWake.workflowId;
                 console.log(`[wake-auto] Device ${session.publisher.deviceId!.slice(0, 8)}... connected, auto-activating workflow ${pwId}`);
                 // Internal activation via self-fetch to reuse all existing logic (conflicts, sequential, event-driven, etc.)
+                // wakeActivation: true forces start_stream to be sent to publisher
                 fetch(`http://127.0.0.1:${PORT}/workflows/${pwId}/activate`, {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ sessionId }),
+                  body: JSON.stringify({ sessionId, wakeActivation: true }),
                 }).then(r => r.json()).then(result => {
                   console.log(`[wake-auto] Activation result for ${pwId}:`, JSON.stringify(result));
                 }).catch(err => {
