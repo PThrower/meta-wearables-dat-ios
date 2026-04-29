@@ -1,5 +1,6 @@
 /**
- * Workflow editor view — palette, canvas, config panel, toolbar layout.
+ * Workflow editor view — palette, canvas, config panel, toolbar layout,
+ * FAB controls, testing mode, mobile drawer toggles.
  */
 
 import {
@@ -15,7 +16,8 @@ import {
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
-import { wireSVGEvents, onKeyDown } from "./interactions.js";
+import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
+import { hideNodeActionPopover } from "./node-actions.js";
 import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
 import { isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import {
@@ -81,11 +83,13 @@ export async function renderEditor(isNew: boolean): Promise<void> {
   container.innerHTML = `
     <div class="page workflow-editor-page">
       <div class="wf-editor-layout">
-        <div class="wf-palette">
+        <div class="wf-palette" id="wf-palette">
           ${buildPaletteHTML()}
         </div>
+        <div class="wf-scrim" id="wf-scrim"></div>
         <div class="wf-canvas-wrap" id="wf-canvas-wrap">
           ${buildSVG()}
+          ${buildFABHTML()}
         </div>
         <div class="wf-config-panel" id="wf-config-panel">
           <p class="empty-state">Select a node</p>
@@ -100,15 +104,18 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-settings-btn">Settings</button>
         <span class="wf-toolbar-sep" style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;vertical-align:middle"></span>
-        <button class="btn" id="wf-wake-btn" title="Wake device via push notification">Wake</button>
-        <button class="btn" id="wf-activate-btn" title="Activate workflow against a live session">Activate</button>
-        <button class="btn" id="wf-stream-start-btn" title="Start camera stream">Start Stream</button>
-        <button class="btn" id="wf-stream-stop-btn" title="Stop camera stream" disabled>Stop Stream</button>
-        <button class="btn" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
+        <button class="btn wf-toolbar-desktop" id="wf-wake-btn" title="Wake device via push notification">Wake</button>
+        <button class="btn wf-toolbar-desktop" id="wf-activate-btn" title="Activate workflow against a live session">Activate</button>
+        <button class="btn wf-toolbar-desktop" id="wf-stream-start-btn" title="Start camera stream">Start Stream</button>
+        <button class="btn wf-toolbar-desktop" id="wf-stream-stop-btn" title="Stop camera stream" disabled>Stop Stream</button>
+        <button class="btn wf-toolbar-desktop" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
           <span style="color:#4ade80;vertical-align:middle">LIVE</span>
         </span>
+        <!-- Mobile toggles -->
+        <button class="btn wf-mobile-toggle" id="wf-nodes-toggle" style="display:none">Nodes</button>
+        <button class="btn wf-mobile-toggle" id="wf-config-toggle" style="display:none">Config</button>
       </div>
       <div class="wf-testing-panel" id="wf-testing-panel" style="display:none">
         <div class="wf-testing-header">
@@ -123,7 +130,10 @@ export async function renderEditor(isNew: boolean): Promise<void> {
   `;
 
   wireEditorEvents();
+  wireMobileToggles();
+  wireFABEvents();
   wirePreview(liveSessionId, workflow.id);
+  detectMobile();
 }
 
 /** Build palette sidebar HTML from node definitions grouped by role. */
@@ -155,6 +165,65 @@ function buildPaletteHTML(): string {
   }).join("");
 }
 
+/** Build FAB HTML overlay for canvas. */
+function buildFABHTML(): string {
+  return `
+    <div class="wf-fab-group" id="wf-fab-group">
+      <button class="wf-fab wf-fab-sec" id="wf-fab-wake" title="Wake device" style="display:none">Wake</button>
+      <button class="wf-fab wf-fab-sec" id="wf-fab-activate" title="Activate workflow" style="display:none">Activate</button>
+      <button class="wf-fab wf-fab-sec" id="wf-fab-stream" title="Start/Stop stream" style="display:none">Stream</button>
+      <button class="wf-fab wf-fab-primary" id="wf-fab-toggle">&#8230;</button>
+    </div>`;
+}
+
+/** Wire FAB button events. */
+function wireFABEvents(): void {
+  const container = getContainer();
+  const fabGroup = container?.querySelector("#wf-fab-group");
+  if (!fabGroup) return;
+
+  // Toggle FAB
+  fabGroup.querySelector("#wf-fab-toggle")?.addEventListener("click", () => {
+    const open = fabGroup.classList.toggle("wf-fab-open");
+    fabGroup.querySelectorAll(".wf-fab-sec").forEach(btn => {
+      (btn as HTMLElement).style.display = open ? "flex" : "none";
+    });
+  });
+
+  // FAB Wake
+  fabGroup.querySelector("#wf-fab-wake")?.addEventListener("click", async () => {
+    const workflow = getWorkflow();
+    if (!workflow?.id) return;
+    const settings = workflow.settings as any;
+    if (settings?.targetDeviceId) {
+      await wakeDevice(settings.targetDeviceId);
+    }
+  });
+
+  // FAB Activate
+  fabGroup.querySelector("#wf-fab-activate")?.addEventListener("click", async () => {
+    const workflow = getWorkflow();
+    if (!workflow?.id) return;
+    const sessions = await fetchSessions();
+    const liveSessions = sessions.filter(s => s.live);
+    if (liveSessions.length === 0) { alert("No live sessions."); return; }
+    const sessionId = liveSessions[0].sessionId;
+    await activateWorkflow(workflow.id, sessionId);
+  });
+
+  // FAB Stream
+  fabGroup.querySelector("#wf-fab-stream")?.addEventListener("click", () => {
+    if (isPreviewConnected()) {
+      const pubStatus = getPublisherStatus();
+      if (pubStatus === "live") {
+        sendPreviewJson({ type: "stop_stream" });
+      } else {
+        sendPreviewJson({ type: "start_stream" });
+      }
+    }
+  });
+}
+
 /** Wire toolbar buttons, palette clicks, and keyboard events. */
 function wireEditorEvents(): void {
   wireSVGEvents();
@@ -180,6 +249,9 @@ function wireEditorEvents(): void {
       setDirty(true);
       autoSave();
       refreshSVG();
+
+      // Auto-close palette drawer on mobile after adding
+      closeMobileDrawers();
     });
   });
 
@@ -407,6 +479,97 @@ function wireEditorEvents(): void {
   });
 }
 
+// --- Mobile Drawer Toggles ---
+
+/** Detect mobile viewport and show/hide mobile UI elements. */
+function detectMobile(): void {
+  const container = getContainer();
+  if (!container) return;
+  const isMobile = window.innerWidth <= 768;
+
+  // Show/hide mobile toggles
+  container.querySelectorAll(".wf-mobile-toggle").forEach(btn => {
+    (btn as HTMLElement).style.display = isMobile ? "inline-flex" : "none";
+  });
+
+  // Show/hide desktop-only toolbar buttons
+  container.querySelectorAll(".wf-toolbar-desktop").forEach(btn => {
+    (btn as HTMLElement).style.display = isMobile ? "none" : "inline-flex";
+  });
+
+  // Show FAB on mobile
+  const fabGroup = container.querySelector("#wf-fab-group");
+  if (fabGroup) {
+    (fabGroup as HTMLElement).style.display = isMobile ? "flex" : "none";
+  }
+}
+
+/** Wire mobile drawer toggle buttons. */
+function wireMobileToggles(): void {
+  const container = getContainer();
+  if (!container) return;
+
+  // Nodes toggle
+  container.querySelector("#wf-nodes-toggle")?.addEventListener("click", () => {
+    const palette = container.querySelector("#wf-palette");
+    const scrim = container.querySelector("#wf-scrim");
+    if (!palette) return;
+    const isOpen = palette.classList.contains("mobile-open");
+    closeMobileDrawers();
+    if (!isOpen) {
+      palette.classList.add("mobile-open");
+      scrim?.classList.add("active");
+    }
+  });
+
+  // Config toggle
+  container.querySelector("#wf-config-toggle")?.addEventListener("click", () => {
+    const config = container.querySelector("#wf-config-panel");
+    const scrim = container.querySelector("#wf-scrim");
+    if (!config) return;
+    const isOpen = config.classList.contains("mobile-open");
+    closeMobileDrawers();
+    if (!isOpen) {
+      config.classList.add("mobile-open");
+      scrim?.classList.add("active");
+    }
+  });
+
+  // Scrim click closes drawers
+  container.querySelector("#wf-scrim")?.addEventListener("click", () => {
+    closeMobileDrawers();
+  });
+
+  // Auto-open config when node selected on mobile
+  const origSetSelected = setSelectedNodeId;
+  const observer = new MutationObserver(() => {
+    if (window.innerWidth <= 768 && getSelectedNodeId()) {
+      const config = container.querySelector("#wf-config-panel");
+      if (config && !config.classList.contains("mobile-open")) {
+        closeMobileDrawers();
+        config.classList.add("mobile-open");
+      }
+    }
+  });
+  // Observe SVG for selection changes (refreshSVG swaps innerHTML)
+  const canvasWrap = container.querySelector("#wf-canvas-wrap");
+  if (canvasWrap) {
+    observer.observe(canvasWrap, { childList: true, subtree: true });
+  }
+
+  // Responsive listener
+  window.addEventListener("resize", () => detectMobile());
+}
+
+/** Close all mobile drawers. */
+function closeMobileDrawers(): void {
+  const container = getContainer();
+  if (!container) return;
+  container.querySelector("#wf-palette")?.classList.remove("mobile-open");
+  container.querySelector("#wf-config-panel")?.classList.remove("mobile-open");
+  container.querySelector("#wf-scrim")?.classList.remove("active");
+}
+
 // --- Testing Panel ---
 
 let _testingPollTimer: ReturnType<typeof setInterval> | null = null;
@@ -567,9 +730,9 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
   // Start testing panel auto-refresh
   startTestingPoll();
 
-  // Listen for preview data changes and re-render
+  // Listen for preview data changes and re-render with full preview data
   _previewListener = () => {
-    // Re-render SVG with node states
+    // Re-render SVG with node states and preview data
     const workflow = getWorkflow();
     const container = getContainer();
     if (!workflow || !container) return;
@@ -583,10 +746,19 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
       nodeStates.set(p.nodeId, p.executionState);
     }
 
-    if (nodeStates.size > 0) {
-      wrap.innerHTML = buildSVGFromData(workflow, getViewBox(), getSelectedNodeId(), nodeStates);
-      wireSVGEvents();
-    }
+    const testingMode = isPreviewConnected();
+
+    // Rebuild SVG with testing mode and preview data
+    const fabGroup = wrap.querySelector("#wf-fab-group");
+    const fabHTML = fabGroup ? fabGroup.outerHTML : buildFABHTML();
+
+    wrap.innerHTML = buildSVGFromData(
+      workflow, getViewBox(), getSelectedNodeId(),
+      nodeStates, 1, "wf-svg", undefined, testingMode, previews,
+    ) + fabHTML;
+
+    wireSVGEvents();
+    wireFABEvents();
 
     // Update preview status indicator
     const statusEl = container.querySelector("#wf-preview-status");
@@ -606,6 +778,12 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
       stopBtn.disabled = !connected || pubStatus !== "live";
     }
 
+    // Update FAB stream button text
+    const fabStream = container.querySelector("#wf-fab-stream");
+    if (fabStream) {
+      fabStream.textContent = pubStatus === "live" ? "Stop" : "Stream";
+    }
+
     // Re-render config panel to update preview section
     renderConfigPanel();
   };
@@ -620,4 +798,5 @@ export function destroyEditorPreview(): void {
   }
   destroyPreview();
   stopTestingPoll();
+  hideNodeActionPopover();
 }

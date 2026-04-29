@@ -1,6 +1,7 @@
 /**
  * SVG DAG rendering — build, refresh, runtime badges, subtitle resolution,
- * incremental edge updates, flow-colored edges.
+ * incremental edge updates, flow-colored edges, live output, status glow,
+ * touch-friendly targets, menu triggers.
  */
 
 import { esc } from "../../core/api-client.js";
@@ -9,10 +10,12 @@ import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { wireSVGEvents } from "./interactions.js";
+import { isTouchDevice } from "./interactions.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "./flow-detection.js";
+import type { NodePreviewState } from "./editor-preview.js";
 
 /** Render runtime badge SVG for a node definition. */
-export function runtimeBadgeSVG(def: { runtime?: string[] | null } | undefined): string {
+export function runtimeBadgeSVG(def: { runtime?: string[] | null } | undefined, scale = 1): string {
   const rt = def?.runtime;
   if (!rt || rt.length === 0) return "";
   const hasMobile = rt.includes("mobile");
@@ -21,19 +24,19 @@ export function runtimeBadgeSVG(def: { runtime?: string[] | null } | undefined):
   const serverColor = "#8b5cf6";
   if (hasMobile && hasServer) {
     return `
-      <rect x="${NODE_W - 70}" y="${NODE_H - 15}" width="30" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
-      <text x="${NODE_W - 55}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">MOB</text>
-      <rect x="${NODE_W - 37}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
-      <text x="${NODE_W - 23}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
+      <rect x="${NODE_W * scale - 70 * scale}" y="${NODE_H * scale - 15 * scale}" width="${30 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W * scale - 55 * scale}" y="${NODE_H * scale - 7 * scale}" text-anchor="middle" fill="#fff" font-size="${7 * scale}" font-weight="600">MOB</text>
+      <rect x="${NODE_W * scale - 37 * scale}" y="${NODE_H * scale - 15 * scale}" width="${28 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="${serverColor}" opacity="0.9"/>
+      <text x="${NODE_W * scale - 23 * scale}" y="${NODE_H * scale - 7 * scale}" text-anchor="middle" fill="#fff" font-size="${7 * scale}" font-weight="600">SRV</text>`;
   }
   if (hasMobile) {
     return `
-      <rect x="${NODE_W - 40}" y="${NODE_H - 15}" width="30" height="11" rx="2" fill="${mobileColor}" opacity="0.9"/>
-      <text x="${NODE_W - 25}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">MOB</text>`;
+      <rect x="${NODE_W * scale - 40 * scale}" y="${NODE_H * scale - 15 * scale}" width="${30 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="${mobileColor}" opacity="0.9"/>
+      <text x="${NODE_W * scale - 25 * scale}" y="${NODE_H * scale - 7 * scale}" text-anchor="middle" fill="#fff" font-size="${7 * scale}" font-weight="600">MOB</text>`;
   }
   return `
-    <rect x="${NODE_W - 36}" y="${NODE_H - 15}" width="28" height="11" rx="2" fill="${serverColor}" opacity="0.9"/>
-    <text x="${NODE_W - 22}" y="${NODE_H - 7}" text-anchor="middle" fill="#fff" font-size="7" font-weight="600">SRV</text>`;
+    <rect x="${NODE_W * scale - 36 * scale}" y="${NODE_H * scale - 15 * scale}" width="${28 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="${serverColor}" opacity="0.9"/>
+    <text x="${NODE_W * scale - 22 * scale}" y="${NODE_H * scale - 7 * scale}" text-anchor="middle" fill="#fff" font-size="${7 * scale}" font-weight="600">SRV</text>`;
 }
 
 /** Resolve a subtitle template string against node config values. */
@@ -112,14 +115,20 @@ export function buildSVGFromData(
   scale = 1,
   svgId = "wf-svg",
   flows?: DetectedFlow[],
+  testingMode = false,
+  previews?: Map<string, NodePreviewState>,
 ): string {
   const nodes = workflow.nodes;
   const edges = workflow.edges;
   const { x: vx, y: vy, zoom } = viewBox;
   const w = NODE_W * scale;
-  const h = NODE_H * scale;
+  const baseH = NODE_H * scale;
   const r = NODE_R * scale;
   const gridId = svgId + "-grid";
+  const touch = isTouchDevice();
+  const portR = touch ? 10 * scale : 6 * scale;
+  const portHitR = touch ? 22 * scale : 0;
+  const nodeH = testingMode ? baseH + 30 * scale : baseH;
 
   // Auto-detect flows if not provided
   const detectedFlows = flows ?? detectFlows(nodes, edges);
@@ -144,33 +153,84 @@ export function buildSVGFromData(
   // Compute topological depth (execution timeline) for all nodes
   const depths = computeDepth(nodes, edges);
 
+  // SVG filter for status glow
+  const glowFilter = testingMode ? `
+    <defs>
+      <filter id="wf-status-glow" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="3" result="blur" />
+        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+      </filter>
+    </defs>` : "";
+
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
     const c = def?.color ?? FALLBACK_COLOR;
     const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
     const selected = selectedId === n.id;
-    const stateColor = nodeStates?.get(n.id);
+    const stateStr = nodeStates?.get(n.id);
+    const preview = previews?.get(n.id);
+    const stateColor = stateStr ? (NODE_STATUS_DOT_COLORS[stateStr] ?? "#9ca3af") : null;
+    const isRunning = stateStr === "running" || stateStr === "active";
+
+    // Status dot (with pulse animation for running nodes)
     const statusDot = stateColor
-      ? `<circle cx="${r}" cy="${r}" r="${5 * scale}" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
+      ? `<circle class="wf-status-dot" cx="${r}" cy="${r}" r="${5 * scale}" fill="${stateColor}" ${isRunning ? 'style="animation:wf-pulse 1.5s infinite"' : ''} />`
       : "";
+
+    // Status glow rect behind node (testing mode only)
+    const statusGlow = testingMode && stateColor && stateStr !== "idle" && stateStr !== "unknown"
+      ? `<rect x="${-2 * scale}" y="${-2 * scale}" width="${w + 4 * scale}" height="${nodeH + 4 * scale}" rx="${r + 2 * scale}" fill="none" stroke="${stateColor}" stroke-width="1" opacity="0.3" filter="url(#wf-status-glow)" pointer-events="none" />`
+      : "";
+
     // Flow indicator badge (small colored dot in top-left, only when multi-flow)
     const flowColor = nodeFlowColor.get(n.id);
     const flowDot = multiFlow && flowColor
       ? `<circle class="wf-flow-dot" data-flow-id="${detectedFlows.find(f => f.nodeIds.includes(n.id))?.flowId ?? ""}" cx="${8 * scale}" cy="${8 * scale}" r="${4 * scale}" fill="${flowColor}" stroke="#0a0a0a" stroke-width="1" style="cursor:pointer" />`
       : "";
     const flowAttr = multiFlow && flowColor ? ` data-flow-id="${detectedFlows.find(f => f.nodeIds.includes(n.id))?.flowId ?? ""}"` : "";
+
+    // Live output text (testing mode)
+    const liveOutput = testingMode && preview?.lastText
+      ? `<text class="wf-node-output" x="${12 * scale}" y="${nodeH - 8 * scale}" fill="#50fa7b" font-size="${9 * scale}" font-family="'SF Mono',monospace">${esc(preview.lastText.slice(0, 28))}</text>`
+      : "";
+
+    // Menu trigger circle (testing mode, top-right)
+    const menuBtn = testingMode
+      ? `<g class="wf-node-menu-btn" style="cursor:pointer">
+           <circle cx="${w - 10 * scale}" cy="${10 * scale}" r="${touch ? 10 * scale : 7 * scale}" fill="transparent" />
+           <circle cx="${w - 10 * scale}" cy="${10 * scale}" r="${2 * scale}" fill="#9ca3af" />
+           <circle cx="${w - 10 * scale}" cy="${15 * scale}" r="${2 * scale}" fill="#9ca3af" />
+           <circle cx="${w - 10 * scale}" cy="${20 * scale}" r="${2 * scale}" fill="#9ca3af" />
+         </g>`
+      : "";
+
+    // Port circles with optional hit area for touch
+    const portIn = touch
+      ? `<circle class="wf-port-hit wf-port-in-hit" cx="0" cy="${nodeH / 2}" r="${portHitR}" fill="transparent" pointer-events="all" />
+         <circle class="wf-port wf-port-in" cx="0" cy="${nodeH / 2}" r="${portR}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />`
+      : `<circle class="wf-port wf-port-in" cx="0" cy="${nodeH / 2}" r="${portR}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />`;
+
+    const portOut = touch
+      ? `<circle class="wf-port-hit wf-port-out-hit" cx="${w}" cy="${nodeH / 2}" r="${portHitR}" fill="transparent" pointer-events="all" />
+         <circle class="wf-port wf-port-out" cx="${w}" cy="${nodeH / 2}" r="${portR}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />`
+      : `<circle class="wf-port wf-port-out" cx="${w}" cy="${nodeH / 2}" r="${portR}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />`;
+
     return `
-      <g class="wf-node" data-id="${n.id}"${flowAttr} transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
+      <g class="wf-node" data-id="${n.id}" data-state="${stateStr ?? ""}"${flowAttr} transform="translate(${n.positionX * scale}, ${n.positionY * scale})">
+        ${statusGlow}
         ${statusDot}
         ${flowDot}
-        <rect class="wf-node-bg" width="${w}" height="${h}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
+        <rect class="wf-node-bg" width="${w}" height="${nodeH}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
         <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
         <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
         <text x="${w / 2}" y="${16 * scale}" text-anchor="middle" fill="#fff" font-size="${10 * scale}" font-weight="600">${esc(n.type.replace("-", " "))}</text>
         <text x="${12 * scale}" y="${44 * scale}" fill="#ccc" font-size="${11 * scale}">${esc(n.label || n.type)}</text>
         <text x="${12 * scale}" y="${60 * scale}" fill="#888" font-size="${9 * scale}">${esc(configSummary)}</text>
-        <circle class="wf-port wf-port-in" cx="0" cy="${h / 2}" r="${6 * scale}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
-        <circle class="wf-port wf-port-out" cx="${w}" cy="${h / 2}" r="${6 * scale}" fill="${c.stroke}" stroke="#0a0a0a" stroke-width="2" />
+        ${liveOutput}
+        ${menuBtn}
+        ${runtimeBadgeSVG(def, scale)}
+        ${portIn}
+        ${portOut}
       </g>
     `;
   }).join("");
@@ -181,9 +241,9 @@ export function buildSVGFromData(
     const tgt = nodes.find(n => n.id === e.targetNodeId);
     if (!src || !tgt) return "";
     const sx = src.positionX * scale + w;
-    const sy = src.positionY * scale + h / 2;
+    const sy = src.positionY * scale + nodeH / 2;
     const tx = tgt.positionX * scale;
-    const ty = tgt.positionY * scale + h / 2;
+    const ty = tgt.positionY * scale + nodeH / 2;
     const mx = (sx + tx) / 2;
     const midY = (sy + ty) / 2;
 
@@ -206,12 +266,12 @@ export function buildSVGFromData(
         <path d="M ${20 * scale} 0 L 0 0 0 ${20 * scale}" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="0.5" />
       </pattern>
     </defs>
-    <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#${gridId})" />
+    <rect class="wf-grid-bg" x="-5000" y="-5000" width="10000" height="10000" fill="url(#${gridId})" />
   `;
 
   const vbW = 1100 * scale / zoom;
   const vbH = 600 * scale / zoom;
-  return `<svg class="wf-canvas-svg" id="${svgId}" viewBox="${vx} ${vy} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg">${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+  return `<svg class="wf-canvas-svg" id="${svgId}" viewBox="${vx} ${vy} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg" ${touch ? 'data-touch="true"' : ''}>${glowFilter}${grid}${edgeSVGs}${nodeSVGs}</svg>`;
 }
 
 /** Build the full SVG string for nodes + edges + grid (singleton state wrapper). */

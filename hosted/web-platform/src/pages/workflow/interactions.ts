@@ -1,16 +1,18 @@
 /**
  * SVG interactions — node drag, edge drag, pan, zoom, keyboard delete.
+ * Pointer events (mouse + touch + pen) with pinch-to-zoom and long-press.
  */
 
 import { NODE_W, NODE_H } from "./constants.js";
 import {
   getContainer, getWorkflow, getSelectedNodeId,
-  getViewX, getViewY, getZoom, setZoom,
+  getViewX, getViewY, getZoom, setZoom, setViewX, setViewY,
   setDirty, autoSave, nanoid, setSelectedNodeId,
 } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG, updateEdgesForNode } from "./svg-renderer.js";
 import { renderConfigPanel } from "./config-panel.js";
+import { showNodeActionPopover, hideNodeActionPopover } from "./node-actions.js";
 
 // --- Drag state ---
 
@@ -38,39 +40,127 @@ let _dragState: DragState | null = null;
 let _edgeState: EdgeState | null = null;
 let _panState: PanState | null = null;
 
+// --- Touch / pointer state ---
+
+let _isTouchDevice = false;
+let _longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let _longPressNodeId: string | null = null;
+let _pointerStartX = 0;
+let _pointerStartY = 0;
+let _pointerMoved = false;
+let _activePointers = new Map<number, PointerEvent>();
+let _initialPinchDistance: number | null = null;
+let _pinchZoomStart: number | null = null;
+
+const LONG_PRESS_MS = 500;
+const TAP_THRESHOLD_PX = 8;
+
+/** Whether the device supports touch. */
+export function isTouchDevice(): boolean { return _isTouchDevice; }
+
 // --- SVG event wiring ---
 
 export function wireSVGEvents(): void {
   const svg = getContainer()?.querySelector("#wf-svg") as SVGElement | null;
   if (!svg) return;
 
-  // Node click -> select
+  // Prevent browser scroll/zoom interference
+  svg.style.touchAction = "none";
+
+  // Node pointerdown -> select, drag, or long-press
   svg.querySelectorAll(".wf-node").forEach(g => {
-    g.addEventListener("mousedown", (e: Event) => {
-      const me = e as MouseEvent;
+    g.addEventListener("pointerdown", (e: Event) => {
+      const pe = e as PointerEvent;
       const nodeId = (g as Element).getAttribute("data-id")!;
-      const target = me.target as Element;
+      const target = pe.target as Element;
+
+      if (pe.pointerType === "touch") _isTouchDevice = true;
 
       // Port drag (edge creation)
       if (target.classList.contains("wf-port-out")) {
-        startEdgeDrag(me, nodeId, svg);
+        pe.preventDefault();
+        pe.stopPropagation();
+        startEdgeDrag(pe, nodeId, svg);
         return;
       }
 
-      setSelectedNodeId(nodeId);
-      renderConfigPanel();
-      refreshSVG();
-
-      // Node drag (unless clicking port)
-      if (!target.classList.contains("wf-port-in")) {
-        startNodeDrag(me, nodeId);
+      // Menu button
+      if (target.classList.contains("wf-node-menu-btn") || target.closest(".wf-node-menu-btn")) {
+        pe.preventDefault();
+        pe.stopPropagation();
+        showNodeActionPopover(nodeId);
+        return;
       }
+
+      // Don't drag from input port
+      if (target.classList.contains("wf-port-in")) {
+        pe.preventDefault();
+        return;
+      }
+
+      pe.preventDefault();
+
+      // Track for tap vs long-press vs drag
+      _pointerStartX = pe.clientX;
+      _pointerStartY = pe.clientY;
+      _pointerMoved = false;
+      _longPressNodeId = nodeId;
+
+      // Long-press timer -> enter drag mode on touch
+      _longPressTimer = setTimeout(() => {
+        if (_pointerMoved) return;
+        _longPressTimer = null;
+        _longPressNodeId = null;
+        // Enter drag mode
+        startNodeDrag(_pointerStartX, _pointerStartY, nodeId);
+      }, LONG_PRESS_MS);
     });
   });
 
+  // Node pointermove (track movement for tap threshold)
+  // We attach to the document level for this
+  const onPointerMove = (pe: PointerEvent) => {
+    if (_longPressTimer != null && _longPressNodeId != null) {
+      const dx = pe.clientX - _pointerStartX;
+      const dy = pe.clientY - _pointerStartY;
+      if (Math.abs(dx) > TAP_THRESHOLD_PX || Math.abs(dy) > TAP_THRESHOLD_PX) {
+        _pointerMoved = true;
+        clearTimeout(_longPressTimer);
+        _longPressTimer = null;
+        // Cancelled — was a drag start, not a long press
+        _longPressNodeId = null;
+      }
+    }
+  };
+  document.addEventListener("pointermove", onPointerMove);
+
+  // Node pointerup — tap detection
+  const onPointerUp = (pe: PointerEvent) => {
+    if (_longPressTimer != null) {
+      clearTimeout(_longPressTimer);
+      _longPressTimer = null;
+
+      if (!_pointerMoved && _longPressNodeId) {
+        // Short tap — select node + show popover
+        const nodeId = _longPressNodeId;
+        _longPressNodeId = null;
+        setSelectedNodeId(nodeId);
+        renderConfigPanel();
+        refreshSVG();
+        showNodeActionPopover(nodeId);
+      }
+      _longPressNodeId = null;
+    }
+  };
+  document.addEventListener("pointerup", onPointerUp);
+
   // Edge click -> delete
   svg.querySelectorAll(".wf-edge").forEach(path => {
-    path.addEventListener("click", () => {
+    path.addEventListener("pointerup", (e: Event) => {
+      const pe = e as PointerEvent;
+      if (pe.pointerType === "touch") _isTouchDevice = true;
+      // Only respond to quick taps, not drags
+      if (_pointerMoved) return;
       const workflow = getWorkflow();
       if (!workflow) return;
       const id = (path as Element).getAttribute("data-id")!;
@@ -81,31 +171,116 @@ export function wireSVGEvents(): void {
     });
   });
 
-  // Canvas pan (middle click or ctrl+drag on background)
-  svg.addEventListener("mousedown", (e: Event) => {
-    const me = e as MouseEvent;
-    if (me.target === svg || (me.target as Element).tagName === "rect") {
-      if (me.button === 1 || me.ctrlKey || me.metaKey) {
-        e.preventDefault();
-        _panState = { startX: me.clientX, startY: me.clientY, viewX: getViewX(), viewY: getViewY() };
-      } else {
-        // Click on background -> deselect
+  // Canvas pan / background tap
+  svg.addEventListener("pointerdown", (e: Event) => {
+    const pe = e as PointerEvent;
+    if (pe.pointerType === "touch") _isTouchDevice = true;
+
+    // Track multi-touch for pinch zoom
+    _activePointers.set(pe.pointerId, pe);
+
+    if (_activePointers.size === 2) {
+      // Start pinch — cancel any ongoing pan
+      _panState = null;
+      const pts = [..._activePointers.values()];
+      _initialPinchDistance = Math.hypot(pts[1].clientX - pts[0].clientX, pts[1].clientY - pts[0].clientY);
+      _pinchZoomStart = getZoom();
+      return;
+    }
+
+    if (pe.target === svg || (pe.target as Element).tagName === "rect" ||
+        (pe.target as Element).classList.contains("wf-grid-bg")) {
+      pe.preventDefault();
+      hideNodeActionPopover();
+
+      // Click on background -> deselect
+      if (pe.button === 0 && !pe.ctrlKey && !pe.metaKey) {
         setSelectedNodeId(null);
         renderConfigPanel();
         refreshSVG();
       }
+
+      // Pan: left drag on background (touch) or middle/ctrl+drag (mouse)
+      if (pe.button === 1 || pe.ctrlKey || pe.metaKey || pe.pointerType === "touch") {
+        _panState = { startX: pe.clientX, startY: pe.clientY, viewX: getViewX(), viewY: getViewY() };
+        svg.setPointerCapture(pe.pointerId);
+
+        const onPanMove = (ev: PointerEvent) => {
+          if (!_panState) return;
+          const zoom = getZoom();
+          const dx = (ev.clientX - _panState.startX) / zoom;
+          const dy = (ev.clientY - _panState.startY) / zoom;
+          const vx = _panState.viewX - dx;
+          const vy = _panState.viewY - dy;
+          const svgEl = getContainer()?.querySelector("#wf-svg");
+          if (svgEl) {
+            svgEl.setAttribute("viewBox", `${vx} ${vy} ${1100 / zoom} ${600 / zoom}`);
+          }
+        };
+
+        const onPanUp = (ev: PointerEvent) => {
+          if (_panState) {
+            const zoom = getZoom();
+            const dx = (ev.clientX - _panState.startX) / zoom;
+            const dy = (ev.clientY - _panState.startY) / zoom;
+            setViewX(_panState.viewX - dx);
+            setViewY(_panState.viewY - dy);
+          }
+          _panState = null;
+          svg.removeEventListener("pointermove", onPanMove);
+          svg.removeEventListener("pointerup", onPanUp);
+        };
+
+        svg.addEventListener("pointermove", onPanMove);
+        svg.addEventListener("pointerup", onPanUp);
+      }
     }
   });
 
-  // Zoom
+  // Pointer up — track multi-touch release
+  svg.addEventListener("pointerup", (e: Event) => {
+    const pe = e as PointerEvent;
+    _activePointers.delete(pe.pointerId);
+    if (_activePointers.size < 2) {
+      _initialPinchDistance = null;
+      _pinchZoomStart = null;
+    }
+  });
+
+  // Pointer move — pinch-to-zoom
+  svg.addEventListener("pointermove", (e: Event) => {
+    const pe = e as PointerEvent;
+    _activePointers.set(pe.pointerId, pe);
+
+    if (_activePointers.size === 2 && _initialPinchDistance != null && _pinchZoomStart != null) {
+      pe.preventDefault();
+      const pts = [..._activePointers.values()];
+      const dist = Math.hypot(pts[1].clientX - pts[0].clientX, pts[1].clientY - pts[0].clientY);
+      if (dist < 1) return;
+      const ratio = dist / _initialPinchDistance;
+      const newZoom = Math.max(0.3, Math.min(3, _pinchZoomStart * ratio));
+      setZoom(newZoom);
+      const svgEl = getContainer()?.querySelector("#wf-svg");
+      if (svgEl) {
+        svgEl.setAttribute("viewBox", `${getViewX()} ${getViewY()} ${1100 / newZoom} ${600 / newZoom}`);
+      }
+    }
+  });
+
+  // Zoom (mouse wheel)
   svg.addEventListener("wheel", (e: Event) => {
     e.preventDefault();
     const we = e as WheelEvent;
     const delta = we.deltaY > 0 ? 0.9 : 1.1;
     const newZoom = Math.max(0.3, Math.min(3, getZoom() * delta));
     setZoom(newZoom);
-    svg.setAttribute("viewBox", `${getViewX()} ${getViewY()} ${900 / newZoom} ${600 / newZoom}`);
+    svg.setAttribute("viewBox", `${getViewX()} ${getViewY()} ${1100 / newZoom} ${600 / newZoom}`);
   }, { passive: false });
+
+  // Mark SVG with touch device flag for CSS targeting
+  if (_isTouchDevice) {
+    svg.setAttribute("data-touch", "true");
+  }
 }
 
 // --- Keyboard ---
@@ -119,6 +294,7 @@ export function onKeyDown(e: KeyboardEvent): void {
     workflow.nodes = workflow.nodes.filter(n => n.id !== selectedId);
     workflow.edges = workflow.edges.filter(e => e.sourceNodeId !== selectedId && e.targetNodeId !== selectedId);
     setSelectedNodeId(null);
+    hideNodeActionPopover();
     setDirty(true);
     autoSave();
     refreshSVG();
@@ -128,20 +304,20 @@ export function onKeyDown(e: KeyboardEvent): void {
 
 // --- Node drag ---
 
-function startNodeDrag(me: MouseEvent, nodeId: string): void {
+function startNodeDrag(startX: number, startY: number, nodeId: string): void {
   const workflow = getWorkflow();
   if (!workflow) return;
   const node = workflow.nodes.find(n => n.id === nodeId);
   if (!node) return;
   _dragState = {
     nodeId,
-    startX: me.clientX,
-    startY: me.clientY,
+    startX,
+    startY,
     nodeStartX: node.positionX,
     nodeStartY: node.positionY,
   };
 
-  const onMove = (e: MouseEvent) => {
+  const onMove = (e: PointerEvent) => {
     if (!_dragState) return;
     const wf = getWorkflow();
     if (!wf) return;
@@ -165,18 +341,18 @@ function startNodeDrag(me: MouseEvent, nodeId: string): void {
 
   const onUp = () => {
     _dragState = null;
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
     refreshSVG();
   };
 
-  document.addEventListener("mousemove", onMove);
-  document.addEventListener("mouseup", onUp);
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
 }
 
 // --- Edge drag ---
 
-function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): void {
+function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement): void {
   const workflow = getWorkflow();
   const source = workflow?.nodes.find(n => n.id === sourceNodeId);
   if (!source) return;
@@ -196,24 +372,24 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
 
   _edgeState = { sourceNodeId, tempLine: line };
 
-  const onMove = (e: MouseEvent) => {
+  const onMove = (e: PointerEvent) => {
     if (!_edgeState) return;
     const rect = svg.getBoundingClientRect();
     const zoom = getZoom();
-    const mx = getViewX() + (e.clientX - rect.left) / rect.width * (900 / zoom);
+    const mx = getViewX() + (e.clientX - rect.left) / rect.width * (1100 / zoom);
     const my = getViewY() + (e.clientY - rect.top) / rect.height * (600 / zoom);
     _edgeState.tempLine.setAttribute("x2", String(mx));
     _edgeState.tempLine.setAttribute("y2", String(my));
   };
 
-  const onUp = (e: MouseEvent) => {
+  const onUp = (e: PointerEvent) => {
     if (_edgeState?.tempLine.parentNode) {
       _edgeState.tempLine.parentNode.removeChild(_edgeState.tempLine);
     }
 
     const rect = svg.getBoundingClientRect();
     const zoom = getZoom();
-    const mx = getViewX() + (e.clientX - rect.left) / rect.width * (900 / zoom);
+    const mx = getViewX() + (e.clientX - rect.left) / rect.width * (1100 / zoom);
     const my = getViewY() + (e.clientY - rect.top) / rect.height * (600 / zoom);
     const target = workflow?.nodes.find(n =>
       mx >= n.positionX && mx <= n.positionX + NODE_W &&
@@ -247,12 +423,12 @@ function startEdgeDrag(me: MouseEvent, sourceNodeId: string, svg: SVGElement): v
     }
 
     _edgeState = null;
-    document.removeEventListener("mousemove", onMove);
-    document.removeEventListener("mouseup", onUp);
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", onUp);
   };
 
-  document.addEventListener("mousemove", onMove);
-  document.addEventListener("mouseup", onUp);
+  document.addEventListener("pointermove", onMove);
+  document.addEventListener("pointerup", onUp);
 }
 
 /** Reset interaction state (called from page.destroy). */
@@ -260,4 +436,10 @@ export function resetInteractions(): void {
   _dragState = null;
   _edgeState = null;
   _panState = null;
+  if (_longPressTimer) clearTimeout(_longPressTimer);
+  _longPressTimer = null;
+  _longPressNodeId = null;
+  _activePointers.clear();
+  _initialPinchDistance = null;
+  _pinchZoomStart = null;
 }
