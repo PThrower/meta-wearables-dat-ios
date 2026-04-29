@@ -140,21 +140,40 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
       syncAudioConfig(msg as Record<string, unknown>);
     }
 
-    // STT transcription result
+    // STT transcription result — persistent display in transcription panel
     if (msg.type === "stt_result") {
       const m = msg as { text: string; isFinal: boolean; error?: string; confidence?: number };
+      const log = document.getElementById("transcriptionLog");
+      const status = document.getElementById("sttStatus");
       if (m.error) {
         showToast("STT error: " + m.error.slice(0, 60), "error");
-      } else if (m.isFinal && m.text) {
-        showToast("STT: " + m.text.slice(0, 50), "info");
+        if (log) appendTranscriptionEntry(log, m.error, { isError: true });
+        if (status) { status.textContent = "error"; status.className = "stt-status error"; }
+      } else if (m.text) {
+        if (log) {
+          // Remove previous interim entry if this is a final result
+          if (m.isFinal) {
+            const interim = log.querySelector(".transcription-entry.interim:last-child");
+            if (interim) interim.remove();
+          }
+          appendTranscriptionEntry(log, m.text, { isFinal: m.isFinal, confidence: m.confidence });
+        }
+        if (status) { status.textContent = "listening"; status.className = "stt-status listening"; }
+        if (m.isFinal) showToast("STT: " + m.text.slice(0, 50), "info");
       }
     }
 
-    // VAD result
+    // VAD result — persistent display in transcription panel
     if (msg.type === "vad_result") {
-      const m = msg as { eventType: string; isSpeech: boolean; energyDb?: number; error?: string };
+      const m = msg as { eventType: string; isSpeech: boolean; energyDb?: number; error?: string; durationMs?: number };
+      const log = document.getElementById("transcriptionLog");
       if (m.error) {
         showToast("VAD error: " + m.error.slice(0, 60), "error");
+        if (log) appendTranscriptionEntry(log, m.error, { isError: true });
+      } else if (log && (m.eventType === "speech_start" || m.eventType === "speech_end")) {
+        const indicator = m.eventType === "speech_start" ? "speech-start" : "speech-end";
+        const label = m.eventType === "speech_start" ? "Speech started" : `Speech ended (${m.durationMs?.toFixed(0) ?? "?"}ms)`;
+        appendTranscriptionEntry(log, label, { isVad: true, vadIndicator: indicator });
       }
     }
   };
@@ -340,4 +359,37 @@ function handleTelemetry(m: Record<string, unknown>): void {
         : "";
     }
   } else { set("t-activity", "--"); }
+}
+
+/** Append a transcription entry to the log panel. Auto-trims to 50 entries. */
+function appendTranscriptionEntry(
+  log: HTMLElement,
+  text: string,
+  opts: { isFinal?: boolean; isError?: boolean; isVad?: boolean; vadIndicator?: string; confidence?: number } = {},
+): void {
+  const entry = document.createElement("div");
+  const now = new Date();
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+
+  if (opts.isError) {
+    entry.className = "transcription-entry error-entry";
+    entry.innerHTML = `<span class="stt-time">${time}</span>${escHtml(text)}`;
+  } else if (opts.isVad) {
+    entry.className = "transcription-entry vad-entry";
+    entry.innerHTML = `<span class="stt-time">${time}</span><span class="vad-indicator ${opts.vadIndicator ?? ""}"></span>${escHtml(text)}`;
+  } else {
+    entry.className = `transcription-entry ${opts.isFinal ? "final" : "interim"}`;
+    const conf = opts.confidence != null ? ` <span style="color:var(--text-tertiary);font-size:9px">${(opts.confidence * 100).toFixed(0)}%</span>` : "";
+    entry.innerHTML = `<span class="stt-time">${time}</span>${escHtml(text)}${conf}`;
+  }
+
+  log.appendChild(entry);
+
+  // Trim to 50 entries
+  while (log.children.length > 50) log.removeChild(log.firstChild!);
+  log.scrollTop = log.scrollHeight;
+}
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
