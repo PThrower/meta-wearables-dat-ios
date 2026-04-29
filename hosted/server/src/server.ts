@@ -364,6 +364,80 @@ function buildMobileWorkflowConfig(
   };
 }
 
+/**
+ * Dispatch workflow config messages (speech, vision, enhance, sensor, workflow)
+ * to the publisher WebSocket. Called both on activation and on publisher reconnect.
+ */
+function dispatchWorkflowConfig(
+  ws: import("ws").WebSocket | { send: (data: string) => void; readyState: number },
+  nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
+  sid: string,
+): void {
+  if (ws.readyState !== 1 /* WebSocket.OPEN */) return;
+
+  const speechIdx: number[] = [];
+  const visionIdx: number[] = [];
+  const enhanceIdx: number[] = [];
+  const sensorIdx: number[] = [];
+
+  for (let i = 0; i < nodes.length; i++) {
+    const def = NODE_DEF_MAP.get(nodes[i].type);
+    if (def?.activationMode === "speech")  { speechIdx.push(i);  continue; }
+    if (def?.activationMode === "vision")  { visionIdx.push(i);  continue; }
+    if (def?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
+    if (def?.activationMode === "sensor")  { sensorIdx.push(i);  continue; }
+  }
+
+  // Speech config (mobile-stt, vad)
+  if (speechIdx.length > 0) {
+    const speechConfigs = speechIdx.map(i => ({
+      speechType: nodes[i].type,
+      config: { ...(nodes[i].config ?? {}) },
+    }));
+    ws.send(JSON.stringify({ type: "speech_stage_config", stages: speechConfigs, enabled: true }));
+    console.log(`[relay] Replayed speech config (${speechConfigs.length} stages) session=${sid}`);
+  }
+
+  // Vision config
+  for (const i of visionIdx) {
+    const cfg = nodes[i].config as any;
+    ws.send(JSON.stringify({
+      type: "vision_stage_config",
+      nodeType: nodes[i].type,
+      detectionTypes: [nodes[i].type],
+      confidence: cfg?.confidence ?? 0.5,
+      targetFPS: cfg?.targetFPS ?? 5,
+      maxResults: cfg?.maxFaces ?? cfg?.maxPersons ?? cfg?.maxPoses ?? 0,
+      language: cfg?.language ?? "en-US",
+      symbologies: Object.entries(cfg?.symbologies ?? { qr: true }).filter(([, v]) => v).map(([k]) => k),
+      maxLabels: cfg?.maxLabels ?? 5,
+    }));
+  }
+
+  // Enhance config
+  if (enhanceIdx.length > 0) {
+    const filters = enhanceIdx.map(i => ({
+      type: nodes[i].type,
+      params: (nodes[i].config ?? {}) as Record<string, number>,
+    }));
+    ws.send(JSON.stringify({ type: "enhance_stage_config", filters, enabled: true }));
+    console.log(`[relay] Replayed enhance config (${filters.length} filters) session=${sid}`);
+  }
+
+  // Sensor config
+  if (sensorIdx.length > 0) {
+    const sensors = sensorIdx.map(i => {
+      const rawConfig = { ...(nodes[i].config ?? {}) as Record<string, unknown> };
+      if (nodes[i].type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
+        rawConfig.targetLabels = (rawConfig.targetLabels as string).split(",").map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+      }
+      return { sensorType: nodes[i].type, config: rawConfig };
+    });
+    ws.send(JSON.stringify({ type: "sensor_stage_config", sensors, enabled: true }));
+    console.log(`[relay] Replayed sensor config (${sensors.length} sensors) session=${sid}`);
+  }
+}
+
 // --- Control Event Bus ---
 // Pub/sub for gesture/control events from iOS publisher.
 
@@ -1887,6 +1961,23 @@ const server = Bun.serve<WsData>({
           // on disconnect. A full restart would require storing the workflow ID
           // in the session metadata.
           console.log(`[relay] Publisher reconnected: AI policy=${onReconnect} session=${sessionId}`);
+        }
+
+        // Replay workflow config if there's an active workflow (publisher reconnected)
+        if (session?.activeWorkflowId && ws.readyState === WebSocket.OPEN) {
+          const wf = q.getWorkflow(session.activeWorkflowId);
+          if (wf) {
+            const wfNodes = q.getWorkflowNodes(session.activeWorkflowId);
+            if (wfNodes.length > 0) {
+              const typedNodes = wfNodes.map(n => ({
+                id: n.id,
+                type: n.type,
+                config: typeof n.config === "string" ? JSON.parse(n.config) : (n.config ?? {}),
+              }));
+              dispatchWorkflowConfig(ws, typedNodes, sessionId);
+              console.log(`[relay] Replayed workflow config for ${session.activeWorkflowId} on publisher reconnect session=${sessionId}`);
+            }
+          }
         }
 
         // Notify viewers that publisher is in standby (connected but not streaming)
