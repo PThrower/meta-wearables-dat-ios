@@ -510,13 +510,18 @@ export function getSession(sessionId: string): { id: string; activeWorkflowId: s
   return db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as any ?? null;
 }
 
+/** camelCase → snake_case for raw SQL column names */
+function toSnakeCase(s: string): string {
+  return s.replace(/[A-Z]/g, m => `_${m.toLowerCase()}`);
+}
+
 /** Update session fields (returns a closure for DbWriter). */
 export function updateSession(sessionId: string, fields: Record<string, unknown>) {
   return () => {
     const db = getDbRaw();
     const keys = Object.keys(fields);
     if (keys.length === 0) return;
-    const setClause = keys.map(k => `${k} = ?`).join(", ");
+    const setClause = keys.map(k => `${toSnakeCase(k)} = ?`).join(", ");
     const values = keys.map(k => fields[k]);
     db.prepare(`UPDATE sessions SET ${setClause}, updated_at = ? WHERE id = ?`)
       .run(...values, now(), sessionId);

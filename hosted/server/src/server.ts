@@ -1970,7 +1970,7 @@ const server = Bun.serve<WsData>({
         let wfId = session?.activeWorkflowId;
         if (!wfId) {
           const dbSession = q.getSession(sessionId);
-          wfId = dbSession?.activeWorkflowId ?? undefined;
+          wfId = (dbSession as any)?.active_workflow_id ?? (dbSession as any)?.activeWorkflowId ?? undefined;
           if (wfId) {
             session.activeWorkflowId = wfId;
             console.log(`[relay] Restored activeWorkflowId=${wfId} from DB for session=${sessionId}`);
