@@ -90,6 +90,8 @@ export function renderConfigPanel(): void {
 /** Render empty state with inline flow controls when multi-flow. */
 function renderEmptyPanel(panel: Element, workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>; flowConfig?: import("../../core/api-client.js").FlowExecutionConfig | null }): void {
   const flows = detectFlows(workflow.nodes, workflow.edges);
+  console.log("[flow-debug] nodes:", workflow.nodes.length, "edges:", workflow.edges.length, "flows:", flows.length, flows.map(f => ({ id: f.flowId, nodes: f.nodeIds, label: f.label })));
+  console.log("[flow-debug] edges:", workflow.edges.map(e => `${e.sourceNodeId} → ${e.targetNodeId}`));
   const multiFlow = flows.length > 1;
 
   let flowHtml = "";
