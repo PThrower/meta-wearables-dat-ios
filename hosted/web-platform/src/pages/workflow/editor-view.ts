@@ -18,7 +18,7 @@ import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
 import { hideNodeActionPopover } from "./node-actions.js";
-import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
+import { renderConfigPanel } from "./config-panel.js";
 import { isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import {
   findActiveSession, findLiveSession, connectPreview, disconnectPreview,
@@ -469,12 +469,13 @@ function wireEditorEvents(): void {
   // Keyboard: delete selected node
   document.addEventListener("keydown", onKeyDown);
 
-  // Flow dot click on SVG canvas — opens flow config panel
+  // Flow dot click on SVG canvas — deselect node to show flow controls in side panel
   getContainer()?.addEventListener("click", (e) => {
     const dot = (e.target as HTMLElement).closest(".wf-flow-dot");
     if (dot) {
       e.stopPropagation();
-      setFlowConfigActive(true);
+      setSelectedNodeId(null);
+      renderConfigPanel();
     }
   });
 }

@@ -1,6 +1,6 @@
 /**
  * Config panel — schema-driven form fields for selected workflow nodes.
- * Four-state: settings / flow-config / node-config / empty.
+ * Three-state: settings / node-config / empty (with inline flow controls).
  */
 
 import { esc, fetchDevices } from "../../core/api-client.js";
@@ -14,21 +14,6 @@ import { renderConfigField, renderFlowConfigHTML, wireFlowConfigEvents, wireConf
 import type { FlowConfigCallbacks, ConfigFieldCallbacks, SettingsCallbacks } from "./shared-config.js";
 import { getNodePreview, renderNodePreviewHTML } from "./editor-preview.js";
 
-/** Track whether flow config panel is active */
-let _flowConfigActive = false;
-
-/** Activate/deactivate flow config panel mode */
-export function setFlowConfigActive(active: boolean): void {
-  _flowConfigActive = active;
-  if (active) setSelectedNodeId(null);
-  renderConfigPanel();
-}
-
-/** Check if flow config panel is active */
-export function isFlowConfigActive(): boolean {
-  return _flowConfigActive;
-}
-
 /** Flow config callbacks for the full editor (wires to state module). */
 const flowCallbacks: FlowConfigCallbacks = {
   getWorkflow: () => getWorkflow(),
@@ -39,7 +24,6 @@ const flowCallbacks: FlowConfigCallbacks = {
   setDirty: () => setDirty(true),
   autoSave,
   rerender: () => renderConfigPanel(),
-  onBack: () => setFlowConfigActive(false),
   getSVGContainer: () => getContainer()?.querySelector("#wf-svg") ?? null,
 };
 
@@ -64,7 +48,7 @@ const settingsCallbacks: SettingsCallbacks = {
   onBack: () => { setSettingsPanelActive(false); renderConfigPanel(); },
 };
 
-/** Render the full config panel — four-state: settings / flow-config / node-config / empty. */
+/** Render the full config panel — three-state: settings / node-config / empty-with-flows. */
 export function renderConfigPanel(): void {
   const panel = getContainer()?.querySelector("#wf-config-panel");
   const workflow = getWorkflow();
@@ -92,34 +76,35 @@ export function renderConfigPanel(): void {
     return;
   }
 
-  // State 1: Flow config active
-  if (_flowConfigActive) {
-    const flows = detectFlows(workflow.nodes, workflow.edges);
-    panel.innerHTML = renderFlowConfigHTML(flows, workflow.flowConfig, "wf", { showBack: true });
-    wireFlowConfigEvents(panel, flows, flowCallbacks);
-    return;
-  }
-
-  // State 2: Node selected → node config
+  // State 1: Node selected → node config
   const selectedId = getSelectedNodeId();
   if (selectedId) {
     renderNodeConfigPanel(panel, workflow, selectedId);
     return;
   }
 
-  // State 3: Empty — show "Select a node" + settings link + flow link
+  // State 2: Empty — show "Select a node" + inline flow controls
   renderEmptyPanel(panel, workflow);
 }
 
-/** Render empty state with optional flow link. */
-function renderEmptyPanel(panel: Element, workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> }): void {
+/** Render empty state with inline flow controls when multi-flow. */
+function renderEmptyPanel(panel: Element, workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>; flowConfig?: import("../../core/api-client.js").FlowExecutionConfig | null }): void {
   const flows = detectFlows(workflow.nodes, workflow.edges);
   const multiFlow = flows.length > 1;
+
+  let flowHtml = "";
+  if (multiFlow) {
+    flowHtml = renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf");
+  }
+
   panel.innerHTML = `
     <p class="empty-state">Select a node</p>
-    ${multiFlow ? `<span class="wf-flow-link" id="wf-flow-link">${flows.length} flows detected</span>` : ""}
+    ${flowHtml}
   `;
-  panel.querySelector("#wf-flow-link")?.addEventListener("click", () => setFlowConfigActive(true));
+
+  if (multiFlow) {
+    wireFlowConfigEvents(panel, flows, flowCallbacks);
+  }
 }
 
 /** Render node config panel with schema-driven form fields. */
