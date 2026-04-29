@@ -1519,6 +1519,14 @@ const server = Bun.serve<WsData>({
           return d && d.activationMode !== null;
         });
 
+        // Build app-id → raw-node lookup so sequential/event-driven filtering
+        // of appsToActivate doesn't break the processableNodes index mapping.
+        // pipelineApps[i] maps 1:1 to processableNodes[i] (same source, same filter).
+        const rawNodeByAppId = new Map<string, any>();
+        for (let i = 0; i < pipelineApps.length && i < processableNodes.length; i++) {
+          rawNodeByAppId.set(pipelineApps[i].id, processableNodes[i]);
+        }
+
         // Register workflow instance for execution controls
         session.activeWorkflowId = wfId;
         // Persist to DB so it survives server restarts
@@ -1582,7 +1590,8 @@ const server = Bun.serve<WsData>({
         const aiIdx: number[] = [];
 
         for (let i = 0; i < appsToActivate.length; i++) {
-          const pDef = processableNodes[i] ? NODE_DEF_MAP.get(processableNodes[i].type) : null;
+          const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+          const pDef = rawNode ? NODE_DEF_MAP.get(rawNode.type) : null;
           if (pDef?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
           if (pDef?.activationMode === "vision") { visionIdx.push(i); continue; }
           if (pDef?.activationMode === "sensor") { sensorIdx.push(i); continue; }
@@ -1593,20 +1602,22 @@ const server = Bun.serve<WsData>({
 
         // 1. Fire-and-forget: send all vision configs to iOS immediately
         for (const i of visionIdx) {
+          const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+          if (!rawNode) continue;
           const visionConfig = {
             type: "vision_stage_config" as const,
-            nodeType: processableNodes[i].type,
-            detectionTypes: [processableNodes[i].type],
-            confidence: (processableNodes[i].config as any)?.confidence ?? 0.5,
-            targetFPS: (processableNodes[i].config as any)?.targetFPS ?? 5,
-            maxResults: (processableNodes[i].config as any)?.maxFaces
-              ?? (processableNodes[i].config as any)?.maxPersons
-              ?? (processableNodes[i].config as any)?.maxPoses ?? 0,
-            language: (processableNodes[i].config as any)?.language ?? "en-US",
+            nodeType: rawNode.type,
+            detectionTypes: [rawNode.type],
+            confidence: (rawNode.config as any)?.confidence ?? 0.5,
+            targetFPS: (rawNode.config as any)?.targetFPS ?? 5,
+            maxResults: (rawNode.config as any)?.maxFaces
+              ?? (rawNode.config as any)?.maxPersons
+              ?? (rawNode.config as any)?.maxPoses ?? 0,
+            language: (rawNode.config as any)?.language ?? "en-US",
             symbologies: Object.entries(
-              (processableNodes[i].config as any)?.symbologies ?? { qr: true }
+              (rawNode.config as any)?.symbologies ?? { qr: true }
             ).filter(([, v]) => v).map(([k]) => k),
-            maxLabels: (processableNodes[i].config as any)?.maxLabels ?? 5,
+            maxLabels: (rawNode.config as any)?.maxLabels ?? 5,
           };
           if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
             session.publisher.ws.send(JSON.stringify(visionConfig));
@@ -1652,14 +1663,16 @@ const server = Bun.serve<WsData>({
         }
 
         // 4. Collect all enhance nodes and send one combined config to iOS
-        // IMPORTANT: use processableNodes[i].config (raw node config with brightness/contrast/saturation)
+        // IMPORTANT: use rawNode.config (raw node config with brightness/contrast/saturation)
         // NOT appsToActivate[i].config (resolved AppConfig with model/voice/input/output)
         if (enhanceIdx.length > 0) {
           const enhanceFilters: Array<{ type: string; params: Record<string, number> }> = [];
           for (const i of enhanceIdx) {
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
             enhanceFilters.push({
-              type: processableNodes[i].type,
-              params: (processableNodes[i].config ?? {}) as Record<string, number>,
+              type: rawNode.type,
+              params: (rawNode.config ?? {}) as Record<string, number>,
             });
             activatedAppIds.push(appsToActivate[i].id);
           }
@@ -1677,16 +1690,18 @@ const server = Bun.serve<WsData>({
         if (sensorIdx.length > 0) {
           const sensorConfigs: Array<{ sensorType: string; config: Record<string, unknown> }> = [];
           for (const i of sensorIdx) {
-            const rawConfig = { ...(processableNodes[i].config ?? {}) as Record<string, unknown> };
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
+            const rawConfig = { ...(rawNode.config ?? {}) as Record<string, unknown> };
 
             // Parse targetLabels from comma-separated string to array for sound classifier
-            if (processableNodes[i].type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
+            if (rawNode.type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
               const parsed = (rawConfig.targetLabels as string).split(",").map(s => s.trim()).filter(s => s.length > 0);
               rawConfig.targetLabels = parsed.length > 0 ? parsed : undefined;
             }
 
             sensorConfigs.push({
-              sensorType: processableNodes[i].type,
+              sensorType: rawNode.type,
               config: rawConfig,
             });
             activatedAppIds.push(appsToActivate[i].id);
@@ -1705,9 +1720,11 @@ const server = Bun.serve<WsData>({
         if (speechIdx.length > 0) {
           const speechConfigs: Array<{ speechType: string; config: Record<string, unknown> }> = [];
           for (const i of speechIdx) {
-            const rawConfig = { ...(processableNodes[i].config ?? {}) as Record<string, unknown> };
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
+            const rawConfig = { ...(rawNode.config ?? {}) as Record<string, unknown> };
             speechConfigs.push({
-              speechType: processableNodes[i].type,
+              speechType: rawNode.type,
               config: rawConfig,
             });
             activatedAppIds.push(appsToActivate[i].id);
