@@ -9,7 +9,7 @@
 import { fetchSessions, esc } from "../../core/api-client.js";
 import type { SessionInfo } from "../../core/api-client.js";
 import { getWorkflow } from "./state.js";
-import { NODE_STATE_VISUALS } from "./svg-renderer.js";
+
 
 // --- Types ---
 
@@ -386,15 +386,15 @@ export function renderNodePreviewHTML(nodeId: string | null): string {
 // --- Helpers ---
 
 const NODE_STATE_COLORS: Record<string, string> = {
-  running: NODE_STATE_VISUALS.running.color,
-  active: NODE_STATE_VISUALS.active.color,
-  idle: NODE_STATE_VISUALS.idle.color,
-  pending: NODE_STATE_VISUALS.pending.color,
-  waiting: NODE_STATE_VISUALS.waiting.color,
-  paused: NODE_STATE_VISUALS.paused.color,
-  completed: NODE_STATE_VISUALS.completed.color,
-  skipped: NODE_STATE_VISUALS.skipped.color,
-  errored: NODE_STATE_VISUALS.errored.color,
+  running:   "#50fa7b",
+  active:    "#50fa7b",
+  idle:      "#9ca3af",
+  pending:   "#f59e0b",
+  waiting:   "#f59e0b",
+  paused:    "#60a5fa",
+  completed: "#22d3ee",
+  skipped:   "#6b7280",
+  errored:   "#f87171",
 };
 
 const STATE_LABELS: Record<string, string> = {
