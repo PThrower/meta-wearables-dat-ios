@@ -1521,6 +1521,8 @@ const server = Bun.serve<WsData>({
 
         // Register workflow instance for execution controls
         session.activeWorkflowId = wfId;
+        // Persist to DB so it survives server restarts
+        dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: wfId }));
 
         // Max session duration enforcement
         const maxDur = parsedSettings?.maxSessionDuration;
@@ -1964,10 +1966,20 @@ const server = Bun.serve<WsData>({
         }
 
         // Replay workflow config if there's an active workflow (publisher reconnected)
-        if (session?.activeWorkflowId && ws.readyState === WebSocket.OPEN) {
-          const wf = q.getWorkflow(session.activeWorkflowId);
+        // Check in-memory first, then fall back to DB (survives server restarts)
+        let wfId = session?.activeWorkflowId;
+        if (!wfId) {
+          const dbSession = q.getSession(sessionId);
+          wfId = dbSession?.activeWorkflowId ?? undefined;
+          if (wfId) {
+            session.activeWorkflowId = wfId;
+            console.log(`[relay] Restored activeWorkflowId=${wfId} from DB for session=${sessionId}`);
+          }
+        }
+        if (wfId && ws.readyState === WebSocket.OPEN) {
+          const wf = q.getWorkflow(wfId);
           if (wf) {
-            const wfNodes = q.getWorkflowNodes(session.activeWorkflowId);
+            const wfNodes = q.getWorkflowNodes(wfId);
             if (wfNodes.length > 0) {
               const typedNodes = wfNodes.map(n => ({
                 id: n.id,
@@ -1975,7 +1987,7 @@ const server = Bun.serve<WsData>({
                 config: typeof n.config === "string" ? JSON.parse(n.config) : (n.config ?? {}),
               }));
               dispatchWorkflowConfig(ws, typedNodes, sessionId);
-              console.log(`[relay] Replayed workflow config for ${session.activeWorkflowId} on publisher reconnect session=${sessionId}`);
+              console.log(`[relay] Replayed workflow config for ${wfId} on publisher reconnect session=${sessionId}`);
             }
           }
         }
@@ -2176,6 +2188,7 @@ const server = Bun.serve<WsData>({
                     session.activeAppId = primaryApp.id;
                     session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: wfId }));
                     // Register workflow instance for execution controls
                     if ((nodes as any[]).length > 1) {
                       const nodeEntries = (nodes as any[]).map((n: any) => ({
@@ -2613,6 +2626,7 @@ const server = Bun.serve<WsData>({
                     session.activeAppId = primaryApp.id;
                     session.activeWorkflowId = wfId;
                     session.appPipeline = { appId: primaryApp.id, primitiveId: primaryApp.binding };
+                    dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: wfId }));
                     // Register workflow instance for execution controls
                     if ((nodes as any[]).length > 1) {
                       const nodeEntries = (nodes as any[]).map((n: any) => ({

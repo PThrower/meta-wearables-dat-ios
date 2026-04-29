@@ -115,6 +115,7 @@ export const sessions = sqliteTable("sessions", {
   stateEnteredAt: text("state_entered_at"),
   dropReason: text("drop_reason"),
   ephemeral: integer("ephemeral").notNull().default(0),
+  activeWorkflowId: text("active_workflow_id"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [

@@ -502,6 +502,27 @@ export function getWorkflowEdges(workflowId: string): Array<{
   `).all(workflowId) as any[];
 }
 
+// --- Session Queries ---
+
+/** Get a session row from DB (for reading persisted fields like activeWorkflowId). */
+export function getSession(sessionId: string): { id: string; activeWorkflowId: string | null; [key: string]: unknown } | null {
+  const db = getDbRaw();
+  return db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId) as any ?? null;
+}
+
+/** Update session fields (returns a closure for DbWriter). */
+export function updateSession(sessionId: string, fields: Record<string, unknown>) {
+  return () => {
+    const db = getDbRaw();
+    const keys = Object.keys(fields);
+    if (keys.length === 0) return;
+    const setClause = keys.map(k => `${k} = ?`).join(", ");
+    const values = keys.map(k => fields[k]);
+    db.prepare(`UPDATE sessions SET ${setClause}, updated_at = ? WHERE id = ?`)
+      .run(...values, now(), sessionId);
+  };
+}
+
 // --- Session State Machine ---
 
 /** Update session state (new state machine). Maps to legacy status column too. */
