@@ -85,13 +85,28 @@ export function renderConfigPanel(): void {
 
   const { flows, multiFlow } = getMultiFlowInfo(workflow);
 
-  // TEMP DEBUG: show flow detection result visibly
-  const debugBanner = `<div style="background:#300;padding:4px 8px;font-size:10px;color:#f66;border-radius:4px;margin-bottom:8px;">[debug] nodes=${workflow.nodes.length} edges=${workflow.edges.length} flows=${flows.length} multiFlow=${multiFlow}</div>`;
+  // TEMP DEBUG: show flow detection result + flowHtml length
+  const debugBanner = `<div style="background:#300;padding:4px 8px;font-size:10px;color:#f66;border-radius:4px;margin-bottom:8px;">[debug] nodes=${workflow.nodes.length} edges=${workflow.edges.length} flows=${flows.length} multiFlow=${multiFlow} selectedId=${getSelectedNodeId() ?? "null"}</div>`;
 
   // Flow config section — always visible at top when multi-flow
+  // Using inline styles to bypass any CSS loading/caching issues
   let flowHtml = "";
   if (multiFlow) {
-    flowHtml = `<div class="wf-flow-section">${renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf")}</div>`;
+    const rawFlowHtml = renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf");
+    flowHtml = `<div style="padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08);">${rawFlowHtml}</div>`;
+    // Fallback: also render a plain-text version with inline styles
+    const mode = workflow.flowConfig?.mode ?? "parallel";
+    const flowLabels = flows.map(f => `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:4px;font-size:11px;background:${f.color};color:#fff;">${esc(f.label)}</span>`).join("");
+    flowHtml += `<div style="padding:8px 0;">
+      <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Flows (${flows.length})</div>
+      <div style="display:flex;gap:4px;margin-bottom:8px;">
+        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "parallel" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="parallel" class="wf-flow-mode-btn">Parallel</button>
+        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "sequential" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="sequential" class="wf-flow-mode-btn">Sequential</button>
+        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "event-driven" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="event-driven" class="wf-flow-mode-btn">Event-Driven</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">${flowLabels}</div>
+      <div style="font-size:10px;color:#f66;margin-top:8px;">[debug] rawFlowHtml.length=${rawFlowHtml.length}</div>
+    </div>`;
   }
 
   // State 1: Node selected → flow config (if multi) + node config
