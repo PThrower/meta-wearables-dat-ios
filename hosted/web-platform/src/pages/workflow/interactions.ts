@@ -1,18 +1,23 @@
 /**
- * SVG interactions — node drag, edge drag, pan, zoom, keyboard delete.
- * Pointer events (mouse + touch + pen) with pinch-to-zoom and long-press.
+ * SVG interactions — node drag, edge drag, keyboard delete.
+ * Pointer events (mouse + touch + pen) with long-press tap detection.
+ * Canvas controls (pan, zoom, pinch) live in canvas-controls.ts.
  */
 
 import { NODE_W, NODE_H } from "./constants.js";
 import {
   getContainer, getWorkflow, getSelectedNodeId,
-  getViewX, getViewY, getZoom, setZoom, setViewX, setViewY,
+  getViewX, getViewY, getZoom,
   setDirty, autoSave, nanoid, setSelectedNodeId,
 } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG, updateEdgesForNode } from "./svg-renderer.js";
 import { renderConfigPanel } from "./config-panel.js";
 import { showNodeActionPopover, hideNodeActionPopover } from "./node-actions.js";
+import { wireCanvasControls, resetCanvasControls, isTouchDevice as _isTouchDeviceFn } from "./canvas-controls.js";
+
+// Re-export for consumers
+export { isTouchDevice } from "./canvas-controls.js";
 
 // --- Drag state ---
 
@@ -29,36 +34,21 @@ interface EdgeState {
   tempLine: SVGLineElement;
 }
 
-interface PanState {
-  startX: number;
-  startY: number;
-  viewX: number;
-  viewY: number;
-}
-
 let _dragState: DragState | null = null;
 let _edgeState: EdgeState | null = null;
-let _panState: PanState | null = null;
 
-// --- Touch / pointer state ---
+// --- Touch / pointer state (node interaction) ---
 
-let _isTouchDevice = false;
 let _longPressTimer: ReturnType<typeof setTimeout> | null = null;
 let _longPressNodeId: string | null = null;
 let _pointerStartX = 0;
 let _pointerStartY = 0;
 let _pointerMoved = false;
-let _activePointers = new Map<number, PointerEvent>();
-let _initialPinchDistance: number | null = null;
-let _pinchZoomStart: number | null = null;
 let _docMoveHandler: ((e: PointerEvent) => void) | null = null;
 let _docUpHandler: ((e: PointerEvent) => void) | null = null;
 
 const LONG_PRESS_MS = 500;
 const TAP_THRESHOLD_PX = 8;
-
-/** Whether the device supports touch. */
-export function isTouchDevice(): boolean { return _isTouchDevice; }
 
 // --- SVG event wiring ---
 
@@ -70,8 +60,8 @@ export function wireSVGEvents(): void {
   if (_docMoveHandler) document.removeEventListener("pointermove", _docMoveHandler);
   if (_docUpHandler) document.removeEventListener("pointerup", _docUpHandler);
 
-  // Prevent browser scroll/zoom interference
-  svg.style.touchAction = "none";
+  // Wire canvas controls (pan, zoom, pinch)
+  wireCanvasControls(svg);
 
   // Node pointerdown -> select, drag, or long-press
   svg.querySelectorAll(".wf-node").forEach(g => {
@@ -79,8 +69,6 @@ export function wireSVGEvents(): void {
       const pe = e as PointerEvent;
       const nodeId = (g as Element).getAttribute("data-id")!;
       const target = pe.target as Element;
-
-      if (pe.pointerType === "touch") _isTouchDevice = true;
 
       // Port drag (edge creation)
       if (target.classList.contains("wf-port-out")) {
@@ -175,7 +163,6 @@ export function wireSVGEvents(): void {
   svg.querySelectorAll(".wf-edge").forEach(path => {
     path.addEventListener("pointerup", (e: Event) => {
       const pe = e as PointerEvent;
-      if (pe.pointerType === "touch") _isTouchDevice = true;
       // Only respond to quick taps, not drags
       if (_pointerMoved) return;
       const workflow = getWorkflow();
@@ -187,117 +174,6 @@ export function wireSVGEvents(): void {
       refreshSVG();
     });
   });
-
-  // Canvas pan / background tap
-  svg.addEventListener("pointerdown", (e: Event) => {
-    const pe = e as PointerEvent;
-    if (pe.pointerType === "touch") _isTouchDevice = true;
-
-    // Track multi-touch for pinch zoom
-    _activePointers.set(pe.pointerId, pe);
-
-    if (_activePointers.size === 2) {
-      // Start pinch — cancel any ongoing pan
-      _panState = null;
-      const pts = [..._activePointers.values()];
-      _initialPinchDistance = Math.hypot(pts[1].clientX - pts[0].clientX, pts[1].clientY - pts[0].clientY);
-      _pinchZoomStart = getZoom();
-      return;
-    }
-
-    if (pe.target === svg || (pe.target as Element).tagName === "rect" ||
-        (pe.target as Element).classList.contains("wf-grid-bg")) {
-      pe.preventDefault();
-      hideNodeActionPopover();
-
-      // Click on background -> deselect
-      if (pe.button === 0 && !pe.ctrlKey && !pe.metaKey) {
-        setSelectedNodeId(null);
-        renderConfigPanel();
-        refreshSVG();
-      }
-
-      // Pan: any drag on background
-      if (pe.button === 0 || pe.button === 1) {
-        _panState = { startX: pe.clientX, startY: pe.clientY, viewX: getViewX(), viewY: getViewY() };
-        svg.setPointerCapture(pe.pointerId);
-
-        const onPanMove = (ev: PointerEvent) => {
-          if (!_panState) return;
-          const zoom = getZoom();
-          const dx = (ev.clientX - _panState.startX) / zoom;
-          const dy = (ev.clientY - _panState.startY) / zoom;
-          const vx = _panState.viewX - dx;
-          const vy = _panState.viewY - dy;
-          const svgEl = getContainer()?.querySelector("#wf-svg");
-          if (svgEl) {
-            svgEl.setAttribute("viewBox", `${vx} ${vy} ${1100 / zoom} ${600 / zoom}`);
-          }
-        };
-
-        const onPanUp = (ev: PointerEvent) => {
-          if (_panState) {
-            const zoom = getZoom();
-            const dx = (ev.clientX - _panState.startX) / zoom;
-            const dy = (ev.clientY - _panState.startY) / zoom;
-            setViewX(_panState.viewX - dx);
-            setViewY(_panState.viewY - dy);
-          }
-          _panState = null;
-          svg.removeEventListener("pointermove", onPanMove);
-          svg.removeEventListener("pointerup", onPanUp);
-        };
-
-        svg.addEventListener("pointermove", onPanMove);
-        svg.addEventListener("pointerup", onPanUp);
-      }
-    }
-  });
-
-  // Pointer up — track multi-touch release
-  svg.addEventListener("pointerup", (e: Event) => {
-    const pe = e as PointerEvent;
-    _activePointers.delete(pe.pointerId);
-    if (_activePointers.size < 2) {
-      _initialPinchDistance = null;
-      _pinchZoomStart = null;
-    }
-  });
-
-  // Pointer move — pinch-to-zoom
-  svg.addEventListener("pointermove", (e: Event) => {
-    const pe = e as PointerEvent;
-    _activePointers.set(pe.pointerId, pe);
-
-    if (_activePointers.size === 2 && _initialPinchDistance != null && _pinchZoomStart != null) {
-      pe.preventDefault();
-      const pts = [..._activePointers.values()];
-      const dist = Math.hypot(pts[1].clientX - pts[0].clientX, pts[1].clientY - pts[0].clientY);
-      if (dist < 1) return;
-      const ratio = dist / _initialPinchDistance;
-      const newZoom = Math.max(0.3, Math.min(3, _pinchZoomStart * ratio));
-      setZoom(newZoom);
-      const svgEl = getContainer()?.querySelector("#wf-svg");
-      if (svgEl) {
-        svgEl.setAttribute("viewBox", `${getViewX()} ${getViewY()} ${1100 / newZoom} ${600 / newZoom}`);
-      }
-    }
-  });
-
-  // Zoom (mouse wheel)
-  svg.addEventListener("wheel", (e: Event) => {
-    e.preventDefault();
-    const we = e as WheelEvent;
-    const delta = we.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.3, Math.min(3, getZoom() * delta));
-    setZoom(newZoom);
-    svg.setAttribute("viewBox", `${getViewX()} ${getViewY()} ${1100 / newZoom} ${600 / newZoom}`);
-  }, { passive: false });
-
-  // Mark SVG with touch device flag for CSS targeting
-  if (_isTouchDevice) {
-    svg.setAttribute("data-touch", "true");
-  }
 }
 
 // --- Keyboard ---
@@ -452,11 +328,8 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
 export function resetInteractions(): void {
   _dragState = null;
   _edgeState = null;
-  _panState = null;
   if (_longPressTimer) clearTimeout(_longPressTimer);
   _longPressTimer = null;
   _longPressNodeId = null;
-  _activePointers.clear();
-  _initialPinchDistance = null;
-  _pinchZoomStart = null;
+  resetCanvasControls();
 }
