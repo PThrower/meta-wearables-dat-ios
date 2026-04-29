@@ -17,27 +17,27 @@ import { buildDefaultFlowConfig } from "./flow-detection.js";
 
 const S = {
   /** Active mode button — cyan accent */
-  btnActive: `flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;text-align:center;transition:all 0.15s;background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;`,
-  /** Inactive mode button — dimmed */
-  btnInactive: `flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;text-align:center;transition:all 0.15s;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);`,
+  btnActive: `flex:1;padding:6px 8px;font-size:11px;border-radius:6px;cursor:pointer;text-align:center;transition:all 0.15s;background:rgba(0,255,255,0.18);border:1px solid rgba(0,255,255,0.5);color:#0ff;font-weight:600;`,
+  /** Inactive mode button — visible but subdued */
+  btnInactive: `flex:1;padding:6px 8px;font-size:11px;border-radius:6px;cursor:pointer;text-align:center;transition:all 0.15s;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.7);`,
   /** Flow order item row */
   item: (draggable: boolean) =>
-    `display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-surface-alt,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:4px;cursor:${draggable ? "grab" : "default"};font-size:12px;color:var(--text-primary,#e0e0e0);`,
+    `display:flex;align-items:center;gap:10px;padding:8px 10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:6px;cursor:${draggable ? "grab" : "default"};font-size:13px;color:#eee;`,
   /** Drag handle icon */
   handle: (draggable: boolean) =>
-    `cursor:${draggable ? "grab" : "default"};color:var(--text-tertiary,rgba(255,255,255,0.35));user-select:none;`,
-  /** Color dot */
+    `cursor:${draggable ? "grab" : "default"};color:rgba(255,255,255,0.5);user-select:none;font-size:14px;`,
+  /** Color dot — 12px with subtle glow */
   dot: (color: string) =>
-    `width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;`,
+    `width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;box-shadow:0 0 6px ${color}40;`,
   /** Section container */
-  section: `padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border,rgba(255,255,255,0.08));`,
+  section: `padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.12);`,
   /** Header row */
-  header: `display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid var(--border,rgba(255,255,255,0.08));margin-bottom:8px;`,
+  header: `display:flex;align-items:center;justify-content:space-between;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:10px;`,
   /** Mode button row */
-  modeRow: `display:flex;gap:2px;width:100%;margin-bottom:8px;`,
+  modeRow: `display:flex;gap:4px;width:100%;margin-bottom:10px;`,
   /** Flow list container — dimmed when parallel (no reorder) */
   list: (active: boolean) =>
-    `display:flex;flex-direction:column;gap:4px;${active ? "" : "opacity:0.4;pointer-events:none;"}`,
+    `display:flex;flex-direction:column;gap:6px;${active ? "" : "opacity:0.5;pointer-events:none;"}`,
 };
 
 /* ── Callback interface ── */
@@ -162,8 +162,8 @@ export function render(flows: DetectedFlow[], config: FlowExecutionConfig | null
 
   return `<div style="${S.section}">
   <div style="${S.header}">
-    <span style="font-size:13px;font-weight:600;color:var(--text-primary,#e0e0e0);">Flows</span>
-    <span style="font-size:11px;color:var(--text-tertiary,rgba(255,255,255,0.35));">${flows.length} found</span>
+    <span style="font-size:13px;font-weight:600;color:#eee;">Flows</span>
+    <span style="font-size:11px;color:rgba(255,255,255,0.55);">${flows.length} found</span>
   </div>
   <div class="wf-flow-mode-selector" style="${S.modeRow}">
     ${buttons}
