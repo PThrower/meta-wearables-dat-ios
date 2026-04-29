@@ -56,18 +56,36 @@ export function resolveSubtitle(template: string, config: Record<string, unknown
   });
 }
 
-/** Node status dot colors for live status indicators. */
-export const NODE_STATUS_DOT_COLORS: Record<string, string> = {
-  running: "#50fa7b",
-  active: "#50fa7b",
-  idle: "#f1fa8c",
-  pending: "#f1fa8c",
-  waiting: "#38bdf8",
-  paused: "#facc15",
-  completed: "#60a5fa",
-  skipped: "#6b7280",
-  errored: "#ff5555",
-  unknown: "#9ca3af",
+/**
+ * Node execution state visual config.
+ * Each state maps to a color + animation class + glow intensity + border width.
+ * Colors chosen for semantic clarity:
+ *   queue (pending/waiting) = amber   — staged, not yet executing
+ *   runtime (running/active) = green  — actively processing
+ *   success (completed) = cyan/blue   — finished OK
+ *   failure (errored) = red           — error
+ *   skip = gray                       — bypassed
+ *   idle = muted yellow               — no activity
+ */
+export interface NodeStateVisual {
+  color: string;       // primary state color
+  glow: number;        // SVG filter stdDeviation (0 = no glow)
+  borderWidth: number; // node border stroke-width
+  opacity: number;     // glow border opacity (0-1)
+  anim: string;        // CSS animation class (empty = none)
+}
+
+export const NODE_STATE_VISUALS: Record<string, NodeStateVisual> = {
+  running:   { color: "#50fa7b", glow: 5, borderWidth: 2, opacity: 0.6, anim: "wf-anim-running" },
+  active:    { color: "#50fa7b", glow: 4, borderWidth: 2, opacity: 0.5, anim: "wf-anim-running" },
+  pending:   { color: "#f59e0b", glow: 3, borderWidth: 1.5, opacity: 0.4, anim: "wf-anim-pending" },
+  waiting:   { color: "#f59e0b", glow: 2, borderWidth: 1.5, opacity: 0.3, anim: "wf-anim-pending" },
+  paused:    { color: "#facc15", glow: 2, borderWidth: 1.5, opacity: 0.35, anim: "" },
+  completed: { color: "#22d3ee", glow: 4, borderWidth: 2, opacity: 0.5, anim: "wf-anim-completed" },
+  skipped:   { color: "#6b7280", glow: 0, borderWidth: 1, opacity: 0.15, anim: "" },
+  errored:   { color: "#ef4444", glow: 6, borderWidth: 2.5, opacity: 0.7, anim: "wf-anim-errored" },
+  idle:      { color: "#f1fa8c", glow: 0, borderWidth: 1, opacity: 0, anim: "" },
+  unknown:   { color: "#9ca3af", glow: 0, borderWidth: 1, opacity: 0, anim: "" },
 };
 
 /** Compute topological depth for all nodes from edges.
@@ -153,14 +171,32 @@ export function buildSVGFromData(
   // Compute topological depth (execution timeline) for all nodes
   const depths = computeDepth(nodes, edges);
 
-  // SVG filter for status glow
-  const glowFilter = testingMode ? `
-    <defs>
-      <filter id="wf-status-glow" x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur stdDeviation="3" result="blur" />
-        <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
-      </filter>
-    </defs>` : "";
+  // SVG filters for per-state glow effects
+  const filterDefs = (() => {
+    // Collect unique states that need glow filters
+    const stateSet = new Set<string>();
+    for (const n of nodes) {
+      const s = nodeStates?.get(n.id);
+      if (s) stateSet.add(s);
+    }
+    if (stateSet.size === 0) return "";
+    let filters = "<defs>";
+    for (const s of stateSet) {
+      const vis = NODE_STATE_VISUALS[s];
+      if (!vis || vis.glow === 0) continue;
+      filters += `<filter id="wf-glow-${s}" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="${vis.glow}" result="blur" />
+        <feFlood flood-color="${vis.color}" flood-opacity="0.4" result="color" />
+        <feComposite in="color" in2="blur" operator="in" result="colored-blur" />
+        <feMerge><feMergeNode in="colored-blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+      </filter>`;
+    }
+    filters += "</defs>";
+    return filters;
+  })();
+
+  // Replace old glowFilter reference
+  const glowFilter = filterDefs;
 
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
@@ -169,18 +205,23 @@ export function buildSVGFromData(
     const selected = selectedId === n.id;
     const stateStr = nodeStates?.get(n.id);
     const preview = previews?.get(n.id);
-    const stateColor = stateStr ? (NODE_STATUS_DOT_COLORS[stateStr] ?? "#9ca3af") : null;
-    const isRunning = stateStr === "running" || stateStr === "active";
+    const vis = stateStr ? (NODE_STATE_VISUALS[stateStr] ?? NODE_STATE_VISUALS.unknown) : null;
 
-    // Status dot (with pulse animation for running nodes)
-    const statusDot = stateColor
-      ? `<circle class="wf-status-dot" cx="${r}" cy="${r}" r="${5 * scale}" fill="${stateColor}" ${isRunning ? 'style="animation:wf-pulse 1.5s infinite"' : ''} />`
+    // State-colored border: replace default stroke when node has a state
+    const borderStroke = selected ? "#fff" : (vis ? vis.color : c.stroke);
+    const borderStrokeWidth = selected ? 2 : (vis ? vis.borderWidth : 1);
+
+    // Status dot — colored circle with per-state animation
+    const statusDot = vis
+      ? `<circle class="wf-status-dot ${vis.anim}" cx="${r}" cy="${r}" r="${5 * scale}" fill="${vis.color}" />`
       : "";
 
-    // Status glow rect behind node (testing mode only)
-    const statusGlow = testingMode && stateColor && stateStr !== "idle" && stateStr !== "unknown"
-      ? `<rect x="${-2 * scale}" y="${-2 * scale}" width="${w + 4 * scale}" height="${nodeH + 4 * scale}" rx="${r + 2 * scale}" fill="none" stroke="${stateColor}" stroke-width="1" opacity="0.3" filter="url(#wf-status-glow)" pointer-events="none" />`
-      : "";
+    // State glow border — always visible when node has non-idle state
+    const statusGlow = vis && vis.glow > 0
+      ? `<rect x="${-2 * scale}" y="${-2 * scale}" width="${w + 4 * scale}" height="${nodeH + 4 * scale}" rx="${r + 2 * scale}" fill="none" stroke="${vis.color}" stroke-width="${vis.borderWidth}" opacity="${vis.opacity}" filter="url(#wf-glow-${stateStr})" pointer-events="none" />`
+      : vis && vis.opacity > 0
+        ? `<rect x="${-2 * scale}" y="${-2 * scale}" width="${w + 4 * scale}" height="${nodeH + 4 * scale}" rx="${r + 2 * scale}" fill="none" stroke="${vis.color}" stroke-width="1" opacity="${vis.opacity}" pointer-events="none" />`
+        : "";
 
     // Flow indicator badge (small colored dot in top-left, only when multi-flow)
     const flowColor = nodeFlowColor.get(n.id);
@@ -220,7 +261,7 @@ export function buildSVGFromData(
         ${statusGlow}
         ${statusDot}
         ${flowDot}
-        <rect class="wf-node-bg" width="${w}" height="${nodeH}" rx="${r}" fill="${c.fill}" stroke="${selected ? "#fff" : c.stroke}" stroke-width="${selected ? 2 : 1}" />
+        <rect class="wf-node-bg" width="${w}" height="${nodeH}" rx="${r}" fill="${c.fill}" stroke="${borderStroke}" stroke-width="${borderStrokeWidth}" />
         <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
         <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
         <text x="${w / 2}" y="${16 * scale}" text-anchor="middle" fill="#fff" font-size="${10 * scale}" font-weight="600">${esc(n.type.replace("-", " "))}</text>

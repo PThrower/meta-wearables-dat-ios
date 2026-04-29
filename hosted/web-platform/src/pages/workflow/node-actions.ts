@@ -11,7 +11,7 @@ import {
 import { getNodeDef } from "./node-defs.js";
 import { renderConfigPanel } from "./config-panel.js";
 import { refreshSVG } from "./svg-renderer.js";
-import { NODE_STATUS_DOT_COLORS } from "./svg-renderer.js";
+import { NODE_STATE_VISUALS } from "./svg-renderer.js";
 import {
   getNodePreview, isPreviewConnected, sendPreviewJson, getPublisherStatus,
 } from "./editor-preview.js";
@@ -47,7 +47,7 @@ export function showNodeActionPopover(nodeId: string): void {
 
   // State indicator
   const stateStr = preview?.executionState;
-  const stateColor = stateStr ? (NODE_STATUS_DOT_COLORS[stateStr] ?? "#9ca3af") : "#9ca3af";
+  const stateColor = stateStr ? (NODE_STATE_VISUALS[stateStr]?.color ?? "#9ca3af") : "#9ca3af";
   const stateLabel = stateStr ?? "idle";
   bodyHTML += `<div class="wf-popover-state">
     <span class="wf-popover-dot" style="background:${stateColor}"></span>

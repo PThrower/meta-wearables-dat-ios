@@ -561,7 +561,7 @@ export interface NodeDefinition {
   color: { fill: string; header: string; stroke: string };
   allowedTargets: string[];
   role: "source" | "processor" | "reference" | "trigger" | "transform" | "sink";
-  activationMode: "ai" | "jepa" | "stt" | "passthrough" | "vision" | "enhance" | "sensor" | null;
+  activationMode: "ai" | "jepa" | "stt" | "passthrough" | "vision" | "enhance" | "sensor" | "speech" | null;
   binding: string | null;
   defaultModel: string | null;
   configSchema: ConfigFieldSchema[];

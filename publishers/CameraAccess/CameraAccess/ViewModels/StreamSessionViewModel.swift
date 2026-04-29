@@ -176,6 +176,8 @@ class StreamSessionViewModel: ObservableObject {
   private var enhanceStage: FrameTransformStage?
   private var audioClassificationStage: AudioClassificationStage?
   private var locationStage: LocationStage?
+  private var speechRecognitionStage: SpeechRecognitionStage?
+  private var voiceActivityStage: VoiceActivityStage?
 
   // Preview system
   #if DEBUG
@@ -909,6 +911,59 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  // MARK: - Speech Stages
+
+  /// Configure speech stages (STT, VAD) from server-sent config.
+  private func configureSpeechStage(config: [String: Any]) async {
+    let speechConfig = SpeechStageConfig.fromServerConfig(config)
+
+    // Stop existing stages
+    if let sttStage = speechRecognitionStage {
+      await sttStage.stop()
+      speechRecognitionStage = nil
+    }
+    if let vadStage = voiceActivityStage {
+      await vadStage.stop()
+      voiceActivityStage = nil
+    }
+
+    for stage in speechConfig.stages {
+      switch stage.type {
+      case .stt:
+        let sttStage = SpeechRecognitionStage()
+        let cfg = stage.config
+        await sttStage.configure(
+          language: cfg["language"] as? String ?? "en-US",
+          onDeviceOnly: (cfg["recognitionMode"] as? String ?? "onDevice") == "onDevice",
+          partialResults: cfg["partialResults"] as? Bool ?? true
+        )
+        await sttStage.setOnResult { [weak self] result in
+          await self?.relayStage.sendJson(result.jsonDict)
+        }
+        await sttStage.start()
+        speechRecognitionStage = sttStage
+        NSLog("[StreamSession] SpeechRecognitionStage started")
+
+      case .vad:
+        let vadStage = VoiceActivityStage()
+        let cfg = stage.config
+        await vadStage.configure(
+          energyThreshold: cfg["energyThreshold"] as? Float ?? -40.0,
+          speechDurationMs: cfg["speechDurationMs"] as? Double ?? 100.0,
+          silenceDurationMs: cfg["silenceDurationMs"] as? Double ?? 300.0,
+          cooldownMs: cfg["cooldownMs"] as? Double ?? 200.0
+        )
+        await vadStage.setEventBus(audioEventBus)
+        await vadStage.setOnResult { [weak self] result in
+          await self?.relayStage.sendJson(result.jsonDict)
+        }
+        await vadStage.start()
+        voiceActivityStage = vadStage
+        NSLog("[StreamSession] VoiceActivityStage started")
+      }
+    }
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -1086,6 +1141,28 @@ class StreamSessionViewModel: ObservableObject {
         } else {
           Task { @MainActor [weak self] in
             await self?.configureSensorStage(config: msg)
+          }
+        }
+      }
+
+      // Speech stage config from server — configure STT / VAD stages
+      if msgType == "speech_stage_config" {
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            if let sttStage = self?.speechRecognitionStage {
+              await sttStage.stop()
+              self?.speechRecognitionStage = nil
+            }
+            if let vadStage = self?.voiceActivityStage {
+              await vadStage.stop()
+              self?.voiceActivityStage = nil
+            }
+            NSLog("[StreamSession] Speech stages disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            await self?.configureSpeechStage(config: msg)
           }
         }
       }
@@ -1278,6 +1355,16 @@ class StreamSessionViewModel: ObservableObject {
     if let locStage = locationStage {
       await locStage.stop()
       locationStage = nil
+    }
+
+    // Stop speech stages (STT, VAD)
+    if let sttStage = speechRecognitionStage {
+      await sttStage.stop()
+      speechRecognitionStage = nil
+    }
+    if let vadStage = voiceActivityStage {
+      await vadStage.stop()
+      voiceActivityStage = nil
     }
 
     // Stop sensor relay (FRSE frames)

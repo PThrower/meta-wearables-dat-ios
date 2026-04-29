@@ -7,6 +7,8 @@
  * Sends control messages via the injected sendFn.
  */
 
+import { NODE_STATE_VISUALS } from "./pages/workflow/svg-renderer.js";
+
 export interface GuidanceEvent {
   type:
     | "guidance.step"
@@ -124,13 +126,13 @@ export interface NodeState {
 }
 
 export const NODE_STATE_COLORS: Record<NodeExecutionState, string> = {
-  pending: "#9ca3af",
-  running: "#4ade80",
-  paused: "#facc15",
-  completed: "#60a5fa",
-  skipped: "#6b7280",
-  errored: "#f87171",
-  waiting: "#38bdf8",
+  pending: NODE_STATE_VISUALS.pending.color,
+  running: NODE_STATE_VISUALS.running.color,
+  paused: NODE_STATE_VISUALS.paused.color,
+  completed: NODE_STATE_VISUALS.completed.color,
+  skipped: NODE_STATE_VISUALS.skipped.color,
+  errored: NODE_STATE_VISUALS.errored.color,
+  waiting: NODE_STATE_VISUALS.waiting.color,
 };
 
 const NODE_STATE_LABELS: Record<NodeExecutionState, string> = {

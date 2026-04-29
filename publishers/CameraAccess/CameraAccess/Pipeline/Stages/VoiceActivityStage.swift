@@ -17,7 +17,8 @@ import Foundation
 actor VoiceActivityStage {
     // AudioEventBus subscription
     private var eventBus: AudioEventBus?
-    private var subscription: AsyncStream<AudioPacket>.Iterator?
+    private var subscriptionId: UUID?
+    private var subscriptionStream: AsyncStream<AudioPacket>?
 
     // Config
     private var energyThreshold: Float = -40.0   // dB, speech above this
@@ -80,8 +81,9 @@ actor VoiceActivityStage {
         consecutiveSilenceFrames = 0
         lastEventTimestamp = 0
 
-        let stream = await eventBus.subscribe()
-        subscription = stream.makeIterator()
+        let (subId, stream) = await eventBus.subscribe()
+        subscriptionId = subId
+        subscriptionStream = stream
 
         // Calculate expected frame duration: bufferSize / sampleRate * 1000
         // Typical: 1024 samples / 48000 Hz * 1000 = ~21ms per frame
@@ -102,7 +104,12 @@ actor VoiceActivityStage {
 
         processingTask?.cancel()
         processingTask = nil
-        subscription = nil
+
+        if let subId = subscriptionId, let eventBus {
+            await eventBus.unsubscribe(subId)
+        }
+        subscriptionId = nil
+        subscriptionStream = nil
 
         NSLog("[VAD] Stopped")
     }
@@ -110,10 +117,10 @@ actor VoiceActivityStage {
     // MARK: - Processing
 
     private func processLoop() async {
-        guard var iterator = subscription else { return }
+        guard let stream = subscriptionStream else { return }
 
-        while isEnabled {
-            guard let packet = iterator.next() else { break }
+        for await packet in stream {
+            guard isEnabled else { break }
 
             let now = Date().timeIntervalSince1970 * 1000
 

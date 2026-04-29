@@ -81,6 +81,9 @@
 		FFF5552C9C664A529B08A28E /* FrameTransformStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */; };
 		SNSRTYPBLD01 /* SensorTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRTYPFLE01 /* SensorTypes.swift */; };
 		SNSRSNDBLD01 /* AudioClassificationStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRSNDFLE01 /* AudioClassificationStage.swift */; };
+		6B8D26170B011C5349CC9B05 /* SpeechRecognitionStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AB03A4DD05EDE700A59A481 /* SpeechRecognitionStage.swift */; };
+		3330C7CA2FDB5BB12849D950 /* VoiceActivityStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC51C000FF20228B63FDA6A8 /* VoiceActivityStage.swift */; };
+		0919D58C005F10F5432C8958 /* SpeechTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A179371FBA280A73F0A2ABC /* SpeechTypes.swift */; };
 		SNSRLOCBLD01 /* LocationStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = SNSRLOCFLE01 /* LocationStage.swift */; };
 /* End PBXBuildFile section */
 
@@ -192,6 +195,9 @@
 		9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameTransformStage.swift; sourceTree = "<group>"; };
 		SNSRTYPFLE01 /* SensorTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensorTypes.swift; sourceTree = "<group>"; };
 		SNSRSNDFLE01 /* AudioClassificationStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioClassificationStage.swift; sourceTree = "<group>"; };
+		9AB03A4DD05EDE700A59A481 /* SpeechRecognitionStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognitionStage.swift; sourceTree = "<group>"; };
+		EC51C000FF20228B63FDA6A8 /* VoiceActivityStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceActivityStage.swift; sourceTree = "<group>"; };
+		6A179371FBA280A73F0A2ABC /* SpeechTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechTypes.swift; sourceTree = "<group>"; };
 		SNSRLOCFLE01 /* LocationStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -375,6 +381,7 @@
 				PRVBSFLE001 /* PreviewBus.swift */,
 				VISNTYPFLE01 /* VisionTypes.swift */,
 				SNSRTYPFLE01 /* SensorTypes.swift */,
+				6A179371FBA280A73F0A2ABC /* SpeechTypes.swift */,
 				A57B6CDBA9FB45D0B1AD3A97 /* EnhanceTypes.swift */,
 				60782D0E0BAD4B1A9C0E7E04 /* AudioProcessingConfig.swift */,
 				PIPEMSRC02 /* AudioSource.swift */,
@@ -405,6 +412,8 @@
 				PIPEH264R01 /* H264FrameEncoder.swift */,
 				VISNSTGFLE01 /* VisionStage.swift */,
 				SNSRSNDFLE01 /* AudioClassificationStage.swift */,
+				9AB03A4DD05EDE700A59A481 /* SpeechRecognitionStage.swift */,
+				EC51C000FF20228B63FDA6A8 /* VoiceActivityStage.swift */,
 				SNSRLOCFLE01 /* LocationStage.swift */,
 				9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */,
 			);
@@ -656,6 +665,9 @@
 				FFF5552C9C664A529B08A28E /* FrameTransformStage.swift in Sources */,
 				SNSRTYPBLD01 /* SensorTypes.swift in Sources */,
 				SNSRSNDBLD01 /* AudioClassificationStage.swift in Sources */,
+				6B8D26170B011C5349CC9B05 /* SpeechRecognitionStage.swift in Sources */,
+				3330C7CA2FDB5BB12849D950 /* VoiceActivityStage.swift in Sources */,
+				0919D58C005F10F5432C8958 /* SpeechTypes.swift in Sources */,
 				SNSRLOCBLD01 /* LocationStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

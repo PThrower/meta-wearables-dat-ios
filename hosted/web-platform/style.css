@@ -3862,10 +3862,37 @@ select.wf-config-input {
   background: rgba(239, 68, 68, 0.15);
 }
 
-/* === Node Status Pulse Animation === */
-@keyframes wf-pulse {
+/* === Node Status Animations === */
+@keyframes wf-anim-pending {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes wf-anim-running {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+@keyframes wf-anim-completed {
+  0% { opacity: 1; }
+  70% { opacity: 0.8; }
+  100% { opacity: 0.6; }
+}
+@keyframes wf-anim-errored {
+  0%, 100% { opacity: 1; }
+  25% { opacity: 0.3; }
+  50% { opacity: 1; }
+  75% { opacity: 0.3; }
+}
+.wf-status-dot.wf-anim-pending {
+  animation: wf-anim-pending 2.5s ease-in-out infinite;
+}
+.wf-status-dot.wf-anim-running {
+  animation: wf-anim-running 1.5s ease-in-out infinite;
+}
+.wf-status-dot.wf-anim-completed {
+  animation: wf-anim-completed 3s ease-out forwards;
+}
+.wf-status-dot.wf-anim-errored {
+  animation: wf-anim-errored 0.8s ease-in-out infinite;
 }
 
 /* === FAB (Floating Action Button) === */

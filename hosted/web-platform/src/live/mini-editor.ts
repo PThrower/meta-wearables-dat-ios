@@ -8,7 +8,7 @@ import { GuidancePanel, NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeState } from "../guidance.js";
 import { fetchWorkflow, updateWorkflow, esc } from "../core/api-client.js";
 import type { WorkflowDetail } from "../core/api-client.js";
-import { NODE_STATUS_DOT_COLORS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
+import { NODE_STATE_VISUALS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "../pages/workflow/flow-detection.js";
@@ -221,7 +221,7 @@ export class MiniWorkflowEditor {
       const selected = this.selectedNodeId === n.id;
       const stateColor = this.nodeStates.get(n.id);
       const statusDot = stateColor
-        ? `<circle cx="8" cy="8" r="5" fill="${NODE_STATUS_DOT_COLORS[stateColor] ?? "#9ca3af"}" />`
+        ? `<circle cx="8" cy="8" r="5" fill="${NODE_STATE_VISUALS[stateColor]?.color ?? "#9ca3af"}" />`
         : "";
       // Flow indicator badge (small colored dot in top-left, only when multi-flow)
       const flowDot = multiFlow && nodeFlowColor.has(n.id)
