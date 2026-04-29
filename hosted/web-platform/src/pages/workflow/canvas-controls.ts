@@ -66,7 +66,7 @@ export function wireCanvasControls(svg: SVGElement): void {
       // Pan: left drag or middle drag on background
       if (pe.button === 0 || pe.button === 1) {
         _panState = { startX: pe.clientX, startY: pe.clientY, viewX: getViewX(), viewY: getViewY() };
-        svg.setPointerCapture(pe.pointerId);
+        try { svg.setPointerCapture(pe.pointerId); } catch {}
 
         const onPanMove = (ev: PointerEvent) => {
           if (!_panState) return;
