@@ -226,7 +226,7 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
-    const wfMatch = pathname.match(/^\/workflows\/([^/]+)(\/activate)?$/);
+    const wfMatch = pathname.match(/^\/workflows\/([^/]+)(\/activate|\/start-stream|\/stop-stream)?$/);
     if (wfMatch) {
       return proxyRequest(req, pathname);
     }
