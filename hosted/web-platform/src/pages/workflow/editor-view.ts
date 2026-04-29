@@ -343,26 +343,36 @@ function wireEditorEvents(): void {
     setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
-  // Toolbar: stream toggle — start or stop stream for activated workflow
+  // Toolbar: stream toggle — start or stop camera on a live session
   getContainer()?.querySelector("#wf-stream-btn")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    if (!workflow?.id) return;
     const btn = getContainer()?.querySelector("#wf-stream-btn") as HTMLElement;
     const isStreaming = btn?.textContent?.trim() === "Stop";
 
+    // Find a live session to target
+    const sessions = await fetchSessions();
+    const liveSessions = sessions.filter(s => s.live);
+    if (liveSessions.length === 0) {
+      alert("No live sessions. Wake a device first.");
+      return;
+    }
+
+    // If only one session, use it directly; otherwise pick by workflow target or first
+    const workflow = getWorkflow();
+    const settings = workflow?.settings;
+    let target = liveSessions.find(s => s.device?.deviceId === settings?.targetDeviceId) ?? liveSessions[0];
+
     if (isStreaming) {
-      const result = await stopStream(workflow.id);
+      const result = await stopStream(target.sessionId);
       if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
       btn.textContent = "Stream";
       refreshTestingPanel();
       return;
     }
 
-    const result = await startStream(workflow.id);
+    const result = await startStream(target.sessionId);
     if (!result?.ok) {
       const err = result?.error ?? "Unknown error";
-      if (err.includes("No active activation")) { alert("No active activation. Activate the workflow first."); }
-      else if (err.includes("Publisher not connected")) { alert("Publisher not connected. Wake the device first."); }
+      if (err.includes("Publisher not connected")) { alert("Publisher not connected. Wake the device first."); }
       else { alert("Stream failed: " + err); }
       return;
     }
@@ -434,10 +444,10 @@ async function refreshTestingPanel(): Promise<void> {
       ? '<span class="wf-testing-badge wf-testing-badge-activated">Activated</span>'
       : '';
 
-    // Button states
+    // Button states: Stream is independent of activation — just needs publisher connected
     const canWake = !isOnline && !!d.apnsToken;
     const canActivate = isOnline && !isActivated;
-    const canStartStream = isActivated && isOnline && !isStreaming;
+    const canStartStream = isOnline && !isStreaming;
     const canStopStream = isStreaming;
 
     return `
@@ -496,10 +506,9 @@ async function refreshTestingPanel(): Promise<void> {
   // Wire per-device Start Stream buttons
   body.querySelectorAll(".wf-test-start-stream:not([disabled])").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const wf = getWorkflow();
       const sessionId = (btn as HTMLElement).dataset.sessionId!;
-      if (!wf?.id) return;
-      const result = await startStream(wf.id, sessionId || undefined);
+      if (!sessionId) return;
+      const result = await startStream(sessionId);
       if (!result?.ok) { alert(result?.error ?? "Stream failed"); return; }
       setTimeout(refreshTestingPanel, 2000);
     });
@@ -508,10 +517,9 @@ async function refreshTestingPanel(): Promise<void> {
   // Wire per-device Stop Stream buttons
   body.querySelectorAll(".wf-test-stop-stream").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const wf = getWorkflow();
       const sessionId = (btn as HTMLElement).dataset.sessionId!;
-      if (!wf?.id) return;
-      const result = await stopStream(wf.id, sessionId || undefined);
+      if (!sessionId) return;
+      const result = await stopStream(sessionId);
       if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
       setTimeout(refreshTestingPanel, 1500);
     });

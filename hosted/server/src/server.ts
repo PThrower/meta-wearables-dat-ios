@@ -1637,57 +1637,37 @@ const server = Bun.serve<WsData>({
       }
     }
 
-    // --- Workflow Stream Control (start/stop stream via REST) ---
+    // --- Session Stream Control (start/stop camera stream) ---
+    // Independent of workflow activation — just sends start_stream/stop_stream
+    // to the publisher's WebSocket, same as the live viewer does.
 
-    const wfStreamMatch = url.pathname.match(/^\/workflows\/([^/]+)\/start-stream$/);
-    if (wfStreamMatch && req.method === "POST") {
+    const sessStartMatch = url.pathname.match(/^\/session\/([^/]+)\/start-stream$/);
+    if (sessStartMatch && req.method === "POST") {
       try {
-        const wfId = wfStreamMatch[1];
-        let sessionId: string | undefined;
-        try { sessionId = (await req.json() as { sessionId?: string }).sessionId; } catch {}
-        let session: Session | undefined;
-        if (sessionId) {
-          session = registry.getSession(sessionId);
-        } else {
-          const activation = q.getActiveActivationForWorkflow(wfId);
-          if (!activation) {
-            return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
-          }
-          session = registry.getSession(activation.sessionId);
-        }
+        const sessionId = sessStartMatch[1];
+        const session = registry.getSession(sessionId);
         if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
           return Response.json({ error: "Publisher not connected" }, { status: 404 });
         }
         session.publisher.ws.send(JSON.stringify({ type: "start_stream" }));
-        console.log(`[stream-control] start_stream sent for workflow ${wfId} session ${session.id ?? sessionId}`);
-        return Response.json({ ok: true, sessionId: session.id ?? sessionId });
+        console.log(`[stream-control] start_stream sent to session ${sessionId}`);
+        return Response.json({ ok: true, sessionId });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }
     }
 
-    const wfStopStreamMatch = url.pathname.match(/^\/workflows\/([^/]+)\/stop-stream$/);
-    if (wfStopStreamMatch && req.method === "POST") {
+    const sessStopMatch = url.pathname.match(/^\/session\/([^/]+)\/stop-stream$/);
+    if (sessStopMatch && req.method === "POST") {
       try {
-        const wfId = wfStopStreamMatch[1];
-        let sessionId: string | undefined;
-        try { sessionId = (await req.json() as { sessionId?: string }).sessionId; } catch {}
-        let session: Session | undefined;
-        if (sessionId) {
-          session = registry.getSession(sessionId);
-        } else {
-          const activation = q.getActiveActivationForWorkflow(wfId);
-          if (!activation) {
-            return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
-          }
-          session = registry.getSession(activation.sessionId);
-        }
+        const sessionId = sessStopMatch[1];
+        const session = registry.getSession(sessionId);
         if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
           return Response.json({ error: "Publisher not connected" }, { status: 404 });
         }
         session.publisher.ws.send(JSON.stringify({ type: "stop_stream" }));
-        console.log(`[stream-control] stop_stream sent for workflow ${wfId} session ${session.id ?? sessionId}`);
-        return Response.json({ ok: true, sessionId: session.id ?? sessionId });
+        console.log(`[stream-control] stop_stream sent to session ${sessionId}`);
+        return Response.json({ ok: true, sessionId });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }

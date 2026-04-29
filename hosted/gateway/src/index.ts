@@ -226,7 +226,7 @@ export function createFetchHandler(config?: {
       return proxyRequest(req, pathname);
     }
 
-    const wfMatch = pathname.match(/^\/workflows\/([^/]+)(\/activate|\/start-stream|\/stop-stream)?$/);
+    const wfMatch = pathname.match(/^\/workflows\/([^/]+)(\/activate)?$/);
     if (wfMatch) {
       return proxyRequest(req, pathname);
     }
@@ -247,6 +247,11 @@ export function createFetchHandler(config?: {
 
     const audioInMatch = pathname.match(/^\/session\/([^/]+)\/audio-in$/);
     if (audioInMatch && req.method === "POST") {
+      return proxyRequest(req, pathname);
+    }
+
+    const sessStreamMatch = pathname.match(/^\/session\/([^/]+)\/(start|stop)-stream$/);
+    if (sessStreamMatch && req.method === "POST") {
       return proxyRequest(req, pathname);
     }
 

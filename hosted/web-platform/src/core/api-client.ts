@@ -488,15 +488,12 @@ export async function activateWorkflow(
   }
 }
 
-/** Start streaming for an activated workflow (optionally targeting a specific session) */
-export async function startStream(workflowId: string, sessionId?: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+/** Start camera stream on a session's publisher (independent of workflow activation) */
+export async function startStream(sessionId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
   try {
-    const body: Record<string, string> = {};
-    if (sessionId) body.sessionId = sessionId;
-    const res = await authFetch(`/workflows/${workflowId}/start-stream`, {
+    const res = await authFetch(`/session/${sessionId}/start-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: Object.keys(body).length ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as any;
     if (!res.ok) return { ok: false, error: data.error ?? "Failed to start stream" };
@@ -507,15 +504,12 @@ export async function startStream(workflowId: string, sessionId?: string): Promi
   }
 }
 
-/** Stop streaming for an activated workflow (optionally targeting a specific session) */
-export async function stopStream(workflowId: string, sessionId?: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+/** Stop camera stream on a session's publisher */
+export async function stopStream(sessionId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
   try {
-    const body: Record<string, string> = {};
-    if (sessionId) body.sessionId = sessionId;
-    const res = await authFetch(`/workflows/${workflowId}/stop-stream`, {
+    const res = await authFetch(`/session/${sessionId}/stop-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: Object.keys(body).length ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as any;
     if (!res.ok) return { ok: false, error: data.error ?? "Failed to stop stream" };
