@@ -51,6 +51,8 @@ let _pointerMoved = false;
 let _activePointers = new Map<number, PointerEvent>();
 let _initialPinchDistance: number | null = null;
 let _pinchZoomStart: number | null = null;
+let _docMoveHandler: ((e: PointerEvent) => void) | null = null;
+let _docUpHandler: ((e: PointerEvent) => void) | null = null;
 
 const LONG_PRESS_MS = 500;
 const TAP_THRESHOLD_PX = 8;
@@ -63,6 +65,10 @@ export function isTouchDevice(): boolean { return _isTouchDevice; }
 export function wireSVGEvents(): void {
   const svg = getContainer()?.querySelector("#wf-svg") as SVGElement | null;
   if (!svg) return;
+
+  // Clean up previous document-level listeners
+  if (_docMoveHandler) document.removeEventListener("pointermove", _docMoveHandler);
+  if (_docUpHandler) document.removeEventListener("pointerup", _docUpHandler);
 
   // Prevent browser scroll/zoom interference
   svg.style.touchAction = "none";
@@ -106,19 +112,26 @@ export function wireSVGEvents(): void {
       _pointerMoved = false;
       _longPressNodeId = nodeId;
 
-      // Long-press timer -> enter drag mode on touch
-      _longPressTimer = setTimeout(() => {
-        if (_pointerMoved) return;
-        _longPressTimer = null;
+      if (pe.pointerType === "touch") {
+        // Touch: require long-press (500ms) to start drag, tap to select
+        _longPressTimer = setTimeout(() => {
+          if (_pointerMoved) return;
+          _longPressTimer = null;
+          _longPressNodeId = null;
+          startNodeDrag(_pointerStartX, _pointerStartY, nodeId);
+        }, LONG_PRESS_MS);
+      } else {
+        // Mouse/pen: immediate drag on pointerdown
+        setSelectedNodeId(nodeId);
+        renderConfigPanel();
+        refreshSVG();
+        startNodeDrag(pe.clientX, pe.clientY, nodeId);
         _longPressNodeId = null;
-        // Enter drag mode
-        startNodeDrag(_pointerStartX, _pointerStartY, nodeId);
-      }, LONG_PRESS_MS);
+      }
     });
   });
 
-  // Node pointermove (track movement for tap threshold)
-  // We attach to the document level for this
+  // Node pointermove — detect drag intent on touch (transition from waiting to dragging)
   const onPointerMove = (pe: PointerEvent) => {
     if (_longPressTimer != null && _longPressNodeId != null) {
       const dx = pe.clientX - _pointerStartX;
@@ -127,14 +140,17 @@ export function wireSVGEvents(): void {
         _pointerMoved = true;
         clearTimeout(_longPressTimer);
         _longPressTimer = null;
-        // Cancelled — was a drag start, not a long press
+        const nodeId = _longPressNodeId;
         _longPressNodeId = null;
+        // Movement detected — start drag immediately
+        startNodeDrag(_pointerStartX, _pointerStartY, nodeId);
       }
     }
   };
+  _docMoveHandler = onPointerMove;
   document.addEventListener("pointermove", onPointerMove);
 
-  // Node pointerup — tap detection
+  // Node pointerup — tap detection (touch only, mouse already handled)
   const onPointerUp = (pe: PointerEvent) => {
     if (_longPressTimer != null) {
       clearTimeout(_longPressTimer);
@@ -152,6 +168,7 @@ export function wireSVGEvents(): void {
       _longPressNodeId = null;
     }
   };
+  _docUpHandler = onPointerUp;
   document.addEventListener("pointerup", onPointerUp);
 
   // Edge click -> delete
