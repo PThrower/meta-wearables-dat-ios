@@ -57,11 +57,10 @@ export function wireCanvasControls(svg: SVGElement): void {
       pe.preventDefault();
       hideNodeActionPopover();
 
-      // Click on background -> deselect
+      // Click on background -> deselect (defer refreshSVG to avoid destroying SVG mid-gesture)
       if (pe.button === 0) {
         setSelectedNodeId(null);
         renderConfigPanel();
-        refreshSVG();
       }
 
       // Pan: left drag or middle drag on background
@@ -93,6 +92,7 @@ export function wireCanvasControls(svg: SVGElement): void {
           _panState = null;
           svg.removeEventListener("pointermove", onPanMove);
           svg.removeEventListener("pointerup", onPanUp);
+          refreshSVG();
         };
 
         svg.addEventListener("pointermove", onPanMove);

@@ -1500,6 +1500,7 @@ const server = Bun.serve<WsData>({
         const enhanceIdx: number[] = [];
         const visionIdx: number[] = [];
         const sensorIdx: number[] = [];
+        const speechIdx: number[] = [];
         const jepaIdx: number[] = [];
         const aiIdx: number[] = [];
 
@@ -1508,6 +1509,7 @@ const server = Bun.serve<WsData>({
           if (pDef?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
           if (pDef?.activationMode === "vision") { visionIdx.push(i); continue; }
           if (pDef?.activationMode === "sensor") { sensorIdx.push(i); continue; }
+          if (pDef?.activationMode === "speech") { speechIdx.push(i); continue; }
           if (pDef?.activationMode === "jepa")   { jepaIdx.push(i);   continue; }
           aiIdx.push(i);
         }
@@ -1622,7 +1624,26 @@ const server = Bun.serve<WsData>({
           }
         }
 
-        // Send cached frame to AI for immediate context
+        // 6. Collect all speech nodes (mobile-stt, vad) and send one combined config to iOS
+        if (speechIdx.length > 0) {
+          const speechConfigs: Array<{ speechType: string; config: Record<string, unknown> }> = [];
+          for (const i of speechIdx) {
+            const rawConfig = { ...(processableNodes[i].config ?? {}) as Record<string, unknown> };
+            speechConfigs.push({
+              speechType: processableNodes[i].type,
+              config: rawConfig,
+            });
+            activatedAppIds.push(appsToActivate[i].id);
+          }
+          if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+            session.publisher.ws.send(JSON.stringify({
+              type: "speech_stage_config",
+              stages: speechConfigs,
+              enabled: true,
+            }));
+            console.log(`[relay] Sent speech config with ${speechConfigs.length} stages session=${sid}`);
+          }
+        }
         const cachedFrame = registry.getLastFrame(body.sessionId);
         if (cachedFrame) sendCachedFrameToAI(body.sessionId, cachedFrame);
 

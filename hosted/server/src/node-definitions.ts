@@ -24,7 +24,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -128,7 +128,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Phone Mic",
     subtitle: "48kHz built-in",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "deepgram-stt", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "deepgram-stt", "mobile-stt", "vad", TARGET_ROLE_SINK],
     role: "source",
     activationMode: null,
     binding: null,
@@ -147,7 +147,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Glasses Mic",
     subtitle: "8kHz HFP",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "deepgram-stt", TARGET_ROLE_SINK],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "deepgram-stt", "mobile-stt", "vad", TARGET_ROLE_SINK],
     role: "source",
     activationMode: null,
     binding: null,
@@ -676,7 +676,62 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultLabel: "GPS Location",
     runtime: ["mobile"],
   },
-  // --- Trigger nodes (event-driven conditional routers) ---
+  // --- Speech nodes (on-device STT + VAD) ---
+  {
+    type: "mobile-stt",
+    label: "Mobile STT",
+    subtitle: "${language} | ${recognitionMode}",
+    color: { fill: "#0d2d3d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "mobile-stt", "vad", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "speech",
+    binding: "mobile-stt",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "select", key: "language", label: "Language", options: [
+        { value: "en-US", label: "English (US)" },
+        { value: "en-GB", label: "English (UK)" },
+        { value: "es-ES", label: "Spanish" },
+        { value: "fr-FR", label: "French" },
+        { value: "de-DE", label: "German" },
+        { value: "it-IT", label: "Italian" },
+        { value: "pt-BR", label: "Portuguese (BR)" },
+        { value: "ja-JP", label: "Japanese" },
+        { value: "ko-KR", label: "Korean" },
+        { value: "zh-CN", label: "Chinese (Simplified)" },
+      ]},
+      { kind: "select", key: "recognitionMode", label: "Recognition Mode", options: [
+        { value: "onDevice", label: "On-device only (no network)" },
+        { value: "hybrid", label: "Hybrid (on-device + server fallback)" },
+      ]},
+      { kind: "checkbox", key: "partialResults", label: "Stream partial results" },
+    ],
+    defaultConfig: { language: "en-US", recognitionMode: "onDevice", partialResults: true },
+    defaultLabel: "Mobile STT",
+    runtime: ["mobile"],
+  },
+  {
+    type: "vad",
+    label: "VAD",
+    subtitle: "threshold: ${energyThreshold}dB",
+    color: { fill: "#0d2d3d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "mobile-stt", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "speech",
+    binding: "vad",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "label", label: "Label" },
+      { kind: "range", key: "energyThreshold", label: "Energy Threshold", min: -80, max: -10, step: 1, unit: " dB" },
+      { kind: "number", key: "speechDurationMs", label: "Speech Onset (ms)", min: 50, max: 1000, step: 50 },
+      { kind: "number", key: "silenceDurationMs", label: "Silence Duration (ms)", min: 100, max: 2000, step: 50 },
+      { kind: "number", key: "cooldownMs", label: "Cooldown (ms)", min: 0, max: 1000, step: 50 },
+    ],
+    defaultConfig: { energyThreshold: -40, speechDurationMs: 100, silenceDurationMs: 300, cooldownMs: 200 },
+    defaultLabel: "VAD",
+    runtime: ["mobile"],
+  },
   //
   // Triggers are event-driven routers that bridge processors to other nodes.
   // They receive discrete events from upstream processors and conditionally
