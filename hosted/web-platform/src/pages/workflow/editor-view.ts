@@ -19,7 +19,7 @@ import { wireSVGEvents, onKeyDown } from "./interactions.js";
 import { renderConfigPanel, setFlowConfigActive } from "./config-panel.js";
 import { isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import {
-  findActiveSession, connectPreview, disconnectPreview,
+  findActiveSession, findLiveSession, connectPreview, disconnectPreview,
   startSessionPolling, stopSessionPolling, destroyPreview,
   addPreviewListener, removePreviewListener, getNodePreviews,
   isPreviewConnected, sendPreviewJson, getPublisherStatus, getConnectedSessionId,
@@ -344,18 +344,39 @@ function wireEditorEvents(): void {
     setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
-  // Toolbar: start stream — send start_stream via preview WS (same as live viewer)
-  getContainer()?.querySelector("#wf-stream-start-btn")?.addEventListener("click", () => {
-    if (!isPreviewConnected()) {
-      alert("Not connected to a session. Wake a device first.");
+  // Toolbar: start stream — find live session, connect preview, send start_stream via WS
+  getContainer()?.querySelector("#wf-stream-start-btn")?.addEventListener("click", async () => {
+    // Already connected via WS — send directly
+    if (isPreviewConnected()) {
+      sendPreviewJson({ type: "start_stream" });
       return;
     }
-    sendPreviewJson({ type: "start_stream" });
+    // Find a live session (prefer target device from settings)
+    const workflow = getWorkflow();
+    const targetDeviceId = (workflow?.settings as any)?.targetDeviceId ?? null;
+    const sessionId = await findLiveSession(targetDeviceId);
+    if (!sessionId) {
+      alert("No live session found. Open the app on a device first.");
+      return;
+    }
+    // Connect preview WS to this session, then send start_stream once open
+    connectPreview(sessionId);
+    // Wait briefly for WS to open, then send
+    const trySend = () => {
+      if (isPreviewConnected()) {
+        sendPreviewJson({ type: "start_stream" });
+      } else {
+        setTimeout(trySend, 200);
+      }
+    };
+    setTimeout(trySend, 300);
   });
 
-  // Toolbar: stop stream — send stop_stream via preview WS (same as live viewer)
+  // Toolbar: stop stream — send stop_stream via preview WS
   getContainer()?.querySelector("#wf-stream-stop-btn")?.addEventListener("click", () => {
-    sendPreviewJson({ type: "stop_stream" });
+    if (isPreviewConnected()) {
+      sendPreviewJson({ type: "stop_stream" });
+    }
   });
 
   // Toolbar: testing panel toggle

@@ -52,6 +52,18 @@ export async function findActiveSession(workflowId: string): Promise<string | nu
   return match?.sessionId ?? null;
 }
 
+/** Find any live session, optionally preferring a specific device. Returns sessionId or null. */
+export async function findLiveSession(deviceId?: string | null): Promise<string | null> {
+  const sessions = await fetchSessions();
+  const live = sessions.filter(s => s.live);
+  if (live.length === 0) return null;
+  if (deviceId) {
+    const match = live.find(s => s.device?.deviceId === deviceId);
+    if (match) return match.sessionId;
+  }
+  return live[0].sessionId;
+}
+
 /** Connect to a session's viewer WebSocket for preview data. */
 export function connectPreview(sessionId: string): void {
   disconnectPreview();
