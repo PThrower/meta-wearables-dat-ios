@@ -1522,7 +1522,7 @@ const server = Bun.serve<WsData>({
         // Register workflow instance for execution controls
         session.activeWorkflowId = wfId;
         // Persist to DB so it survives server restarts
-        dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: wfId }));
+        dbWriter.enqueue(q.updateSession(body.sessionId!, { activeWorkflowId: wfId }));
 
         // Max session duration enforcement
         const maxDur = parsedSettings?.maxSessionDuration;
