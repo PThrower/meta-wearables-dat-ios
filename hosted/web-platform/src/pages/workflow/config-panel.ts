@@ -85,6 +85,9 @@ export function renderConfigPanel(): void {
 
   const { flows, multiFlow } = getMultiFlowInfo(workflow);
 
+  // TEMP DEBUG: show flow detection result visibly
+  const debugBanner = `<div style="background:#300;padding:4px 8px;font-size:10px;color:#f66;border-radius:4px;margin-bottom:8px;">[debug] nodes=${workflow.nodes.length} edges=${workflow.edges.length} flows=${flows.length} multiFlow=${multiFlow}</div>`;
+
   // Flow config section — always visible at top when multi-flow
   let flowHtml = "";
   if (multiFlow) {
@@ -96,13 +99,13 @@ export function renderConfigPanel(): void {
   if (selectedId) {
     const node = workflow.nodes.find(n => n.id === selectedId);
     if (!node) {
-      panel.innerHTML = `${flowHtml}<p class="empty-state">Select a node</p>`;
+      panel.innerHTML = `${debugBanner}${flowHtml}<p class="empty-state">Select a node</p>`;
       if (multiFlow) wireFlowConfigEvents(panel, flows, flowCallbacks);
       return;
     }
     const def = getNodeDef(node.type);
     if (!def) {
-      panel.innerHTML = `${flowHtml}<p class="empty-state">Unknown node type</p>`;
+      panel.innerHTML = `${debugBanner}${flowHtml}<p class="empty-state">Unknown node type</p>`;
       if (multiFlow) wireFlowConfigEvents(panel, flows, flowCallbacks);
       return;
     }
@@ -111,6 +114,7 @@ export function renderConfigPanel(): void {
     const previewHtml = renderNodePreviewHTML(selectedId);
 
     panel.innerHTML = `
+      ${debugBanner}
       ${flowHtml}
       <div class="wf-node-config-section">
         <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
@@ -143,9 +147,9 @@ export function renderConfigPanel(): void {
 
   // State 2: Empty — flow config (if multi) or "Select a node"
   if (multiFlow) {
-    panel.innerHTML = flowHtml;
+    panel.innerHTML = `${debugBanner}${flowHtml}`;
     wireFlowConfigEvents(panel, flows, flowCallbacks);
   } else {
-    panel.innerHTML = '<p class="empty-state">Select a node</p>';
+    panel.innerHTML = `${debugBanner}<p class="empty-state">Select a node</p>`;
   }
 }
