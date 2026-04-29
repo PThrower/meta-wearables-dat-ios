@@ -1,6 +1,7 @@
 /**
  * Config panel — schema-driven form fields for selected workflow nodes.
- * Three-state: settings / node-config / empty (with inline flow controls).
+ * Three-state: settings / node-config / empty.
+ * Flow config always visible at top when multi-flow detected.
  */
 
 import { esc, fetchDevices } from "../../core/api-client.js";
@@ -48,7 +49,13 @@ const settingsCallbacks: SettingsCallbacks = {
   onBack: () => { setSettingsPanelActive(false); renderConfigPanel(); },
 };
 
-/** Render the full config panel — three-state: settings / node-config / empty-with-flows. */
+/** Detect multi-flow for the current workflow. */
+function getMultiFlowInfo(workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> }) {
+  const flows = detectFlows(workflow.nodes, workflow.edges);
+  return { flows, multiFlow: flows.length > 1 };
+}
+
+/** Render the full config panel — three-state: settings / node-config / empty. */
 export function renderConfigPanel(): void {
   const panel = getContainer()?.querySelector("#wf-config-panel");
   const workflow = getWorkflow();
@@ -76,75 +83,69 @@ export function renderConfigPanel(): void {
     return;
   }
 
-  // State 1: Node selected → node config
+  const { flows, multiFlow } = getMultiFlowInfo(workflow);
+
+  // Flow config section — always visible at top when multi-flow
+  let flowHtml = "";
+  if (multiFlow) {
+    flowHtml = `<div class="wf-flow-section">${renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf")}</div>`;
+  }
+
+  // State 1: Node selected → flow config (if multi) + node config
   const selectedId = getSelectedNodeId();
   if (selectedId) {
-    renderNodeConfigPanel(panel, workflow, selectedId);
+    const node = workflow.nodes.find(n => n.id === selectedId);
+    if (!node) {
+      panel.innerHTML = `${flowHtml}<p class="empty-state">Select a node</p>`;
+      if (multiFlow) wireFlowConfigEvents(panel, flows, flowCallbacks);
+      return;
+    }
+    const def = getNodeDef(node.type);
+    if (!def) {
+      panel.innerHTML = `${flowHtml}<p class="empty-state">Unknown node type</p>`;
+      if (multiFlow) wireFlowConfigEvents(panel, flows, flowCallbacks);
+      return;
+    }
+    const c = def.color;
+    const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node, "wf-config")).join("");
+    const previewHtml = renderNodePreviewHTML(selectedId);
+
+    panel.innerHTML = `
+      ${flowHtml}
+      <div class="wf-node-config-section">
+        <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
+          <span class="wf-config-type">${esc(def.label)}</span>
+        </div>
+        ${previewHtml}
+        ${fieldsHtml}
+        <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
+      </div>
+    `;
+
+    if (multiFlow) wireFlowConfigEvents(panel, flows, flowCallbacks);
+    wireConfigFieldInputs(panel, configCallbacks);
+
+    // Delete node button (full-editor-specific)
+    panel.querySelector(".wf-config-delete")?.addEventListener("click", () => {
+      const wf = getWorkflow();
+      if (!wf) return;
+      const id = (panel.querySelector(".wf-config-delete") as HTMLElement).dataset.id!;
+      wf.nodes = wf.nodes.filter(n => n.id !== id);
+      wf.edges = wf.edges.filter(e => e.sourceNodeId !== id && e.targetNodeId !== id);
+      setSelectedNodeId(null);
+      setDirty(true);
+      autoSave();
+      refreshSVG();
+      renderConfigPanel();
+    });
     return;
   }
 
-  // State 2: Empty — show "Select a node" + inline flow controls
-  renderEmptyPanel(panel, workflow);
-}
-
-/** Render empty state with inline flow controls when multi-flow. */
-function renderEmptyPanel(panel: Element, workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>; flowConfig?: import("../../core/api-client.js").FlowExecutionConfig | null }): void {
-  const flows = detectFlows(workflow.nodes, workflow.edges);
-  console.log("[flow-debug] nodes:", workflow.nodes.length, "edges:", workflow.edges.length, "flows:", flows.length, flows.map(f => ({ id: f.flowId, nodes: f.nodeIds, label: f.label })));
-  console.log("[flow-debug] edges:", workflow.edges.map(e => `${e.sourceNodeId} → ${e.targetNodeId}`));
-  const multiFlow = flows.length > 1;
-
-  let flowHtml = "";
+  // State 2: Empty — flow config (if multi) or "Select a node"
   if (multiFlow) {
-    flowHtml = renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf");
-  }
-
-  panel.innerHTML = `
-    <p class="empty-state">Select a node</p>
-    ${flowHtml}
-  `;
-
-  if (multiFlow) {
+    panel.innerHTML = flowHtml;
     wireFlowConfigEvents(panel, flows, flowCallbacks);
+  } else {
+    panel.innerHTML = '<p class="empty-state">Select a node</p>';
   }
-}
-
-/** Render node config panel with schema-driven form fields. */
-function renderNodeConfigPanel(panel: Element, workflow: { nodes: import("../../core/api-client.js").WorkflowNodeDef[]; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> }, selectedId: string): void {
-  const node = workflow.nodes.find(n => n.id === selectedId);
-  if (!node) { panel.innerHTML = '<p class="empty-state">Select a node</p>'; return; }
-
-  const def = getNodeDef(node.type);
-  if (!def) { panel.innerHTML = '<p class="empty-state">Unknown node type</p>'; return; }
-
-  const c = def.color;
-  const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node, "wf-config")).join("");
-
-  // Live preview section (only when preview data exists for this node)
-  const previewHtml = renderNodePreviewHTML(selectedId);
-
-  panel.innerHTML = `
-    <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
-      <span class="wf-config-type">${esc(def.label)}</span>
-    </div>
-    ${previewHtml}
-    ${fieldsHtml}
-    <button class="btn btn-danger btn-sm wf-config-delete" data-id="${node.id}">Delete Node</button>
-  `;
-
-  wireConfigFieldInputs(panel, configCallbacks);
-
-  // Delete node button (full-editor-specific)
-  panel.querySelector(".wf-config-delete")?.addEventListener("click", () => {
-    const wf = getWorkflow();
-    if (!wf) return;
-    const id = (panel.querySelector(".wf-config-delete") as HTMLElement).dataset.id!;
-    wf.nodes = wf.nodes.filter(n => n.id !== id);
-    wf.edges = wf.edges.filter(e => e.sourceNodeId !== id && e.targetNodeId !== id);
-    setSelectedNodeId(null);
-    setDirty(true);
-    autoSave();
-    refreshSVG();
-    renderConfigPanel();
-  });
 }

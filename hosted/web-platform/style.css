@@ -3266,6 +3266,19 @@ select.wf-config-input {
   gap: 12px;
 }
 
+/* Flow section wrapper — separates from node config below */
+.wf-flow-section {
+  padding-bottom: 12px;
+  margin-bottom: 0;
+}
+
+/* Node config section — appears below flow config when both visible */
+.wf-node-config-section {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
+}
+
 .wf-flow-config-header {
   display: flex;
   align-items: center;
