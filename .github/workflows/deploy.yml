@@ -27,10 +27,9 @@ jobs:
 
             echo ">>> Pulling latest"
             cd /root/relay-server
-            git checkout -- hosted/server/pkg/ 2>/dev/null || true
-            git checkout -- hosted/web-platform/dist/ 2>/dev/null || true
-            git clean -fd hosted/web-platform/dist/ 2>/dev/null || true
-            git pull origin feat/stream-registry
+            git fetch origin feat/stream-registry
+            git reset --hard origin/feat/stream-registry
+            git clean -fd hosted/server/pkg/ hosted/web-platform/dist/ 2>/dev/null || true
 
             echo ">>> Updating version env vars"
             NEW_COMMIT=$(git rev-parse --short HEAD)
