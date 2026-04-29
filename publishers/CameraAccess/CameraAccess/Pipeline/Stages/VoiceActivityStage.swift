@@ -223,26 +223,6 @@ actor VoiceActivityStage {
             Task { await onResult(errorResult) }
         }
     }
-}
-
-// MARK: - Error Types
-
-enum VoiceActivityError: LocalizedError {
-    case eventBusNotConfigured
-    case audioSessionNotActive
-    case engineStartFailed(underlying: Error)
-
-    var errorDescription: String? {
-        switch self {
-        case .eventBusNotConfigured:
-            return "AudioEventBus not configured"
-        case .audioSessionNotActive:
-            return "Audio session is not active"
-        case .engineStartFailed(let error):
-            return "Audio engine start failed: \(error.localizedDescription)"
-        }
-    }
-}
 
     // MARK: - Energy Calculation
 
@@ -267,5 +247,24 @@ enum VoiceActivityError: LocalizedError {
         // Convert to dB: 20 * log10(rms)
         let db = 20.0 * log10(Float(rms))
         return db
+    }
+}
+
+// MARK: - Error Types
+
+enum VoiceActivityError: LocalizedError {
+    case eventBusNotConfigured
+    case audioSessionNotActive
+    case engineStartFailed(underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .eventBusNotConfigured:
+            return "AudioEventBus not configured"
+        case .audioSessionNotActive:
+            return "Audio session is not active"
+        case .engineStartFailed(let error):
+            return "Audio engine start failed: \(error.localizedDescription)"
+        }
     }
 }

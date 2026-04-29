@@ -47,7 +47,8 @@ struct StreamView: View {
             boxes: viewModel.boundingBoxes,
             showOverlay: viewModel.showBboxOverlay,
             visionDetections: viewModel.visionDetections,
-            sceneLabel: viewModel.visionSceneLabel
+            sceneLabel: viewModel.visionSceneLabel,
+            transcription: viewModel.overlayTranscription
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }

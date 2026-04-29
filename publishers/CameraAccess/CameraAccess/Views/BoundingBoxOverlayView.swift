@@ -30,8 +30,11 @@ struct BoundingBoxOverlayView: View {
   /// Scene classification label to display (if any).
   var sceneLabel: String?
 
+  /// Live transcription text to display as subtitle overlay.
+  var transcription: String? = nil
+
   var body: some View {
-    if showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil) {
+    if showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil || transcription != nil) {
       GeometryReader { geometry in
         ZStack {
           // Server AI bounding boxes (existing)
@@ -121,6 +124,24 @@ struct BoundingBoxOverlayView: View {
               .position(
                 x: geometry.size.width - 60,
                 y: 14
+              )
+          }
+
+          // Live transcription subtitle (bottom-center)
+          if let text = transcription {
+            Text(text)
+              .font(.system(size: 13, weight: .medium, design: .monospaced))
+              .foregroundColor(.white)
+              .padding(.horizontal, 12)
+              .padding(.vertical, 6)
+              .background(Color.black.opacity(0.75))
+              .cornerRadius(6)
+              .lineLimit(3)
+              .multilineTextAlignment(.center)
+              .frame(maxWidth: geometry.size.width - 24, alignment: .center)
+              .position(
+                x: geometry.size.width / 2,
+                y: geometry.size.height - 30
               )
           }
         }

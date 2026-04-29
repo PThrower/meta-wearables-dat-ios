@@ -117,6 +117,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var visionDetections: [VisionDetection] = []
   @Published var visionSceneLabel: String?
   @Published var showBboxOverlay: Bool = true
+  @Published var overlayTranscription: String? = nil
   @Published var audioInputMode: AudioInputMode = .builtInMic {
     didSet {
       // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
@@ -939,6 +940,17 @@ class StreamSessionViewModel: ObservableObject {
         )
         await sttStage.setOnResult { [weak self] result in
           await self?.relayStage.sendJson(result.jsonDict)
+          // Update overlay transcription for on-device display
+          if !result.text.isEmpty {
+            await MainActor.run { [weak self] in
+              self?.overlayTranscription = result.isFinal ? result.text : nil
+            }
+          }
+          if result.error != nil {
+            await MainActor.run { [weak self] in
+              self?.overlayTranscription = nil
+            }
+          }
         }
         await sttStage.start()
         speechRecognitionStage = sttStage
@@ -1362,6 +1374,7 @@ class StreamSessionViewModel: ObservableObject {
       await sttStage.stop()
       speechRecognitionStage = nil
     }
+    overlayTranscription = nil
     if let vadStage = voiceActivityStage {
       await vadStage.stop()
       voiceActivityStage = nil
