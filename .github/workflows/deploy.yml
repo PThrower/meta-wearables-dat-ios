@@ -81,10 +81,24 @@ jobs:
 
             echo ">>> Injecting secrets into relay .env"
             cd /root/relay-server/hosted/server
+            if [ -n "${{ secrets.APNS_KEY_ID }}" ]; then
+              grep -q '^APNS_KEY_ID=' .env && sed -i "s|^APNS_KEY_ID=.*|APNS_KEY_ID=${{ secrets.APNS_KEY_ID }}|" .env || echo "APNS_KEY_ID=${{ secrets.APNS_KEY_ID }}" >> .env
+              echo "APNS_KEY_ID injected"
+            fi
+            if [ -n "${{ secrets.APNS_TEAM_ID }}" ]; then
+              grep -q '^APNS_TEAM_ID=' .env && sed -i "s|^APNS_TEAM_ID=.*|APNS_TEAM_ID=${{ secrets.APNS_TEAM_ID }}|" .env || echo "APNS_TEAM_ID=${{ secrets.APNS_TEAM_ID }}" >> .env
+              echo "APNS_TEAM_ID injected"
+            fi
+            if [ -n "${{ secrets.APNS_BUNDLE_ID }}" ]; then
+              grep -q '^APNS_BUNDLE_ID=' .env && sed -i "s|^APNS_BUNDLE_ID=.*|APNS_BUNDLE_ID=${{ secrets.APNS_BUNDLE_ID }}|" .env || echo "APNS_BUNDLE_ID=${{ secrets.APNS_BUNDLE_ID }}" >> .env
+              echo "APNS_BUNDLE_ID injected"
+            fi
             if [ -n "${{ secrets.APNS_KEY_B64 }}" ]; then
               grep -q '^APNS_KEY_B64=' .env && sed -i "s|^APNS_KEY_B64=.*|APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}|" .env || echo "APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}" >> .env
               echo "APNS_KEY_B64 injected"
             fi
+            # APNS_PRODUCTION: always set (sandbox for dev builds, production for App Store)
+            grep -q '^APNS_PRODUCTION=' .env && sed -i 's|^APNS_PRODUCTION=.*|APNS_PRODUCTION=false|' .env || echo "APNS_PRODUCTION=false" >> .env
             if [ -n "${{ secrets.DEEPGRAM_API_KEY }}" ]; then
               grep -q '^DEEPGRAM_API_KEY=' .env && sed -i "s|^DEEPGRAM_API_KEY=.*|DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}|" .env || echo "DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}" >> .env
               echo "DEEPGRAM_API_KEY injected"
