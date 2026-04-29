@@ -608,12 +608,16 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   /// Handle wake from APNs push notification.
-  /// Reconnects standby relay if currently disconnected (app was backgrounded/killed).
+  /// Reconnects standby relay if currently disconnected (app was killed).
+  /// If already in standby (app was backgrounded), activates stream directly.
   /// Requests background time so the WebSocket stays alive long enough to receive start_stream.
   @MainActor
   func handleWakeFromPush() {
-    guard relayMode == .disconnected else {
-      NSLog("[StreamSession] Wake push ignored — already connected (relayMode=\(relayMode))")
+    NSLog("[StreamSession] Wake push received — relayMode=\(relayMode)")
+
+    // Already streaming — nothing to do
+    guard relayMode != .active else {
+      NSLog("[StreamSession] Wake push ignored — already active")
       return
     }
 
@@ -627,14 +631,20 @@ class StreamSessionViewModel: ObservableObject {
       NSLog("[StreamSession] Wake background task started")
     }
 
-    NSLog("[StreamSession] Wake push received — connecting standby then activating stream")
-    // Connect standby relay, then immediately activate (start camera + streaming)
-    // The server will auto-activate the workflow when it detects the pending device connection.
-    Task {
-      await startStandbyRelay()
-      // Standby connected — now start the camera and relay frames
-      if relayMode == .standby {
+    if relayMode == .standby {
+      // Already connected — just activate (start camera + streaming)
+      NSLog("[StreamSession] Already in standby — activating stream")
+      Task {
         await activateFromStandby()
+      }
+    } else {
+      // Disconnected — connect standby then activate
+      NSLog("[StreamSession] Connecting standby then activating stream")
+      Task {
+        await startStandbyRelay()
+        if relayMode == .standby {
+          await activateFromStandby()
+        }
       }
     }
   }
@@ -649,7 +659,7 @@ class StreamSessionViewModel: ObservableObject {
   }
 
   /// Transition from standby to active — start camera, wait for BT link, then audio + telemetry.
-  /// Called when start_stream is received while in standby.
+  /// Called when start_stream is received while in standby, or from handleWakeFromPush().
   private func activateFromStandby() async {
     guard relayMode == .standby else { return }
 
@@ -664,7 +674,14 @@ class StreamSessionViewModel: ObservableObject {
 
     relayMode = .active
 
-    if isPhoneCameraMode {
+    // Auto-detect phone camera mode if no wearable device is available.
+    // On cold launch from push notification, isPhoneCameraMode resets to false
+    // because it isn't persisted. If no glasses are connected, use phone camera.
+    let usePhoneCamera = isPhoneCameraMode || (!hasActiveDevice && activeWearableId == nil)
+
+    if usePhoneCamera {
+      NSLog("[StreamSession] Using phone camera for activation (isPhoneCameraMode=\(isPhoneCameraMode), hasActiveDevice=\(hasActiveDevice))")
+
       // Phone camera path: no BT link to wait for, start directly
       await startPhoneCameraSession()
 

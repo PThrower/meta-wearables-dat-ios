@@ -93,12 +93,6 @@ struct StreamSessionView: View {
         Task { await viewModel.startStandbyRelay() }
       }
     }
-    .onChange(of: pushNotificationService?.pendingWake ?? false) { pending in
-      guard pending else { return }
-      NSLog("[StreamSessionView] pendingWake changed to true — triggering wake from push")
-      pushNotificationService?.pendingWake = false
-      Task { await viewModel.handleWakeFromPush() }
-    }
     .onChange(of: viewModel.isStreaming) { streaming in
       if streaming {
         OrientationLock.shared.unlock()
