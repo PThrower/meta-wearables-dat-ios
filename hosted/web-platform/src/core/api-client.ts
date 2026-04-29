@@ -33,6 +33,7 @@ export interface SessionInfo {
   hasThumbnail?: boolean;
   segments?: number;
   device?: {
+    deviceId?: string;
     deviceName?: string;
     deviceModel?: string;
     wearableType?: string;
@@ -46,6 +47,7 @@ export interface SessionInfo {
   viewerCount?: number;
   uptimeMs?: number;
   activeWorkflowId?: string | null;
+  publisherStandby?: boolean;
 }
 
 export interface DeviceInfo {
@@ -191,15 +193,21 @@ export async function fetchStats(): Promise<StatsResponse | null> {
 export function fetchSessions(): Promise<SessionInfo[]> {
   return apiGet<Record<string, unknown>[]>("/sessions").then(r => {
     if (!r) return [];
-    return r.map(s => ({
-      sessionId: (s.id ?? s.sessionId) as string,
-      live: s.live as boolean,
-      startedAt: (s.startedAt ?? (s.metadata as Record<string,string>)?.startedAt) as string | undefined,
-      device: (s.metadata as Record<string, unknown>) ?? s.device as SessionInfo["device"],
-      viewerCount: s.viewerCount as number | undefined,
-      uptimeMs: s.uptimeMs as number | undefined,
-      activeWorkflowId: (s.activeWorkflowId ?? null) as string | null | undefined,
-    }));
+    return r.map(s => {
+      const meta = s.metadata as Record<string, string> | undefined;
+      return {
+        sessionId: (s.id ?? s.sessionId) as string,
+        live: s.live as boolean,
+        startedAt: (s.startedAt ?? meta?.startedAt) as string | undefined,
+        device: meta
+          ? { deviceId: meta.deviceId, deviceName: meta.deviceName, deviceModel: meta.deviceModel, wearableType: meta.wearableType }
+          : s.device as SessionInfo["device"],
+        viewerCount: s.viewerCount as number | undefined,
+        uptimeMs: s.uptimeMs as number | undefined,
+        activeWorkflowId: (s.activeWorkflowId ?? null) as string | null | undefined,
+        publisherStandby: s.publisherStandby as boolean | undefined,
+      };
+    });
   });
 }
 
@@ -480,12 +488,15 @@ export async function activateWorkflow(
   }
 }
 
-/** Start streaming for an activated workflow */
-export async function startStream(workflowId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+/** Start streaming for an activated workflow (optionally targeting a specific session) */
+export async function startStream(workflowId: string, sessionId?: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
   try {
+    const body: Record<string, string> = {};
+    if (sessionId) body.sessionId = sessionId;
     const res = await authFetch(`/workflows/${workflowId}/start-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: Object.keys(body).length ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as any;
     if (!res.ok) return { ok: false, error: data.error ?? "Failed to start stream" };
@@ -496,12 +507,15 @@ export async function startStream(workflowId: string): Promise<{ ok: boolean; se
   }
 }
 
-/** Stop streaming for an activated workflow */
-export async function stopStream(workflowId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+/** Stop streaming for an activated workflow (optionally targeting a specific session) */
+export async function stopStream(workflowId: string, sessionId?: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
   try {
+    const body: Record<string, string> = {};
+    if (sessionId) body.sessionId = sessionId;
     const res = await authFetch(`/workflows/${workflowId}/stop-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      body: Object.keys(body).length ? JSON.stringify(body) : undefined,
     });
     const data = await res.json() as any;
     if (!res.ok) return { ok: false, error: data.error ?? "Failed to stop stream" };

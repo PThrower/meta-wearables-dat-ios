@@ -343,10 +343,21 @@ function wireEditorEvents(): void {
     setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
-  // Toolbar: start stream — sends start_stream to activated publisher
+  // Toolbar: stream toggle — start or stop stream for activated workflow
   getContainer()?.querySelector("#wf-stream-btn")?.addEventListener("click", async () => {
     const workflow = getWorkflow();
     if (!workflow?.id) return;
+    const btn = getContainer()?.querySelector("#wf-stream-btn") as HTMLElement;
+    const isStreaming = btn?.textContent?.trim() === "Stop";
+
+    if (isStreaming) {
+      const result = await stopStream(workflow.id);
+      if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
+      btn.textContent = "Stream";
+      refreshTestingPanel();
+      return;
+    }
+
     const result = await startStream(workflow.id);
     if (!result?.ok) {
       const err = result?.error ?? "Unknown error";
@@ -355,7 +366,7 @@ function wireEditorEvents(): void {
       else { alert("Stream failed: " + err); }
       return;
     }
-    alert("Stream started on session " + (result.sessionId ?? "").slice(0, 8) + "...");
+    btn.textContent = "Stop";
     refreshTestingPanel();
   });
 
@@ -398,6 +409,7 @@ async function refreshTestingPanel(): Promise<void> {
 
   const [devices, sessions] = await Promise.all([fetchDevices(), fetchSessions()]);
   const liveSessions = sessions.filter(s => s.live);
+  const workflow = getWorkflow();
 
   if (devices.length === 0) {
     body.innerHTML = '<p class="empty-state" style="font-size:11px;color:var(--text-tertiary)">No registered devices found. Open the app on a device to register it.</p>';
@@ -405,20 +417,18 @@ async function refreshTestingPanel(): Promise<void> {
   }
 
   body.innerHTML = devices.map(d => {
-    // Find if this device has a live session
-    const session = liveSessions.find(s => {
-      const sDevId = (s as any).device?.deviceId ?? (s as any).device?.device_id;
-      return sDevId === d.device_id;
-    });
+    // Match device to live session via metadata.deviceId
+    const session = liveSessions.find(s => s.device?.deviceId === d.device_id);
     const isOnline = !!session;
-    const isStreaming = isOnline && !(session as any).standby;
-    const isStandby = isOnline && !!(session as any).standby;
+    const isStreaming = isOnline && session!.publisherStandby === false;
+    const isStandby = isOnline && session!.publisherStandby !== false;
     const activeWf = session?.activeWorkflowId;
-    const workflow = getWorkflow();
     const isActivated = activeWf === workflow?.id;
 
     const onlineBadge = isOnline
-      ? (isStreaming ? '<span class="wf-testing-badge wf-testing-badge-streaming">Streaming</span>' : '<span class="wf-testing-badge wf-testing-badge-standby">Standby</span>')
+      ? (isStreaming
+        ? '<span class="wf-testing-badge wf-testing-badge-streaming">Streaming</span>'
+        : '<span class="wf-testing-badge wf-testing-badge-standby">Standby</span>')
       : '<span class="wf-testing-badge wf-testing-badge-offline">Offline</span>';
     const activatedBadge = isActivated
       ? '<span class="wf-testing-badge wf-testing-badge-activated">Activated</span>'
@@ -427,7 +437,8 @@ async function refreshTestingPanel(): Promise<void> {
     // Button states
     const canWake = !isOnline && !!d.apnsToken;
     const canActivate = isOnline && !isActivated;
-    const canStream = isActivated && isOnline && !isStreaming;
+    const canStartStream = isActivated && isOnline && !isStreaming;
+    const canStopStream = isStreaming;
 
     return `
       <div class="wf-testing-device-card" data-device-id="${d.device_id}">
@@ -443,47 +454,66 @@ async function refreshTestingPanel(): Promise<void> {
         <div class="wf-testing-device-actions">
           <button class="btn wf-test-wake" data-device-id="${d.device_id}" ${canWake ? "" : "disabled"}>Wake</button>
           <button class="btn wf-test-activate" data-session-id="${session?.sessionId ?? ""}" ${canActivate ? "" : "disabled"}>Activate</button>
-          <button class="btn wf-test-stream" ${canStream ? "" : "disabled"}>Stream</button>
+          ${canStopStream
+            ? `<button class="btn wf-test-stop-stream" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop</button>`
+            : `<button class="btn wf-test-start-stream" data-session-id="${session?.sessionId ?? ""}" ${canStartStream ? "" : "disabled"}>Stream</button>`
+          }
         </div>
       </div>
     `;
   }).join("");
 
-  // Wire per-device action buttons
+  // Wire per-device Wake buttons
   body.querySelectorAll(".wf-test-wake:not([disabled])").forEach(btn => {
     btn.addEventListener("click", async () => {
       const deviceId = (btn as HTMLElement).dataset.deviceId!;
       const result = await wakeDevice(deviceId);
       if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
-      setTimeout(refreshTestingPanel, 3000); // Refresh after giving time for connection
+      // Wake returns { ok, status: "push_sent" | "already_connected" }
+      setTimeout(refreshTestingPanel, 3000);
     });
   });
 
+  // Wire per-device Activate buttons
   body.querySelectorAll(".wf-test-activate:not([disabled])").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const workflow = getWorkflow();
+      const wf = getWorkflow();
       const sessionId = (btn as HTMLElement).dataset.sessionId!;
-      if (!workflow?.id || !sessionId) return;
+      if (!wf?.id || !sessionId) return;
 
-      let result = await activateWorkflow(workflow.id, sessionId);
+      let result = await activateWorkflow(wf.id, sessionId);
       if (!result) { alert("Activation failed"); return; }
       if (result.status === "conflict" && result.conflict) {
         const ok = confirm("Session has active AI. Override?");
         if (!ok) return;
-        result = await activateWorkflow(workflow.id, sessionId, { override: true, reason: "Manual override" });
+        result = await activateWorkflow(wf.id, sessionId, { override: true, reason: "Manual override" });
         if (!result) { alert("Override failed"); return; }
       }
-      setTimeout(refreshTestingPanel, 1000);
+      setTimeout(refreshTestingPanel, 1500);
     });
   });
 
-  body.querySelectorAll(".wf-test-stream:not([disabled])").forEach(btn => {
+  // Wire per-device Start Stream buttons
+  body.querySelectorAll(".wf-test-start-stream:not([disabled])").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const workflow = getWorkflow();
-      if (!workflow?.id) return;
-      const result = await startStream(workflow.id);
+      const wf = getWorkflow();
+      const sessionId = (btn as HTMLElement).dataset.sessionId!;
+      if (!wf?.id) return;
+      const result = await startStream(wf.id, sessionId || undefined);
       if (!result?.ok) { alert(result?.error ?? "Stream failed"); return; }
-      setTimeout(refreshTestingPanel, 1000);
+      setTimeout(refreshTestingPanel, 2000);
+    });
+  });
+
+  // Wire per-device Stop Stream buttons
+  body.querySelectorAll(".wf-test-stop-stream").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const wf = getWorkflow();
+      const sessionId = (btn as HTMLElement).dataset.sessionId!;
+      if (!wf?.id) return;
+      const result = await stopStream(wf.id, sessionId || undefined);
+      if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
+      setTimeout(refreshTestingPanel, 1500);
     });
   });
 }

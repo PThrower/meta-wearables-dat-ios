@@ -700,6 +700,7 @@ const server = Bun.serve<WsData>({
           id: s.id,
           live: true,
           publisherConnected: s.publisherConnected,
+          publisherStandby: (registry.get(s.id)?.publisher?.standby ?? true) as boolean,
           viewerCount: s.viewerCount,
           metadata: s.metadata,
           uptimeMs: s.uptimeMs,
@@ -1642,17 +1643,24 @@ const server = Bun.serve<WsData>({
     if (wfStreamMatch && req.method === "POST") {
       try {
         const wfId = wfStreamMatch[1];
-        const activation = q.getActiveActivationForWorkflow(wfId);
-        if (!activation) {
-          return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
+        let sessionId: string | undefined;
+        try { sessionId = (await req.json() as { sessionId?: string }).sessionId; } catch {}
+        let session: Session | undefined;
+        if (sessionId) {
+          session = registry.getSession(sessionId);
+        } else {
+          const activation = q.getActiveActivationForWorkflow(wfId);
+          if (!activation) {
+            return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
+          }
+          session = registry.getSession(activation.sessionId);
         }
-        const session = registry.getSession(activation.sessionId);
         if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
           return Response.json({ error: "Publisher not connected" }, { status: 404 });
         }
         session.publisher.ws.send(JSON.stringify({ type: "start_stream" }));
-        console.log(`[stream-control] start_stream sent for workflow ${wfId} session ${activation.sessionId}`);
-        return Response.json({ ok: true, sessionId: activation.sessionId });
+        console.log(`[stream-control] start_stream sent for workflow ${wfId} session ${session.id ?? sessionId}`);
+        return Response.json({ ok: true, sessionId: session.id ?? sessionId });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }
@@ -1662,17 +1670,24 @@ const server = Bun.serve<WsData>({
     if (wfStopStreamMatch && req.method === "POST") {
       try {
         const wfId = wfStopStreamMatch[1];
-        const activation = q.getActiveActivationForWorkflow(wfId);
-        if (!activation) {
-          return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
+        let sessionId: string | undefined;
+        try { sessionId = (await req.json() as { sessionId?: string }).sessionId; } catch {}
+        let session: Session | undefined;
+        if (sessionId) {
+          session = registry.getSession(sessionId);
+        } else {
+          const activation = q.getActiveActivationForWorkflow(wfId);
+          if (!activation) {
+            return Response.json({ error: "No active activation for this workflow" }, { status: 404 });
+          }
+          session = registry.getSession(activation.sessionId);
         }
-        const session = registry.getSession(activation.sessionId);
         if (!session?.publisher?.ws || session.publisher.ws.readyState !== WebSocket.OPEN) {
           return Response.json({ error: "Publisher not connected" }, { status: 404 });
         }
         session.publisher.ws.send(JSON.stringify({ type: "stop_stream" }));
-        console.log(`[stream-control] stop_stream sent for workflow ${wfId} session ${activation.sessionId}`);
-        return Response.json({ ok: true, sessionId: activation.sessionId });
+        console.log(`[stream-control] stop_stream sent for workflow ${wfId} session ${session.id ?? sessionId}`);
+        return Response.json({ ok: true, sessionId: session.id ?? sessionId });
       } catch (e) {
         return Response.json({ error: String(e) }, { status: 500 });
       }
