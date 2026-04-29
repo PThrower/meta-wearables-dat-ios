@@ -627,8 +627,16 @@ class StreamSessionViewModel: ObservableObject {
       NSLog("[StreamSession] Wake background task started")
     }
 
-    NSLog("[StreamSession] Wake push received — reconnecting standby relay")
-    Task { await startStandbyRelay() }
+    NSLog("[StreamSession] Wake push received — connecting standby then activating stream")
+    // Connect standby relay, then immediately activate (start camera + streaming)
+    // The server will auto-activate the workflow when it detects the pending device connection.
+    Task {
+      await startStandbyRelay()
+      // Standby connected — now start the camera and relay frames
+      if relayMode == .standby {
+        await activateFromStandby()
+      }
+    }
   }
 
   private var wakeBackgroundTask: UIBackgroundTaskIdentifier = .invalid
