@@ -685,7 +685,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "mobile-stt", "vad", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "speech",
-    binding: "mobile-stt",
+    binding: null,
     defaultModel: null,
     configSchema: [
       { kind: "text", key: "label", label: "Label" },
@@ -719,7 +719,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "mobile-stt", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "speech",
-    binding: "vad",
+    binding: null,
     defaultModel: null,
     configSchema: [
       { kind: "text", key: "label", label: "Label" },

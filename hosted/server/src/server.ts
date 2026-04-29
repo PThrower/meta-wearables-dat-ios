@@ -2267,6 +2267,39 @@ const server = Bun.serve<WsData>({
               }
               // Fan out to viewers
               broadcastToViewers(session, cmd);
+            } else if (cmd.type === "stt_result") {
+              // iOS speech-to-text results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const text = (cmd.text as string || "").trim();
+                const isFinal = cmd.isFinal as boolean;
+                if (text && isFinal) {
+                  const summary = `Transcription: "${text}"`;
+                  orchestrator.sendTrigger(sessionId, `[STT: ${summary}]`);
+                }
+              }
+              // Fan out to viewers
+              broadcastToViewers(session, cmd);
+            } else if (cmd.type === "vad_result") {
+              // iOS voice activity detection results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const eventType = cmd.eventType as string;
+                const isSpeech = cmd.isSpeech as boolean;
+                const energyDb = (cmd.energyDb as number)?.toFixed(1);
+                let summary = "";
+                if (eventType === "speech_start") {
+                  summary = `Speech started (energy: ${energyDb}dB)`;
+                } else if (eventType === "speech_end") {
+                  const duration = (cmd.durationMs as number)?.toFixed(0);
+                  summary = `Speech ended (${duration}ms, energy: ${energyDb}dB)`;
+                } else if (eventType === "speech_active") {
+                  summary = `Speech active (energy: ${energyDb}dB)`;
+                }
+                if (summary) {
+                  orchestrator.sendTrigger(sessionId, `[VAD: ${summary}]`);
+                }
+              }
+              // Fan out to viewers
+              broadcastToViewers(session, cmd);
             } else if (isBackpressureAckMessage(cmd)) {
               // Publisher acknowledges backpressure adjustment
               console.log(`[relay] Backpressure ack from publisher: targetFps=${cmd.targetFps} session=${sessionId}`);
@@ -2292,6 +2325,7 @@ const server = Bun.serve<WsData>({
                     session.publisher.ws.send(JSON.stringify({ type: "vision_stage_config", enabled: false }));
                     session.publisher.ws.send(JSON.stringify({ type: "enhance_stage_config", enabled: false }));
                     session.publisher.ws.send(JSON.stringify({ type: "sensor_stage_config", enabled: false }));
+                    session.publisher.ws.send(JSON.stringify({ type: "speech_stage_config", enabled: false }));
                   }
                   broadcastToViewers(session, { type: "app_status", appId: null, status: "inactive" });
                 }
