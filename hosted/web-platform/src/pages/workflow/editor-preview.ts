@@ -38,6 +38,7 @@ let nodePreviews = new Map<string, NodePreviewState>();
 let listeners: PreviewChangeListener[] = [];
 let connectedSessionId: string | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _publisherStatus: "live" | "standby" | "offline" | "paused" | "dropped" = "offline";
 
 // --- Public API ---
 
@@ -117,6 +118,23 @@ export function isPreviewConnected(): boolean {
   return ws?.readyState === WebSocket.OPEN;
 }
 
+/** Send a JSON command through the preview WebSocket (e.g. start_stream, stop_stream). */
+export function sendPreviewJson(msg: Record<string, unknown>): void {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(msg));
+  }
+}
+
+/** Get the connected session ID (null if not connected). */
+export function getConnectedSessionId(): string | null {
+  return connectedSessionId;
+}
+
+/** Get the current publisher status from WS messages. */
+export function getPublisherStatus(): string {
+  return _publisherStatus;
+}
+
 /** Register a listener for preview data changes. */
 export function addPreviewListener(fn: PreviewChangeListener): void {
   listeners.push(fn);
@@ -164,6 +182,27 @@ function notifyListeners(): void {
 
 function handlePreviewMessage(msg: Record<string, any>): void {
   const now = Date.now();
+
+  // Publisher status updates (streaming, standby, dropped)
+  if (msg.type === "publisher_status") {
+    _publisherStatus = msg.status ?? "offline";
+    notifyListeners();
+    return;
+  }
+
+  // Stream started/stopped confirmation from publisher
+  if (msg.type === "stream_changed") {
+    _publisherStatus = msg.streaming ? "live" : "standby";
+    notifyListeners();
+    return;
+  }
+
+  // Session info (initial state on connect)
+  if (msg.type === "session_info") {
+    _publisherStatus = msg.publisherStatus ?? "offline";
+    notifyListeners();
+    // Don't return — let it fall through if needed
+  }
 
   if (msg.type === "node_states" && msg.nodes) {
     const workflowId = msg.workflowId;

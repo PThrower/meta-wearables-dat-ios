@@ -5,7 +5,7 @@
 import {
   fetchWorkflow, updateWorkflow, deleteWorkflow,
   activateWorkflow, fetchSessions, fetchDevices, esc,
-  startStream, stopStream, wakeDevice,
+  wakeDevice, startStream, stopStream,
 } from "../../core/api-client.js";
 import {
   getContainer, getWorkflow, setWorkflow,
@@ -22,7 +22,7 @@ import {
   findActiveSession, connectPreview, disconnectPreview,
   startSessionPolling, stopSessionPolling, destroyPreview,
   addPreviewListener, removePreviewListener, getNodePreviews,
-  isPreviewConnected,
+  isPreviewConnected, sendPreviewJson, getPublisherStatus, getConnectedSessionId,
 } from "./editor-preview.js";
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
@@ -102,7 +102,8 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <span class="wf-toolbar-sep" style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;vertical-align:middle"></span>
         <button class="btn" id="wf-wake-btn" title="Wake device via push notification">Wake</button>
         <button class="btn" id="wf-activate-btn" title="Activate workflow against a live session">Activate</button>
-        <button class="btn" id="wf-stream-btn" title="Start camera stream on activated device">Stream</button>
+        <button class="btn" id="wf-stream-start-btn" title="Start camera stream">Start Stream</button>
+        <button class="btn" id="wf-stream-stop-btn" title="Stop camera stream" disabled>Stop Stream</button>
         <button class="btn" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
@@ -343,41 +344,18 @@ function wireEditorEvents(): void {
     setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
-  // Toolbar: stream toggle — start or stop camera on a live session
-  getContainer()?.querySelector("#wf-stream-btn")?.addEventListener("click", async () => {
-    const btn = getContainer()?.querySelector("#wf-stream-btn") as HTMLElement;
-    const isStreaming = btn?.textContent?.trim() === "Stop";
-
-    // Find a live session to target
-    const sessions = await fetchSessions();
-    const liveSessions = sessions.filter(s => s.live);
-    if (liveSessions.length === 0) {
-      alert("No live sessions. Wake a device first.");
+  // Toolbar: start stream — send start_stream via preview WS (same as live viewer)
+  getContainer()?.querySelector("#wf-stream-start-btn")?.addEventListener("click", () => {
+    if (!isPreviewConnected()) {
+      alert("Not connected to a session. Wake a device first.");
       return;
     }
+    sendPreviewJson({ type: "start_stream" });
+  });
 
-    // If only one session, use it directly; otherwise pick by workflow target or first
-    const workflow = getWorkflow();
-    const settings = workflow?.settings;
-    let target = liveSessions.find(s => s.device?.deviceId === settings?.targetDeviceId) ?? liveSessions[0];
-
-    if (isStreaming) {
-      const result = await stopStream(target.sessionId);
-      if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
-      btn.textContent = "Stream";
-      refreshTestingPanel();
-      return;
-    }
-
-    const result = await startStream(target.sessionId);
-    if (!result?.ok) {
-      const err = result?.error ?? "Unknown error";
-      if (err.includes("Publisher not connected")) { alert("Publisher not connected. Wake the device first."); }
-      else { alert("Stream failed: " + err); }
-      return;
-    }
-    btn.textContent = "Stop";
-    refreshTestingPanel();
+  // Toolbar: stop stream — send stop_stream via preview WS (same as live viewer)
+  getContainer()?.querySelector("#wf-stream-stop-btn")?.addEventListener("click", () => {
+    sendPreviewJson({ type: "stop_stream" });
   });
 
   // Toolbar: testing panel toggle
@@ -593,6 +571,18 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
     const statusEl = container.querySelector("#wf-preview-status");
     if (statusEl) {
       (statusEl as HTMLElement).style.display = isPreviewConnected() ? "" : "none";
+    }
+
+    // Update toolbar stream button states based on publisher status
+    const pubStatus = getPublisherStatus();
+    const startBtn = container.querySelector("#wf-stream-start-btn") as HTMLButtonElement | null;
+    const stopBtn = container.querySelector("#wf-stream-stop-btn") as HTMLButtonElement | null;
+    const connected = isPreviewConnected();
+    if (startBtn) {
+      startBtn.disabled = !connected || pubStatus === "live";
+    }
+    if (stopBtn) {
+      stopBtn.disabled = !connected || pubStatus !== "live";
     }
 
     // Re-render config panel to update preview section
