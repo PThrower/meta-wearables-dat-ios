@@ -788,6 +788,7 @@ class StreamSessionViewModel: ObservableObject {
     guard let detType = VisionDetectionType(rawValue: nodeType) else { return }
 
     let confidence = config["confidence"] as? Double ?? 0.5
+    let smoothingAlpha = config["smoothingAlpha"] as? Double ?? 0.3
     let targetFPS = config["targetFPS"] as? UInt ?? 5
     let maxResults = config["maxResults"] as? Int ?? 0
     let language = config["language"] as? String ?? "en-US"
@@ -800,6 +801,7 @@ class StreamSessionViewModel: ObservableObject {
       confidence: confidence,
       targetFPS: targetFPS,
       maxResults: maxResults,
+      smoothingAlpha: smoothingAlpha,
       language: language,
       symbologies: symbologies,
       maxLabels: maxLabels
@@ -878,19 +880,28 @@ class StreamSessionViewModel: ObservableObject {
         let stage = AudioClassificationStage()
         let cfg = sensor.config
         let targetLabels = cfg["targetLabels"] as? [String]
+        // Resolve audio source from server-sent config (derived from workflow edges)
+        let audioSource: AudioSource? = {
+          if let sourceStr = cfg["audioSource"] as? String, sourceStr == "glasses" {
+            return .bluetoothHFP
+          }
+          return .builtInMic
+        }()
         await stage.configure(
           windowDuration: cfg["windowDuration"] as? Double ?? 1.5,
           overlapFactor: cfg["overlapFactor"] as? Double ?? 0.5,
           confidence: cfg["confidence"] as? Double ?? 0.3,
           maxLabels: cfg["maxLabels"] as? Int ?? 5,
-          targetLabels: targetLabels
+          targetLabels: targetLabels,
+          smoothingAlpha: cfg["smoothingAlpha"] as? Double ?? 0.3,
+          source: audioSource
         )
         await stage.setOnResult { [weak self] classification in
           await self?.relayStage.sendJson(classification.jsonDict)
         }
         await stage.start()
         audioClassificationStage = stage
-        NSLog("[StreamSession] AudioClassificationStage started")
+        NSLog("[StreamSession] AudioClassificationStage started source=\(audioSource?.displayName ?? "Phone Mic")")
 
       case .location:
         let stage = LocationStage()

@@ -25,6 +25,9 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     // Vision configuration
     private var visionConfig: VisionStageConfig
 
+    // Confidence smoothing (EMA per tracked detection)
+    private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
+
     // Built VNRequests (rebuilt when config changes)
     private var requests: [VNRequest] = []
 
@@ -110,6 +113,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.visionConfig = newConfig
         self.config = FrameStageConfig(targetFPS: newConfig.targetFPS, isEnabled: true)
         self.requests = Self.buildRequests(config: newConfig)
+        confidenceSmoother.reset()
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
@@ -123,6 +127,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
     func stop() async {
         lastProcessTime = nil
+        confidenceSmoother.reset()
         NSLog("[VisionStage] Stopped")
     }
 
@@ -178,7 +183,38 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             }
         }
 
-        // Filter by confidence
+        // Smooth confidence values with EMA (skip if alpha == 1.0 = disabled)
+        if visionConfig.smoothingAlpha < 1.0 {
+            confidenceSmoother.alpha = visionConfig.smoothingAlpha
+            detections = detections.map { detection in
+                let key: String
+                switch detection {
+                case .face, .person, .bodyPose:
+                    guard let bbox = detection.boundingBox else {
+                        return detection
+                    }
+                    key = confidenceSmoother.spatialKey(type: detection.detectionType.rawValue, bbox: bbox)
+                case .barcode(let d):
+                    key = "barcode-\(d.payloadString)"
+                case .ocr(let d):
+                    // Truncate to avoid unbounded keys from varying text
+                    key = "ocr-\(d.text.prefix(80))"
+                case .scene(let cls):
+                    // Smooth each scene label individually
+                    let smoothedLabels = cls.labels.map { label in
+                        let labelKey = "scene-\(label.label)"
+                        let smoothed = confidenceSmoother.smooth(key: labelKey, raw: label.confidence)
+                        return SceneLabel(label: label.label, confidence: smoothed)
+                    }
+                    return detection.withSmoothedLabels(smoothedLabels)
+                }
+                let smoothed = confidenceSmoother.smooth(key: key, raw: detection.confidence, bbox: detection.boundingBox)
+                return detection.withConfidence(smoothed)
+            }
+            confidenceSmoother.prune()
+        }
+
+        // Filter by (smoothed) confidence
         detections = detections.filter { $0.confidence >= visionConfig.confidence }
 
         // Filter by maxResults

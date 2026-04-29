@@ -7,6 +7,13 @@
  *
  * Results are relayed as `sensor_result` JSON messages through RelayStage.
  * NSMicrophoneUsageDescription must be in Info.plist (already present).
+ *
+ * Audio source routing:
+ *   - .builtInMic (default): uses phone's built-in microphone
+ *   - .bluetoothHFP: routes through glasses HFP mic via setPreferredInput
+ *
+ * IMPORTANT: Never calls setCategory — joins the app delegate's existing
+ * .playAndRecord + .allowBluetooth session to avoid breaking HFP/TTS.
  */
 
 import AVFoundation
@@ -24,7 +31,12 @@ actor AudioClassificationStage {
     private var confidenceThreshold: Double = 0.3
     private var maxLabels: Int = 5
     private var targetLabels: Set<String>? = nil  // nil = all labels, non-nil = filter to these only
+    private var source: AudioSource?
     private var isEnabled = false
+
+    // Confidence smoothing (EMA per sound label)
+    private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
+    private var smoothingAlpha: Double = 0.3
 
     // Callback for relaying results
     private var onResult: (@Sendable (SoundClassification) async -> Void)?
@@ -33,12 +45,15 @@ actor AudioClassificationStage {
         self.onResult = handler
     }
 
-    func configure(windowDuration: Double, overlapFactor: Double, confidence: Double, maxLabels: Int, targetLabels: [String]?) {
+    func configure(windowDuration: Double, overlapFactor: Double, confidence: Double, maxLabels: Int, targetLabels: [String]?, smoothingAlpha: Double = 0.3, source: AudioSource? = nil) {
         self.windowDuration = windowDuration
         self.overlapFactor = overlapFactor
         self.confidenceThreshold = confidence
         self.maxLabels = maxLabels
         self.targetLabels = (targetLabels != nil && !targetLabels!.isEmpty) ? Set(targetLabels!) : nil
+        self.smoothingAlpha = smoothingAlpha
+        self.source = source
+        confidenceSmoother.reset()
     }
 
     func start() async {
@@ -47,11 +62,39 @@ actor AudioClassificationStage {
 
         let audioSession = AVAudioSession.sharedInstance()
         do {
-            try audioSession.setCategory(.record, mode: .measurement)
+            // Do NOT call setCategory — the app delegate already configures
+            // .playAndRecord + .allowBluetooth. Overriding it breaks HFP and TTS.
             try audioSession.setActive(true)
         } catch {
-            NSLog("[AudioClassification] Failed to set up audio session: \(error)")
+            NSLog("[AudioClassification] Failed to activate audio session: \(error)")
             return
+        }
+
+        // Route to requested input source
+        if let source = source, source == .bluetoothHFP {
+            let preferredPort = audioSession.availableInputs?.first { $0.portType == .bluetoothHFP }
+            if let port = preferredPort {
+                do {
+                    try audioSession.setPreferredInput(port)
+                    NSLog("[AudioClassification] Set preferred input to HFP: \(port.portName)")
+                    // Allow time for Bluetooth HFP handshake
+                    try? await Task.sleep(nanoseconds: 2 * NSEC_PER_SEC)
+                } catch {
+                    NSLog("[AudioClassification] Failed to set HFP preferred input: \(error), falling back to built-in")
+                }
+            } else {
+                NSLog("[AudioClassification] No Bluetooth HFP port available, using built-in mic")
+            }
+        } else {
+            // Explicitly prefer built-in mic
+            let preferredPort = audioSession.availableInputs?.first { $0.portType == .builtInMic }
+            if let port = preferredPort {
+                do {
+                    try audioSession.setPreferredInput(port)
+                } catch {
+                    NSLog("[AudioClassification] Failed to set built-in mic as preferred: \(error)")
+                }
+            }
         }
 
         let engine = AVAudioEngine()
@@ -95,7 +138,8 @@ actor AudioClassificationStage {
         do {
             try engine.start()
             self.audioEngine = engine
-            NSLog("[AudioClassification] Started: window=\(windowDuration)s overlap=\(overlapFactor) confidence=\(confidenceThreshold) maxLabels=\(maxLabels) targetLabels=\(targetLabels?.sorted().joined(separator: ", ") ?? "all")")
+            let sourceName = source?.displayName ?? "Phone Mic"
+            NSLog("[AudioClassification] Started: source=\(sourceName) window=\(windowDuration)s overlap=\(overlapFactor) confidence=\(confidenceThreshold) maxLabels=\(maxLabels) targetLabels=\(targetLabels?.sorted().joined(separator: ", ") ?? "all")")
         } catch {
             NSLog("[AudioClassification] Failed to start audio engine: \(error)")
         }
@@ -109,10 +153,9 @@ actor AudioClassificationStage {
         audioEngine?.stop()
         audioEngine = nil
         analyzer = nil
+        confidenceSmoother.reset()
 
-        let audioSession = AVAudioSession.sharedInstance()
-        try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
-
+        // Don't deactivate the shared audio session — other stages may still need it
         NSLog("[AudioClassification] Stopped")
     }
 
@@ -136,7 +179,21 @@ actor AudioClassificationStage {
 
         let filtered = classifications
             .prefix(maxLabels)
-            .map { SoundLabel(label: $0.identifier, confidence: Double($0.confidence)) }
+            .map { raw -> SoundLabel in
+                let key = "sound-\(raw.identifier)"
+                let smoothed: Double
+                if smoothingAlpha < 1.0 {
+                    smoothed = confidenceSmoother.smooth(key: key, raw: Double(raw.confidence))
+                } else {
+                    smoothed = Double(raw.confidence)
+                }
+                return SoundLabel(label: raw.identifier, confidence: smoothed)
+            }
+
+        // Prune stale labels from smoother
+        if smoothingAlpha < 1.0 {
+            confidenceSmoother.prune(maxAge: .milliseconds(2000))
+        }
 
         guard !filtered.isEmpty else { return }
 

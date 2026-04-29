@@ -296,7 +296,7 @@ function resolveTriggerChains(
  * Walks edges backward from a processor to find connected source nodes,
  * then OR-merges the source types into an InputConfig.
  */
-function resolveSourceInput(
+export function resolveSourceInput(
   processorId: string,
   nodes: WorkflowNodeDef[],
   edges: WorkflowEdgeDef[],

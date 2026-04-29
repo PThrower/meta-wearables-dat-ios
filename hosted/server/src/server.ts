@@ -51,7 +51,7 @@ import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
-import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
+import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline, resolveSourceInput } from "./app-registry.js";
 import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow, WorkflowSettings } from "./app-types.js";
 import { detectFlows } from "./flow-detection.js";
 import { isSttResult, isVadResult } from "./message-types.js";
@@ -113,6 +113,7 @@ dbWriter.start();
 
 // --- Seed pre-built apps as published workflows ---
 import { seedAppsAsWorkflows } from "./seed-apps.js";
+import { DetectionThrottle } from "./detection-throttle.js";
 
 seedAppsAsWorkflows();
 
@@ -372,6 +373,7 @@ function dispatchWorkflowConfig(
   ws: import("ws").WebSocket | { send: (data: string) => void; readyState: number },
   nodes: Array<{ id: string; type: string; config: Record<string, unknown> }>,
   sid: string,
+  edges?: Array<{ sourceNodeId: string; targetNodeId: string }>,
 ): void {
   if (ws.readyState !== 1 /* WebSocket.OPEN */) return;
 
@@ -406,6 +408,7 @@ function dispatchWorkflowConfig(
       nodeType: nodes[i].type,
       detectionTypes: [nodes[i].type],
       confidence: cfg?.confidence ?? 0.5,
+      smoothingAlpha: cfg?.smoothingAlpha ?? 0.3,
       targetFPS: cfg?.targetFPS ?? 5,
       maxResults: cfg?.maxFaces ?? cfg?.maxPersons ?? cfg?.maxPoses ?? 0,
       language: cfg?.language ?? "en-US",
@@ -431,6 +434,15 @@ function dispatchWorkflowConfig(
       if (nodes[i].type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
         rawConfig.targetLabels = (rawConfig.targetLabels as string).split(",").map((s: string) => s.trim()).filter((s: string) => s.length > 0);
       }
+      // Resolve upstream audio source for sensor-sound on reconnect
+      if (nodes[i].type === "sensor-sound" && edges) {
+        const inputCfg = resolveSourceInput(nodes[i].id, nodes as any, edges as any);
+        if (inputCfg.glassesMic && !inputCfg.phoneMic) {
+          rawConfig.audioSource = "glasses";
+        } else {
+          rawConfig.audioSource = "phone";
+        }
+      }
       return { sensorType: nodes[i].type, config: rawConfig };
     });
     ws.send(JSON.stringify({ type: "sensor_stage_config", sensors, enabled: true }));
@@ -454,10 +466,16 @@ const appRegistry = new AppRegistry();
 
 const orchestrator = new GuidanceOrchestrator(controlEventBus, appRegistry);
 
+// Detection throttle — reduces AI context noise by deduplicating identical
+// detection summaries within a 2-second window. Vision fires ~5fps; without
+// throttling, AI gets 5 near-identical `[Vision: Face (87%)]` messages/sec.
+const detectionThrottle = new DetectionThrottle(2000);
+
 // Clean up orchestrator state when sessions expire
 registry.setOnSessionDestroy((id: string) => {
   orchestrator.cleanup(id);
   jepaOrchestrator.deactivate(id);
+  detectionThrottle.clear(id);
 });
 
 // Pause/resume active workflow when session pauses/resumes
@@ -1609,6 +1627,7 @@ const server = Bun.serve<WsData>({
             nodeType: rawNode.type,
             detectionTypes: [rawNode.type],
             confidence: (rawNode.config as any)?.confidence ?? 0.5,
+            smoothingAlpha: (rawNode.config as any)?.smoothingAlpha ?? 0.3,
             targetFPS: (rawNode.config as any)?.targetFPS ?? 5,
             maxResults: (rawNode.config as any)?.maxFaces
               ?? (rawNode.config as any)?.maxPersons
@@ -1698,6 +1717,16 @@ const server = Bun.serve<WsData>({
             if (rawNode.type === "sensor-sound" && typeof rawConfig.targetLabels === "string") {
               const parsed = (rawConfig.targetLabels as string).split(",").map(s => s.trim()).filter(s => s.length > 0);
               rawConfig.targetLabels = parsed.length > 0 ? parsed : undefined;
+            }
+
+            // Resolve upstream audio source from workflow edges for sensor-sound
+            if (rawNode.type === "sensor-sound") {
+              const inputCfg = resolveSourceInput(rawNode.id, nodes as any, edges as any);
+              if (inputCfg.glassesMic && !inputCfg.phoneMic) {
+                rawConfig.audioSource = "glasses";
+              } else {
+                rawConfig.audioSource = "phone";
+              }
             }
 
             sensorConfigs.push({
@@ -1988,7 +2017,7 @@ const server = Bun.serve<WsData>({
         if (!wfId) {
           const dbSession = q.getSession(sessionId);
           wfId = (dbSession as any)?.active_workflow_id ?? (dbSession as any)?.activeWorkflowId ?? undefined;
-          if (wfId) {
+          if (wfId && session) {
             session.activeWorkflowId = wfId;
             console.log(`[relay] Restored activeWorkflowId=${wfId} from DB for session=${sessionId}`);
           }
@@ -1997,13 +2026,14 @@ const server = Bun.serve<WsData>({
           const wf = q.getWorkflow(wfId);
           if (wf) {
             const wfNodes = q.getWorkflowNodes(wfId);
+            const wfEdges = q.getWorkflowEdges(wfId);
             if (wfNodes.length > 0) {
               const typedNodes = wfNodes.map(n => ({
                 id: n.id,
                 type: n.type,
                 config: typeof n.config === "string" ? JSON.parse(n.config) : (n.config ?? {}),
               }));
-              dispatchWorkflowConfig(ws, typedNodes, sessionId);
+              dispatchWorkflowConfig(ws, typedNodes, sessionId, wfEdges);
               console.log(`[relay] Replayed workflow config for ${wfId} on publisher reconnect session=${sessionId}`);
             }
           }
@@ -2330,12 +2360,8 @@ const server = Bun.serve<WsData>({
               ws.send(JSON.stringify({ type: "vision_fps", fps }));
             } else if (cmd.type === "vision_result" && Array.isArray(cmd.detections)) {
               // iOS VisionStage detection results — inject as context into active AI sessions.
-              //
-              // NOTE: Vision runs at ~5fps by default, so this fires ~5x/sec. Each call
-              // sends a [Vision: ...] text trigger to every active AI service via sendText().
-              // If the AI context window becomes noisy, consider throttling the AI injection
-              // to e.g. 1 trigger every 2-3 seconds (deduplicate identical summaries, or
-              // only send on detection change). The viewer fan-out below is fine at 5fps.
+              // Throttled via DetectionThrottle: only forwards on summary change or every 2s.
+              // Viewer fan-out is NOT throttled (viewers need every frame for overlays).
               if (session.activeAppId) {
                 const summary = (cmd.detections as any[]).map((d: any) => {
                   if (d.type === "vision-face-detect") return `Face detected (confidence: ${(d.confidence * 100).toFixed(0)}%)`;
@@ -2353,7 +2379,10 @@ const server = Bun.serve<WsData>({
                   return `${d.type}: ${d.label}`;
                 }).join("; ");
                 if (summary) {
-                  orchestrator.sendTrigger(sessionId, `[Vision: ${summary}]`);
+                  const throttled = detectionThrottle.check(sessionId, "vision", summary);
+                  if (throttled) {
+                    orchestrator.sendTrigger(sessionId, `[Vision: ${throttled}]`);
+                  }
                 }
               }
               // Fan out to viewers for overlay rendering
@@ -2384,7 +2413,10 @@ const server = Bun.serve<WsData>({
                   }
                 }
                 if (summary) {
-                  orchestrator.sendTrigger(sessionId, `[Sensor: ${summary}]`);
+                  const throttled = detectionThrottle.check(sessionId, `sensor:${sensorType}`, summary);
+                  if (throttled) {
+                    orchestrator.sendTrigger(sessionId, `[Sensor: ${throttled}]`);
+                  }
                 }
               }
               // Fan out to viewers

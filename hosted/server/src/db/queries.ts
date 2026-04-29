@@ -524,7 +524,7 @@ export function updateSession(sessionId: string, fields: Record<string, unknown>
     const setClause = keys.map(k => `${toSnakeCase(k)} = ?`).join(", ");
     const values = keys.map(k => fields[k]);
     db.prepare(`UPDATE sessions SET ${setClause}, updated_at = ? WHERE id = ?`)
-      .run(...values, now(), sessionId);
+      .run(...values as (string | number | boolean | null)[], now(), sessionId);
   };
 }
 

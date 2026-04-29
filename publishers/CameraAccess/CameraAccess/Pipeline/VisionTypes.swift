@@ -150,6 +150,35 @@ enum VisionDetection: Sendable {
         case .bodyPose(let d): return d.confidence
         }
     }
+
+    /// Return a copy with a modified top-level confidence.
+    /// Used by ConfidenceSmoother to apply EMA before threshold filtering.
+    /// For scene classification, smooths each label's confidence individually.
+    func withConfidence(_ newConfidence: Double) -> VisionDetection {
+        switch self {
+        case .face(let d):
+            return .face(FaceDetection(boundingBox: d.boundingBox, confidence: newConfidence, landmarkCount: d.landmarkCount))
+        case .barcode(let d):
+            return .barcode(BarcodeDetection(boundingBox: d.boundingBox, payloadString: d.payloadString, symbology: d.symbology, confidence: newConfidence))
+        case .ocr(let d):
+            return .ocr(OCRResult(boundingBox: d.boundingBox, text: d.text, confidence: newConfidence))
+        case .scene:
+            // Scene smoothing is handled per-label externally; top-level uses first label
+            return self
+        case .person(let d):
+            return .person(PersonDetection(boundingBox: d.boundingBox, confidence: newConfidence))
+        case .bodyPose(let d):
+            return .bodyPose(BodyPoseDetection(boundingBox: d.boundingBox, confidence: newConfidence, joints: d.joints))
+        }
+    }
+
+    /// Return a copy with smoothed per-label confidences (scene classification).
+    func withSmoothedLabels(_ smoothedLabels: [SceneLabel]) -> VisionDetection {
+        if case .scene = self {
+            return .scene(SceneClassification(labels: smoothedLabels))
+        }
+        return self
+    }
 }
 
 // MARK: - VisionFrameResult
@@ -172,6 +201,7 @@ struct VisionStageConfig: Sendable, Codable {
     let confidence: Double
     let targetFPS: UInt
     let maxResults: Int  // 0 = unlimited
+    let smoothingAlpha: Double  // EMA factor: 0.3=heavy, 1.0=disabled
 
     // OCR-specific
     let language: String
@@ -187,6 +217,7 @@ struct VisionStageConfig: Sendable, Codable {
         confidence: 0.5,
         targetFPS: 5,
         maxResults: 0,
+        smoothingAlpha: 0.3,
         language: "en-US",
         symbologies: ["QR"],
         maxLabels: 5
