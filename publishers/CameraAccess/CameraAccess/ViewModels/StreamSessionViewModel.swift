@@ -943,7 +943,7 @@ class StreamSessionViewModel: ObservableObject {
           // Update overlay transcription for on-device display
           if !result.text.isEmpty {
             await MainActor.run { [weak self] in
-              self?.overlayTranscription = result.isFinal ? result.text : nil
+              self?.overlayTranscription = result.text
             }
           }
           if result.error != nil {

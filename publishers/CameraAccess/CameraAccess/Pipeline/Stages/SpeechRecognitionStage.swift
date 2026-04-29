@@ -49,8 +49,15 @@ actor SpeechRecognitionStage {
         guard !isEnabled else { return }
 
         do {
-            // Request speech recognition authorization
-            let authStatus = SFSpeechRecognizer.authorizationStatus()
+            // Request speech recognition authorization if not yet determined
+            var authStatus = SFSpeechRecognizer.authorizationStatus()
+            if authStatus == .notDetermined {
+                authStatus = await withCheckedContinuation { continuation in
+                    SFSpeechRecognizer.requestAuthorization { status in
+                        continuation.resume(returning: status)
+                    }
+                }
+            }
             guard authStatus == .authorized else {
                 throw SpeechRecognitionError.authorizationDenied(status: authStatus.rawValue)
             }

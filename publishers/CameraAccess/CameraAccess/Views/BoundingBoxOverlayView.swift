@@ -34,10 +34,13 @@ struct BoundingBoxOverlayView: View {
   var transcription: String? = nil
 
   var body: some View {
-    if showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil || transcription != nil) {
+    let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil)
+    let hasTranscription = transcription != nil
+    if hasBoxes || hasTranscription {
       GeometryReader { geometry in
         ZStack {
           // Server AI bounding boxes (existing)
+          if showOverlay {
           ForEach(Array(boxes.enumerated()), id: \.element.id) { index, box in
             let color = aiColor
             let rect = CGRect(
@@ -126,8 +129,9 @@ struct BoundingBoxOverlayView: View {
                 y: 14
               )
           }
+          } // end if showOverlay
 
-          // Live transcription subtitle (bottom-center)
+          // Live transcription subtitle (bottom-center) — always visible when present
           if let text = transcription {
             Text(text)
               .font(.system(size: 13, weight: .medium, design: .monospaced))
