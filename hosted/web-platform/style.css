@@ -3482,6 +3482,72 @@ select.wf-settings-input { appearance: none; cursor: pointer; }
   gap: 3px;
 }
 
+/* Inline flow controls bar (below canvas) */
+.wf-flow-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px;
+  background: rgba(15, 23, 42, 0.5);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.wf-flow-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-flow-mode-toggle .wf-flow-mode-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.wf-flow-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-flow-list.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.wf-flow-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: grab;
+}
+
+.wf-flow-bar-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wf-flow-bar-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.wf-flow-bar-arrow {
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.wf-flow-bar-arrow:hover {
+  color: var(--text-primary);
+}
+
 /* SVG canvas flow highlighting */
 .wf-flow-highlight-dim .wf-node:not([data-flow-id]) {
   opacity: 0.2;
