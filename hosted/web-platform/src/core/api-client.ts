@@ -480,6 +480,55 @@ export async function activateWorkflow(
   }
 }
 
+/** Start streaming for an activated workflow */
+export async function startStream(workflowId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+  try {
+    const res = await authFetch(`/workflows/${workflowId}/start-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json() as any;
+    if (!res.ok) return { ok: false, error: data.error ?? "Failed to start stream" };
+    return data;
+  } catch (err) {
+    console.warn("[api] startStream failed:", err);
+    return null;
+  }
+}
+
+/** Stop streaming for an activated workflow */
+export async function stopStream(workflowId: string): Promise<{ ok: boolean; sessionId?: string; error?: string } | null> {
+  try {
+    const res = await authFetch(`/workflows/${workflowId}/stop-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const data = await res.json() as any;
+    if (!res.ok) return { ok: false, error: data.error ?? "Failed to stop stream" };
+    return data;
+  } catch (err) {
+    console.warn("[api] stopStream failed:", err);
+    return null;
+  }
+}
+
+/** Wake a device via APNs push */
+export async function wakeDevice(deviceId: string): Promise<{ ok: boolean; error?: string } | null> {
+  try {
+    const res = await authFetch("/api/wake-device", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deviceId }),
+    });
+    const data = await res.json() as any;
+    if (!res.ok) return { ok: false, error: data.error ?? "Wake failed" };
+    return data;
+  } catch (err) {
+    console.warn("[api] wakeDevice failed:", err);
+    return null;
+  }
+}
+
 /** Fetch available primitives */
 export function fetchPrimitives(): Promise<Array<{ id: string; name: string; icon: string }>> {
   return apiGet<Array<{ id: string; name: string; icon: string }>>("/primitives").then(r => r ?? []);

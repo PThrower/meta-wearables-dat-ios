@@ -5,6 +5,7 @@
 import {
   fetchWorkflow, updateWorkflow, deleteWorkflow,
   activateWorkflow, fetchSessions, fetchDevices, esc,
+  startStream, stopStream, wakeDevice,
 } from "../../core/api-client.js";
 import {
   getContainer, getWorkflow, setWorkflow,
@@ -98,11 +99,24 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn" id="wf-publish-btn">${workflow.status === "published" ? "Unpublish" : "Publish"}</button>
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-settings-btn">Settings</button>
-        <button class="btn" id="wf-activate-btn">Activate</button>
+        <span class="wf-toolbar-sep" style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;vertical-align:middle"></span>
+        <button class="btn" id="wf-wake-btn" title="Wake device via push notification">Wake</button>
+        <button class="btn" id="wf-activate-btn" title="Activate workflow against a live session">Activate</button>
+        <button class="btn" id="wf-stream-btn" title="Start camera stream on activated device">Stream</button>
+        <button class="btn" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
           <span style="color:#4ade80;vertical-align:middle">LIVE</span>
         </span>
+      </div>
+      <div class="wf-testing-panel" id="wf-testing-panel" style="display:none">
+        <div class="wf-testing-header">
+          <span style="font-weight:600;font-size:13px">Fleet Testing</span>
+          <button class="btn" id="wf-testing-close" style="padding:2px 8px;font-size:11px">&times;</button>
+        </div>
+        <div class="wf-testing-body" id="wf-testing-body">
+          <p class="empty-state" style="font-size:11px;color:var(--text-tertiary)">Loading devices...</p>
+        </div>
       </div>
     </div>
   `;
@@ -216,99 +230,85 @@ function wireEditorEvents(): void {
     renderConfigPanel();
   });
 
-  // Toolbar: activate — device-first (wake) or session-based activation
+  // Toolbar: wake — send APNs push to wake a device
+  getContainer()?.querySelector("#wf-wake-btn")?.addEventListener("click", async () => {
+    const workflow = getWorkflow();
+    if (!workflow?.id) return;
+
+    const settings = workflow.settings;
+    if (settings?.targetDeviceId) {
+      // Wake the configured target device directly
+      const result = await wakeDevice(settings.targetDeviceId);
+      if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
+      alert(`Wake sent to device ${settings.targetDeviceId.slice(0, 8)}...`);
+      refreshTestingPanel();
+      return;
+    }
+
+    // No target configured — show device picker
+    const existing = getContainer()?.querySelector(".wf-wake-dropdown");
+    if (existing) { existing.remove(); return; }
+
+    const devices = await fetchDevices();
+    if (devices.length === 0) { alert("No registered devices. Open the app on a device first."); return; }
+
+    const dd = document.createElement("div");
+    dd.className = "wf-wake-dropdown";
+    dd.style.cssText = "position:absolute;right:200px;bottom:60px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:8px;z-index:200;min-width:220px";
+    dd.innerHTML = `
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Select device to wake:</div>
+      <select class="wf-wake-select" style="width:100%;margin-bottom:6px;padding:4px;background:var(--bg-surface-alt);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px">
+        ${devices.map(d => `<option value="${d.device_id}">${d.deviceName ?? d.device_id.slice(0, 8)} ${d.deviceModel ?? ""}</option>`).join("")}
+      </select>
+      <button class="btn" style="width:100%">Wake Device</button>
+    `;
+    getContainer()?.querySelector(".workflow-editor-page")?.appendChild(dd);
+
+    dd.querySelector(".btn")?.addEventListener("click", async () => {
+      const deviceId = (dd.querySelector(".wf-wake-select") as HTMLSelectElement)?.value;
+      if (!deviceId) return;
+      dd.remove();
+      const result = await wakeDevice(deviceId);
+      if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
+      alert(`Wake sent to ${deviceId.slice(0, 8)}...`);
+      refreshTestingPanel();
+    });
+
+    const dismiss = (ev: MouseEvent) => {
+      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
+    };
+    setTimeout(() => document.addEventListener("click", dismiss), 0);
+  });
+
+  // Toolbar: activate — session-based workflow activation
   getContainer()?.querySelector("#wf-activate-btn")?.addEventListener("click", async () => {
     const workflow = getWorkflow();
     if (!workflow?.id) return;
     const existing = getContainer()?.querySelector(".wf-activate-dropdown");
     if (existing) { existing.remove(); return; }
 
-    const settings = workflow.settings;
-    const wakeMode = settings?.wakeOnActivate && settings?.targetDeviceId;
-
-    if (wakeMode) {
-      // Device-first mode: wake the target device via APNs
-      const dd = document.createElement("div");
-      dd.className = "wf-activate-dropdown";
-      dd.innerHTML = `
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:11px;color:var(--text-secondary);">Wake &amp; activate:</span>
-          <span style="font-size:11px;color:var(--text-primary);">${esc(settings!.targetDeviceId!.slice(0, 8))}...</span>
-          <button class="wf-activate-go">Wake Device</button>
-        </div>
-      `;
-      (getContainer()?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
-
-      dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
-        dd.remove();
-        const result = await activateWorkflow(workflow!.id, undefined, { deviceId: settings!.targetDeviceId! });
-        if (!result) { alert("Wake failed"); return; }
-        if (result.status === "wake_sent") {
-          alert(`Wake sent to device ${settings!.targetDeviceId!.slice(0, 8)}... — it will auto-activate when connected.`);
-        } else {
-          alert(`Unexpected status: ${result.status}`);
-        }
-      });
-
-      const dismiss = (ev: MouseEvent) => {
-        if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
-      };
-      setTimeout(() => document.addEventListener("click", dismiss), 0);
-      return;
-    }
-
-    // Session-based mode: show live session picker
+    // Session-based: show live session picker
     const sessions = await fetchSessions();
     const liveSessions = sessions.filter(s => s.live);
+
     if (liveSessions.length === 0) {
-      // Check if we have devices we could wake instead
-      const devices = await fetchDevices();
-      if (devices.length > 0) {
-        const dd = document.createElement("div");
-        dd.className = "wf-activate-dropdown";
-        dd.innerHTML = `
-          <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">No live sessions — wake a device:</div>
-          <select class="wf-activate-select">
-            ${devices.map(d => `<option value="${d.device_id}">${d.deviceName ?? d.device_id.slice(0, 8)} ${d.deviceModel ?? ""}</option>`).join("")}
-          </select>
-          <button class="wf-activate-go">Wake &amp; Activate</button>
-        `;
-        (getContainer()?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
-
-        dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
-          const deviceId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
-          if (!deviceId) return;
-          dd.remove();
-          const result = await activateWorkflow(workflow!.id, undefined, { deviceId });
-          if (!result) { alert("Wake failed"); return; }
-          if (result.status === "wake_sent") {
-            alert(`Wake sent — device will auto-activate when connected.`);
-          } else {
-            alert(`Status: ${result.status}`);
-          }
-        });
-
-        const dismiss = (ev: MouseEvent) => {
-          if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
-        };
-        setTimeout(() => document.addEventListener("click", dismiss), 0);
-      } else {
-        alert("No live sessions or registered devices available. Open the app on your device first.");
-      }
+      alert("No live sessions. Wake a device first, then activate.");
       return;
     }
 
     const dd = document.createElement("div");
     dd.className = "wf-activate-dropdown";
+    dd.style.cssText = "position:absolute;right:140px;bottom:60px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:8px;z-index:200;min-width:260px";
     dd.innerHTML = `
-      <select class="wf-activate-select">
+      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Select session:</div>
+      <select class="wf-activate-select" style="width:100%;margin-bottom:6px;padding:4px;background:var(--bg-surface-alt);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px">
         ${liveSessions.map(s => `<option value="${s.sessionId}">${s.device?.deviceName ?? "unknown"} (${s.sessionId.slice(0, 8)})</option>`).join("")}
       </select>
-      <button class="wf-activate-go">Go</button>
+      <button class="btn" style="width:100%">Activate</button>
     `;
-    (getContainer()?.querySelector("#wf-activate-btn") as HTMLElement)?.after(dd);
+    getContainer()?.querySelector(".workflow-editor-page")?.appendChild(dd);
 
-    dd.querySelector(".wf-activate-go")?.addEventListener("click", async () => {
+    dd.querySelector(".btn")?.addEventListener("click", async () => {
       const sessionId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
       if (!sessionId) return;
       dd.remove();
@@ -327,20 +327,51 @@ function wireEditorEvents(): void {
           `Override and activate this workflow instead?`
         );
         if (!ok) return;
-
         result = await activateWorkflow(workflow!.id, sessionId, { override: true, reason: "Manual override" });
         if (!result) { alert("Override failed"); return; }
       }
 
-      if (result.status === "passive") alert(`Activated (passive). No AI processor — sinks/transforms configured on device.`);
+      if (result.status === "passive") alert("Activated (passive). Sinks/transforms configured on device.");
       else if (result.appId) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
-      else alert("Activation failed");
+      else alert("Activation result: " + result.status);
+      refreshTestingPanel();
     });
 
     const dismiss = (ev: MouseEvent) => {
       if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
     };
     setTimeout(() => document.addEventListener("click", dismiss), 0);
+  });
+
+  // Toolbar: start stream — sends start_stream to activated publisher
+  getContainer()?.querySelector("#wf-stream-btn")?.addEventListener("click", async () => {
+    const workflow = getWorkflow();
+    if (!workflow?.id) return;
+    const result = await startStream(workflow.id);
+    if (!result?.ok) {
+      const err = result?.error ?? "Unknown error";
+      if (err.includes("No active activation")) { alert("No active activation. Activate the workflow first."); }
+      else if (err.includes("Publisher not connected")) { alert("Publisher not connected. Wake the device first."); }
+      else { alert("Stream failed: " + err); }
+      return;
+    }
+    alert("Stream started on session " + (result.sessionId ?? "").slice(0, 8) + "...");
+    refreshTestingPanel();
+  });
+
+  // Toolbar: testing panel toggle
+  getContainer()?.querySelector("#wf-test-btn")?.addEventListener("click", () => {
+    const panel = getContainer()?.querySelector("#wf-testing-panel") as HTMLElement;
+    if (!panel) return;
+    const isOpen = panel.style.display !== "none";
+    panel.style.display = isOpen ? "none" : "flex";
+    if (!isOpen) refreshTestingPanel();
+  });
+
+  // Testing panel close button
+  getContainer()?.querySelector("#wf-testing-close")?.addEventListener("click", () => {
+    const panel = getContainer()?.querySelector("#wf-testing-panel") as HTMLElement;
+    if (panel) panel.style.display = "none";
   });
 
   // Keyboard: delete selected node
@@ -354,6 +385,123 @@ function wireEditorEvents(): void {
       setFlowConfigActive(true);
     }
   });
+}
+
+// --- Testing Panel ---
+
+let _testingPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Refresh the testing panel device list. */
+async function refreshTestingPanel(): Promise<void> {
+  const body = getContainer()?.querySelector("#wf-testing-body");
+  if (!body) return;
+
+  const [devices, sessions] = await Promise.all([fetchDevices(), fetchSessions()]);
+  const liveSessions = sessions.filter(s => s.live);
+
+  if (devices.length === 0) {
+    body.innerHTML = '<p class="empty-state" style="font-size:11px;color:var(--text-tertiary)">No registered devices found. Open the app on a device to register it.</p>';
+    return;
+  }
+
+  body.innerHTML = devices.map(d => {
+    // Find if this device has a live session
+    const session = liveSessions.find(s => {
+      const sDevId = (s as any).device?.deviceId ?? (s as any).device?.device_id;
+      return sDevId === d.device_id;
+    });
+    const isOnline = !!session;
+    const isStreaming = isOnline && !(session as any).standby;
+    const isStandby = isOnline && !!(session as any).standby;
+    const activeWf = session?.activeWorkflowId;
+    const workflow = getWorkflow();
+    const isActivated = activeWf === workflow?.id;
+
+    const onlineBadge = isOnline
+      ? (isStreaming ? '<span class="wf-testing-badge wf-testing-badge-streaming">Streaming</span>' : '<span class="wf-testing-badge wf-testing-badge-standby">Standby</span>')
+      : '<span class="wf-testing-badge wf-testing-badge-offline">Offline</span>';
+    const activatedBadge = isActivated
+      ? '<span class="wf-testing-badge wf-testing-badge-activated">Activated</span>'
+      : '';
+
+    // Button states
+    const canWake = !isOnline && !!d.apnsToken;
+    const canActivate = isOnline && !isActivated;
+    const canStream = isActivated && isOnline && !isStreaming;
+
+    return `
+      <div class="wf-testing-device-card" data-device-id="${d.device_id}">
+        <div class="wf-testing-device-header">
+          <div>
+            <div class="wf-testing-device-name">${esc(d.deviceName ?? d.device_id.slice(0, 12))}</div>
+            <div class="wf-testing-device-model">${esc(d.deviceModel ?? "")}</div>
+          </div>
+        </div>
+        <div class="wf-testing-device-status">
+          ${onlineBadge} ${activatedBadge}
+        </div>
+        <div class="wf-testing-device-actions">
+          <button class="btn wf-test-wake" data-device-id="${d.device_id}" ${canWake ? "" : "disabled"}>Wake</button>
+          <button class="btn wf-test-activate" data-session-id="${session?.sessionId ?? ""}" ${canActivate ? "" : "disabled"}>Activate</button>
+          <button class="btn wf-test-stream" ${canStream ? "" : "disabled"}>Stream</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  // Wire per-device action buttons
+  body.querySelectorAll(".wf-test-wake:not([disabled])").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const deviceId = (btn as HTMLElement).dataset.deviceId!;
+      const result = await wakeDevice(deviceId);
+      if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
+      setTimeout(refreshTestingPanel, 3000); // Refresh after giving time for connection
+    });
+  });
+
+  body.querySelectorAll(".wf-test-activate:not([disabled])").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const workflow = getWorkflow();
+      const sessionId = (btn as HTMLElement).dataset.sessionId!;
+      if (!workflow?.id || !sessionId) return;
+
+      let result = await activateWorkflow(workflow.id, sessionId);
+      if (!result) { alert("Activation failed"); return; }
+      if (result.status === "conflict" && result.conflict) {
+        const ok = confirm("Session has active AI. Override?");
+        if (!ok) return;
+        result = await activateWorkflow(workflow.id, sessionId, { override: true, reason: "Manual override" });
+        if (!result) { alert("Override failed"); return; }
+      }
+      setTimeout(refreshTestingPanel, 1000);
+    });
+  });
+
+  body.querySelectorAll(".wf-test-stream:not([disabled])").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const workflow = getWorkflow();
+      if (!workflow?.id) return;
+      const result = await startStream(workflow.id);
+      if (!result?.ok) { alert(result?.error ?? "Stream failed"); return; }
+      setTimeout(refreshTestingPanel, 1000);
+    });
+  });
+}
+
+/** Start auto-refresh polling for the testing panel (every 15s). */
+function startTestingPoll(): void {
+  stopTestingPoll();
+  _testingPollTimer = setInterval(() => {
+    const panel = getContainer()?.querySelector("#wf-testing-panel") as HTMLElement;
+    if (panel && panel.style.display !== "none") {
+      refreshTestingPanel();
+    }
+  }, 15_000);
+}
+
+/** Stop testing panel auto-refresh. */
+function stopTestingPoll(): void {
+  if (_testingPollTimer) { clearInterval(_testingPollTimer); _testingPollTimer = null; }
 }
 
 // --- Preview wiring ---
@@ -378,6 +526,9 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
 
   // Poll for active sessions in case the workflow gets activated while editing
   startSessionPolling(workflowId);
+
+  // Start testing panel auto-refresh
+  startTestingPoll();
 
   // Listen for preview data changes and re-render
   _previewListener = () => {
@@ -419,4 +570,5 @@ export function destroyEditorPreview(): void {
     _previewListener = null;
   }
   destroyPreview();
+  stopTestingPoll();
 }

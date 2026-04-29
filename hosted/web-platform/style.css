@@ -3608,3 +3608,98 @@ select.wf-config-input {
   display: flex;
   gap: 4px;
 }
+
+/* Workflow Testing Panel */
+.wf-testing-panel {
+  position: fixed;
+  right: 0;
+  top: 48px;
+  bottom: 0;
+  width: 320px;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -2px 0 12px rgba(0,0,0,0.15);
+}
+
+.wf-testing-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.wf-testing-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.wf-testing-device-card {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.wf-testing-device-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.wf-testing-device-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.wf-testing-device-model {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.wf-testing-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.wf-testing-badge-online { background: rgba(34,197,94,0.15); color: #4ade80; }
+.wf-testing-badge-offline { background: rgba(248,113,113,0.15); color: #f87171; }
+.wf-testing-badge-streaming { background: rgba(59,130,246,0.15); color: #60a5fa; }
+.wf-testing-badge-standby { background: rgba(234,179,8,0.15); color: #facc15; }
+.wf-testing-badge-activated { background: rgba(168,85,247,0.15); color: #c084fc; }
+
+.wf-testing-device-status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.wf-testing-device-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.wf-testing-device-actions .btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.wf-testing-device-actions .btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

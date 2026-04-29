@@ -575,6 +575,25 @@ export function getActiveActivation(sessionId: string): {
   `).get(sessionId) as any ?? null;
 }
 
+/** Get the current active activation for a workflow (for stream control) */
+export function getActiveActivationForWorkflow(workflowId: string): {
+  id: string;
+  sessionId: string;
+  workflowId: string;
+  appId: string | null;
+  activatedAt: string;
+} | null {
+  const db = getDbRaw();
+  return db.prepare(`
+    SELECT id, session_id as sessionId, workflow_id as workflowId,
+      app_id as appId, activated_at as activatedAt
+    FROM activation_log
+    WHERE workflow_id = ? AND status = 'active'
+      AND overridden_at IS NULL
+    ORDER BY activated_at DESC LIMIT 1
+  `).get(workflowId) as any ?? null;
+}
+
 /** Insert a new activation log entry */
 export function insertActivation(params: {
   id: string;
