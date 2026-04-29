@@ -213,20 +213,19 @@ export async function sendSilentWake(
 }
 
 /**
- * Send a visible push notification as a fallback when silent push fails.
- *
- * User tapping the notification will launch the app.
+ * Send a visible push notification to prompt the user to open the app.
+ * User tapping the notification will launch the app and trigger wake flow.
  */
 export async function sendVisibleWake(
   deviceToken: string,
   sessionId?: string,
+  workflowName?: string,
 ): Promise<{ success: boolean; reason?: string }> {
+  const title = workflowName ? `Workflow: ${workflowName}` : "Stream Ready";
+  const body = workflowName ? "Tap to activate." : "Tap to connect your glasses.";
   const payload: Record<string, unknown> = {
     aps: {
-      alert: {
-        title: "Stream Ready",
-        body: "Tap to connect your glasses.",
-      },
+      alert: { title, body },
       sound: "default",
     },
     wake: "standby",

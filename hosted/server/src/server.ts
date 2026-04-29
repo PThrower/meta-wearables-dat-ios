@@ -1242,10 +1242,19 @@ const server = Bun.serve<WsData>({
             return Response.json({ error: "Device has no APNs token — cannot wake" }, { status: 400 });
           }
           pendingWakeActivations.set(body.deviceId, { workflowId: wfId, requestedAt: Date.now() });
-          sendSilentWake(deviceToken, `wake_${wfId}`).then(r => {
-            if (!r.success) console.warn(`[wake] Silent push failed: ${r.reason}`);
-            else console.log(`[wake] Sent wake for workflow ${wfId} to device ${body.deviceId!.slice(0, 8)}...`);
-          }).catch(() => {});
+          // Visible notification first so user taps to open the app (silent push can't launch a killed app)
+          sendVisibleWake(deviceToken, `wake_${wfId}`, wf.name).then(r => {
+            if (r.success) {
+              console.log(`[wake] Visible push delivered for workflow ${wfId} to device ${body.deviceId!.slice(0, 8)}...`);
+              // Follow up with silent push for background wake if app is already running
+              sendSilentWake(deviceToken, `wake_${wfId}`).catch(() => {});
+            } else {
+              console.warn(`[wake] Visible push failed: ${r.reason} — trying silent as fallback`);
+              sendSilentWake(deviceToken, `wake_${wfId}`).catch(() => {});
+            }
+          }).catch(() => {
+            sendSilentWake(deviceToken, `wake_${wfId}`).catch(() => {});
+          });
           console.log(`[wake] Pending activation stored: device=${body.deviceId.slice(0, 8)}... workflow=${wfId}`);
           return Response.json({ status: "wake_sent", deviceId: body.deviceId });
         }
