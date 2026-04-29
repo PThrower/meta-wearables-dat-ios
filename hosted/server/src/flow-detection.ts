@@ -10,8 +10,8 @@ import type { DetectedFlow } from "./app-types.js";
 
 /** Color palette for flow visualization (cycled when >8 flows) */
 export const FLOW_COLORS = [
-  "#06b6d4", "#a855f7", "#22c55e", "#f97316",
-  "#ec4899", "#eab308", "#3b82f6", "#ef4444",
+  "#38bdf8", "#c084fc", "#4ade80", "#fb923c",
+  "#f472b6", "#facc15", "#60a5fa", "#f87171",
 ];
 
 /** Default edge color for single-flow or uncolored workflows */

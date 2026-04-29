@@ -89,23 +89,41 @@ export function renderConfigPanel(): void {
   const debugBanner = `<div style="background:#300;padding:4px 8px;font-size:10px;color:#f66;border-radius:4px;margin-bottom:8px;">[debug] nodes=${workflow.nodes.length} edges=${workflow.edges.length} flows=${flows.length} multiFlow=${multiFlow} selectedId=${getSelectedNodeId() ?? "null"}</div>`;
 
   // Flow config section — always visible at top when multi-flow
-  // Using inline styles to bypass any CSS loading/caching issues
   let flowHtml = "";
   if (multiFlow) {
-    const rawFlowHtml = renderFlowConfigHTML(flows, workflow.flowConfig ?? null, "wf");
-    flowHtml = `<div style="padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08);">${rawFlowHtml}</div>`;
-    // Fallback: also render a plain-text version with inline styles
     const mode = workflow.flowConfig?.mode ?? "parallel";
-    const flowLabels = flows.map(f => `<span style="display:inline-block;padding:2px 8px;margin:2px;border-radius:4px;font-size:11px;background:${f.color};color:#fff;">${esc(f.label)}</span>`).join("");
-    flowHtml += `<div style="padding:8px 0;">
-      <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;">Flows (${flows.length})</div>
-      <div style="display:flex;gap:4px;margin-bottom:8px;">
-        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "parallel" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="parallel" class="wf-flow-mode-btn">Parallel</button>
-        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "sequential" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="sequential" class="wf-flow-mode-btn">Sequential</button>
-        <button style="flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;${mode === "event-driven" ? "background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;" : "background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);"}" data-mode="event-driven" class="wf-flow-mode-btn">Event-Driven</button>
+    const flowOrder = workflow.flowConfig?.flowOrder ?? flows.map(f => f.flowId);
+    const isDraggable = mode === "sequential";
+
+    const flowItems = flowOrder.map(fid => {
+      const f = flows.find(fl => fl.flowId === fid);
+      if (!f) return "";
+      return `<div class="wf-flow-order-item" data-flow-id="${f.flowId}" draggable="${isDraggable}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--bg-surface-alt,#1a1a1a);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:4px;cursor:${isDraggable ? "grab" : "default"};font-size:12px;color:var(--text-primary,#e0e0e0);">
+        <span class="wf-flow-drag-handle" style="cursor:${isDraggable ? "grab" : "default"};color:var(--text-tertiary,rgba(255,255,255,0.35));user-select:none;">${isDraggable ? "⋮⋮" : "●"}</span>
+        <span class="wf-flow-color-dot" style="width:8px;height:8px;border-radius:50%;background:${f.color};flex-shrink:0;"></span>
+        <span class="wf-flow-label">${esc(f.label)}</span>
+      </div>`;
+    }).join("");
+
+    const btnStyle = (active: boolean) =>
+      `flex:1;padding:5px 8px;font-size:11px;border-radius:4px;cursor:pointer;text-align:center;transition:all 0.15s;` +
+      (active
+        ? `background:rgba(0,255,255,0.15);border:1px solid rgba(0,255,255,0.4);color:#0ff;font-weight:600;`
+        : `background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);`);
+
+    flowHtml = `<div style="padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--border,rgba(255,255,255,0.08));">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid var(--border,rgba(255,255,255,0.08));margin-bottom:8px;">
+        <span style="font-size:13px;font-weight:600;color:var(--text-primary,#e0e0e0);">Flows</span>
+        <span style="font-size:11px;color:var(--text-tertiary,rgba(255,255,255,0.35));">${flows.length} found</span>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;">${flowLabels}</div>
-      <div style="font-size:10px;color:#f66;margin-top:8px;">[debug] rawFlowHtml.length=${rawFlowHtml.length}</div>
+      <div class="wf-flow-mode-selector" style="display:flex;gap:2px;width:100%;margin-bottom:8px;">
+        <button class="wf-flow-mode-btn ${mode === "parallel" ? "active" : ""}" data-mode="parallel" style="${btnStyle(mode === "parallel")}">Parallel</button>
+        <button class="wf-flow-mode-btn ${mode === "sequential" ? "active" : ""}" data-mode="sequential" style="${btnStyle(mode === "sequential")}">Sequential</button>
+        <button class="wf-flow-mode-btn ${mode === "event-driven" ? "active" : ""}" data-mode="event-driven" style="${btnStyle(mode === "event-driven")}">Event-Driven</button>
+      </div>
+      <div class="wf-flow-order ${mode === "parallel" ? "disabled" : ""}" id="wf-flow-order" style="display:flex;flex-direction:column;gap:4px;${mode === "parallel" ? "opacity:0.4;pointer-events:none;" : ""}">
+        ${flowItems}
+      </div>
     </div>`;
   }
 
