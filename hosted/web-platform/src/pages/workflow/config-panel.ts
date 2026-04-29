@@ -111,19 +111,14 @@ export function renderConfigPanel(): void {
   renderEmptyPanel(panel, workflow);
 }
 
-/** Render empty state with settings link + optional flow link. */
+/** Render empty state with optional flow link. */
 function renderEmptyPanel(panel: Element, workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> }): void {
   const flows = detectFlows(workflow.nodes, workflow.edges);
   const multiFlow = flows.length > 1;
   panel.innerHTML = `
     <p class="empty-state">Select a node</p>
-    <span class="wf-flow-link" id="wf-settings-link">Workflow Settings</span>
     ${multiFlow ? `<span class="wf-flow-link" id="wf-flow-link">${flows.length} flows detected</span>` : ""}
   `;
-  panel.querySelector("#wf-settings-link")?.addEventListener("click", () => {
-    setSettingsPanelActive(true);
-    renderConfigPanel();
-  });
   panel.querySelector("#wf-flow-link")?.addEventListener("click", () => setFlowConfigActive(true));
 }
 

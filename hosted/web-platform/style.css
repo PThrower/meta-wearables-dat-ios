@@ -3406,6 +3406,82 @@ select.wf-config-input {
   color: var(--text-secondary);
 }
 
+/* Workflow settings panel — reuses wf-config-* pattern */
+.wf-settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-settings-field > label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.wf-settings-input {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.wf-settings-input:focus { border-color: var(--text-tertiary); }
+select.wf-settings-input { appearance: none; cursor: pointer; }
+
+.wf-settings-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Flow trigger fields (event-driven mode) */
+.wf-flow-trigger-row {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-trigger-type,
+.wf-trigger-subfield {
+  background: var(--bg-surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wf-trigger-type:focus,
+.wf-trigger-subfield:focus {
+  border-color: var(--text-tertiary);
+}
+
+.wf-trigger-subfields {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 /* SVG canvas flow highlighting */
 .wf-flow-highlight-dim .wf-node:not([data-flow-id]) {
   opacity: 0.2;
