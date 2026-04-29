@@ -77,10 +77,9 @@ struct StreamSessionView: View {
             viewModel?.handleWakeFromPush()
           }
         }
-        // Cold-launch from notification tap: callback wasn't wired when delegate fired,
-        // so a pendingWake flag was set. Pick it up now.
+        // Cold-launch from notification tap: launchOptions set pendingWake in didFinishLaunching
         if pushService.pendingWake {
-          NSLog("[StreamSessionView] Detected pendingWake — triggering wake from push")
+          NSLog("[StreamSessionView] Detected pendingWake on appear — triggering wake from push")
           pushService.pendingWake = false
           Task { await viewModel.handleWakeFromPush() }
           return
@@ -93,6 +92,12 @@ struct StreamSessionView: View {
         // Connect to relay in standby mode so viewer can remotely start stream
         Task { await viewModel.startStandbyRelay() }
       }
+    }
+    .onChange(of: pushNotificationService?.pendingWake ?? false) { pending in
+      guard pending else { return }
+      NSLog("[StreamSessionView] pendingWake changed to true — triggering wake from push")
+      pushNotificationService?.pendingWake = false
+      Task { await viewModel.handleWakeFromPush() }
     }
     .onChange(of: viewModel.isStreaming) { streaming in
       if streaming {

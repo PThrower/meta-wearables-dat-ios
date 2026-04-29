@@ -44,6 +44,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
       pushService.resendStoredToken()
     }
 
+    // Check if app was launched from a notification tap (cold launch)
+    if let notification = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
+      let wakeType = notification["wake"] as? String
+      if wakeType == "standby" {
+        NSLog("[PushNotification] Launched from notification — setting pendingWake")
+        pushService.pendingWake = true
+      }
+    }
+
     return true
   }
 
