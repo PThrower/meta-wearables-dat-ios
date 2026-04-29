@@ -54,6 +54,7 @@ import { ControlEventBus } from "./control-event-bus.js";
 import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline } from "./app-registry.js";
 import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow, WorkflowSettings } from "./app-types.js";
 import { detectFlows } from "./flow-detection.js";
+import { isSttResult, isVadResult } from "./message-types.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
@@ -2269,33 +2270,37 @@ const server = Bun.serve<WsData>({
               broadcastToViewers(session, cmd);
             } else if (cmd.type === "stt_result") {
               // iOS speech-to-text results — inject as context into active AI sessions
-              if (session.activeAppId) {
-                const text = (cmd.text as string || "").trim();
-                const isFinal = cmd.isFinal as boolean;
-                if (text && isFinal) {
+              if (isSttResult(cmd) && session.activeAppId) {
+                const text = (cmd.text || "").trim();
+                if (text && cmd.isFinal) {
                   const summary = `Transcription: "${text}"`;
                   orchestrator.sendTrigger(sessionId, `[STT: ${summary}]`);
+                }
+                if (cmd.error) {
+                  console.warn(`[relay] STT error from publisher: ${cmd.error} session=${sessionId}`);
                 }
               }
               // Fan out to viewers
               broadcastToViewers(session, cmd);
             } else if (cmd.type === "vad_result") {
               // iOS voice activity detection results — inject as context into active AI sessions
-              if (session.activeAppId) {
-                const eventType = cmd.eventType as string;
-                const isSpeech = cmd.isSpeech as boolean;
-                const energyDb = (cmd.energyDb as number)?.toFixed(1);
+              if (isVadResult(cmd) && session.activeAppId) {
+                const { eventType } = cmd;
+                const energyDb = cmd.energyDb?.toFixed(1);
                 let summary = "";
                 if (eventType === "speech_start") {
                   summary = `Speech started (energy: ${energyDb}dB)`;
                 } else if (eventType === "speech_end") {
-                  const duration = (cmd.durationMs as number)?.toFixed(0);
+                  const duration = cmd.durationMs?.toFixed(0);
                   summary = `Speech ended (${duration}ms, energy: ${energyDb}dB)`;
                 } else if (eventType === "speech_active") {
                   summary = `Speech active (energy: ${energyDb}dB)`;
                 }
                 if (summary) {
                   orchestrator.sendTrigger(sessionId, `[VAD: ${summary}]`);
+                }
+                if (cmd.error) {
+                  console.warn(`[relay] VAD error from publisher: ${cmd.error} session=${sessionId}`);
                 }
               }
               // Fan out to viewers

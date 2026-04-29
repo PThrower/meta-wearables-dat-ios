@@ -332,6 +332,55 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     }
     notifyListeners();
   }
+
+  // STT transcription results — display on mobile-stt nodes
+  if (msg.type === "stt_result") {
+    const text = (msg.text as string || "").trim();
+    const isFinal = msg.isFinal as boolean;
+    const error = msg.error as string | undefined;
+    for (const [, preview] of nodePreviews) {
+      if (preview.nodeType === "mobile-stt") {
+        if (error) {
+          preview.lastText = `Error: ${error}`;
+          preview.executionState = "errored";
+        } else if (text) {
+          preview.lastText = text.slice(0, 200);
+          preview.executionState = isFinal ? "completed" : "running";
+        }
+        preview.lastTextTime = now;
+        preview.updated = now;
+      }
+    }
+    notifyListeners();
+  }
+
+  // VAD results — display on vad nodes
+  if (msg.type === "vad_result") {
+    const eventType = msg.eventType as string;
+    const error = msg.error as string | undefined;
+    const energyDb = typeof msg.energyDb === "number" ? msg.energyDb.toFixed(1) : "?";
+    for (const [, preview] of nodePreviews) {
+      if (preview.nodeType === "vad") {
+        if (error) {
+          preview.lastText = `Error: ${error}`;
+          preview.executionState = "errored";
+        } else if (eventType === "speech_start") {
+          preview.lastText = `Speech started (${energyDb}dB)`;
+          preview.executionState = "running";
+        } else if (eventType === "speech_end") {
+          const dur = typeof msg.durationMs === "number" ? msg.durationMs.toFixed(0) : "?";
+          preview.lastText = `Speech ended (${dur}ms)`;
+          preview.executionState = "idle";
+        } else if (eventType === "speech_active") {
+          preview.lastText = `Active (${energyDb}dB)`;
+          preview.executionState = "running";
+        }
+        preview.lastTextTime = now;
+        preview.updated = now;
+      }
+    }
+    notifyListeners();
+  }
 }
 
 // --- Preview Rendering ---

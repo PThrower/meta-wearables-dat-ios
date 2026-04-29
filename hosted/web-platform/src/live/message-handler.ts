@@ -139,6 +139,24 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
     if (msg.type === "audio_config") {
       syncAudioConfig(msg as Record<string, unknown>);
     }
+
+    // STT transcription result
+    if (msg.type === "stt_result") {
+      const m = msg as { text: string; isFinal: boolean; error?: string; confidence?: number };
+      if (m.error) {
+        showToast("STT error: " + m.error.slice(0, 60), "error");
+      } else if (m.isFinal && m.text) {
+        showToast("STT: " + m.text.slice(0, 50), "info");
+      }
+    }
+
+    // VAD result
+    if (msg.type === "vad_result") {
+      const m = msg as { eventType: string; isSpeech: boolean; energyDb?: number; error?: string };
+      if (m.error) {
+        showToast("VAD error: " + m.error.slice(0, 60), "error");
+      }
+    }
   };
 }
 

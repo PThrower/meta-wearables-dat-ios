@@ -69,33 +69,39 @@ actor VoiceActivityStage {
 
     func start() async {
         guard !isEnabled else { return }
-        guard let eventBus else {
-            NSLog("[VAD] No AudioEventBus configured")
-            return
+
+        do {
+            guard let eventBus else {
+                throw VoiceActivityError.eventBusNotConfigured
+            }
+
+            isEnabled = true
+
+            // Reset state
+            currentState = .silence
+            consecutiveSpeechFrames = 0
+            consecutiveSilenceFrames = 0
+            lastEventTimestamp = 0
+
+            let (subId, stream) = await eventBus.subscribe()
+            subscriptionId = subId
+            subscriptionStream = stream
+
+            // Calculate expected frame duration: bufferSize / sampleRate * 1000
+            // Typical: 1024 samples / 48000 Hz * 1000 = ~21ms per frame
+            let estimatedFrameDuration = 1024.0 / 48000.0 * 1000.0
+            self.frameDurationMs = estimatedFrameDuration
+
+            // Start background processing
+            processingTask = Task { [weak self] in
+                await self?.processLoop()
+            }
+
+            NSLog("[VAD] Started: threshold=\(energyThreshold)dB speech=\(speechDurationMs)ms silence=\(silenceDurationMs)ms cooldown=\(cooldownMs)ms")
+        } catch {
+            NSLog("[VAD] Start failed: \(error.localizedDescription)")
+            sendErrorResult(error.localizedDescription)
         }
-        isEnabled = true
-
-        // Reset state
-        currentState = .silence
-        consecutiveSpeechFrames = 0
-        consecutiveSilenceFrames = 0
-        lastEventTimestamp = 0
-
-        let (subId, stream) = await eventBus.subscribe()
-        subscriptionId = subId
-        subscriptionStream = stream
-
-        // Calculate expected frame duration: bufferSize / sampleRate * 1000
-        // Typical: 1024 samples / 48000 Hz * 1000 = ~21ms per frame
-        let estimatedFrameDuration = 1024.0 / 48000.0 * 1000.0
-        self.frameDurationMs = estimatedFrameDuration
-
-        // Start background processing
-        processingTask = Task { [weak self] in
-            await self?.processLoop()
-        }
-
-        NSLog("[VAD] Started: threshold=\(energyThreshold)dB speech=\(speechDurationMs)ms silence=\(silenceDurationMs)ms cooldown=\(cooldownMs)ms")
     }
 
     func stop() async {
@@ -195,13 +201,48 @@ actor VoiceActivityStage {
             isSpeech: isSpeech,
             confidence: Double(min(1.0, max(0.0, abs(energyDb - energyThreshold) / 20.0))),
             energyDb: Double(energyDb),
-            durationMs: durationMs
+            durationMs: durationMs,
+            error: nil
         )
 
         if let onResult {
             Task { await onResult(result) }
         }
     }
+
+    private func sendErrorResult(_ errorMessage: String) {
+        let errorResult = VADResult(
+            eventType: "error",
+            isSpeech: false,
+            confidence: 0,
+            energyDb: -96,
+            durationMs: 0,
+            error: errorMessage
+        )
+        if let onResult {
+            Task { await onResult(errorResult) }
+        }
+    }
+}
+
+// MARK: - Error Types
+
+enum VoiceActivityError: LocalizedError {
+    case eventBusNotConfigured
+    case audioSessionNotActive
+    case engineStartFailed(underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .eventBusNotConfigured:
+            return "AudioEventBus not configured"
+        case .audioSessionNotActive:
+            return "Audio session is not active"
+        case .engineStartFailed(let error):
+            return "Audio engine start failed: \(error.localizedDescription)"
+        }
+    }
+}
 
     // MARK: - Energy Calculation
 

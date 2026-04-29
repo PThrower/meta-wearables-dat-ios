@@ -25,6 +25,7 @@ struct TranscriptionResult: Sendable {
     let alternatives: [TranscriptionAlternative]
     let wordTimestamps: [WordTimestamp]
     let language: String
+    let error: String?
 }
 
 struct TranscriptionAlternative: Sendable {
@@ -47,6 +48,7 @@ struct VADResult: Sendable {
     let confidence: Double
     let energyDb: Double
     let durationMs: Double
+    let error: String?
 }
 
 // MARK: - SpeechStageConfig
@@ -85,6 +87,9 @@ extension TranscriptionResult {
             "confidence": confidence,
             "language": language,
         ]
+        if let error {
+            dict["error"] = error
+        }
         if !alternatives.isEmpty {
             dict["alternatives"] = alternatives.map { [
                 "text": $0.text,
@@ -105,13 +110,17 @@ extension TranscriptionResult {
 
 extension VADResult {
     var jsonDict: [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "type": "vad_result",
             "eventType": eventType,
             "isSpeech": isSpeech,
             "confidence": confidence,
             "energyDb": energyDb,
             "durationMs": durationMs,
-        ] as [String: Any]
+        ]
+        if let error {
+            dict["error"] = error
+        }
+        return dict
     }
 }

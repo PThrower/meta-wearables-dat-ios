@@ -48,51 +48,44 @@ actor SpeechRecognitionStage {
     func start() async {
         guard !isEnabled else { return }
 
-        // Request speech recognition authorization
-        let authStatus = SFSpeechRecognizer.authorizationStatus()
-        guard authStatus == .authorized else {
-            NSLog("[SpeechRecognition] Not authorized: \(authStatus.rawValue)")
-            return
-        }
-
-        // Create speech recognizer for the specified locale
-        guard let locale = Locale(identifier: language) as Locale?,
-              let recognizer = SFSpeechRecognizer(locale: locale) else {
-            NSLog("[SpeechRecognition] No recognizer for language: \(language)")
-            return
-        }
-
-        // Check on-device availability if requested
-        if onDeviceOnly {
-            if #available(iOS 17.0, *) {
-                guard recognizer.supportsOnDeviceRecognition else {
-                    NSLog("[SpeechRecognition] On-device not available for \(language), requires network")
-                    return
-                }
-            } else {
-                NSLog("[SpeechRecognition] On-device recognition requires iOS 17+")
-                return
-            }
-        }
-
-        self.speechRecognizer = recognizer
-
-        // Set up audio session (category already .playAndRecord from app)
-        let audioSession = AVAudioSession.sharedInstance()
-        // Don't change category — it's already set by app delegate.
-        // Just ensure active.
         do {
+            // Request speech recognition authorization
+            let authStatus = SFSpeechRecognizer.authorizationStatus()
+            guard authStatus == .authorized else {
+                throw SpeechRecognitionError.authorizationDenied(status: authStatus.rawValue)
+            }
+
+            // Create speech recognizer for the specified locale
+            guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: language)) else {
+                throw SpeechRecognitionError.recognitionUnavailable(language: language)
+            }
+
+            // Check on-device availability if requested
+            if onDeviceOnly {
+                if #available(iOS 17.0, *) {
+                    guard recognizer.supportsOnDeviceRecognition else {
+                        throw SpeechRecognitionError.onDeviceUnavailable(language: language)
+                    }
+                } else {
+                    throw SpeechRecognitionError.onDeviceUnavailable(language: language)
+                }
+            }
+
+            self.speechRecognizer = recognizer
+
+            // Set up audio session (category already .playAndRecord from app)
+            let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setActive(true)
+
+            // Start recognition
+            try await startRecognition()
+
+            isEnabled = true
+            NSLog("[SpeechRecognition] Started: language=\(language) onDevice=\(onDeviceOnly) partial=\(partialResults)")
         } catch {
-            NSLog("[SpeechRecognition] Failed to activate audio session: \(error)")
-            return
+            NSLog("[SpeechRecognition] Start failed: \(error.localizedDescription)")
+            sendErrorResult(error.localizedDescription)
         }
-
-        // Start recognition
-        await startRecognition()
-
-        isEnabled = true
-        NSLog("[SpeechRecognition] Started: language=\(language) onDevice=\(onDeviceOnly) partial=\(partialResults)")
     }
 
     func stop() async {
@@ -113,10 +106,9 @@ actor SpeechRecognitionStage {
 
     // MARK: - Private
 
-    private func startRecognition() async {
+    private func startRecognition() async throws {
         guard let speechRecognizer, speechRecognizer.isAvailable else {
-            NSLog("[SpeechRecognition] Speech recognizer not available")
-            return
+            throw SpeechRecognitionError.recognitionUnavailable(language: language)
         }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
@@ -145,8 +137,7 @@ actor SpeechRecognitionStage {
             try engine.start()
             self.audioEngine = engine
         } catch {
-            NSLog("[SpeechRecognition] Failed to start audio engine: \(error)")
-            return
+            throw SpeechRecognitionError.audioEngineStartFailed(underlying: error)
         }
 
         // Begin recognition task
@@ -163,6 +154,7 @@ actor SpeechRecognitionStage {
 
         if let error {
             NSLog("[SpeechRecognition] Recognition error: \(error)")
+            sendErrorResult(error.localizedDescription)
             // Restart recognition on error (transient failures are common)
             if isEnabled {
                 Task { [weak self] in
@@ -202,7 +194,8 @@ actor SpeechRecognitionStage {
             confidence: wordTimestamps.isEmpty ? 0.0 : wordTimestamps.map(\.confidence).reduce(0, +) / Double(wordTimestamps.count),
             alternatives: alternatives,
             wordTimestamps: wordTimestamps,
-            language: language
+            language: language,
+            error: nil
         )
 
         if let onResult {
@@ -232,7 +225,55 @@ actor SpeechRecognitionStage {
         Task {
             try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
             guard self.isEnabled else { return }
-            await self.startRecognition()
+            do {
+                try await self.startRecognition()
+            } catch {
+                NSLog("[SpeechRecognition] Restart failed: \(error.localizedDescription)")
+                sendErrorResult(error.localizedDescription)
+            }
+        }
+    }
+
+    private func sendErrorResult(_ errorMessage: String) {
+        let errorResult = TranscriptionResult(
+            isFinal: true,
+            text: "",
+            confidence: 0,
+            alternatives: [],
+            wordTimestamps: [],
+            language: language,
+            error: errorMessage
+        )
+        if let onResult {
+            Task { await onResult(errorResult) }
+        }
+    }
+}
+
+// MARK: - Error Types
+
+enum SpeechRecognitionError: LocalizedError {
+    case authorizationDenied(status: Int)
+    case recognitionUnavailable(language: String)
+    case onDeviceUnavailable(language: String)
+    case audioEngineStartFailed(underlying: Error)
+    case requestCreationFailed
+    case recognitionFailed(underlying: Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .authorizationDenied(let status):
+            return "Speech recognition not authorized (status: \(status))"
+        case .recognitionUnavailable(let lang):
+            return "No speech recognizer available for language: \(lang)"
+        case .onDeviceUnavailable(let lang):
+            return "On-device recognition unavailable for language: \(lang)"
+        case .audioEngineStartFailed(let error):
+            return "Audio engine start failed: \(error.localizedDescription)"
+        case .requestCreationFailed:
+            return "Failed to create speech recognition request"
+        case .recognitionFailed(let error):
+            return "Recognition failed: \(error.localizedDescription)"
         }
     }
 }
