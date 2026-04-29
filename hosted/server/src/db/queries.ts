@@ -589,7 +589,6 @@ export function getActiveActivationForWorkflow(workflowId: string): {
       app_id as appId, activated_at as activatedAt
     FROM activation_log
     WHERE workflow_id = ? AND status = 'active'
-      AND overridden_at IS NULL
     ORDER BY activated_at DESC LIMIT 1
   `).get(workflowId) as any ?? null;
 }
