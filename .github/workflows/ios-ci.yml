@@ -201,6 +201,8 @@ jobs:
 
       - name: Archive
         run: |
+          set -o pipefail
+
           ARCHIVE_PATH="$RUNNER_TEMP/CameraAccess.xcarchive"
 
           xcodebuild archive \
@@ -214,11 +216,7 @@ jobs:
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="${{ env.TEAM_ID }}" \
             PROVISIONING_PROFILE_SPECIFIER="${{ env.PP_UUID }}" \
-            2>&1 | tee build/archive.log | xcpretty --color || {
-              echo "--- Archive failed, raw errors ---"
-              grep -E "error:|ld:|linker|fatal" build/archive.log | head -30
-              exit 1
-            }
+            2>&1 | tee build/archive.log | xcpretty --color
 
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
