@@ -15,6 +15,7 @@ import { refreshSVG, updateEdgesForNode } from "./svg-renderer.js";
 import { renderConfigPanel } from "./config-panel.js";
 import { showNodeActionPopover, hideNodeActionPopover } from "./node-actions.js";
 import { wireCanvasControls, resetCanvasControls, isTouchDevice as _isTouchDeviceFn } from "./canvas-controls.js";
+import { getNodePreview } from "./editor-preview.js";
 
 // Re-export for consumers
 export { isTouchDevice } from "./canvas-controls.js";
@@ -62,6 +63,27 @@ export function wireSVGEvents(): void {
 
   // Wire canvas controls (pan, zoom, pinch)
   wireCanvasControls(svg);
+
+  // Thumbnail click -> modal preview (must come before node drag)
+  svg.addEventListener("pointerdown", (e: Event) => {
+    const pe = e as PointerEvent;
+    const target = pe.target as Element;
+    const thumbTarget = target.closest(".wf-thumb-target") as Element | null;
+    if (!thumbTarget) return;
+
+    pe.preventDefault();
+    pe.stopPropagation();
+
+    const idx = Number(thumbTarget.getAttribute("data-thumb-idx"));
+    const nodeG = thumbTarget.closest(".wf-node") as Element | null;
+    const nodeId = nodeG?.getAttribute("data-id");
+    if (!nodeId) return;
+
+    const preview = getNodePreview(nodeId);
+    if (!preview?.thumbnails?.[idx]) return;
+
+    showThumbModal(preview.thumbnails[idx]);
+  }, true); // capture phase to intercept before node pointerdown
 
   // Node pointerdown -> select, drag, or long-press
   svg.querySelectorAll(".wf-node").forEach(g => {
@@ -322,6 +344,82 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
 
   document.addEventListener("pointermove", onMove);
   document.addEventListener("pointerup", onUp);
+}
+
+// --- Thumbnail modal ---
+
+let _thumbModal: HTMLDivElement | null = null;
+
+function showThumbModal(thumb: { dataUrl: string; label: string; confidence: number }): void {
+  // Remove existing modal if any
+  hideThumbModal();
+
+  const container = getContainer();
+  if (!container) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "wf-thumb-modal";
+  overlay.style.cssText = "position:absolute;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);cursor:pointer";
+
+  const card = document.createElement("div");
+  card.style.cssText = "background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:12px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.5);cursor:default";
+
+  // Header
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-bottom:8px";
+  const title = document.createElement("span");
+  title.style.cssText = "color:#e2e8f0;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:240px";
+  title.textContent = thumb.label || "Detection";
+  const closeBtn = document.createElement("span");
+  closeBtn.style.cssText = "color:#666;font-size:18px;cursor:pointer;padding:2px 6px;line-height:1";
+  closeBtn.textContent = "x";
+  closeBtn.addEventListener("click", (e) => { e.stopPropagation(); hideThumbModal(); });
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  // Image
+  const img = document.createElement("img");
+  img.src = thumb.dataUrl;
+  img.style.cssText = "width:100%;border-radius:8px;display:block;image-rendering:auto";
+
+  // Footer
+  const footer = document.createElement("div");
+  footer.style.cssText = "display:flex;justify-content:space-between;align-items:center;margin-top:8px";
+  const confBadge = document.createElement("span");
+  const pct = Math.round(thumb.confidence * 100);
+  confBadge.style.cssText = `font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:${pct >= 80 ? "rgba(80,250,123,0.15)" : "rgba(255,255,255,0.1)"};color:${pct >= 80 ? "#50fa7b" : "#94a3b8"}`;
+  confBadge.textContent = `${pct}% confidence`;
+  const hint = document.createElement("span");
+  hint.style.cssText = "color:#555;font-size:10px";
+  hint.textContent = "Click outside to close";
+  footer.appendChild(confBadge);
+  footer.appendChild(hint);
+
+  card.appendChild(header);
+  card.appendChild(img);
+  card.appendChild(footer);
+  overlay.appendChild(card);
+
+  // Close on overlay click
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) hideThumbModal();
+  });
+
+  // Close on Escape
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") { hideThumbModal(); document.removeEventListener("keydown", onKey); }
+  };
+  document.addEventListener("keydown", onKey);
+
+  container.appendChild(overlay);
+  _thumbModal = overlay;
+}
+
+function hideThumbModal(): void {
+  if (_thumbModal) {
+    _thumbModal.remove();
+    _thumbModal = null;
+  }
 }
 
 /** Reset interaction state (called from page.destroy). */

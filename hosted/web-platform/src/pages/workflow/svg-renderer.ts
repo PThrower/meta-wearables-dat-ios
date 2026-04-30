@@ -253,16 +253,18 @@ export function buildSVGFromData(
             const row = Math.floor(i / maxCols);
             const tx = tPad + col * (tSize + tPad);
             const ty = stripY + tPad + row * (tSize + tPad);
-            out += `<image x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" href="${t.dataUrl}" preserveAspectRatio="xMidYMid slice" rx="${3 * scale}" />`;
+            // Invisible click target over entire thumb area
+            out += `<rect class="wf-thumb-target" data-thumb-idx="${i}" x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" rx="${3 * scale}" fill="transparent" style="cursor:pointer" />`;
+            out += `<image class="wf-thumb-img" data-thumb-idx="${i}" x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" href="${t.dataUrl}" preserveAspectRatio="xMidYMid slice" rx="${3 * scale}" pointer-events="none" />`;
             // Confidence badge bottom-right
             const pct = Math.round(t.confidence * 100);
-            out += `<rect x="${tx + tSize - 20 * scale}" y="${ty + tSize - 11 * scale}" width="${20 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" />`;
-            out += `<text x="${tx + tSize - 3 * scale}" y="${ty + tSize - 2 * scale}" text-anchor="end" fill="#50fa7b" font-size="${7 * scale}" font-weight="600">${pct}%</text>`;
+            out += `<rect x="${tx + tSize - 20 * scale}" y="${ty + tSize - 11 * scale}" width="${20 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" pointer-events="none" />`;
+            out += `<text x="${tx + tSize - 3 * scale}" y="${ty + tSize - 2 * scale}" text-anchor="end" fill="#50fa7b" font-size="${7 * scale}" font-weight="600" pointer-events="none">${pct}%</text>`;
             // Label badge top-left
             if (t.label) {
               const lbl = t.label.length > 8 ? t.label.slice(0, 7) + "…" : t.label;
-              out += `<rect x="${tx + 1}" y="${ty + 1}" width="${lbl.length * 5.5 * scale + 6 * scale}" height="${10 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" />`;
-              out += `<text x="${tx + 3 * scale}" y="${ty + 8 * scale}" fill="#e2e8f0" font-size="${6 * scale}">${esc(lbl)}</text>`;
+              out += `<rect x="${tx + 1}" y="${ty + 1}" width="${lbl.length * 5.5 * scale + 6 * scale}" height="${10 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" pointer-events="none" />`;
+              out += `<text x="${tx + 3 * scale}" y="${ty + 8 * scale}" fill="#e2e8f0" font-size="${6 * scale}" pointer-events="none">${esc(lbl)}</text>`;
             }
           });
           return out;
