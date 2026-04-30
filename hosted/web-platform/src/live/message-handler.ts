@@ -191,6 +191,21 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
         appendTranscriptionEntry(log, label, { isVad: true, vadIndicator: indicator });
       }
     }
+
+    // Deepgram / server-side STT — guidance_event with transcription content
+    if (msg.type === "guidance_event") {
+      const evt = (msg as { event?: { type?: string; content?: string; source?: string } }).event;
+      if (evt?.type === "guidance.transcription" || evt?.type === "guidance.transcript") {
+        const text = (evt.content ?? "").trim();
+        if (text) {
+          const log = document.getElementById("transcriptionLog");
+          ensureBottomOpen();
+          if (log) {
+            appendTranscriptionEntry(log, text, { isFinal: true });
+          }
+        }
+      }
+    }
   };
 }
 
