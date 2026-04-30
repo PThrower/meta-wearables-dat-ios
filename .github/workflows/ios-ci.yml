@@ -119,13 +119,8 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
           xcodebuild -version
 
-          # Archive needs iOS device SDK, not simulator
-          if ! xcodebuild -showsdks 2>/dev/null | grep -q "iphoneos"; then
-            echo "Downloading iOS platform..."
-            xcodebuild -downloadPlatform iOS
-          else
-            echo "iOS platform already installed"
-          fi
+          echo "Downloading iOS platform (device SDK)..."
+          xcodebuild -downloadPlatform iOS
 
       - name: Install signing certificate
         env:
