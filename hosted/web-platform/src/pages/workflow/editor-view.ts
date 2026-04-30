@@ -104,7 +104,7 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-settings-btn">Settings</button>
         <span class="wf-toolbar-sep" style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;vertical-align:middle"></span>
-        <button class="btn wf-toolbar-desktop" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
+        <button class="btn" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
           <span style="color:#4ade80;vertical-align:middle">LIVE</span>
