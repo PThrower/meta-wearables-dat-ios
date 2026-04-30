@@ -350,6 +350,249 @@ header {
 }
 #livePlayer.active { display: flex; }
 
+/* === SPLIT LAYOUT === */
+.split-layout {
+  flex: 1; display: flex; overflow: hidden;
+  min-height: 0;
+}
+
+/* === ACTIVITY BAR === */
+.activity-bar {
+  width: 44px; flex-shrink: 0;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--player-border);
+  display: flex; flex-direction: column;
+  padding: 4px 0;
+  z-index: 12;
+}
+.activity-bar-btn {
+  width: 44px; height: 40px;
+  background: none; border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  position: relative;
+}
+.activity-bar-btn:hover {
+  color: var(--text-secondary);
+  background: var(--border-subtle);
+}
+.activity-bar-btn.active {
+  color: var(--text-bright);
+}
+.activity-bar-btn.active::before {
+  content: '';
+  position: absolute; left: 0; top: 6px; bottom: 6px;
+  width: 2px; background: var(--text-bright);
+  border-radius: 0 1px 1px 0;
+}
+.activity-bar-spacer { flex: 1; }
+
+/* === SPLIT MAIN (canvas + bottom) === */
+.split-main {
+  flex: 1; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  overflow: hidden;
+}
+
+/* === SPLIT CANVAS === */
+.split-canvas {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative;
+  min-height: 0;
+}
+.split-canvas canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+#overlayCanvas {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none; z-index: 5;
+}
+
+/* === SPLIT BOTTOM PANEL === */
+.split-bottom {
+  height: 0; flex-shrink: 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--player-border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: height 0.15s ease;
+}
+.split-bottom.open {
+  height: 200px;
+}
+.split-bottom-handle {
+  height: 4px; cursor: row-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 6;
+}
+.split-bottom-handle:hover,
+.split-bottom-handle.active {
+  background: var(--accent-blue);
+}
+.bottom-tab-bar {
+  display: flex; flex-shrink: 0;
+  border-bottom: 1px solid var(--player-border);
+}
+.bottom-tab {
+  padding: 5px 12px; font-size: 10px; font-weight: 500;
+  background: none; border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+.bottom-tab:hover { color: var(--text-secondary); }
+.bottom-tab.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-blue);
+}
+.bottom-content {
+  flex: 1; overflow: hidden;
+}
+.bottom-tab-content {
+  height: 100%; overflow-y: auto;
+  padding: 6px 10px;
+}
+.bottom-tab-content.hidden { display: none; }
+.transcription-log:empty::after {
+  content: "Waiting for speech..."; color: var(--text-tertiary); font-style: italic;
+  display: block; padding: 4px 0; font-size: 11px;
+}
+
+/* === SPLIT SIDEBAR === */
+.split-sidebar {
+  width: 0; flex-shrink: 0;
+  background: var(--bg-surface);
+  border-left: 1px solid var(--player-border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  transition: width 0.15s ease;
+}
+.split-sidebar.open {
+  width: 360px;
+}
+.split-sidebar-handle {
+  width: 4px; cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 6;
+}
+.split-sidebar-handle:hover,
+.split-sidebar-handle.active {
+  background: var(--accent-blue);
+}
+.sidebar-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--player-border);
+  flex-shrink: 0;
+}
+.sidebar-title {
+  font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+}
+.sidebar-close {
+  background: none; border: none;
+  color: var(--text-tertiary); cursor: pointer;
+  padding: 4px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.sidebar-close:hover {
+  color: var(--text-primary);
+  background: var(--border);
+}
+.sidebar-content {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.sidebar-section {
+  display: flex; flex-direction: column;
+  height: 100%;
+}
+.sidebar-section.hidden { display: none; }
+
+/* Guidance/mini-editor inline in sidebar (not absolute positioned) */
+.guidance-panel-in-sidebar {
+  display: flex; flex-direction: column;
+  height: 100%;
+}
+.guidance-panel-in-sidebar #guidanceContent {
+  display: flex; flex-direction: column;
+  height: 100%;
+}
+.mini-editor-panel-in-sidebar {
+  display: flex; flex-direction: column;
+  height: 100%;
+}
+.mini-editor-panel-in-sidebar .mini-editor-content {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; padding-top: 0;
+}
+
+/* === PLAYER STATUS BAR === */
+.player-status-bar {
+  height: 26px; flex-shrink: 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--player-border);
+  display: flex; align-items: center;
+  padding: 0 12px; gap: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.status-bar-label {
+  color: var(--text-tertiary);
+  margin-right: 4px;
+}
+.status-bar-value {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.status-bar-sep {
+  color: var(--border);
+  margin: 0 4px;
+}
+
+/* === DEBUG LOG (bottom panel) === */
+.debug-log {
+  font-size: 11px; line-height: 1.5;
+  color: var(--text-secondary);
+}
+.debug-log:empty::after {
+  content: "No debug output"; color: var(--text-tertiary); font-style: italic;
+  display: block; padding: 4px 0;
+}
+.debug-entry { padding: 2px 0; border-bottom: 1px solid var(--border-subtle); }
+.debug-source { font-weight: 600; color: var(--text-primary); margin-right: 6px; }
+
+/* === TELEMETRY GRID (bottom panel) === */
+.telemetry-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+}
+.telemetry-card {
+  background: var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px; padding: 6px 8px;
+}
+.telemetry-card-label {
+  font-size: 9px; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
+.telemetry-card-value {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  margin-top: 2px;
+}
+
 /* Minimal top bar */
 .player-topbar {
   flex-shrink: 0;
@@ -395,25 +638,7 @@ header {
 }
 #quality-select option { background: var(--bg-surface-alt); }
 
-/* === LEFT INFO PANEL (togglable) === */
-.info-panel {
-  position: absolute;
-  top: 0; left: 0; bottom: 0;
-  width: 240px;
-  background: var(--player-panel);
-  border-right: 1px solid var(--border);
-  backdrop-filter: blur(16px);
-  z-index: 15;
-  transform: translateX(-100%);
-  transition: transform 0.2s ease;
-  pointer-events: auto;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
-}
-.info-panel.open {
-  transform: translateX(0);
-}
+/* Collapsible sections (kept for sidebar info panel) */
 .info-panel-inner {
   padding: 48px 14px 14px;
 }
@@ -604,11 +829,14 @@ header {
   50% { opacity: 0.3; }
 }
 
-/* Toast notifications */
+/* Toast notifications — positioned in player context */
 .toast-container {
   position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
   display: flex; flex-direction: column; gap: 6px; z-index: 100;
   pointer-events: none; width: 80%; max-width: 400px;
+}
+#livePlayer > .toast-container {
+  position: absolute;
 }
 .toast {
   padding: 6px 14px; border-radius: 6px; font-size: 11px;
@@ -621,22 +849,7 @@ header {
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes toast-out { from { opacity: 1; } to { opacity: 0; } }
 
-/* Transcription panel */
-.transcription-panel {
-  position: absolute; bottom: 12px; left: 12px; width: 320px; max-width: 40%;
-  background: rgba(15, 15, 20, 0.92); border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px; z-index: 90; font-size: 12px; overflow: hidden;
-  backdrop-filter: blur(8px);
-}
-.transcription-panel:empty { display: none; }
-.transcription-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 6px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-.transcription-title { color: var(--text-secondary); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stt-status { font-size: 9px; color: var(--text-tertiary); }
-.stt-status.listening { color: #50fa7b; }
-.stt-status.error { color: #f87171; }
+/* Transcription — now inline in bottom panel, no absolute positioning */
 .transcription-log {
   max-height: 140px; overflow-y: auto; padding: 6px 10px;
   scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
@@ -656,17 +869,14 @@ header {
 .vad-indicator.speech-end { background: #6272a4; }
 .vad-indicator.speech-active { background: #f1fa8c; }
 
-/* Canvas */
-#livePlayer .player-canvas {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  overflow: hidden; position: relative;
+/* Info panel — now static inside sidebar, no absolute positioning */
+#infoPanel {
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
-#livePlayer canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
-#overlayCanvas {
-  position: absolute; top: 0; left: 0;
-  width: 100%; height: 100%;
-  pointer-events: none;
-  z-index: 5;
+/* Info panel inner — no top padding needed (sidebar header handles that) */
+.info-panel-inner {
+  padding: 0 14px 14px;
 }
 
 /* === PUSH-TO-TALK === */
@@ -830,54 +1040,10 @@ header {
 .share-token-revoke:hover { background: rgba(255,80,80,0.2); }
 
 /* === AI GUIDANCE PANEL === */
-.guidance-panel {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 320px;
-  display: flex;
-  flex-direction: row;
-  z-index: 10;
-  pointer-events: none;
-}
-.guidance-panel > * {
-  pointer-events: auto;
-}
-
-/* Collapsed: only toggle visible */
-.guidance-panel.collapsed .guidance-content {
-  display: none;
-}
-.guidance-panel.collapsed {
-  width: auto;
-}
-
-/* Toggle button */
-.guidance-toggle {
-  position: absolute;
-  top: 8px; right: 8px;
-  width: 42px; height: 32px;
-  background: var(--bg-overlay);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  font-family: inherit;
-  backdrop-filter: blur(8px);
-  transition: all 0.15s ease;
-  z-index: 11;
-}
-.guidance-toggle:hover {
-  background: var(--bg-overlay);
-  border-color: var(--text-tertiary);
-}
-.guidance-panel:not(.collapsed) .guidance-toggle {
-  right: 328px;
+/* Guidance is now rendered inside sidebar, uses inner content only */
+#guidanceContent {
+  display: flex; flex-direction: column;
+  flex: 1; overflow: hidden;
 }
 .guidance-toggle-label {
   letter-spacing: 0.5px;
@@ -889,18 +1055,7 @@ header {
   transition: background 0.3s ease;
 }
 
-/* Content panel */
-.guidance-content {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 320px;
-  background: var(--player-panel);
-  border-left: 1px solid var(--border);
-  backdrop-filter: blur(12px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* Content panel — now inline, not absolute */
 
 .guidance-section {
   padding: 8px 10px;
@@ -1259,69 +1414,23 @@ header {
   margin-top: 1px;
 }
 
-/* Responsive: narrower on small screens */
-@media (max-width: 640px) {
-  .guidance-content {
-    width: 260px;
+/* Responsive: narrower sidebar on small screens */
+@media (max-width: 768px) {
+  .split-sidebar.open {
+    width: 280px;
   }
-  .guidance-panel:not(.collapsed) .guidance-toggle {
-    right: 268px;
+  .split-bottom.open {
+    height: 160px;
   }
 }
 
 /* === MINI WORKFLOW EDITOR PANEL === */
-.mini-editor-panel {
-  position: absolute;
-  top: 0; right: 0; bottom: 0;
-  width: 380px;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--player-border);
-  z-index: 9;
-  display: flex;
-  flex-direction: column;
-  pointer-events: none;
-}
-.mini-editor-panel > * {
-  pointer-events: auto;
-}
-
-/* Collapsed: only toggle visible */
-.mini-editor-panel.collapsed .mini-editor-content {
-  display: none;
-}
-.mini-editor-panel.collapsed {
-  width: auto;
-}
-
-/* Toggle button */
-.mini-editor-toggle {
-  position: absolute;
-  top: 44px; right: 8px;
-  width: 36px; height: 36px;
-  background: var(--bg-surface);
-  border: 1px solid var(--player-border);
-  border-radius: 8px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s;
-  z-index: 10;
-}
-.mini-editor-toggle:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-.mini-editor-panel:not(.collapsed) .mini-editor-toggle {
-  right: 388px;
-}
-
-/* Content area */
+/* Now rendered inside sidebar, no absolute positioning */
 .mini-editor-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding-top: 48px;
 }
 
 /* Header with exec controls */
@@ -1619,13 +1728,10 @@ header {
   margin-left: auto;
 }
 
-/* Responsive: narrower on small screens */
+/* Responsive: narrower mini editor in sidebar on small screens */
 @media (max-width: 640px) {
-  .mini-editor-panel {
-    width: 300px;
-  }
-  .mini-editor-panel:not(.collapsed) .mini-editor-toggle {
-    right: 308px;
+  .split-sidebar.open {
+    width: 260px;
   }
 }
 

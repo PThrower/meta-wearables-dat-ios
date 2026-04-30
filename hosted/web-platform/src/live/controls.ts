@@ -1,19 +1,13 @@
 /**
- * Control wiring — info panel toggle, mic/codec selectors, buttons, audio sliders.
- * Called once at player init.
+ * Control wiring — mic/codec selectors, buttons, audio sliders.
+ * Called once at player init. Info panel toggle is now handled by ActivityBar.
  */
 
 import { getPlayer, getCurrentDeviceId, getCurrentSessionId } from "./state.js";
 
-// --- Info panel toggle ---
-
+// --- Info panel toggle (removed — ActivityBar handles sidebar) ---
 const infoPanel = document.getElementById("infoPanel")!;
-const infoPanelToggle = document.getElementById("infoPanelToggle")!;
-
-infoPanelToggle.addEventListener("click", () => {
-  infoPanel.classList.toggle("open");
-  infoPanelToggle.classList.toggle("active");
-});
+const infoPanelToggle = document.createElement("div"); // dummy, not in DOM
 
 // Collapsible section headers
 document.querySelectorAll(".info-section-header").forEach((header) => {

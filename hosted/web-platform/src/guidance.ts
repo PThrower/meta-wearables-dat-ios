@@ -355,6 +355,9 @@ export class GuidancePanel {
   /** Get the active workflow ID (for mini editor). */
   getActiveWorkflowId(): string | null { return this.activeWorkflowId; }
 
+  /** Get guidance events for debug tab. */
+  getEventLog(): GuidanceEvent[] { return this.events; }
+
   /** Get current node execution states (for mini editor). */
   getNodeStates(): NodeState[] { return this.nodeStates; }
 
@@ -364,7 +367,10 @@ export class GuidancePanel {
   // --- Rendering ---
 
   render(): void {
-    this.container.classList.toggle("collapsed", this.collapsed);
+    // In sidebar layout, don't apply collapsed class — sidebar handles visibility
+    if (!this.container.closest(".sidebar-section")) {
+      this.container.classList.toggle("collapsed", this.collapsed);
+    }
     this.container.innerHTML = `
       <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">
         <span class="guidance-toggle-label">AI</span>

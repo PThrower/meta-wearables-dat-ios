@@ -52,14 +52,11 @@
 
   <!-- LIVE PLAYER -->
   <div id="livePlayer">
-    <!-- Minimal top bar -->
+    <!-- Top bar -->
     <div class="player-topbar">
       <div class="topbar-left">
         <button class="topbar-btn" id="backBtn" title="Back">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        </button>
-        <button class="topbar-btn" id="infoPanelToggle" title="Session info">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         </button>
       </div>
       <div class="topbar-center">
@@ -82,271 +79,330 @@
       </div>
     </div>
 
-    <!-- Left info panel (togglable) -->
-    <div id="infoPanel" class="info-panel">
-      <div class="info-panel-inner">
-        <!-- Stream -->
-        <div class="info-collapsible open" data-section="stream">
-          <button class="info-section-header" aria-expanded="true">
-            <span class="info-section-title">Stream</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row"><span class="info-label">FPS</span><span class="info-value info-highlight" id="p-fps">--</span></div>
-              <div class="info-row"><span class="info-label">Resolution</span><span class="info-value" id="p-size">--</span></div>
-              <div class="info-row"><span class="info-label">Latency</span><span class="info-value" id="p-latency">--</span></div>
-              <div class="info-row"><span class="info-label">Dropped</span><span class="info-value" id="p-drop">--</span></div>
-            </div>
-          </div>
-        </div>
-        <!-- Session -->
-        <div class="info-collapsible open" data-section="session">
-          <button class="info-section-header" aria-expanded="true">
-            <span class="info-section-title">Session</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div id="sessionInfoStrip" class="info-rows hidden">
-              <div class="info-row"><span class="info-label">Device</span><span class="info-value" id="si-device">--</span></div>
-              <div class="info-row"><span class="info-label">Wearable</span><span class="info-value" id="si-wearable">--</span></div>
-              <div class="info-row"><span class="info-label">Uptime</span><span class="info-value" id="si-uptime">--:--</span></div>
-              <div class="info-row"><span class="info-label">Viewers</span><span class="info-value" id="si-viewers">--</span></div>
-              <!-- TODO: integrate App Store Connect API for version/build source of truth
-                   instead of git tag + commit count. Requires ASC_API_KEY, ASC_ISSUER_ID,
-                   ASC_KEY_ID secrets in iOS CI/CD workflow. Current git-based auto-versioning
-                   (build phase writes Version.xcconfig from git describe + rev-list) works
-                   for local dev installs. -->
-              <div class="info-row"><span class="info-label">App</span><span class="info-value" id="si-app">--</span></div>
-              <div class="info-row"><span class="info-label">Build</span><span class="info-value" id="si-build">--</span></div>
-              <div class="info-row si-rec-row hidden" id="si-rec-row"><span class="info-label"><span class="si-rec"></span></span><span class="info-value si-rec-text">Recording</span></div>
-            </div>
-          </div>
-        </div>
-        <!-- Controls -->
-        <div class="info-collapsible open" data-section="controls">
-          <button class="info-section-header" aria-expanded="true">
-            <span class="info-section-title">Controls</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row">
-                <span class="info-label">Camera</span>
-                <span class="info-value" style="flex:1">
-                  <button class="ctrl-btn" id="btnCapture" title="Capture photo">Photo</button>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Record</span>
-                <span class="info-value" style="flex:1">
-                  <button class="ctrl-btn ctrl-btn-start" id="btnRecStart">Start</button>
-                  <button class="ctrl-btn ctrl-btn-stop" id="btnRecStop">Stop</button>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Stream</span>
-                <span class="info-value" style="flex:1">
-                  <button class="ctrl-btn ctrl-btn-start" id="btnStreamStart">Start</button>
-                  <button class="ctrl-btn ctrl-btn-stop" id="btnStreamStop">Stop</button>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Wake</span>
-                <span class="info-value" style="flex:1">
-                  <button class="ctrl-btn ctrl-btn-start" id="btnWakeDevice">Wake Device</button>
-                  <span id="wakeStatus" style="font-size:11px;margin-left:6px;color:#8be9fd"></span>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Speak</span>
-                <span class="info-value" style="flex:1">
-                  <input type="text" id="speakInput" class="speak-input" placeholder="Text to speak...">
-                  <button class="ctrl-btn" id="btnSpeak">Speak</button>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- Audio -->
-        <div class="info-collapsible" data-section="audio">
-          <button class="info-section-header" aria-expanded="false">
-            <span class="info-section-title">Audio</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row"><span class="info-label">Source</span><span class="info-value" id="p-audio">OFF</span></div>
-              <div class="info-row">
-                <span class="info-label">Level</span>
-                <span class="info-value" style="flex:1"><span id="audio-meter"><span id="audio-meter-fill"></span></span></span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Mic</span>
-                <span class="info-value" style="flex:1">
-                  <div class="mic-selector" id="micSelector">
-                    <button class="mic-btn active" data-mode="phone">Phone</button>
-                    <button class="mic-btn" data-mode="glasses">Glasses</button>
-                    <button class="mic-btn" data-mode="all">All</button>
-                  </div>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Phone Gain</span>
-                <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
-                  <input type="range" id="gainPhone" min="-20" max="20" value="0" step="1" class="audio-slider">
-                  <span id="gainPhoneVal" class="slider-val">0dB</span>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Glasses Gain</span>
-                <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
-                  <input type="range" id="gainGlasses" min="-20" max="20" value="0" step="1" class="audio-slider">
-                  <span id="gainGlassesVal" class="slider-val">0dB</span>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Noise Gate</span>
-                <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
-                  <input type="range" id="noiseGateThreshold" min="0" max="0.1" value="0" step="0.005" class="audio-slider">
-                  <span id="noiseGateVal" class="slider-val">OFF</span>
-                </span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">Suppress</span>
-                <span class="info-value" style="flex:1">
-                  <button class="ctrl-btn" id="btnNoiseSuppress">OFF</button>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- Stream Quality -->
-        <div class="info-collapsible" data-section="stream-quality">
-          <button class="info-section-header" aria-expanded="false">
-            <span class="info-section-title">Stream Quality</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row"><span class="info-label">Relay FPS</span><span class="info-value" id="t-relay-fps">--</span></div>
-              <div class="info-row"><span class="info-label">Encode EMA</span><span class="info-value" id="t-encode-ema">--</span></div>
-              <div class="info-row"><span class="info-label">Dropped</span><span class="info-value" id="t-relay-dropped">--</span></div>
-              <div class="info-row"><span class="info-label">RTT</span><span class="info-value" id="t-relay-rtt">--</span></div>
-              <div class="info-row"><span class="info-label">Frame Size</span><span class="info-value info-highlight" id="t-frame-size">--</span></div>
-              <div class="info-row"><span class="info-label">Throughput</span><span class="info-value" id="t-throughput">--</span></div>
-              <div class="info-row">
-                <span class="info-label">Codec</span>
-                <span class="info-value" style="flex:1">
-                  <div class="mic-selector" id="codecSelector">
-                    <button class="mic-btn active" data-codec="jpeg">JPEG</button>
-                    <button class="mic-btn" data-codec="h264">H.264</button>
-                  </div>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-        <!-- Device -->
-        <div class="info-collapsible" data-section="device">
-          <button class="info-section-header" aria-expanded="false">
-            <span class="info-section-title">Device</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row"><span class="info-label">Battery</span><span class="info-value" id="t-battery">--</span></div>
-              <div class="info-row"><span class="info-label">Thermal</span><span class="info-value" id="t-thermal">--</span></div>
-              <div class="info-row"><span class="info-label">Memory</span><span class="info-value" id="t-memory">--</span></div>
-              <div class="info-row"><span class="info-label">Disk</span><span class="info-value" id="t-disk">--</span></div>
-              <div class="info-row"><span class="info-label">CPU</span><span class="info-value" id="t-cpu">--</span></div>
-              <div class="info-row"><span class="info-label">Mem RSS</span><span class="info-value" id="t-memory-footprint">--</span></div>
-              <div class="info-row"><span class="info-label">Display</span><span class="info-value" id="t-display">--</span></div>
-            </div>
-          </div>
-        </div>
-        <!-- Sensors -->
-        <div class="info-collapsible" data-section="sensors">
-          <button class="info-section-header" aria-expanded="false">
-            <span class="info-section-title">Sensors</span>
-            <span class="info-chevron"></span>
-          </button>
-          <div class="info-collapsible-body">
-            <div class="info-rows">
-              <div class="info-row"><span class="info-label">BT Link</span><span class="info-value" id="t-link-state">--</span></div>
-              <div class="info-row"><span class="info-label">Network</span><span class="info-value" id="t-network">--</span></div>
-              <div class="info-row"><span class="info-label">Cellular</span><span class="info-value" id="t-cellular">--</span></div>
-              <div class="info-row"><span class="info-label">Bluetooth</span><span class="info-value" id="t-bluetooth">--</span></div>
-              <div class="info-row"><span class="info-label">Errors</span><span class="info-value" id="t-errors">0</span></div>
-              <div class="info-row"><span class="info-label">Orientation</span><span class="info-value" id="t-orientation">--</span></div>
-              <div class="info-row"><span class="info-label">Motion</span><span class="info-value" id="t-motion">--</span></div>
-              <div class="info-row"><span class="info-label">Camera</span><span class="info-value" id="t-camera">--</span></div>
-              <div class="info-row"><span class="info-label">Proximity</span><span class="info-value" id="t-proximity">--</span></div>
-              <div class="info-row"><span class="info-label">FG/BG</span><span class="info-value" id="t-background">--</span></div>
-              <div class="info-row"><span class="info-label">GPS</span><span class="info-value" id="t-location">--</span></div>
-              <div class="info-row"><span class="info-label">Gyro</span><span class="info-value" id="t-gyro">--</span></div>
-              <div class="info-row"><span class="info-label">Mag</span><span class="info-value" id="t-magnetometer">--</span></div>
-              <div class="info-row"><span class="info-label">Baro</span><span class="info-value" id="t-barometer">--</span></div>
-              <div class="info-row"><span class="info-label">Audio dB</span><span class="info-value" id="t-audio-level">--</span></div>
-              <div class="info-row"><span class="info-label">Activity</span><span class="info-value" id="t-activity">--</span></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="player-canvas">
-      <canvas id="liveCanvas"></canvas>
-      <canvas id="overlayCanvas"></canvas>
-      <div id="connectionOverlay" class="connection-overlay hidden">
-        <div class="connection-spinner" id="connSpinner"></div>
-        <div id="connStatus" class="connection-status">Connecting...</div>
-        <div id="connDetail" class="connection-detail"></div>
-      </div>
-      <!-- AI Guidance Panel (right side overlay) -->
-      <div id="guidancePanel" class="guidance-panel collapsed">
-        <button id="guidanceToggle" class="guidance-toggle" title="AI Guidance">
-          <span class="guidance-toggle-label">AI</span>
-          <span id="guidanceStatusDot" class="guidance-status-dot" style="background:rgba(255,255,255,0.25)"></span>
+    <!-- Split layout: activity-bar | main(canvas+bottom) | sidebar -->
+    <div class="split-layout">
+      <!-- Activity bar (vertical icon strip) -->
+      <div class="activity-bar" id="activityBar">
+        <button class="activity-bar-btn" data-section="info" title="Info & Controls">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         </button>
-        <div id="guidanceContent" class="guidance-content">
-          <div id="guidanceControl" class="guidance-section"></div>
-          <div id="guidanceLog" class="guidance-section guidance-log"></div>
-          <div id="guidanceTelemetry" class="guidance-section"></div>
-        </div>
-      </div>
-      <!-- Mini Workflow Editor Panel (right side overlay, below guidance) -->
-      <div id="miniEditorPanel" class="mini-editor-panel collapsed">
-        <button id="miniEditorToggle" class="mini-editor-toggle" title="Workflow">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
-            <line x1="8" y1="6" x2="16" y2="6"/><line x1="9.5" y1="15.5" x2="7" y2="8.5"/><line x1="14.5" y1="15.5" x2="17" y2="8.5"/>
-          </svg>
+        <button class="activity-bar-btn" data-section="guidance" title="AI Guidance">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 017 7c0 3-2 5-3.5 6.5L14 17h-4l-1.5-1.5C7 14 5 12 5 9a7 7 0 017-7z"/><line x1="10" y1="20" x2="14" y2="20"/></svg>
         </button>
-        <div id="miniEditorContent" class="mini-editor-content">
-          <div id="miniEditorHeader" class="mini-editor-header">
-            <span class="mini-editor-title"></span>
-            <div class="mini-editor-exec-bar" id="miniEditorExecBar"></div>
+        <button class="activity-bar-btn" data-section="workflow" title="Workflow DAG">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="9.5" y1="15.5" x2="7" y2="8.5"/><line x1="14.5" y1="15.5" x2="17" y2="8.5"/></svg>
+        </button>
+        <button class="activity-bar-btn" data-section="audio" title="Audio Controls">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </button>
+        <div class="activity-bar-spacer"></div>
+        <button class="activity-bar-btn" data-section="bottom" title="Toggle Bottom Panel">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+        </button>
+      </div>
+
+      <!-- Main area: canvas + bottom panel -->
+      <div class="split-main">
+        <!-- Video canvas -->
+        <div class="split-canvas">
+          <canvas id="liveCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+          <div id="connectionOverlay" class="connection-overlay hidden">
+            <div class="connection-spinner" id="connSpinner"></div>
+            <div id="connStatus" class="connection-status">Connecting...</div>
+            <div id="connDetail" class="connection-detail"></div>
           </div>
-          <div class="mini-editor-tab-bar" id="miniEditorTabBar">
-            <button class="mini-editor-tab active" data-tab="canvas">Canvas</button>
-            <button class="mini-editor-tab" data-tab="palette">+ Nodes</button>
-            <button class="mini-editor-tab hidden" data-tab="flows">Flows</button>
+        </div>
+
+        <!-- Bottom panel (resizeable, toggleable) -->
+        <div class="split-bottom-handle" id="bottomResizeHandle"></div>
+        <div class="split-bottom" id="bottomPanel">
+          <div class="bottom-tab-bar" id="bottomTabBar">
+            <button class="bottom-tab active" data-tab="transcription">Transcription</button><span id="sttStatus" class="stt-status" style="margin-left:4px;font-size:9px"></span>
+            <button class="bottom-tab" data-tab="debug">Debug</button>
+            <button class="bottom-tab" data-tab="telemetry">Telemetry</button>
           </div>
-          <div id="miniEditorCanvas" class="mini-editor-canvas"></div>
-          <div id="miniEditorPalette" class="mini-editor-palette hidden"></div>
-          <div id="miniEditorConfigPanel" class="mini-editor-config-panel">
-            <span class="mini-editor-hint">Select a node to edit</span>
+          <div class="bottom-content">
+            <div id="transcriptionPanel" class="bottom-tab-content" data-tab="transcription">
+              <div id="transcriptionLog" class="transcription-log"></div>
+            </div>
+            <div id="debugPanel" class="bottom-tab-content hidden" data-tab="debug">
+              <div id="debugLog" class="debug-log"></div>
+            </div>
+            <div id="telemetryPanel" class="bottom-tab-content hidden" data-tab="telemetry">
+              <div id="telemetryGrid" class="telemetry-grid"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar resize handle -->
+      <div class="split-sidebar-handle" id="sidebarResizeHandle"></div>
+
+      <!-- Sidebar (right panel, toggleable sections) -->
+      <div class="split-sidebar" id="splitSidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title" id="sidebarTitle">Info</span>
+          <button class="sidebar-close" id="sidebarClose" title="Close sidebar">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="sidebar-content" id="sidebarContent">
+          <!-- Info & Controls section -->
+          <div id="sidebarInfo" class="sidebar-section">
+            <div id="infoPanel">
+              <div class="info-panel-inner">
+                <!-- Stream -->
+                <div class="info-collapsible open" data-section="stream">
+                  <button class="info-section-header" aria-expanded="true">
+                    <span class="info-section-title">Stream</span>
+                    <span class="info-chevron"></span>
+                  </button>
+                  <div class="info-collapsible-body">
+                    <div class="info-rows">
+                      <div class="info-row"><span class="info-label">FPS</span><span class="info-value info-highlight" id="p-fps">--</span></div>
+                      <div class="info-row"><span class="info-label">Resolution</span><span class="info-value" id="p-size">--</span></div>
+                      <div class="info-row"><span class="info-label">Latency</span><span class="info-value" id="p-latency">--</span></div>
+                      <div class="info-row"><span class="info-label">Dropped</span><span class="info-value" id="p-drop">--</span></div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Session -->
+                <div class="info-collapsible open" data-section="session">
+                  <button class="info-section-header" aria-expanded="true">
+                    <span class="info-section-title">Session</span>
+                    <span class="info-chevron"></span>
+                  </button>
+                  <div class="info-collapsible-body">
+                    <div id="sessionInfoStrip" class="info-rows hidden">
+                      <div class="info-row"><span class="info-label">Device</span><span class="info-value" id="si-device">--</span></div>
+                      <div class="info-row"><span class="info-label">Wearable</span><span class="info-value" id="si-wearable">--</span></div>
+                      <div class="info-row"><span class="info-label">Uptime</span><span class="info-value" id="si-uptime">--:--</span></div>
+                      <div class="info-row"><span class="info-label">Viewers</span><span class="info-value" id="si-viewers">--</span></div>
+                      <div class="info-row"><span class="info-label">App</span><span class="info-value" id="si-app">--</span></div>
+                      <div class="info-row"><span class="info-label">Build</span><span class="info-value" id="si-build">--</span></div>
+                      <div class="info-row si-rec-row hidden" id="si-rec-row"><span class="info-label"><span class="si-rec"></span></span><span class="info-value si-rec-text">Recording</span></div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Controls -->
+                <div class="info-collapsible open" data-section="controls">
+                  <button class="info-section-header" aria-expanded="true">
+                    <span class="info-section-title">Controls</span>
+                    <span class="info-chevron"></span>
+                  </button>
+                  <div class="info-collapsible-body">
+                    <div class="info-rows">
+                      <div class="info-row">
+                        <span class="info-label">Camera</span>
+                        <span class="info-value" style="flex:1">
+                          <button class="ctrl-btn" id="btnCapture" title="Capture photo">Photo</button>
+                        </span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Record</span>
+                        <span class="info-value" style="flex:1">
+                          <button class="ctrl-btn ctrl-btn-start" id="btnRecStart">Start</button>
+                          <button class="ctrl-btn ctrl-btn-stop" id="btnRecStop">Stop</button>
+                        </span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Stream</span>
+                        <span class="info-value" style="flex:1">
+                          <button class="ctrl-btn ctrl-btn-start" id="btnStreamStart">Start</button>
+                          <button class="ctrl-btn ctrl-btn-stop" id="btnStreamStop">Stop</button>
+                        </span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Wake</span>
+                        <span class="info-value" style="flex:1">
+                          <button class="ctrl-btn ctrl-btn-start" id="btnWakeDevice">Wake Device</button>
+                          <span id="wakeStatus" style="font-size:11px;margin-left:6px;color:#8be9fd"></span>
+                        </span>
+                      </div>
+                      <div class="info-row">
+                        <span class="info-label">Speak</span>
+                        <span class="info-value" style="flex:1">
+                          <input type="text" id="speakInput" class="speak-input" placeholder="Text to speak...">
+                          <button class="ctrl-btn" id="btnSpeak">Speak</button>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- Sensors -->
+                <div class="info-collapsible" data-section="sensors">
+                  <button class="info-section-header" aria-expanded="false">
+                    <span class="info-section-title">Sensors</span>
+                    <span class="info-chevron"></span>
+                  </button>
+                  <div class="info-collapsible-body">
+                    <div class="info-rows">
+                      <div class="info-row"><span class="info-label">BT Link</span><span class="info-value" id="t-link-state">--</span></div>
+                      <div class="info-row"><span class="info-label">Network</span><span class="info-value" id="t-network">--</span></div>
+                      <div class="info-row"><span class="info-label">Cellular</span><span class="info-value" id="t-cellular">--</span></div>
+                      <div class="info-row"><span class="info-label">Bluetooth</span><span class="info-value" id="t-bluetooth">--</span></div>
+                      <div class="info-row"><span class="info-label">Errors</span><span class="info-value" id="t-errors">0</span></div>
+                      <div class="info-row"><span class="info-label">Orientation</span><span class="info-value" id="t-orientation">--</span></div>
+                      <div class="info-row"><span class="info-label">Motion</span><span class="info-value" id="t-motion">--</span></div>
+                      <div class="info-row"><span class="info-label">Camera</span><span class="info-value" id="t-camera">--</span></div>
+                      <div class="info-row"><span class="info-label">Proximity</span><span class="info-value" id="t-proximity">--</span></div>
+                      <div class="info-row"><span class="info-label">FG/BG</span><span class="info-value" id="t-background">--</span></div>
+                      <div class="info-row"><span class="info-label">GPS</span><span class="info-value" id="t-location">--</span></div>
+                      <div class="info-row"><span class="info-label">Gyro</span><span class="info-value" id="t-gyro">--</span></div>
+                      <div class="info-row"><span class="info-label">Mag</span><span class="info-value" id="t-magnetometer">--</span></div>
+                      <div class="info-row"><span class="info-label">Baro</span><span class="info-value" id="t-barometer">--</span></div>
+                      <div class="info-row"><span class="info-label">Audio dB</span><span class="info-value" id="t-audio-level">--</span></div>
+                      <div class="info-row"><span class="info-label">Activity</span><span class="info-value" id="t-activity">--</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- AI Guidance section -->
+          <div id="sidebarGuidance" class="sidebar-section hidden">
+            <div id="guidancePanel" class="guidance-panel-in-sidebar">
+              <div id="guidanceContent">
+                <div id="guidanceControl" class="guidance-section"></div>
+                <div id="guidanceLog" class="guidance-section guidance-log"></div>
+                <div id="guidanceTelemetry" class="guidance-section"></div>
+              </div>
+            </div>
+          </div>
+          <!-- Workflow DAG section -->
+          <div id="sidebarWorkflow" class="sidebar-section hidden">
+            <div id="miniEditorPanel" class="mini-editor-panel-in-sidebar">
+              <div id="miniEditorContent" class="mini-editor-content">
+                <div id="miniEditorHeader" class="mini-editor-header">
+                  <span class="mini-editor-title"></span>
+                  <div class="mini-editor-exec-bar" id="miniEditorExecBar"></div>
+                </div>
+                <div class="mini-editor-tab-bar" id="miniEditorTabBar">
+                  <button class="mini-editor-tab active" data-tab="canvas">Canvas</button>
+                  <button class="mini-editor-tab" data-tab="palette">+ Nodes</button>
+                  <button class="mini-editor-tab hidden" data-tab="flows">Flows</button>
+                </div>
+                <div id="miniEditorCanvas" class="mini-editor-canvas"></div>
+                <div id="miniEditorPalette" class="mini-editor-palette hidden"></div>
+                <div id="miniEditorConfigPanel" class="mini-editor-config-panel">
+                  <span class="mini-editor-hint">Select a node to edit</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Audio section -->
+          <div id="sidebarAudio" class="sidebar-section hidden">
+            <div class="info-panel-inner">
+              <div class="info-rows">
+                <div class="info-row"><span class="info-label">Source</span><span class="info-value" id="p-audio">OFF</span></div>
+                <div class="info-row">
+                  <span class="info-label">Level</span>
+                  <span class="info-value" style="flex:1"><span id="audio-meter"><span id="audio-meter-fill"></span></span></span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Mic</span>
+                  <span class="info-value" style="flex:1">
+                    <div class="mic-selector" id="micSelector">
+                      <button class="mic-btn active" data-mode="phone">Phone</button>
+                      <button class="mic-btn" data-mode="glasses">Glasses</button>
+                      <button class="mic-btn" data-mode="all">All</button>
+                    </div>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Phone Gain</span>
+                  <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
+                    <input type="range" id="gainPhone" min="-20" max="20" value="0" step="1" class="audio-slider">
+                    <span id="gainPhoneVal" class="slider-val">0dB</span>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Glasses Gain</span>
+                  <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
+                    <input type="range" id="gainGlasses" min="-20" max="20" value="0" step="1" class="audio-slider">
+                    <span id="gainGlassesVal" class="slider-val">0dB</span>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Noise Gate</span>
+                  <span class="info-value" style="flex:1;display:flex;align-items:center;gap:4px">
+                    <input type="range" id="noiseGateThreshold" min="0" max="0.1" value="0" step="0.005" class="audio-slider">
+                    <span id="noiseGateVal" class="slider-val">OFF</span>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Suppress</span>
+                  <span class="info-value" style="flex:1">
+                    <button class="ctrl-btn" id="btnNoiseSuppress">OFF</button>
+                  </span>
+                </div>
+              </div>
+              <!-- Stream Quality (collapsed by default) -->
+              <div class="info-collapsible" data-section="stream-quality" style="margin-top:12px">
+                <button class="info-section-header" aria-expanded="false">
+                  <span class="info-section-title">Stream Quality</span>
+                  <span class="info-chevron"></span>
+                </button>
+                <div class="info-collapsible-body">
+                  <div class="info-rows">
+                    <div class="info-row"><span class="info-label">Relay FPS</span><span class="info-value" id="t-relay-fps">--</span></div>
+                    <div class="info-row"><span class="info-label">Encode EMA</span><span class="info-value" id="t-encode-ema">--</span></div>
+                    <div class="info-row"><span class="info-label">Dropped</span><span class="info-value" id="t-relay-dropped">--</span></div>
+                    <div class="info-row"><span class="info-label">RTT</span><span class="info-value" id="t-relay-rtt">--</span></div>
+                    <div class="info-row"><span class="info-label">Frame Size</span><span class="info-value info-highlight" id="t-frame-size">--</span></div>
+                    <div class="info-row"><span class="info-label">Throughput</span><span class="info-value" id="t-throughput">--</span></div>
+                    <div class="info-row">
+                      <span class="info-label">Codec</span>
+                      <span class="info-value" style="flex:1">
+                        <div class="mic-selector" id="codecSelector">
+                          <button class="mic-btn active" data-codec="jpeg">JPEG</button>
+                          <button class="mic-btn" data-codec="h264">H.264</button>
+                        </div>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Device (collapsed by default) -->
+              <div class="info-collapsible" data-section="device" style="margin-top:4px">
+                <button class="info-section-header" aria-expanded="false">
+                  <span class="info-section-title">Device</span>
+                  <span class="info-chevron"></span>
+                </button>
+                <div class="info-collapsible-body">
+                  <div class="info-rows">
+                    <div class="info-row"><span class="info-label">Battery</span><span class="info-value" id="t-battery">--</span></div>
+                    <div class="info-row"><span class="info-label">Thermal</span><span class="info-value" id="t-thermal">--</span></div>
+                    <div class="info-row"><span class="info-label">Memory</span><span class="info-value" id="t-memory">--</span></div>
+                    <div class="info-row"><span class="info-label">Disk</span><span class="info-value" id="t-disk">--</span></div>
+                    <div class="info-row"><span class="info-label">CPU</span><span class="info-value" id="t-cpu">--</span></div>
+                    <div class="info-row"><span class="info-label">Mem RSS</span><span class="info-value" id="t-memory-footprint">--</span></div>
+                    <div class="info-row"><span class="info-label">Display</span><span class="info-value" id="t-display">--</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
-    <div id="transcriptionPanel" class="transcription-panel">
-      <div class="transcription-header">
-        <span class="transcription-title">Transcription</span>
-        <span id="sttStatus" class="stt-status"></span>
-      </div>
-      <div id="transcriptionLog" class="transcription-log"></div>
+
+    <!-- Status bar -->
+    <div class="player-status-bar" id="playerStatusBar">
+      <span class="status-bar-item"><span class="status-bar-label">FPS</span><span class="status-bar-value" id="sb-fps">--</span></span>
+      <span class="status-bar-sep">|</span>
+      <span class="status-bar-item"><span class="status-bar-label">Res</span><span class="status-bar-value" id="sb-size">--</span></span>
+      <span class="status-bar-sep">|</span>
+      <span class="status-bar-item"><span class="status-bar-label">Lat</span><span class="status-bar-value" id="sb-latency">--</span></span>
+      <span class="status-bar-sep">|</span>
+      <span class="status-bar-item"><span class="status-bar-label">Audio</span><span class="status-bar-value" id="sb-audio">OFF</span></span>
+      <span class="status-bar-sep">|</span>
+      <span class="status-bar-item"><span class="status-bar-label">BT</span><span class="status-bar-value" id="sb-link">--</span></span>
+      <span class="status-bar-sep">|</span>
+      <span class="status-bar-item"><span class="status-bar-label">Batt</span><span class="status-bar-value" id="sb-battery">--</span></span>
     </div>
+
     <div id="toastContainer" class="toast-container"></div>
   </div>
 

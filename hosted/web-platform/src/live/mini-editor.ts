@@ -83,18 +83,26 @@ export class MiniWorkflowEditor {
     this.execBar = container.querySelector("#miniEditorExecBar")!;
     this.palette = container.querySelector("#miniEditorPalette")!;
     this.tabBar = container.querySelector("#miniEditorTabBar")!;
+    this.collapsed = true; // Start collapsed until sidebar opens
     this.bindEvents();
   }
 
+  /** Show the editor and load workflow. Called when sidebar opens to workflow section. */
+  show(): void {
+    this.collapsed = false;
+    this.loadWorkflow();
+  }
+
+  /** Hide the editor. Called when sidebar closes or switches away from workflow. */
+  hide(): void {
+    this.collapsed = true;
+  }
+
   toggle(): void {
-    this.collapsed = !this.collapsed;
-    this.container.classList.toggle("collapsed", this.collapsed);
-    if (!this.collapsed) {
-      // Collapse guidance panel when opening mini editor
-      if (!this.guidancePanel.isCollapsed()) {
-        this.guidancePanel.toggle();
-      }
-      this.loadWorkflow();
+    if (this.collapsed) {
+      this.show();
+    } else {
+      this.hide();
     }
   }
 
@@ -466,13 +474,7 @@ export class MiniWorkflowEditor {
   };
 
   private bindEvents(): void {
-    // Toggle button
-    const toggle = this.container.querySelector("#miniEditorToggle");
-    if (toggle) {
-      toggle.addEventListener("click", () => this.toggle());
-    }
-
-    // Tab bar
+    // Tab bar (toggle button removed — ActivityBar handles visibility)
     this.tabBar.addEventListener("click", (e) => {
       const target = (e.target as HTMLElement).closest(".mini-editor-tab") as HTMLElement | null;
       if (!target) return;
