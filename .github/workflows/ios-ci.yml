@@ -40,14 +40,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Select Xcode
+      - name: Select Xcode and Install Simulator Runtime
         run: |
           sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
           xcodebuild -version
 
-      - name: Install iOS Simulator Runtime
-        run: |
-          xcodebuild -downloadPlatform iOS
+          # Check if iOS runtime is already available
+          if xcrun simctl list runtimes | grep -q "iOS 18"; then
+            echo "iOS 18 runtime already installed"
+          else
+            echo "Downloading iOS simulator runtime..."
+            xcodebuild -downloadPlatform iOS 2>&1 || {
+              echo "Download failed, retrying..."
+              sleep 5
+              xcodebuild -downloadPlatform iOS
+            }
+          fi
 
       - name: List available simulators
         run: xcrun simctl list devices available | grep -i 'iphone'
