@@ -12,13 +12,18 @@ const MIRROR_MAP: Record<string, string> = {
   "t-battery": "sb-battery",
 };
 
-/** Mirror all tracked metric values from info panel to status bar. */
+/** Mirror all tracked metric values from info panel to status bar and telemetry grid. */
 export function syncStatusBar(): void {
   for (const [sourceId, targetId] of Object.entries(MIRROR_MAP)) {
     const source = document.getElementById(sourceId);
     const target = document.getElementById(targetId);
     if (source && target) {
       target.textContent = source.textContent;
+    }
+    // Also mirror to telemetry grid card in bottom panel
+    const tm = document.getElementById("tm-" + sourceId);
+    if (source && tm) {
+      tm.textContent = source.textContent;
     }
   }
 }

@@ -223,7 +223,13 @@ function handleTelemetry(m: Record<string, unknown>): void {
   const throughput = m.throughput as Record<string, unknown> | undefined;
   const activity = m.activity as Record<string, unknown> | undefined;
 
-  const set = (id: string, text: string) => { const el = document.getElementById(id); if (el) el.textContent = text; };
+  const set = (id: string, text: string) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+    // Also update telemetry grid card in bottom panel
+    const tm = document.getElementById("tm-" + id);
+    if (tm) tm.textContent = text;
+  };
 
   // Frame / relay stats
   if (relay) {
