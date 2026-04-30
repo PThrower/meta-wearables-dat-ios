@@ -12,6 +12,19 @@ import { handleConnectionState, handleConnectionStatus, connOverlay, connSpinner
 
 const aiPill = document.getElementById("p-ai")!;
 const meterFill = document.getElementById("audio-meter-fill")!;
+const bottomPanel = document.getElementById("bottomPanel")!;
+let bottomAutoOpened = false;
+
+/** Auto-open bottom panel on first transcription/VAD event. */
+function ensureBottomOpen(): void {
+  if (!bottomAutoOpened && !bottomPanel.classList.contains("open")) {
+    bottomPanel.classList.add("open");
+    bottomAutoOpened = true;
+    // Also activate the bottom toggle button in activity bar
+    const btn = document.querySelector('[data-section="bottom"]');
+    if (btn) btn.classList.add("active");
+  }
+}
 
 /** Wire the player's onJsonMessage callback. */
 export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidancePanel): void {
@@ -144,6 +157,7 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
     if (msg.type === "stt_result") {
       const m = msg as { text: string; isFinal: boolean; error?: string; confidence?: number };
       const log = document.getElementById("transcriptionLog");
+      ensureBottomOpen();
       const status = document.getElementById("sttStatus");
       if (m.error) {
         showToast("STT error: " + m.error.slice(0, 60), "error");
@@ -167,6 +181,7 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
     if (msg.type === "vad_result") {
       const m = msg as { eventType: string; isSpeech: boolean; energyDb?: number; error?: string; durationMs?: number };
       const log = document.getElementById("transcriptionLog");
+      ensureBottomOpen();
       if (m.error) {
         showToast("VAD error: " + m.error.slice(0, 60), "error");
         if (log) appendTranscriptionEntry(log, m.error, { isError: true });
