@@ -552,6 +552,7 @@ export type ConfigFieldSchema =
   | { kind: "checkbox"; key: string; label: string }
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
+  | { kind: "geofence-map"; key: string; label: string }
   | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
 
 export interface NodeDefinition {

@@ -18,6 +18,7 @@ export type ConfigFieldSchema =
   | { kind: "checkbox"; key: string; label: string }
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
+  | { kind: "geofence-map"; key: string; label: string }
   | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
 
 // --- Structural & Activation Types ---
@@ -694,7 +695,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       { kind: "number", key: "minDistance", label: "Min Distance (meters)", min: 0, max: 1000, step: 1 },
       { kind: "number", key: "updateIntervalSec", label: "Update Interval (sec)", min: 1, max: 300, step: 1 },
       { kind: "section", label: "Geofences (mode=geofence only)", fields: [
-        { kind: "textarea", key: "geofences", label: "Geofences JSON", placeholder: '[{"latitude":37.7749,"longitude":-122.4194,"radius":100,"label":"Home","notifyOnEntry":true,"notifyOnExit":true}]' },
+        { kind: "geofence-map", key: "geofences", label: "Geofences" },
       ]},
     ],
     defaultConfig: { mode: "continuous", accuracy: "best", minDistance: 5, updateIntervalSec: 5, geofences: [] },

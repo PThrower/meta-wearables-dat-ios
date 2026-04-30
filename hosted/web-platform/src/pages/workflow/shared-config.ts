@@ -51,8 +51,6 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
       return `<div class="${prefix}-field"><label>${esc(field.label)}</label><input type="text" class="${prefix}-input" data-field="${dataField}" value="${esc(val)}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""} /></div>`;
     }
     case "textarea": {
-      // Intercept geofences key → render interactive map instead of raw JSON textarea
-      if (field.key === "geofences") return renderGeofenceMapField(field, node, prefix);
       const val = String(node.config[field.key] ?? "");
       return `<div class="${prefix}-field"><label>${esc(field.label)}</label><textarea class="${prefix}-input ${prefix}-textarea" data-field="config.${field.key}" rows="${field.rows ?? 4}" ${field.placeholder ? `placeholder="${esc(field.placeholder)}"` : ""}>${esc(val)}</textarea></div>`;
     }
@@ -80,6 +78,9 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
       const val = (node.config[field.key] as number) ?? 0;
       return `<div class="${prefix}-field"><label>${esc(field.label)}</label><input type="number" class="${prefix}-input" data-field="config.${field.key}" min="${field.min ?? ""}" max="${field.max ?? ""}" step="${field.step ?? 1}" value="${val}" /></div>`;
     }
+    case "geofence-map": {
+      return renderGeofenceMapField(field, node, prefix);
+    }
     case "section": {
       const inner = field.fields.map(f => renderConfigField(f, node, prefix)).join("");
       return `<div class="${prefix}-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"><label style="font-weight: 600; margin-bottom: 6px; display: block;">${esc(field.label)}</label>${inner}</div>`;
@@ -103,7 +104,7 @@ const GEOFENCE_COLORS = ["#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", 
 const GEOFENCE_MAP_ID = "wf-geofence-map-container";
 
 /** Render geofence map + card list instead of textarea. */
-function renderGeofenceMapField(field: ConfigFieldSchema & { kind: "textarea" }, node: WorkflowNodeDef, prefix: string): string {
+function renderGeofenceMapField(field: ConfigFieldSchema & { kind: "geofence-map" }, node: WorkflowNodeDef, prefix: string): string {
   const geofences = parseGeofences(node.config[field.key]);
   const mapId = `${prefix}-geofence-map`;
   const cardsHtml = geofences.map((gf, i) => renderGeofenceCard(gf, i, prefix)).join("");
