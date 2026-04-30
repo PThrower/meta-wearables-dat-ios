@@ -3150,6 +3150,122 @@ select.wf-config-input {
   line-height: 1.4;
 }
 
+/* ── Geofence Map ── */
+
+.wf-geofence-map-wrap {
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.wf-geofence-map {
+  height: 250px;
+  width: 100%;
+  background: #1a1a2e;
+}
+
+.wf-geofence-hint {
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 4px 8px 6px;
+  margin: 0;
+  background: var(--border-subtle);
+}
+
+.wf-geofence-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wf-geofence-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid #06b6d4;
+}
+
+.wf-geofence-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.wf-geofence-card-header input[type="text"] {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.wf-gf-delete {
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.wf-gf-delete:hover { background: rgba(239,68,68,0.15); }
+
+.wf-geofence-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.wf-gf-coord {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wf-gf-num {
+  width: 90px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.wf-gf-slider-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.wf-gf-radius {
+  flex: 1;
+  accent-color: #06b6d4;
+}
+
+.wf-geofence-card-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wf-geofence-card-row input[type="checkbox"] {
+  accent-color: #06b6d4;
+}
+
 .wf-config-info {
   font-size: 10px;
   color: var(--text-tertiary);
