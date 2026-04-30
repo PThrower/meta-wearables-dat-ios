@@ -381,13 +381,15 @@ function dispatchWorkflowConfig(
   const visionIdx: number[] = [];
   const enhanceIdx: number[] = [];
   const sensorIdx: number[] = [];
+  const trackingIdx: number[] = [];
 
   for (let i = 0; i < nodes.length; i++) {
     const def = NODE_DEF_MAP.get(nodes[i].type);
-    if (def?.activationMode === "speech")  { speechIdx.push(i);  continue; }
-    if (def?.activationMode === "vision")  { visionIdx.push(i);  continue; }
-    if (def?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
-    if (def?.activationMode === "sensor")  { sensorIdx.push(i);  continue; }
+    if (def?.activationMode === "speech")    { speechIdx.push(i);   continue; }
+    if (def?.activationMode === "vision")    { visionIdx.push(i);   continue; }
+    if (def?.activationMode === "enhance")   { enhanceIdx.push(i);  continue; }
+    if (def?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
+    if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
   }
 
   // Speech config (mobile-stt, vad)
@@ -453,10 +455,43 @@ function dispatchWorkflowConfig(
           rawConfig.audioSource = "phone";
         }
       }
-      return { sensorType: nodes[i].type, config: rawConfig };
+      // Normalize location variants to "sensor-location" + inject mode from type
+      const effectiveType = nodes[i].type.startsWith("sensor-location")
+        ? "sensor-location"
+        : nodes[i].type;
+      const modeOverride = nodes[i].type.startsWith("sensor-location-")
+        ? nodes[i].type.replace("sensor-location-", "")
+        : nodes[i].type === "sensor-location" ? "continuous" : undefined;
+      if (modeOverride) rawConfig.mode = modeOverride;
+
+      return { sensorType: effectiveType, config: rawConfig };
     });
     ws.send(JSON.stringify({ type: "sensor_stage_config", sensors, enabled: true }));
     console.log(`[relay] Replayed sensor config (${sensors.length} sensors) session=${sid}`);
+  }
+
+  // Tracking config (OC-SORT)
+  if (trackingIdx.length > 0) {
+    for (const i of trackingIdx) {
+      const cfg = nodes[i].config as Record<string, unknown> ?? {};
+      const targetClasses = typeof cfg.targetClasses === "string" && (cfg.targetClasses as string).length > 0
+        ? (cfg.targetClasses as string).split(",").map(s => s.trim()).filter(s => s.length > 0)
+        : [];
+      ws.send(JSON.stringify({
+        type: "tracking_stage_config",
+        enabled: true,
+        targetClasses,
+        confidence: cfg.confidence ?? 0.5,
+        iouThreshold: cfg.iouThreshold ?? 0.3,
+        maxTracks: cfg.maxTracks ?? 0,
+        maxAge: cfg.maxAge ?? 30,
+        minHits: cfg.minHits ?? 3,
+        targetFPS: cfg.targetFPS ?? 10,
+        smoothingAlpha: cfg.smoothingAlpha ?? 0.3,
+        zones: cfg.zones ?? [],
+      }));
+    }
+    console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);
   }
 }
 
@@ -1614,17 +1649,19 @@ const server = Bun.serve<WsData>({
         const visionIdx: number[] = [];
         const sensorIdx: number[] = [];
         const speechIdx: number[] = [];
+        const trackingIdx: number[] = [];
         const jepaIdx: number[] = [];
         const aiIdx: number[] = [];
 
         for (let i = 0; i < appsToActivate.length; i++) {
           const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
           const pDef = rawNode ? NODE_DEF_MAP.get(rawNode.type) : null;
-          if (pDef?.activationMode === "enhance") { enhanceIdx.push(i); continue; }
-          if (pDef?.activationMode === "vision") { visionIdx.push(i); continue; }
-          if (pDef?.activationMode === "sensor") { sensorIdx.push(i); continue; }
-          if (pDef?.activationMode === "speech") { speechIdx.push(i); continue; }
-          if (pDef?.activationMode === "jepa")   { jepaIdx.push(i);   continue; }
+          if (pDef?.activationMode === "enhance")   { enhanceIdx.push(i);  continue; }
+          if (pDef?.activationMode === "vision")    { visionIdx.push(i);   continue; }
+          if (pDef?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
+          if (pDef?.activationMode === "speech")    { speechIdx.push(i);   continue; }
+          if (pDef?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
+          if (pDef?.activationMode === "jepa")      { jepaIdx.push(i);     continue; }
           aiIdx.push(i);
         }
 
@@ -1749,8 +1786,17 @@ const server = Bun.serve<WsData>({
               }
             }
 
+            // Normalize location variants to "sensor-location" + inject mode from type
+            const effectiveType = rawNode.type.startsWith("sensor-location")
+              ? "sensor-location"
+              : rawNode.type;
+            const modeOverride = rawNode.type.startsWith("sensor-location-")
+              ? rawNode.type.replace("sensor-location-", "")
+              : rawNode.type === "sensor-location" ? "continuous" : undefined;
+            if (modeOverride) rawConfig.mode = modeOverride;
+
             sensorConfigs.push({
-              sensorType: rawNode.type,
+              sensorType: effectiveType,
               config: rawConfig,
             });
             activatedAppIds.push(appsToActivate[i].id);
@@ -1787,6 +1833,36 @@ const server = Bun.serve<WsData>({
             console.log(`[relay] Sent speech config with ${speechConfigs.length} stages session=${sid}`);
           }
         }
+
+        // 7. Fire-and-forget: send tracking config to iOS
+        if (trackingIdx.length > 0) {
+          for (const i of trackingIdx) {
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
+            const rawConfig = (rawNode.config ?? {}) as Record<string, unknown>;
+            const trackingConfig = {
+              type: "tracking_stage_config" as const,
+              enabled: true,
+              targetClasses: typeof rawConfig.targetClasses === "string" && rawConfig.targetClasses.length > 0
+                ? (rawConfig.targetClasses as string).split(",").map(s => s.trim()).filter(s => s.length > 0)
+                : [],
+              confidence: (rawConfig.confidence as number) ?? 0.5,
+              iouThreshold: (rawConfig.iouThreshold as number) ?? 0.3,
+              maxTracks: (rawConfig.maxTracks as number) ?? 0,
+              maxAge: (rawConfig.maxAge as number) ?? 30,
+              minHits: (rawConfig.minHits as number) ?? 3,
+              targetFPS: (rawConfig.targetFPS as number) ?? 10,
+              smoothingAlpha: (rawConfig.smoothingAlpha as number) ?? 0.3,
+              zones: (rawConfig.zones as Array<Record<string, unknown>>) ?? [],
+            };
+            if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+              session.publisher.ws.send(JSON.stringify(trackingConfig));
+            }
+            activatedAppIds.push(appsToActivate[i].id);
+          }
+          console.log(`[relay] Sent tracking config for ${trackingIdx.length} nodes session=${sid}`);
+        }
+
         const cachedFrame = registry.getLastFrame(body.sessionId);
         if (cachedFrame) sendCachedFrameToAI(body.sessionId, cachedFrame);
 
@@ -2474,6 +2550,23 @@ const server = Bun.serve<WsData>({
                 }
                 if (cmd.error) {
                   console.warn(`[relay] VAD error from publisher: ${cmd.error} session=${sessionId}`);
+                }
+              }
+              // Fan out to viewers
+              broadcastToViewers(session, cmd);
+            } else if (cmd.type === "tracking_result" && Array.isArray(cmd.tracks)) {
+              // iOS ObjectTrackingStage results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const tracks = cmd.tracks as any[];
+                const confirmedCount = tracks.filter((t: any) => t.state === "confirmed").length;
+                const totalActive = tracks.length;
+                const zoneCounts = cmd.registry?.zoneCounts as Record<string, number> ?? {};
+                const zoneSummary = Object.entries(zoneCounts).map(([z, c]) => `${z}:${c}`).join(", ");
+                const summary = `Tracking: ${totalActive} objects (${confirmedCount} confirmed)${zoneSummary ? ` zones[${zoneSummary}]` : ""}`;
+
+                const throttled = detectionThrottle.check(sessionId, "tracking", summary);
+                if (throttled) {
+                  orchestrator.sendTrigger(sessionId, `[Tracking: ${throttled}]`);
                 }
               }
               // Fan out to viewers

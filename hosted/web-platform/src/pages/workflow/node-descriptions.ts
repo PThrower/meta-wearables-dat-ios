@@ -26,6 +26,9 @@ export const NODE_DESCRIPTIONS: Record<string, string> = {
   "vision-body-pose": "Detect body skeleton and joint positions",
   "vision-thumbnails": "Generate detection preview thumbnails on canvas",
 
+  // Tracking
+  "tracking-ocsort": "Multi-object tracking with persistent IDs through occlusion",
+
   // Enhance
   "enhance-brightness": "Adjust brightness, contrast, and saturation",
   "enhance-sharpen": "Sharpen image details and edges",

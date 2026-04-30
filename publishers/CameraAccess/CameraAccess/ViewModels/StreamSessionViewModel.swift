@@ -118,6 +118,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var visionSceneLabel: String?
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
+  @Published var trackingTracks: [Track] = []
   @Published var audioInputMode: AudioInputMode = .all {
     didSet {
       // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
@@ -179,6 +180,7 @@ class StreamSessionViewModel: ObservableObject {
   private var locationStage: LocationStage?
   private var speechRecognitionStage: SpeechRecognitionStage?
   private var voiceActivityStage: VoiceActivityStage?
+  private var trackingStage: ObjectTrackingStage?
 
   // Preview system
   #if DEBUG
@@ -999,6 +1001,63 @@ class StreamSessionViewModel: ObservableObject {
     }
   }
 
+  // MARK: - Tracking Stage
+
+  /// Configure OC-SORT tracking stage from server-sent config.
+  private func configureTrackingStage(config: [String: Any]) async {
+    // Unregister existing tracking stage if any
+    if let existing = trackingStage {
+      await existing.stop()
+      pipeline.unregister(stageId: existing.stageId)
+      trackingStage = nil
+      trackingTracks = []
+    }
+
+    let trackingConfig = TrackingStageConfig(
+      targetClasses: config["targetClasses"] as? [String] ?? [],
+      confidence: config["confidence"] as? Double ?? 0.5,
+      iouThreshold: config["iouThreshold"] as? Double ?? 0.3,
+      maxAge: config["maxAge"] as? Int ?? 30,
+      minHits: config["minHits"] as? Int ?? 3,
+      maxTracks: config["maxTracks"] as? Int ?? 0,
+      targetFPS: config["targetFPS"] as? Double ?? 10,
+      smoothingAlpha: config["smoothingAlpha"] as? Double ?? 0.3,
+      zones: (config["zones"] as? [[String: Any]])?.compactMap { z -> ZoneDefinition? in
+        guard let label = z["label"] as? String,
+              let x1 = z["x1"] as? Double,
+              let y1 = z["y1"] as? Double,
+              let x2 = z["x2"] as? Double,
+              let y2 = z["y2"] as? Double else { return nil }
+        return ZoneDefinition(
+          id: z["id"] as? String ?? UUID().uuidString,
+          label: label, x1: x1, y1: y1, x2: x2, y2: y2,
+          color: z["color"] as? String
+        )
+      } ?? []
+    )
+
+    let stage = ObjectTrackingStage(config: trackingConfig)
+
+    // Wire result callback to update overlay AND relay to server
+    await stage.setOnResult { [weak self] result in
+      await MainActor.run {
+        self?.trackingTracks = result.tracks
+      }
+      // Relay tracking result JSON to server
+      await self?.relayStage.sendJson(result.jsonDict())
+    }
+
+    #if DEBUG
+    await stage.setPreviewBus(previewBus)
+    #endif
+
+    pipeline.register(stage)
+    await stage.start()
+    trackingStage = stage
+
+    NSLog("[StreamSession] ObjectTrackingStage registered: confidence=\(trackingConfig.confidence) iou=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) zones=\(trackingConfig.zones.count)")
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -1202,6 +1261,26 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // Tracking stage config from server -- register ObjectTrackingStage
+      if msgType == "tracking_stage_config" {
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            guard let self, let existing = trackingStage else { return }
+            await existing.stop()
+            pipeline.unregister(stageId: existing.stageId)
+            trackingStage = nil
+            trackingTracks = []
+            NSLog("[StreamSession] ObjectTrackingStage disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.configureTrackingStage(config: msg)
+          }
+        }
+      }
+
       // Audio gain control from viewer
       if msgType == "set_audio_gain",
          let codecType = msg["codecType"] as? Int,
@@ -1398,6 +1477,13 @@ class StreamSessionViewModel: ObservableObject {
       speechRecognitionStage = nil
     }
     overlayTranscription = nil
+
+    // Stop tracking stage
+    if let trackStage = trackingStage {
+      await trackStage.stop()
+      trackingStage = nil
+    }
+    trackingTracks = []
     if let vadStage = voiceActivityStage {
       await vadStage.stop()
       voiceActivityStage = nil

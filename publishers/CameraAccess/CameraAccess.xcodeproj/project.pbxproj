@@ -85,6 +85,11 @@
 		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
 		VISNSTGBLD01 /* VisionStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNSTGFLE01 /* VisionStage.swift */; };
 		VISNTYPBLD01 /* VisionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNTYPFLE01 /* VisionTypes.swift */; };
+		TRKTYPBLD01 /* TrackingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRKTYPFLE01 /* TrackingTypes.swift */; };
+		HNGALGBLD01 /* HungarianAlgorithm.swift in Sources */ = {isa = PBXBuildFile; fileRef = HNGALGFLE01 /* HungarianAlgorithm.swift */; };
+		OCSORTBLD01 /* OCSORT.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCSORTFLE01 /* OCSORT.swift */; };
+		ITMREGBLD01 /* ItemRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ITMREGFLE01 /* ItemRegistry.swift */; };
+		OBJTRKBLD01 /* ObjectTrackingStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = OBJTRKFLE01 /* ObjectTrackingStage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -200,6 +205,11 @@
 		V1V1V1V1V1V1V1V1V1V1V1V1 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		VISNSTGFLE01 /* VisionStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionStage.swift; sourceTree = "<group>"; };
 		VISNTYPFLE01 /* VisionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTypes.swift; sourceTree = "<group>"; };
+		TRKTYPFLE01 /* TrackingTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackingTypes.swift; sourceTree = "<group>"; };
+		HNGALGFLE01 /* HungarianAlgorithm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungarianAlgorithm.swift; sourceTree = "<group>"; };
+		OCSORTFLE01 /* OCSORT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCSORT.swift; sourceTree = "<group>"; };
+		ITMREGFLE01 /* ItemRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRegistry.swift; sourceTree = "<group>"; };
+		OBJTRKFLE01 /* ObjectTrackingStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectTrackingStage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -394,6 +404,10 @@
 				PCMAP00000001 /* PCMAudioProcessing.swift */,
 				OPUSENCFL01 /* OpusEncoder.swift */,
 				450DDFDB5AE97C946EA02122 /* ConfidenceSmoother.swift */,
+				TRKTYPFLE01 /* TrackingTypes.swift */,
+				HNGALGFLE01 /* HungarianAlgorithm.swift */,
+				OCSORTFLE01 /* OCSORT.swift */,
+				ITMREGFLE01 /* ItemRegistry.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -418,6 +432,7 @@
 				EC51C000FF20228B63FDA6A8 /* VoiceActivityStage.swift */,
 				SNSRLOCFLE01 /* LocationStage.swift */,
 				9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */,
+				OBJTRKFLE01 /* ObjectTrackingStage.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -667,6 +682,11 @@
 				0919D58C005F10F5432C8958 /* SpeechTypes.swift in Sources */,
 				SNSRLOCBLD01 /* LocationStage.swift in Sources */,
 				0086DA8943BFBECDED980040 /* ConfidenceSmoother.swift in Sources */,
+				TRKTYPBLD01 /* TrackingTypes.swift in Sources */,
+				HNGALGBLD01 /* HungarianAlgorithm.swift in Sources */,
+				OCSORTBLD01 /* OCSORT.swift in Sources */,
+				ITMREGBLD01 /* ItemRegistry.swift in Sources */,
+				OBJTRKBLD01 /* ObjectTrackingStage.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

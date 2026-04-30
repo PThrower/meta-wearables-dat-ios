@@ -33,8 +33,11 @@ struct BoundingBoxOverlayView: View {
   /// Live transcription text to display as subtitle overlay.
   var transcription: String? = nil
 
+  /// Tracked objects from OC-SORT (emerald green, persistent IDs).
+  var trackedItems: [Track] = []
+
   var body: some View {
-    let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || sceneLabel != nil)
+    let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || sceneLabel != nil)
     let hasTranscription = transcription != nil
     if hasBoxes || hasTranscription {
       GeometryReader { geometry in
@@ -113,6 +116,40 @@ struct BoundingBoxOverlayView: View {
                   )
               }
             }
+          }
+
+          // OC-SORT tracked objects (emerald green, persistent IDs)
+          ForEach(Array(trackedItems.enumerated()), id: \.offset) { _, track in
+            let color = Color(red: 0.063, green: 0.725, blue: 0.506) // emerald #10b981
+            let rect = CGRect(
+              x: track.bbox.x1 * geometry.size.width,
+              y: track.bbox.y1 * geometry.size.height,
+              width: (track.bbox.x2 - track.bbox.x1) * geometry.size.width,
+              height: (track.bbox.y2 - track.bbox.y1) * geometry.size.height
+            )
+
+            // Confirmed = solid, tentative/lost = dashed
+            let strokeStyle: StrokeStyle = track.state == .confirmed
+              ? StrokeStyle(lineWidth: 2.5)
+              : StrokeStyle(lineWidth: 1.5, dash: [6, 3])
+
+            Rectangle()
+              .stroke(color, style: strokeStyle)
+              .frame(width: rect.width, height: rect.height)
+              .position(x: rect.midX, y: rect.midY)
+
+            // Track label: #ID classLabel
+            Text(track.displayLabel)
+              .font(.system(size: 9, weight: .bold, design: .monospaced))
+              .foregroundColor(.white)
+              .padding(.horizontal, 4)
+              .padding(.vertical, 2)
+              .background(color.opacity(0.9))
+              .cornerRadius(2)
+              .position(
+                x: rect.minX + 40,
+                y: max(10, rect.minY - 8)
+              )
           }
 
           // Scene classification label (top-right corner)

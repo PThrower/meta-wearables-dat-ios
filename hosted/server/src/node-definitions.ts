@@ -25,7 +25,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -95,7 +95,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -527,6 +527,36 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { thumbnailSize: 64, maxCount: 4, quality: 0.6 },
     defaultLabel: "Thumbnails",
+    runtime: ["mobile"],
+  },
+  // --- Object Tracking nodes (on-device OC-SORT multi-object tracker) ---
+  //
+  // Tracking nodes use OC-SORT to maintain persistent object IDs through
+  // occlusion. Uses Apple Vision for detection front-end (VNDetectHumanRectanglesRequest).
+  // activationMode: "tracking" sends config to iOS publisher.
+  //
+  {
+    type: "tracking-ocsort",
+    label: "OC-SORT Tracker",
+    subtitle: "iou: ${iouThreshold} | maxAge: ${maxAge} | minHits: ${minHits}",
+    color: { fill: "#0d2d1a", header: "#10b981", stroke: "#10b981" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "tracking",
+    binding: "tracking-ocsort",
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "targetClasses", label: "Target Classes (comma-separated, empty=all)", placeholder: "person,vehicle" },
+      { kind: "range", key: "confidence", label: "Detection Confidence", min: 0.1, max: 1.0, step: 0.05 },
+      { kind: "range", key: "iouThreshold", label: "IoU Threshold", min: 0.1, max: 0.9, step: 0.05 },
+      { kind: "number", key: "maxTracks", label: "Max Concurrent Tracks (0=unlimited)", min: 0, max: 100, step: 1 },
+      { kind: "number", key: "maxAge", label: "Max Age (frames without detection)", min: 1, max: 120, step: 1 },
+      { kind: "number", key: "minHits", label: "Min Hits (frames to confirm)", min: 1, max: 30, step: 1 },
+      { kind: "range", key: "targetFPS", label: "Target FPS", min: 1, max: 30, step: 1 },
+      { kind: "range", key: "smoothingAlpha", label: "Confidence Smoothing", min: 0.1, max: 1.0, step: 0.05 },
+    ],
+    defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3 },
+    defaultLabel: "OC-SORT Tracker",
     runtime: ["mobile"],
   },
   // --- Frame Enhancement nodes (on-device CIFilter transforms) ---
