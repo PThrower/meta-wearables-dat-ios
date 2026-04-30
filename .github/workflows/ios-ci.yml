@@ -216,8 +216,7 @@ jobs:
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="${{ env.TEAM_ID }}" \
-            PROVISIONING_PROFILE_SPECIFIER="${{ env.PP_UUID }}" \
-            2>&1 | tee build/archive.log | xcpretty --color
+            PROVISIONING_PROFILE_SPECIFIER="${{ env.PP_UUID }}"
 
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
 
