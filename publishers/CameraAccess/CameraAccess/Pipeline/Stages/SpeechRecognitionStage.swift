@@ -2,12 +2,18 @@
  * SpeechRecognitionStage.swift
  *
  * On-device speech-to-text using Apple SFSpeechRecognizer framework.
- * Runs as an independent actor (NOT a FramePipelineStage) with its own
- * AVAudioEngine input tap, feeding SFSpeechAudioBufferRecognitionRequest.
+ * Runs as an independent actor (NOT a FramePipelineStage) that subscribes
+ * to AudioEventBus for PCM audio data, converting buffers to AVAudioPCMBuffer
+ * for SFSpeechAudioBufferRecognitionRequest.
  *
  * Supports on-device recognition (iOS 17+) for low-latency transcription
  * without network dependency. Falls back to server-side recognition if
  * on-device model is unavailable.
+ *
+ * IMPORTANT: Does NOT create its own AVAudioEngine — shares the audio
+ * capture from AudioStage via AudioEventBus. This avoids the iOS limitation
+ * where only one tap can be installed on bus 0 at a time (which caused
+ * conflicts with AudioClassificationStage).
  *
  * Results are relayed as `stt_result` JSON messages through RelayStage.
  * NSSpeechRecognitionUsageDescription must be in Info.plist.
@@ -18,8 +24,10 @@ import Speech
 import Foundation
 
 actor SpeechRecognitionStage {
-    // Audio engine for mic input
-    private var audioEngine: AVAudioEngine?
+    // AudioEventBus subscription
+    private var eventBus: AudioEventBus?
+    private var subscriptionId: UUID?
+    private var feedTask: Task<Void, Never>?
 
     // Speech recognition
     private var recognitionTask: SFSpeechRecognitionTask?
@@ -45,10 +53,18 @@ actor SpeechRecognitionStage {
         self.partialResults = partialResults
     }
 
+    func setEventBus(_ bus: AudioEventBus) {
+        self.eventBus = bus
+    }
+
     func start() async {
         guard !isEnabled else { return }
 
         do {
+            guard let eventBus else {
+                throw SpeechRecognitionError.eventBusNotConfigured
+            }
+
             // Request speech recognition authorization if not yet determined
             var authStatus = SFSpeechRecognizer.authorizationStatus()
             if authStatus == .notDetermined {
@@ -80,12 +96,8 @@ actor SpeechRecognitionStage {
 
             self.speechRecognizer = recognizer
 
-            // Set up audio session (category already .playAndRecord from app)
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setActive(true)
-
-            // Start recognition
-            try await startRecognition()
+            // Start recognition with AudioEventBus feed
+            try await startRecognition(eventBus: eventBus)
 
             isEnabled = true
             NSLog("[SpeechRecognition] Started: language=\(language) onDevice=\(onDeviceOnly) partial=\(partialResults)")
@@ -99,21 +111,25 @@ actor SpeechRecognitionStage {
         guard isEnabled else { return }
         isEnabled = false
 
+        feedTask?.cancel()
+        feedTask = nil
+
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        audioEngine?.stop()
-        audioEngine = nil
+        if let eventBus, let subId = subscriptionId {
+            await eventBus.unsubscribe(subId)
+            subscriptionId = nil
+        }
 
         NSLog("[SpeechRecognition] Stopped")
     }
 
     // MARK: - Private
 
-    private func startRecognition() async throws {
+    private func startRecognition(eventBus: AudioEventBus) async throws {
         guard let speechRecognizer, speechRecognizer.isAvailable else {
             throw SpeechRecognitionError.recognitionUnavailable(language: language)
         }
@@ -129,22 +145,17 @@ actor SpeechRecognitionStage {
 
         self.recognitionRequest = request
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
+        // Subscribe to AudioEventBus and feed PCM buffers to recognition request
+        let (subId, stream) = await eventBus.subscribe()
+        self.subscriptionId = subId
 
-        // Install tap to feed audio buffers to recognition request
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            Task { [weak self] in
-                await self?.recognitionRequest?.append(buffer)
+        self.feedTask = Task { [weak self] in
+            for await packet in stream {
+                guard let self else { return }
+                let enabled = await self.isEnabled
+                guard enabled else { return }
+                await self.feedBuffer(packet: packet)
             }
-        }
-
-        do {
-            try engine.start()
-            self.audioEngine = engine
-        } catch {
-            throw SpeechRecognitionError.audioEngineStartFailed(underlying: error)
         }
 
         // Begin recognition task
@@ -154,6 +165,27 @@ actor SpeechRecognitionStage {
             }
         }
         self.recognitionTask = task
+    }
+
+    /// Convert AudioPacket PCM data to AVAudioPCMBuffer and append to recognition request.
+    private func feedBuffer(packet: AudioPacket) {
+        guard let request = recognitionRequest else { return }
+
+        let frameCount = UInt32(packet.pcmData.count) / 2  // 16-bit = 2 bytes per frame
+        guard frameCount > 0 else { return }
+
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(packet.sampleRate), channels: 1, interleaved: true)!
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+
+        // Copy PCM data into buffer
+        packet.pcmData.withUnsafeBytes { rawBufferPointer in
+            if let baseAddress = rawBufferPointer.baseAddress {
+                memcpy(buffer.int16ChannelData![0], baseAddress, packet.pcmData.count)
+            }
+        }
+        buffer.frameLength = frameCount
+
+        request.append(buffer)
     }
 
     private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
@@ -228,15 +260,22 @@ actor SpeechRecognitionStage {
         recognitionRequest?.endAudio()
         recognitionRequest = nil
 
+        // Cancel feed task (will resubscribe in startRecognition)
+        feedTask?.cancel()
+        feedTask = nil
+
         // Small delay before restarting to avoid rapid cycling
-        Task {
+        Task { [weak self] in
             try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
-            guard self.isEnabled else { return }
+            guard let self else { return }
+            let enabled = await self.isEnabled
+            guard enabled else { return }
+            guard let eventBus = await self.eventBus else { return }
             do {
-                try await self.startRecognition()
+                try await self.startRecognition(eventBus: eventBus)
             } catch {
                 NSLog("[SpeechRecognition] Restart failed: \(error.localizedDescription)")
-                sendErrorResult(error.localizedDescription)
+                await self.sendErrorResult(error.localizedDescription)
             }
         }
     }
@@ -263,7 +302,7 @@ enum SpeechRecognitionError: LocalizedError {
     case authorizationDenied(status: Int)
     case recognitionUnavailable(language: String)
     case onDeviceUnavailable(language: String)
-    case audioEngineStartFailed(underlying: Error)
+    case eventBusNotConfigured
     case requestCreationFailed
     case recognitionFailed(underlying: Error)
 
@@ -275,8 +314,8 @@ enum SpeechRecognitionError: LocalizedError {
             return "No speech recognizer available for language: \(lang)"
         case .onDeviceUnavailable(let lang):
             return "On-device recognition unavailable for language: \(lang)"
-        case .audioEngineStartFailed(let error):
-            return "Audio engine start failed: \(error.localizedDescription)"
+        case .eventBusNotConfigured:
+            return "AudioEventBus not configured — call setEventBus() before start()"
         case .requestCreationFailed:
             return "Failed to create speech recognition request"
         case .recognitionFailed(let error):

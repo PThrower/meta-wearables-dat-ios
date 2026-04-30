@@ -963,6 +963,7 @@ class StreamSessionViewModel: ObservableObject {
             }
           }
         }
+        await sttStage.setEventBus(audioEventBus)
         await sttStage.start()
         speechRecognitionStage = sttStage
         NSLog("[StreamSession] SpeechRecognitionStage started")
