@@ -239,19 +239,31 @@ export function buildSVGFromData(
     const thumbSVG = (n.type === "vision-thumbnails" && preview?.thumbnails?.length)
       ? (() => {
           const thumbs = preview.thumbnails;
-          const tSize = 28 * scale;
-          const tPad = 4 * scale;
-          const maxCols = Math.min(thumbs.length, Math.floor((w - 8 * scale) / (tSize + tPad)), 4);
-          if (maxCols <= 0) return "";
+          const tPad = 3 * scale;
+          const tSize = Math.floor((w - tPad * 4) / 3);  // 3 cols, fills node width
+          const maxCols = 3;
           let out = "";
-          thumbs.slice(0, 8).forEach((t: { dataUrl: string; label: string; confidence: number }, i: number) => {
+          // Background strip behind thumbnails
+          const rows = Math.ceil(Math.min(thumbs.length, 6) / maxCols);
+          const stripH = rows * (tSize + tPad) + tPad;
+          const stripY = nodeH + 2 * scale;
+          out += `<rect x="${2 * scale}" y="${stripY}" width="${w - 4 * scale}" height="${stripH}" rx="${4 * scale}" fill="#0a0a0a" stroke="#333" stroke-width="1" />`;
+          thumbs.slice(0, 6).forEach((t: { dataUrl: string; label: string; confidence: number }, i: number) => {
             const col = i % maxCols;
             const row = Math.floor(i / maxCols);
-            const totalRowW = Math.min(thumbs.length - row * maxCols, maxCols) * (tSize + tPad) - tPad;
-            const sx = (w - totalRowW) / 2;
-            const tx = sx + col * (tSize + tPad);
-            const ty = nodeH + 4 * scale + row * (tSize + tPad);
-            out += `<image x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" href="${t.dataUrl}" preserveAspectRatio="xMidYMid slice" />`;
+            const tx = tPad + col * (tSize + tPad);
+            const ty = stripY + tPad + row * (tSize + tPad);
+            out += `<image x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" href="${t.dataUrl}" preserveAspectRatio="xMidYMid slice" rx="${3 * scale}" />`;
+            // Confidence badge bottom-right
+            const pct = Math.round(t.confidence * 100);
+            out += `<rect x="${tx + tSize - 20 * scale}" y="${ty + tSize - 11 * scale}" width="${20 * scale}" height="${11 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" />`;
+            out += `<text x="${tx + tSize - 3 * scale}" y="${ty + tSize - 2 * scale}" text-anchor="end" fill="#50fa7b" font-size="${7 * scale}" font-weight="600">${pct}%</text>`;
+            // Label badge top-left
+            if (t.label) {
+              const lbl = t.label.length > 8 ? t.label.slice(0, 7) + "…" : t.label;
+              out += `<rect x="${tx + 1}" y="${ty + 1}" width="${lbl.length * 5.5 * scale + 6 * scale}" height="${10 * scale}" rx="${2 * scale}" fill="rgba(0,0,0,0.7)" />`;
+              out += `<text x="${tx + 3 * scale}" y="${ty + 8 * scale}" fill="#e2e8f0" font-size="${6 * scale}">${esc(lbl)}</text>`;
+            }
           });
           return out;
         })()
