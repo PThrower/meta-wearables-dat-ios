@@ -177,7 +177,7 @@ function buildPaletteHTML(): string {
       const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
       return `
                   <button class="${cls}" data-type="${d.type}" ${avail ? "" : "disabled"}>
-                    <span class="wf-palette-dot" style="background:${d.color.header}"></span>
+                    <span class="wf-palette-dot" style="background:${cat.accent}"></span>
                     <span class="wf-palette-label">${esc(d.label)}</span>
                     <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>
                   </button>`;

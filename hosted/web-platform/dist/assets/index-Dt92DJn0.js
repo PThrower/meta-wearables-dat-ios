@@ -1,4 +1,4 @@
-import{s as Y,p as c,q as se,e as v,n as ae,r as j,t as T,u as z,v as ne,x as q,y as ie,z as oe,A as re,B as le,C as x,D as y,E as G,F as ce,G as de,H as P,I as fe,J as ue,K as pe,L as O,M as we,N as C,O as ve,P as R,Q as X,R as F,S as M,T as be,U as ge,V as ye,g as me,a as Se,W as he,X as A,Y as ke,Z as $e,_ as V,$ as H,a0 as Le,a1 as Ee,a2 as Ie,a3 as J,a4 as B,a5 as _e,a6 as qe,a7 as xe,a8 as Ae,a9 as Te,aa as Pe,ab as Me,ac as Ne,ad as De}from"./main-BpcJlS5E.js";import"./modulepreload-polyfill-B5Qt9EMX.js";async function We(){var o;const e=c();e&&(e.innerHTML=`
+import{s as Y,p as c,q as se,e as v,n as ae,r as j,t as T,u as z,v as ne,x as q,y as ie,z as oe,A as re,B as le,C as x,D as y,E as G,F as ce,G as de,H as P,I as fe,J as ue,K as pe,L as O,M as we,N as C,O as ve,P as R,Q as X,R as F,S as M,T as be,U as ge,V as ye,g as me,a as Se,W as he,X as A,Y as ke,Z as $e,_ as V,$ as H,a0 as Le,a1 as Ee,a2 as Ie,a3 as J,a4 as B,a5 as _e,a6 as qe,a7 as xe,a8 as Ae,a9 as Te,aa as Pe,ab as Me,ac as Ne,ad as De}from"./main-BL76-kYy.js";import"./modulepreload-polyfill-B5Qt9EMX.js";async function We(){var o;const e=c();e&&(e.innerHTML=`
     <div class="page workflow-page">
       <div class="page-header">
         <div class="page-header-row">
@@ -76,7 +76,7 @@ import{s as Y,p as c,q as se,e as v,n as ae,r as j,t as T,u as z,v as ne,x as q,
         <h3 class="wf-palette-title" style="border-left:3px solid ${l.accent};padding-left:6px">${l.label}</h3>
         ${i.map(s=>{const d=(s.runtime??[]).map(f=>f==="mobile"?'<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>':'<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>').join(""),a=Oe(s.type),t=a?"":`<span class="wf-avail-badge" title="${v(Ve(s.type)??"")}">&#x1f512;</span>`;return`
                   <button class="${a?"wf-palette-item":"wf-palette-item wf-palette-item-locked"}" data-type="${s.type}" ${a?"":"disabled"}>
-                    <span class="wf-palette-dot" style="background:${s.color.header}"></span>
+                    <span class="wf-palette-dot" style="background:${l.accent}"></span>
                     <span class="wf-palette-label">${v(s.label)}</span>
                     <span class="wf-palette-runtime">${d}${t}</span>
                   </button>`}).join("")}`}).join("")}function Z(){return`
