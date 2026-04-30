@@ -17,6 +17,7 @@ import {
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import type { NodeDefinition } from "../../core/api-client.js";
 import { isAvailable, getReason } from "./node-availability.js";
+import { getDescription } from "./node-descriptions.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
 import { hideNodeActionPopover } from "./node-actions.js";
@@ -175,8 +176,9 @@ function buildPaletteHTML(): string {
       const avail = isAvailable(d.type);
       const lockBadge = avail ? "" : `<span class="wf-avail-badge" title="${esc(getReason(d.type) ?? "")}">&#x1f512;</span>`;
       const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
+      const tip = esc(getDescription(d.type));
       return `
-                  <button class="${cls}" data-type="${d.type}" ${avail ? "" : "disabled"}>
+                  <button class="${cls}" data-type="${d.type}" ${avail ? "" : "disabled"} title="${tip}">
                     <span class="wf-palette-dot" style="background:${cat.accent}"></span>
                     <span class="wf-palette-label">${esc(d.label)}</span>
                     <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>
