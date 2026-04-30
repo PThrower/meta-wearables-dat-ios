@@ -56,9 +56,21 @@ jobs:
         run: |
           set -o pipefail
 
-          # Pick first available iPhone simulator
-          DESTINATION=$(xcrun simctl list devices available -j | \
-            python3 -c "import sys,json; devs=[d for d in json.load(sys.stdin)['devices'].values() for d in d if 'iPhone' in d['name'] and d['isAvailable']; print(devs[0]['name'] if devs else '')" 2>/dev/null)
+          # Pick first available iPhone simulator (prefer iOS 18)
+          DESTINATION=$(xcrun simctl list devices available -j | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          for runtime, devs in sorted(data['devices'].items(), reverse=True):
+              for d in devs:
+                  if 'iPhone 16 Pro' in d['name'] and d['isAvailable'] and '18' in runtime:
+                      print(d['udid']); sys.exit(0)
+          # Fallback: any iPhone
+          for runtime, devs in sorted(data['devices'].items(), reverse=True):
+              for d in devs:
+                  if 'iPhone' in d['name'] and d['isAvailable']:
+                      print(d['udid']); sys.exit(0)
+          print('')
+          ")
 
           if [ -z "$DESTINATION" ]; then
             echo "ERROR: No iPhone simulator found"
@@ -66,21 +78,17 @@ jobs:
             exit 1
           fi
 
-          echo "Using simulator: $DESTINATION"
+          echo "Using simulator UDID: $DESTINATION"
 
           xcodebuild build test \
             -project "${{ env.PROJECT }}" \
             -scheme "${{ env.SCHEME }}" \
-            -destination "platform=iOS Simulator,name=$DESTINATION" \
+            -destination "id=$DESTINATION" \
             -configuration Debug \
             -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            # GOOGLE_IOS_CLIENT_ID="${{ secrets.GOOGLE_IOS_CLIENT_ID }}" \
-            # GOOGLE_IOS_CLIENT_ID_REVERSED="${{ secrets.GOOGLE_IOS_CLIENT_ID_REVERSED }}" \
-            # META_APP_ID="${{ secrets.META_APP_ID }}" \
-            # CLIENT_TOKEN="${{ secrets.CLIENT_TOKEN }}" \
           | xcpretty --color || true
 
       - name: Upload Test Results
@@ -211,10 +219,6 @@ jobs:
             CODE_SIGN_IDENTITY="Apple Distribution" \
             DEVELOPMENT_TEAM="${{ env.TEAM_ID }}" \
             PROVISIONING_PROFILE_SPECIFIER="${{ env.PP_UUID }}" \
-            # GOOGLE_IOS_CLIENT_ID="${{ secrets.GOOGLE_IOS_CLIENT_ID }}" \
-            # GOOGLE_IOS_CLIENT_ID_REVERSED="${{ secrets.GOOGLE_IOS_CLIENT_ID_REVERSED }}" \
-            # META_APP_ID="${{ secrets.META_APP_ID }}" \
-            # CLIENT_TOKEN="${{ secrets.CLIENT_TOKEN }}" \
           | xcpretty --color
 
           echo "ARCHIVE_PATH=$ARCHIVE_PATH" >> "$GITHUB_ENV"
