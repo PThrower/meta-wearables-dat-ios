@@ -162,7 +162,13 @@ export function render(flows: DetectedFlow[], config: FlowExecutionConfig | null
 
   const effectiveConfig = config ?? buildDefaultFlowConfig(flows);
   const mode: FlowExecutionMode = effectiveConfig?.mode ?? "parallel";
-  const flowOrder: string[] = effectiveConfig?.flowOrder ?? flows.map(f => f.flowId);
+  // Validate flowOrder against detected flows — prune stale IDs, append new flows
+  const validFlowIds = new Set(flows.map(f => f.flowId));
+  const savedOrder = effectiveConfig?.flowOrder ?? [];
+  const flowOrder: string[] = [
+    ...savedOrder.filter(id => validFlowIds.has(id)),
+    ...flows.filter(f => !savedOrder.includes(f.flowId)).map(f => f.flowId),
+  ];
   const flowTriggers = effectiveConfig?.flowTriggers ?? {};
   const isDraggable = mode === "sequential";
 
