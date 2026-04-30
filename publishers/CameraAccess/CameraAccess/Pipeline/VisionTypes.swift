@@ -212,6 +212,12 @@ struct VisionStageConfig: Sendable, Codable {
     // Scene-specific
     let maxLabels: Int
 
+    // Thumbnail extraction config
+    let thumbnailsEnabled: Bool
+    let thumbnailSize: Int       // px, default 64
+    let thumbnailMaxCount: Int   // 0 = unlimited, default 4
+    let thumbnailQuality: CGFloat // JPEG quality 0-1, default 0.6
+
     static let `default` = VisionStageConfig(
         detectionTypes: [.faceDetect],
         confidence: 0.5,
@@ -220,7 +226,11 @@ struct VisionStageConfig: Sendable, Codable {
         smoothingAlpha: 0.3,
         language: "en-US",
         symbologies: ["QR"],
-        maxLabels: 5
+        maxLabels: 5,
+        thumbnailsEnabled: false,
+        thumbnailSize: 64,
+        thumbnailMaxCount: 4,
+        thumbnailQuality: 0.6
     )
 }
 
@@ -228,9 +238,18 @@ struct VisionStageConfig: Sendable, Codable {
 
 extension VisionFrameResult {
     /// Convert to JSON-compatible dictionary for control message relay.
-    var jsonDict: [String: Any] {
+    /// thumbnails: array of (detectionIndex, base64JPEG) pairs to embed in detection entries.
+    func jsonDict(thumbnails: [(Int, String)]? = nil) -> [String: Any] {
+        // Build lookup from detection index to base64 thumbnail
+        var thumbByIndex: [Int: String] = [:]
+        if let thumbnails {
+            for (idx, b64) in thumbnails {
+                thumbByIndex[idx] = b64
+            }
+        }
+
         var detectionsJson: [[String: Any]] = []
-        for detection in detections {
+        for (i, detection) in detections.enumerated() {
             var entry: [String: Any] = [
                 "type": detection.detectionType.rawValue,
                 "label": detection.displayLabel,
@@ -257,6 +276,10 @@ extension VisionFrameResult {
                     "y": $0.y,
                     "confidence": $0.confidence,
                 ] }
+            }
+            // Embed thumbnail base64 if provided for this detection
+            if let thumb = thumbByIndex[i] {
+                entry["thumbnail"] = thumb
             }
             detectionsJson.append(entry)
         }

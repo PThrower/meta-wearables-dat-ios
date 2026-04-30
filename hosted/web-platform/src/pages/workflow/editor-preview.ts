@@ -22,6 +22,7 @@ export interface NodePreviewState {
   lastText?: string;
   lastTextTime?: number;
   numerics: Map<string, { value: number; unit: string; time: number }>;
+  thumbnails?: Array<{ dataUrl: string; label: string; confidence: number }>;
   updated: number;
 }
 
@@ -380,6 +381,41 @@ function handlePreviewMessage(msg: Record<string, any>): void {
       }
     }
     notifyListeners();
+  }
+
+  // Vision detection results with thumbnails — display on vision-thumbnails nodes
+  if (msg.type === "vision_result" && msg.detections) {
+    const detections = msg.detections as Array<{
+      type: string;
+      label: string;
+      confidence: number;
+      bbox?: { x1: number; y1: number; x2: number; y2: number };
+      thumbnail?: string;  // base64 JPEG
+    }>;
+
+    // Extract thumbnails from detections that have them
+    const thumbs: Array<{ dataUrl: string; label: string; confidence: number }> = [];
+    for (const det of detections) {
+      if (det.thumbnail) {
+        thumbs.push({
+          dataUrl: `data:image/jpeg;base64,${det.thumbnail}`,
+          label: det.label,
+          confidence: det.confidence,
+        });
+      }
+    }
+
+    if (thumbs.length > 0) {
+      for (const [, preview] of nodePreviews) {
+        if (preview.nodeType === "vision-thumbnails") {
+          preview.thumbnails = thumbs;
+          preview.lastText = `${thumbs.length} detection${thumbs.length !== 1 ? "s" : ""}`;
+          preview.lastTextTime = now;
+          preview.updated = now;
+        }
+      }
+      notifyListeners();
+    }
   }
 }
 

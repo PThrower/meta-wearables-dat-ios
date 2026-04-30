@@ -13,9 +13,11 @@
  *   2. JSON control message: relayed to server for AI context / event triggers
  */
 
+import CoreImage
 import CoreMedia
 import CoreVideo
 import Foundation
+import ImageIO
 import Vision
 
 actor VisionStage: @preconcurrency FramePipelineStage {
@@ -27,6 +29,9 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
     // Confidence smoothing (EMA per tracked detection)
     private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
+
+    // CIContext for thumbnail extraction (reused across frames, thread-confined to this actor)
+    private lazy var ciContext: CIContext = CIContext(options: [.useSoftwareRenderer: false])
 
     // Built VNRequests (rebuilt when config changes)
     private var requests: [VNRequest] = []
@@ -92,8 +97,8 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     private var previewBus: PreviewBus?
     private let previewSource = PreviewSource(stageId: "vision", label: "Vision")
 
-    // Callback for relaying results to server
-    private var onResult: (@Sendable (VisionFrameResult) async -> Void)?
+    // Callback for relaying results to server (includes optional thumbnails)
+    private var onResult: (@Sendable (VisionFrameResult, [(Int, String)]?) async -> Void)?
 
     init(config: VisionStageConfig = .default) {
         self.visionConfig = config
@@ -105,7 +110,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.previewBus = bus
     }
 
-    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult) async -> Void) {
+    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult, [(Int, String)]?) async -> Void) {
         self.onResult = handler
     }
 
@@ -229,14 +234,33 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             inferenceTimeMs: inferenceMs
         )
 
-        // Publish to PreviewBus for overlay rendering
-        if let previewBus {
-            Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict)) }
+        // Extract thumbnails if enabled and there are detections with bounding boxes
+        var thumbnails: [(Int, String)]? = nil
+        if visionConfig.thumbnailsEnabled {
+            let maxSize = visionConfig.thumbnailMaxCount > 0
+                ? visionConfig.thumbnailMaxCount
+                : detections.count
+            var extracted: [(Int, String)] = []
+            for (i, detection) in detections.enumerated() {
+                guard extracted.count < maxSize else { break }
+                if let bbox = detection.boundingBox,
+                   let thumb = extractThumbnail(from: pixelBuffer, bbox: bbox) {
+                    extracted.append((i, thumb))
+                }
+            }
+            if !extracted.isEmpty {
+                thumbnails = extracted
+            }
         }
 
-        // Relay to server via callback
+        // Publish to PreviewBus for overlay rendering
+        if let previewBus {
+            Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict(thumbnails: nil))) }
+        }
+
+        // Relay to server via callback (includes thumbnails for relay)
         if let onResult {
-            Task { await onResult(result) }
+            Task { await onResult(result, thumbnails) }
         }
     }
 
@@ -371,6 +395,64 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     }
 
     // MARK: - Helpers
+
+    /// Extract a thumbnail from the pixel buffer at the given normalized bounding box.
+    /// Returns a base64-encoded JPEG string, or nil if extraction fails.
+    private func extractThumbnail(from pixelBuffer: CVPixelBuffer, bbox: NormalizedBoundingBox) -> String? {
+        let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
+        let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
+        guard bufWidth > 0, bufHeight > 0 else { return nil }
+
+        // Convert normalized 0-1 coordinates to pixel coordinates, clamped to buffer bounds
+        let pxX = max(0, Int(bbox.x1 * Double(bufWidth)))
+        let pxY = max(0, Int(bbox.y1 * Double(bufHeight)))
+        let pxX2 = min(bufWidth, Int(bbox.x2 * Double(bufWidth)))
+        let pxY2 = min(bufHeight, Int(bbox.y2 * Double(bufHeight)))
+        let pxW = pxX2 - pxX
+        let pxH = pxY2 - pxY
+        guard pxW > 0, pxH > 0 else { return nil }
+
+        let cropRect = CGRect(x: pxX, y: pxY, width: pxW, height: pxH)
+        let targetSize = visionConfig.thumbnailSize
+
+        // Create CIImage from pixel buffer and crop
+        // CIImage from CVPixelBuffer uses pixel coordinates with (0,0) at top-left
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).cropped(to: cropRect)
+
+        // Skip if cropped image is empty
+        guard cropRect.width > 0, cropRect.height > 0 else { return nil }
+
+        // Allocate a fresh output CVPixelBuffer (BGRA, per pipeline convention)
+        var outBuffer: CVPixelBuffer?
+        let attrs: [String: Any] = [
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+        ]
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            targetSize,
+            targetSize,
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &outBuffer
+        )
+        guard status == kCVReturnSuccess, let outBuffer else { return nil }
+
+        // Scale the cropped region into the thumbnail buffer via GPU render
+        let scaleX = CGFloat(targetSize) / cropRect.width
+        let scaleY = CGFloat(targetSize) / cropRect.height
+        let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        ciContext.render(scaledImage, to: outBuffer, bounds: CGRect(x: 0, y: 0, width: targetSize, height: targetSize), colorSpace: colorSpace)
+
+        // Convert to JPEG via CIContext
+        let jpegCIImage = CIImage(cvPixelBuffer: outBuffer)
+        guard let jpegData = ciContext.jpegRepresentation(of: jpegCIImage, colorSpace: colorSpace, options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: visionConfig.thumbnailQuality]) else {
+            return nil
+        }
+
+        return jpegData.base64EncodedString()
+    }
 
     private func stringForSymbology(_ sym: VNBarcodeSymbology) -> String {
         switch sym {

@@ -401,6 +401,12 @@ function dispatchWorkflowConfig(
   }
 
   // Vision config
+  // Check if a vision-thumbnails node exists in the workflow
+  const thumbnailNodeIdx = nodes.findIndex(n => n.type === "vision-thumbnails");
+  const thumbnailCfg = thumbnailNodeIdx >= 0
+    ? (nodes[thumbnailNodeIdx].config as any)
+    : null;
+
   for (const i of visionIdx) {
     const cfg = nodes[i].config as any;
     ws.send(JSON.stringify({
@@ -414,6 +420,10 @@ function dispatchWorkflowConfig(
       language: cfg?.language ?? "en-US",
       symbologies: Object.entries(cfg?.symbologies ?? { qr: true }).filter(([, v]) => v).map(([k]) => k),
       maxLabels: cfg?.maxLabels ?? 5,
+      thumbnailsEnabled: !!thumbnailCfg,
+      thumbnailSize: thumbnailCfg?.thumbnailSize ?? 64,
+      thumbnailMaxCount: thumbnailCfg?.maxCount ?? 4,
+      thumbnailQuality: thumbnailCfg?.quality ?? 0.6,
     }));
   }
 
@@ -1619,6 +1629,12 @@ const server = Bun.serve<WsData>({
         }
 
         // 1. Fire-and-forget: send all vision configs to iOS immediately
+        // Check if a vision-thumbnails node exists in the workflow
+        const thumbnailIdx = processableNodes.findIndex(n => n.type === "vision-thumbnails");
+        const thumbnailConfig = thumbnailIdx >= 0
+          ? (processableNodes[thumbnailIdx].config as any)
+          : null;
+
         for (const i of visionIdx) {
           const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
           if (!rawNode) continue;
@@ -1637,6 +1653,10 @@ const server = Bun.serve<WsData>({
               (rawNode.config as any)?.symbologies ?? { qr: true }
             ).filter(([, v]) => v).map(([k]) => k),
             maxLabels: (rawNode.config as any)?.maxLabels ?? 5,
+            thumbnailsEnabled: !!thumbnailConfig,
+            thumbnailSize: thumbnailConfig?.thumbnailSize ?? 64,
+            thumbnailMaxCount: thumbnailConfig?.maxCount ?? 4,
+            thumbnailQuality: thumbnailConfig?.quality ?? 0.6,
           };
           if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
             session.publisher.ws.send(JSON.stringify(visionConfig));

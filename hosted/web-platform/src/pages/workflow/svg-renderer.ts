@@ -235,6 +235,28 @@ export function buildSVGFromData(
       ? `<text class="wf-node-output" x="${12 * scale}" y="${nodeH - 8 * scale}" fill="#50fa7b" font-size="${9 * scale}" font-family="'SF Mono',monospace">${esc(preview.lastText.slice(0, 28))}</text>`
       : "";
 
+    // Thumbnail strip for vision-thumbnails nodes
+    const thumbSVG = (n.type === "vision-thumbnails" && preview?.thumbnails?.length)
+      ? (() => {
+          const thumbs = preview.thumbnails;
+          const tSize = 28 * scale;
+          const tPad = 4 * scale;
+          const maxCols = Math.min(thumbs.length, Math.floor((w - 8 * scale) / (tSize + tPad)), 4);
+          if (maxCols <= 0) return "";
+          let out = "";
+          thumbs.slice(0, 8).forEach((t: { dataUrl: string; label: string; confidence: number }, i: number) => {
+            const col = i % maxCols;
+            const row = Math.floor(i / maxCols);
+            const totalRowW = Math.min(thumbs.length - row * maxCols, maxCols) * (tSize + tPad) - tPad;
+            const sx = (w - totalRowW) / 2;
+            const tx = sx + col * (tSize + tPad);
+            const ty = nodeH + 4 * scale + row * (tSize + tPad);
+            out += `<image x="${tx}" y="${ty}" width="${tSize}" height="${tSize}" href="${t.dataUrl}" preserveAspectRatio="xMidYMid slice" />`;
+          });
+          return out;
+        })()
+      : "";
+
     // Menu trigger circle (testing mode, top-right)
     const menuBtn = testingMode
       ? `<g class="wf-node-menu-btn" style="cursor:pointer">
@@ -268,6 +290,7 @@ export function buildSVGFromData(
         <text x="${12 * scale}" y="${44 * scale}" fill="#ccc" font-size="${11 * scale}">${esc(n.label || n.type)}</text>
         <text x="${12 * scale}" y="${60 * scale}" fill="#888" font-size="${9 * scale}">${esc(configSummary)}</text>
         ${liveOutput}
+        ${thumbSVG}
         ${menuBtn}
         ${runtimeBadgeSVG(def, scale)}
         ${portIn}

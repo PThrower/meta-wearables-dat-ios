@@ -796,6 +796,12 @@ class StreamSessionViewModel: ObservableObject {
 
     let symbologies: [String] = (config["symbologies"] as? [String]) ?? ["qr"]
 
+    // Thumbnail extraction config
+    let thumbnailsEnabled = config["thumbnailsEnabled"] as? Bool ?? false
+    let thumbnailSize = config["thumbnailSize"] as? Int ?? 64
+    let thumbnailMaxCount = config["thumbnailMaxCount"] as? Int ?? 4
+    let thumbnailQuality = config["thumbnailQuality"] as? Double ?? 0.6
+
     let visionConfig = VisionStageConfig(
       detectionTypes: [detType],
       confidence: confidence,
@@ -804,13 +810,17 @@ class StreamSessionViewModel: ObservableObject {
       smoothingAlpha: smoothingAlpha,
       language: language,
       symbologies: symbologies,
-      maxLabels: maxLabels
+      maxLabels: maxLabels,
+      thumbnailsEnabled: thumbnailsEnabled,
+      thumbnailSize: thumbnailSize,
+      thumbnailMaxCount: thumbnailMaxCount,
+      thumbnailQuality: CGFloat(thumbnailQuality)
     )
 
     let stage = VisionStage(config: visionConfig)
 
     // Wire result callback to update overlay AND relay to server
-    await stage.setOnResult { [weak self] result in
+    await stage.setOnResult { [weak self] result, thumbnails in
       await MainActor.run {
         self?.visionDetections = result.detections
         // Extract scene label if present
@@ -822,7 +832,7 @@ class StreamSessionViewModel: ObservableObject {
       }
       // Relay detection JSON to server for downstream AI context injection
       if !result.isEmpty {
-        await self?.relayStage.sendJson(result.jsonDict)
+        await self?.relayStage.sendJson(result.jsonDict(thumbnails: thumbnails))
       }
     }
 
