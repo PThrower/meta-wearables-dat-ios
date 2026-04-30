@@ -74,7 +74,7 @@ export function showNodeActionPopover(nodeId: string): void {
   // Thumbnails (vision-thumbnails nodes)
   if (preview?.thumbnails?.length) {
     bodyHTML += `<div class="wf-popover-thumbs">`;
-    for (const t of preview.thumbnails.slice(0, 6)) {
+    for (const t of preview.thumbnails.slice(0, 10)) {
       bodyHTML += `<div class="wf-popover-thumb">
         <img src="${t.dataUrl}" width="40" height="40" style="border-radius:4px;object-fit:cover" />
         <span style="font-size:8px;color:#50fa7b">${Math.round(t.confidence * 100)}%</span>

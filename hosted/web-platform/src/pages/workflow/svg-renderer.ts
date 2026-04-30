@@ -236,19 +236,22 @@ export function buildSVGFromData(
       : "";
 
     // Thumbnail strip for vision-thumbnails nodes
+    // TODO: Gallery view — expand into scrollable panel with detection history,
+    // filter by type/confidence, click-to-enlarge modal, and timeline scrubber.
     const thumbSVG = (n.type === "vision-thumbnails" && preview?.thumbnails?.length)
       ? (() => {
           const thumbs = preview.thumbnails;
           const tPad = 3 * scale;
           const tSize = Math.floor((w - tPad * 4) / 3);  // 3 cols, fills node width
           const maxCols = 3;
+          const maxThumbs = 10; // show last 10 detections
           let out = "";
           // Background strip behind thumbnails
-          const rows = Math.ceil(Math.min(thumbs.length, 6) / maxCols);
+          const rows = Math.ceil(Math.min(thumbs.length, maxThumbs) / maxCols);
           const stripH = rows * (tSize + tPad) + tPad;
           const stripY = nodeH + 2 * scale;
           out += `<rect x="${2 * scale}" y="${stripY}" width="${w - 4 * scale}" height="${stripH}" rx="${4 * scale}" fill="#0a0a0a" stroke="#333" stroke-width="1" />`;
-          thumbs.slice(0, 6).forEach((t: { dataUrl: string; label: string; confidence: number }, i: number) => {
+          thumbs.slice(0, maxThumbs).forEach((t: { dataUrl: string; label: string; confidence: number }, i: number) => {
             const col = i % maxCols;
             const row = Math.floor(i / maxCols);
             const tx = tPad + col * (tSize + tPad);

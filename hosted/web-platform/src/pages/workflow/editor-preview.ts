@@ -406,10 +406,15 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     }
 
     if (thumbs.length > 0) {
+      // TODO: Gallery view — persist detections to per-session store with timestamp,
+      // deduplicate by label/bbox proximity, support pagination/filtering, and render
+      // a scrollable gallery panel instead of a fixed-count thumbnail strip.
+      const MAX_THUMBNAILS = 10;
       for (const [, preview] of nodePreviews) {
         if (preview.nodeType === "vision-thumbnails") {
-          preview.thumbnails = thumbs;
-          preview.lastText = `${thumbs.length} detection${thumbs.length !== 1 ? "s" : ""}`;
+          const existing = preview.thumbnails ?? [];
+          preview.thumbnails = [...thumbs, ...existing].slice(0, MAX_THUMBNAILS);
+          preview.lastText = `${thumbs.length} detection${thumbs.length !== 1 ? "s" : ""} (${preview.thumbnails.length} total)`;
           preview.lastTextTime = now;
           preview.updated = now;
         }
