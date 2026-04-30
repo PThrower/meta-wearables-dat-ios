@@ -1,4 +1,4 @@
-import{a as o,e as l,d as v,w as p}from"./main-D1jUnoX4.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const y={init(e){e.innerHTML=`
+import{a as o,e as l,d as v,w as p}from"./main-B6Ls5aul.js";import"./modulepreload-polyfill-B5Qt9EMX.js";const y={init(e){e.innerHTML=`
       <div class="page live-gallery-page">
         <div class="page-header">
           <h1 class="page-title">Live Streams</h1>

@@ -15,6 +15,7 @@ import {
   nanoid, getWorkflowId, getViewBox,
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
+import type { NodeDefinition } from "../../core/api-client.js";
 import { isAvailable, getReason } from "./node-availability.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
@@ -136,21 +137,37 @@ export async function renderEditor(isNew: boolean): Promise<void> {
   renderConfigPanel();
 }
 
-/** Build palette sidebar HTML from node definitions grouped by role. */
+/** Palette categories — grouped by capability, not DAG role. */
+interface PaletteCategory {
+  label: string;
+  accent: string;
+  match: (d: NodeDefinition) => boolean;
+}
+
+const PALETTE_CATEGORIES: PaletteCategory[] = [
+  { label: "Inputs",   accent: "#14b8a6", match: d => d.role === "source" },
+  { label: "AI",       accent: "#22c55e", match: d => d.activationMode === "ai" || d.activationMode === "jepa" },
+  { label: "Vision",   accent: "#8b5cf6", match: d => d.activationMode === "vision" },
+  { label: "Enhance",  accent: "#84cc16", match: d => d.activationMode === "enhance" },
+  { label: "Audio",    accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
+  { label: "Sensors",  accent: "#06b6d4", match: d => d.activationMode === "sensor" },
+  { label: "Triggers", accent: "#eab308", match: d => d.role === "trigger" },
+  { label: "Outputs",  accent: "#f97316", match: d => d.role === "sink" || d.role === "transform" },
+  { label: "Reference",accent: "#94a3b8", match: d => d.role === "reference" },
+];
+
+/** Build palette sidebar HTML grouped by capability. */
 function buildPaletteHTML(): string {
-  const roleOrder: Array<{ role: string; label: string }> = [
-    { role: "source", label: "Source" },
-    { role: "reference", label: "Reference" },
-    { role: "processor", label: "Processor" },
-    { role: "trigger", label: "Trigger" },
-    { role: "transform", label: "Transform" },
-    { role: "sink", label: "Sink" },
-  ];
-  return roleOrder.map(({ role, label }) => {
-    const nodes = getNodeDefs().filter(d => d.role === role);
+  const all = getNodeDefs();
+  const assigned = new Set<string>();
+
+  return PALETTE_CATEGORIES.map(cat => {
+    const nodes = all.filter(d => !assigned.has(d.type) && cat.match(d));
+    nodes.forEach(d => assigned.add(d.type));
     if (nodes.length === 0) return "";
+
     return `
-        <h3 class="wf-palette-title">${label}</h3>
+        <h3 class="wf-palette-title" style="border-left:3px solid ${cat.accent};padding-left:6px">${cat.label}</h3>
         ${nodes.map(d => {
       const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
         ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
