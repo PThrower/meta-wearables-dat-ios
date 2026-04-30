@@ -24,7 +24,7 @@ import {
   findActiveSession, connectPreview, disconnectPreview,
   startSessionPolling, stopSessionPolling, destroyPreview,
   addPreviewListener, removePreviewListener, getNodePreviews,
-  isPreviewConnected, getConnectedSessionId,
+  isPreviewConnected, sendPreviewJson, getConnectedSessionId,
 } from "./editor-preview.js";
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
@@ -439,9 +439,13 @@ async function refreshTestingPanel(): Promise<void> {
         </div>
         <div class="wf-testing-device-actions">
           <button class="btn wf-test-wake" data-device-id="${d.device_id}" ${canWake ? "" : "disabled"}>Wake</button>
-          <button class="btn wf-test-activate" data-session-id="${session?.sessionId ?? ""}" ${canActivate ? "" : "disabled"}>Activate</button>
+          ${isActivated
+            ? `<button class="btn wf-test-deactivate" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop</button>
+               <button class="btn wf-test-rerun" data-session-id="${session!.sessionId}">Re-run</button>`
+            : `<button class="btn wf-test-activate" data-session-id="${session?.sessionId ?? ""}" ${canActivate ? "" : "disabled"}>Activate</button>`
+          }
           ${canStopStream
-            ? `<button class="btn wf-test-stop-stream" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop</button>`
+            ? `<button class="btn wf-test-stop-stream" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop Stream</button>`
             : `<button class="btn wf-test-start-stream" data-session-id="${session?.sessionId ?? ""}" ${canStartStream ? "" : "disabled"}>Stream</button>`
           }
         </div>
@@ -497,6 +501,43 @@ async function refreshTestingPanel(): Promise<void> {
       if (!sessionId) return;
       const result = await stopStream(sessionId);
       if (!result?.ok) { alert(result?.error ?? "Stop failed"); return; }
+      setTimeout(refreshTestingPanel, 1500);
+    });
+  });
+
+  // Wire per-device Deactivate buttons (stop workflow)
+  body.querySelectorAll(".wf-test-deactivate").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const sessionId = (btn as HTMLElement).dataset.sessionId!;
+      if (!sessionId) return;
+      // Ensure preview WS is connected to the right session
+      const connected = getConnectedSessionId();
+      if (connected !== sessionId) {
+        connectPreview(sessionId);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      sendPreviewJson({ type: "deactivate_app" });
+      setTimeout(refreshTestingPanel, 1500);
+    });
+  });
+
+  // Wire per-device Re-run buttons (deactivate + reactivate)
+  body.querySelectorAll(".wf-test-rerun").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const wf = getWorkflow();
+      const sessionId = (btn as HTMLElement).dataset.sessionId!;
+      if (!wf?.id || !sessionId) return;
+      // Deactivate first via WS
+      const connected = getConnectedSessionId();
+      if (connected !== sessionId) {
+        connectPreview(sessionId);
+        await new Promise(r => setTimeout(r, 500));
+      }
+      sendPreviewJson({ type: "deactivate_app" });
+      await new Promise(r => setTimeout(r, 1000));
+      // Re-activate via REST API
+      const result = await activateWorkflow(wf.id, sessionId, { override: true, reason: "Re-run" });
+      if (!result) { alert("Re-run failed"); return; }
       setTimeout(refreshTestingPanel, 1500);
     });
   });
