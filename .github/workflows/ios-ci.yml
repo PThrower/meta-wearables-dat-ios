@@ -45,17 +45,33 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
           xcodebuild -version
 
+      - name: Install iOS Simulator Runtime
+        run: |
+          xcodebuild -downloadPlatform iOS
+
       - name: List available simulators
-        run: xcrun simctl list devices available | grep -i 'iphone 16'
+        run: xcrun simctl list devices available | grep -i 'iphone'
 
       - name: Build and Test
         run: |
           set -o pipefail
 
+          # Pick first available iPhone simulator
+          DESTINATION=$(xcrun simctl list devices available -j | \
+            python3 -c "import sys,json; devs=[d for d in json.load(sys.stdin)['devices'].values() for d in d if 'iPhone' in d['name'] and d['isAvailable']; print(devs[0]['name'] if devs else '')" 2>/dev/null)
+
+          if [ -z "$DESTINATION" ]; then
+            echo "ERROR: No iPhone simulator found"
+            xcrun simctl list devices available
+            exit 1
+          fi
+
+          echo "Using simulator: $DESTINATION"
+
           xcodebuild build test \
             -project "${{ env.PROJECT }}" \
             -scheme "${{ env.SCHEME }}" \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "platform=iOS Simulator,name=$DESTINATION" \
             -configuration Debug \
             -derivedDataPath build/DerivedData \
             CODE_SIGN_IDENTITY="-" \
