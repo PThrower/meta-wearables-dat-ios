@@ -130,6 +130,9 @@ export async function renderEditor(isNew: boolean): Promise<void> {
   wireFABEvents();
   wirePreview(liveSessionId, workflow.id);
   detectMobile();
+
+  // Initial config panel render (shows flow summary + "Select a node")
+  renderConfigPanel();
 }
 
 /** Build palette sidebar HTML from node definitions grouped by role. */

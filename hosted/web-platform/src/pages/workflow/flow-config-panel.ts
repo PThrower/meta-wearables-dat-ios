@@ -139,10 +139,26 @@ export function flowItemWithTrigger(flow: DetectedFlow, flows: DetectedFlow[], t
 
 /**
  * Render the full flow config panel.
- * Returns "" when single flow (nothing to configure).
+ * Shows flow summary for single-flow, full config for multi-flow.
  */
 export function render(flows: DetectedFlow[], config: FlowExecutionConfig | null | undefined, opts?: { showBack?: boolean }): string {
-  if (flows.length <= 1) return "";
+  if (flows.length === 0) return "";
+
+  // Single-flow: show summary
+  if (flows.length === 1) {
+    const f = flows[0];
+    return `<div style="${S.section}">
+  <div style="${S.header}">
+    <span style="font-size:13px;font-weight:600;color:var(--text-primary);">Flows</span>
+    <span style="font-size:11px;color:var(--text-secondary);">1 found</span>
+  </div>
+  <div style="${S.item(false)}">
+    <span style="${S.dot(f.color)}"></span>
+    <span class="wf-flow-label">${esc(f.label)}</span>
+    <span style="font-size:11px;color:var(--text-tertiary);margin-left:auto">${f.nodeIds.length} nodes</span>
+  </div>
+</div>`;
+  }
 
   const effectiveConfig = config ?? buildDefaultFlowConfig(flows);
   const mode: FlowExecutionMode = effectiveConfig?.mode ?? "parallel";

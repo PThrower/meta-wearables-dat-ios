@@ -138,10 +138,10 @@ export function renderConfigPanel(): void {
     return;
   }
 
-  // State 2: Empty — flow config (if multi) or "Select a node"
-  if (multiFlow) {
-    panel.innerHTML = `${flowHtml}`;
-    FlowPanel.wire(panel, flows, flowCallbacks);
+  // State 2: Empty — flow config + "Select a node"
+  if (flowHtml) {
+    panel.innerHTML = `${flowHtml}<p class="empty-state">Select a node</p>`;
+    if (multiFlow) FlowPanel.wire(panel, flows, flowCallbacks);
   } else {
     panel.innerHTML = `<p class="empty-state">Select a node</p>`;
   }
