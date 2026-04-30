@@ -88,7 +88,7 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
   }
 }
 
-/* ── Geofence Map (intercepted from textarea with key "geofences") ── */
+/* ── Geofence Map (modal with Leaflet) ── */
 
 interface GeofenceItem {
   id: string;
@@ -100,24 +100,21 @@ interface GeofenceItem {
   notifyOnExit: boolean;
 }
 
-const GEOFENCE_COLORS = ["#06b6d4", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#f97316", "#14b8a6"];
-const GEOFENCE_MAP_ID = "wf-geofence-map-container";
+const GEOFENCE_COLORS = ["#00d4aa", "#ff6b6b", "#6495ed", "#ffaa32", "#c084fc", "#f472b6", "#34d399", "#fbbf24"];
+const GEOFENCE_MODAL_ID = "wf-geofence-modal";
 
-/** Render geofence map + card list instead of textarea. */
+/** Render geofence field as a trigger button + hidden modal. */
 function renderGeofenceMapField(field: ConfigFieldSchema & { kind: "geofence-map" }, node: WorkflowNodeDef, prefix: string): string {
   const geofences = parseGeofences(node.config[field.key]);
-  const mapId = `${prefix}-geofence-map`;
-  const cardsHtml = geofences.map((gf, i) => renderGeofenceCard(gf, i, prefix)).join("");
+  const count = geofences.length;
   const hiddenVal = JSON.stringify(geofences);
 
-  return `<div class="${prefix}-field wf-geofence-section" data-geofence-section style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;">
-    <label style="font-weight: 600; margin-bottom: 6px; display: block;">Geofences</label>
-    <div class="wf-geofence-map-wrap">
-      <div id="${mapId}" class="wf-geofence-map"></div>
-      <p class="wf-geofence-hint">Click map to place a geofence</p>
-    </div>
-    <div class="wf-geofence-cards">${cardsHtml}</div>
+  return `<div class="${prefix}-field wf-geofence-section" data-geofence-section>
     <input type="hidden" class="${prefix}-input" data-field="config.geofences" value="${esc(hiddenVal)}" />
+    <div class="wf-gf-trigger-row">
+      <span class="wf-gf-count">${count} geofence${count !== 1 ? "s" : ""}</span>
+      <button class="wf-gf-open-btn" type="button">Open Map</button>
+    </div>
   </div>`;
 }
 
@@ -142,100 +139,98 @@ function normalizeGeofence(gf: any): GeofenceItem {
   };
 }
 
-/** Render a single geofence card. */
-function renderGeofenceCard(gf: GeofenceItem, index: number, prefix: string): string {
+/** Render the full modal HTML (appended to body once). */
+function renderGeofenceModal(): string {
+  return `<div id="${GEOFENCE_MODAL_ID}" class="wf-gf-modal-overlay" style="display:none;">
+    <div class="wf-gf-modal">
+      <aside class="wf-gf-sidebar">
+        <div class="wf-gf-sidebar-header">
+          <h1><span class="wf-gf-dot"></span> Geofence Map</h1>
+          <p>Click the map to place geofence regions. Drag markers to reposition.</p>
+        </div>
+        <div class="wf-gf-sidebar-section">
+          <div class="wf-gf-section-title">Cursor Position</div>
+          <div class="wf-gf-coord-display" id="wf-gf-cursor-coords">
+            <span class="wf-gf-coord-label">Lat</span> &mdash;<br>
+            <span class="wf-gf-coord-label">Lng</span> &mdash;<br>
+            <span class="wf-gf-coord-label">Zoom</span> &mdash;
+          </div>
+        </div>
+        <div class="wf-gf-sidebar-section">
+          <div class="wf-gf-section-title">Geofences (<span id="wf-gf-card-count">0</span>)</div>
+          <div id="wf-gf-cards-list" class="wf-gf-cards-list"></div>
+        </div>
+        <div class="wf-gf-sidebar-section wf-gf-sidebar-footer">
+          <div class="wf-gf-btn-row">
+            <button class="wf-gf-btn wf-gf-btn-accent" id="wf-gf-fit-btn">Fit All</button>
+            <button class="wf-gf-btn" id="wf-gf-clear-btn">Clear All</button>
+          </div>
+          <button class="wf-gf-btn wf-gf-btn-done" id="wf-gf-done-btn">Done</button>
+        </div>
+      </aside>
+      <div class="wf-gf-map-area">
+        <div id="wf-gf-map" class="wf-gf-map"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+/** Render a single geofence card for the modal sidebar. */
+function renderGeofenceCard(gf: GeofenceItem, index: number): string {
   const color = GEOFENCE_COLORS[index % GEOFENCE_COLORS.length];
-  return `<div class="wf-geofence-card" data-gf-id="${gf.id}" style="border-left: 3px solid ${color}">
-    <div class="wf-geofence-card-header">
-      <input type="text" class="wf-gf-label" data-gf-field="label" value="${esc(gf.label)}" placeholder="Label (e.g. Home)" />
-      <button class="wf-gf-delete" title="Remove geofence">&times;</button>
+  return `<div class="wf-gf-card" data-gf-id="${gf.id}" style="border-left: 3px solid ${color}">
+    <div class="wf-gf-card-header">
+      <div class="wf-gf-card-pin" style="background: ${color}20; color: ${color};">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      </div>
+      <input type="text" class="wf-gf-card-label" data-gf-field="label" value="${esc(gf.label)}" placeholder="Label (e.g. Home)" />
+      <button class="wf-gf-card-delete" title="Remove geofence">&times;</button>
     </div>
-    <div class="wf-geofence-card-row">
-      <span class="wf-gf-coord">Lat: <input type="number" class="wf-gf-num" data-gf-field="latitude" value="${gf.latitude}" step="any" /></span>
-      <span class="wf-gf-coord">Lon: <input type="number" class="wf-gf-num" data-gf-field="longitude" value="${gf.longitude}" step="any" /></span>
+    <div class="wf-gf-card-row">
+      <span class="wf-gf-coord-inline">Lat: <input type="number" class="wf-gf-num" data-gf-field="latitude" value="${gf.latitude}" step="any" /></span>
+      <span class="wf-gf-coord-inline">Lon: <input type="number" class="wf-gf-num" data-gf-field="longitude" value="${gf.longitude}" step="any" /></span>
     </div>
-    <div class="wf-geofence-card-row">
+    <div class="wf-gf-card-row">
       <label class="wf-gf-slider-label">Radius: <strong>${gf.radius}m</strong></label>
       <input type="range" class="wf-gf-radius" data-gf-field="radius" min="10" max="5000" step="10" value="${gf.radius}" />
     </div>
-    <div class="wf-geofence-card-row">
+    <div class="wf-gf-card-row">
       <label><input type="checkbox" data-gf-field="notifyOnEntry" ${gf.notifyOnEntry ? "checked" : ""} /> Entry</label>
       <label><input type="checkbox" data-gf-field="notifyOnExit" ${gf.notifyOnExit ? "checked" : ""} /> Exit</label>
     </div>
   </div>`;
 }
 
+/** Ensure the modal DOM exists (append once to body). */
+function ensureModal(): HTMLElement {
+  let modal = document.getElementById(GEOFENCE_MODAL_ID);
+  if (!modal) {
+    document.body.insertAdjacentHTML("beforeend", renderGeofenceModal());
+    modal = document.getElementById(GEOFENCE_MODAL_ID)!;
+  }
+  return modal;
+}
+
 /** Wire geofence map interactions. Called from wireConfigFieldInputs after DOM is ready. */
 export function wireGeofenceMap(container: Element, callbacks: ConfigFieldCallbacks): void {
-  const mapEl = container.querySelector(".wf-geofence-map") as HTMLElement | null;
-  if (!mapEl) return;
+  const section = container.querySelector("[data-geofence-section]") as HTMLElement | null;
+  if (!section) return;
 
   // Prevent double-init
-  if (mapEl.dataset.initialized === "true") return;
-  mapEl.dataset.initialized = "true";
+  if (section.dataset.gfWired === "true") return;
+  section.dataset.gfWired = "true";
 
-  const hiddenInput = container.querySelector('[data-field="config.geofences"]') as HTMLInputElement;
-  if (!hiddenInput) return;
+  const hiddenInput = section.querySelector('[data-field="config.geofences"]') as HTMLInputElement;
 
-  // Initialize Leaflet map
-  const map = L.map(mapEl, { zoomControl: true, attributionControl: false }).setView([37.7749, -122.4194], 12);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-
-  // Dark theme filter on tiles
-  const tileLayer = mapEl.querySelector(".leaflet-tile-pane") as HTMLElement;
-  if (tileLayer) tileLayer.style.filter = "invert(1) hue-rotate(180deg) brightness(0.8) contrast(1.2)";
-
-  // Track circles by geofence id
-  const circles = new Map<string, L.Circle>();
-
-  // Load existing geofences
-  const geofences = parseGeofences(hiddenInput.value);
-  for (const gf of geofences) {
-    addCircleToMap(map, circles, gf, geofences.indexOf(gf));
-  }
-  if (geofences.length > 0) {
-    const bounds = geofences.map(gf => [gf.latitude, gf.longitude] as L.LatLngExpression);
-    map.fitBounds(L.latLngBounds(bounds).pad(0.3));
-  }
-
-  // Invalidate size after DOM paint
-  requestAnimationFrame(() => map.invalidateSize());
-
-  // Map click → add geofence
-  map.on("click", (e: L.LeafletMouseEvent) => {
-    const gf: GeofenceItem = {
-      id: crypto.randomUUID(),
-      latitude: Math.round(e.latlng.lat * 1000000) / 1000000,
-      longitude: Math.round(e.latlng.lng * 1000000) / 1000000,
-      radius: 100,
-      label: "",
-      notifyOnEntry: true,
-      notifyOnExit: true,
-    };
-
-    const currentGfs = parseGeofences(hiddenInput.value);
-    currentGfs.push(gf);
-    hiddenInput.value = JSON.stringify(currentGfs);
-
-    const cardsContainer = container.querySelector(".wf-geofence-cards");
-    if (cardsContainer) {
-      cardsContainer.insertAdjacentHTML("beforeend", renderGeofenceCard(gf, currentGfs.length - 1, "wf-config"));
-      wireGeofenceCardEvents(cardsContainer.lastElementChild!, gf.id, map, circles, hiddenInput, container, callbacks);
-    }
-
-    addCircleToMap(map, circles, gf, currentGfs.length - 1);
-    syncConfig(hiddenInput, container, callbacks);
-  });
-
-  // Wire existing cards
-  container.querySelectorAll(".wf-geofence-card").forEach(card => {
-    const gfId = (card as HTMLElement).dataset.gfId!;
-    wireGeofenceCardEvents(card, gfId, map, circles, hiddenInput, container, callbacks);
-  });
+  // Update the count badge whenever config changes
+  const updateCount = () => {
+    const gfs = parseGeofences(hiddenInput.value);
+    const badge = section.querySelector(".wf-gf-count");
+    if (badge) badge.textContent = `${gfs.length} geofence${gfs.length !== 1 ? "s" : ""}`;
+  };
 
   // Conditional visibility: show/hide based on mode select
   const modeSelect = container.querySelector('[data-field="config.mode"]') as HTMLSelectElement | null;
-  const section = container.querySelector("[data-geofence-section]") as HTMLElement | null;
   if (modeSelect && section) {
     const updateVisibility = () => {
       section.style.display = modeSelect.value === "geofence" ? "" : "none";
@@ -243,78 +238,265 @@ export function wireGeofenceMap(container: Element, callbacks: ConfigFieldCallba
     updateVisibility();
     modeSelect.addEventListener("change", updateVisibility);
   }
+
+  // Open modal button
+  const openBtn = section.querySelector(".wf-gf-open-btn");
+  if (!openBtn) return;
+
+  let leafletMap: L.Map | null = null;
+  const mapItems = new Map<string, { circle: L.Circle; marker: L.Marker }>();
+
+  openBtn.addEventListener("click", () => {
+    const modal = ensureModal();
+    modal.style.display = "flex";
+
+    // Initialize or reset map
+    const mapEl = document.getElementById("wf-gf-map")!;
+    if (!leafletMap) {
+      leafletMap = L.map(mapEl, { zoomControl: true, attributionControl: false }).setView([37.7749, -122.4194], 12);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        maxZoom: 19,
+        subdomains: "abcd",
+      }).addTo(leafletMap);
+
+      // Cursor coordinate tracking
+      const coordDisplay = document.getElementById("wf-gf-cursor-coords")!;
+      leafletMap.on("mousemove", (e: L.LeafletMouseEvent) => {
+        coordDisplay.innerHTML =
+          `<span class="wf-gf-coord-label">Lat</span> ${e.latlng.lat.toFixed(6)}<br>` +
+          `<span class="wf-gf-coord-label">Lng</span> ${e.latlng.lng.toFixed(6)}<br>` +
+          `<span class="wf-gf-coord-label">Zoom</span> ${leafletMap!.getZoom()}`;
+      });
+      leafletMap.on("zoomend", () => {
+        const lines = coordDisplay.innerHTML.split("<br>");
+        if (lines.length >= 3) {
+          lines[2] = `<span class="wf-gf-coord-label">Zoom</span> ${leafletMap!.getZoom()}`;
+          coordDisplay.innerHTML = lines.join("<br>");
+        }
+      });
+
+      // Map click → add geofence
+      leafletMap.on("click", (e: L.LeafletMouseEvent) => {
+        const gf: GeofenceItem = {
+          id: crypto.randomUUID(),
+          latitude: Math.round(e.latlng.lat * 1000000) / 1000000,
+          longitude: Math.round(e.latlng.lng * 1000000) / 1000000,
+          radius: 100,
+          label: "",
+          notifyOnEntry: true,
+          notifyOnExit: true,
+        };
+        const currentGfs = parseGeofences(hiddenInput.value);
+        currentGfs.push(gf);
+        hiddenInput.value = JSON.stringify(currentGfs);
+        const idx = currentGfs.length - 1;
+        addMapItem(leafletMap!, mapItems, gf, idx);
+        appendCard(gf, idx, leafletMap!, mapItems, hiddenInput, callbacks);
+        syncModalConfig(hiddenInput, section, callbacks);
+        updateCount();
+        showToast(`Placed geofence at ${gf.latitude.toFixed(4)}, ${gf.longitude.toFixed(4)}`);
+      });
+
+      // Fit All button
+      document.getElementById("wf-gf-fit-btn")?.addEventListener("click", () => {
+        const gfs = parseGeofences(hiddenInput.value);
+        if (gfs.length === 0) return;
+        const bounds = gfs.map(g => [g.latitude, g.longitude] as L.LatLngExpression);
+        leafletMap!.fitBounds(L.latLngBounds(bounds).pad(0.3));
+      });
+
+      // Clear All button
+      document.getElementById("wf-gf-clear-btn")?.addEventListener("click", () => {
+        mapItems.forEach(item => {
+          leafletMap!.removeLayer(item.circle);
+          leafletMap!.removeLayer(item.marker);
+        });
+        mapItems.clear();
+        hiddenInput.value = "[]";
+        const cardsList = document.getElementById("wf-gf-cards-list")!;
+        cardsList.innerHTML = '<span class="wf-gf-empty-msg">Click the map to add geofences...</span>';
+        syncModalConfig(hiddenInput, section, callbacks);
+        updateCount();
+        showToast("All geofences cleared");
+      });
+
+      // Done button
+      document.getElementById("wf-gf-done-btn")?.addEventListener("click", () => {
+        modal.style.display = "none";
+      });
+    }
+
+    // Reset map items
+    mapItems.forEach(item => {
+      leafletMap!.removeLayer(item.circle);
+      leafletMap!.removeLayer(item.marker);
+    });
+    mapItems.clear();
+
+    // Load existing geofences
+    const geofences = parseGeofences(hiddenInput.value);
+    const cardsList = document.getElementById("wf-gf-cards-list")!;
+    if (geofences.length === 0) {
+      cardsList.innerHTML = '<span class="wf-gf-empty-msg">Click the map to add geofences...</span>';
+    } else {
+      cardsList.innerHTML = geofences.map((gf, i) => renderGeofenceCard(gf, i)).join("");
+    }
+    for (let i = 0; i < geofences.length; i++) {
+      addMapItem(leafletMap!, mapItems, geofences[i], i);
+    }
+    // Wire card events
+    cardsList.querySelectorAll(".wf-gf-card").forEach(card => {
+      const gfId = (card as HTMLElement).dataset.gfId!;
+      wireModalCardEvents(card, gfId, leafletMap!, mapItems, hiddenInput, section, callbacks, updateCount);
+    });
+
+    document.getElementById("wf-gf-card-count")!.textContent = String(geofences.length);
+
+    if (geofences.length > 0) {
+      const bounds = geofences.map(gf => [gf.latitude, gf.longitude] as L.LatLngExpression);
+      leafletMap.fitBounds(L.latLngBounds(bounds).pad(0.3));
+    }
+
+    requestAnimationFrame(() => {
+      leafletMap!.invalidateSize();
+    });
+  });
 }
 
-/** Add a draggable circle to the map for a geofence. */
-function addCircleToMap(map: L.Map, circles: Map<string, L.Circle>, gf: GeofenceItem, index: number): void {
+/** Create a colored div icon for a geofence center marker. */
+function createMarkerIcon(colorIndex: number): L.DivIcon {
+  const color = GEOFENCE_COLORS[colorIndex % GEOFENCE_COLORS.length];
+  return L.divIcon({
+    className: "",
+    html: `<div style="width:20px;height:20px;background:${color};border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.4),0 0 0 2px ${color}40;cursor:grab;"></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+  });
+}
+
+/** Add circle + draggable marker to map for a geofence. */
+function addMapItem(map: L.Map, mapItems: Map<string, { circle: L.Circle; marker: L.Marker }>, gf: GeofenceItem, index: number): void {
   const color = GEOFENCE_COLORS[index % GEOFENCE_COLORS.length];
   const circle = L.circle([gf.latitude, gf.longitude], {
     radius: gf.radius,
     color,
     fillColor: color,
-    fillOpacity: 0.15,
+    fillOpacity: 0.12,
     weight: 2,
     bubblingMouseEvents: false,
   }).addTo(map);
 
-  // Center marker (draggable)
-  const marker = L.circleMarker([gf.latitude, gf.longitude], {
-    radius: 4,
-    color,
-    fillColor: color,
-    fillOpacity: 0.9,
-    weight: 1,
+  const marker = L.marker([gf.latitude, gf.longitude], {
+    icon: createMarkerIcon(index),
+    draggable: true,
   }).addTo(map);
 
-  // Store circle + marker together
-  (circle as any)._gfMarker = marker;
-  (circle as any)._gfId = gf.id;
-  circles.set(gf.id, circle);
-}
+  marker.bindPopup(`<strong>${gf.label || "Geofence"}</strong><br><span style="font-family:monospace;font-size:11px;color:#8b8fa3;">${gf.latitude.toFixed(6)}, ${gf.longitude.toFixed(6)}</span>`);
 
-/** Wire events for a single geofence card. */
-function wireGeofenceCardEvents(
-  card: Element, gfId: string, map: L.Map, circles: Map<string, L.Circle>,
-  hiddenInput: HTMLInputElement, container: Element, callbacks: ConfigFieldCallbacks
-): void {
-  // Delete button
-  card.querySelector(".wf-gf-delete")?.addEventListener("click", () => {
-    const circle = circles.get(gfId);
-    if (circle) {
-      const marker = (circle as any)._gfMarker as L.CircleMarker;
-      map.removeLayer(circle);
-      if (marker) map.removeLayer(marker);
-      circles.delete(gfId);
+  // Drag: update circle + hidden input
+  marker.on("dragend", () => {
+    const pos = marker.getLatLng();
+    const updated = parseGeofences((document.querySelector('[data-field="config.geofences"]') as HTMLInputElement)?.value || "[]");
+    const match = updated.find(g => g.id === gf.id);
+    if (match) {
+      match.latitude = Math.round(pos.lat * 1000000) / 1000000;
+      match.longitude = Math.round(pos.lng * 1000000) / 1000000;
+      circle.setLatLng(pos);
+      marker.setPopupContent(`<strong>${match.label || "Geofence"}</strong><br><span style="font-family:monospace;font-size:11px;color:#8b8fa3;">${match.latitude.toFixed(6)}, ${match.longitude.toFixed(6)}</span>`);
+      // Update card inputs
+      const card = document.querySelector(`.wf-gf-card[data-gf-id="${gf.id}"]`);
+      if (card) {
+        const latInput = card.querySelector('[data-gf-field="latitude"]') as HTMLInputElement;
+        const lonInput = card.querySelector('[data-gf-field="longitude"]') as HTMLInputElement;
+        if (latInput) latInput.value = String(match.latitude);
+        if (lonInput) lonInput.value = String(match.longitude);
+      }
+      const hiddenInput = document.querySelector('[data-field="config.geofences"]') as HTMLInputElement;
+      if (hiddenInput) hiddenInput.value = JSON.stringify(updated);
+      // Sync to workflow
+      const section = document.querySelector("[data-geofence-section]");
+      if (section) syncModalConfig(hiddenInput, section, null!);
     }
-    card.remove();
-    syncConfig(hiddenInput, container, callbacks);
   });
 
-  // Field changes (label, lat, lon, radius, checkboxes)
+  mapItems.set(gf.id, { circle, marker });
+}
+
+/** Append a geofence card to the sidebar and wire its events. */
+function appendCard(gf: GeofenceItem, index: number, map: L.Map, mapItems: Map<string, { circle: L.Circle; marker: L.Marker }>, hiddenInput: HTMLInputElement, callbacks: ConfigFieldCallbacks): void {
+  const cardsList = document.getElementById("wf-gf-cards-list")!;
+  // Remove empty message if present
+  const emptyMsg = cardsList.querySelector(".wf-gf-empty-msg");
+  if (emptyMsg) emptyMsg.remove();
+  cardsList.insertAdjacentHTML("beforeend", renderGeofenceCard(gf, index));
+  const card = cardsList.lastElementChild!;
+  wireModalCardEvents(card, gf.id, map, mapItems, hiddenInput, null!, callbacks, () => {});
+  const countEl = document.getElementById("wf-gf-card-count");
+  if (countEl) countEl.textContent = String(cardsList.querySelectorAll(".wf-gf-card").length);
+}
+
+/** Wire events for a single geofence card inside the modal. */
+function wireModalCardEvents(
+  card: Element, gfId: string, map: L.Map, mapItems: Map<string, { circle: L.Circle; marker: L.Marker }>,
+  hiddenInput: HTMLInputElement, _section: Element, callbacks: ConfigFieldCallbacks, updateCount: () => void
+): void {
+  const section = document.querySelector("[data-geofence-section]");
+
+  // Delete
+  card.querySelector(".wf-gf-card-delete")?.addEventListener("click", () => {
+    const item = mapItems.get(gfId);
+    if (item) {
+      map.removeLayer(item.circle);
+      map.removeLayer(item.marker);
+      mapItems.delete(gfId);
+    }
+    card.remove();
+    syncModalConfig(hiddenInput, section!, callbacks);
+    if (updateCount) updateCount();
+    const cardsList = document.getElementById("wf-gf-cards-list");
+    const countEl = document.getElementById("wf-gf-card-count");
+    if (cardsList && countEl) {
+      const remaining = cardsList.querySelectorAll(".wf-gf-card").length;
+      countEl.textContent = String(remaining);
+      if (remaining === 0) cardsList.innerHTML = '<span class="wf-gf-empty-msg">Click the map to add geofences...</span>';
+    }
+    showToast("Geofence removed");
+  });
+
+  // Field changes
   card.querySelectorAll("[data-gf-field]").forEach(input => {
     input.addEventListener("change", () => {
-      syncConfig(hiddenInput, container, callbacks);
-      // Update circle on map
-      const circle = circles.get(gfId);
-      if (!circle) return;
-      const gf = findGeofence(hiddenInput, gfId);
+      syncModalConfig(hiddenInput, section!, callbacks);
+      const item = mapItems.get(gfId);
+      if (!item) return;
+      const gf = parseGeofences(hiddenInput.value).find(g => g.id === gfId);
       if (!gf) return;
-      circle.setLatLng([gf.latitude, gf.longitude]);
-      circle.setRadius(gf.radius);
-      const marker = (circle as any)._gfMarker as L.CircleMarker;
-      if (marker) marker.setLatLng([gf.latitude, gf.longitude]);
+      item.circle.setLatLng([gf.latitude, gf.longitude]);
+      item.circle.setRadius(gf.radius);
+      item.marker.setLatLng([gf.latitude, gf.longitude]);
+      item.marker.setPopupContent(`<strong>${gf.label || "Geofence"}</strong><br><span style="font-family:monospace;font-size:11px;color:#8b8fa3;">${gf.latitude.toFixed(6)}, ${gf.longitude.toFixed(6)}</span>`);
       // Update radius display
       const sliderLabel = card.querySelector(".wf-gf-slider-label strong");
       if (sliderLabel && (input as HTMLElement).dataset.gfField === "radius") {
         sliderLabel.textContent = `${gf.radius}m`;
       }
+      if (updateCount) updateCount();
     });
+    // Also listen to 'input' for range slider live update
+    if ((input as HTMLInputElement).type === "range") {
+      input.addEventListener("input", () => {
+        const sliderLabel = card.querySelector(".wf-gf-slider-label strong");
+        if (sliderLabel) sliderLabel.textContent = `${(input as HTMLInputElement).value}m`;
+        const item = mapItems.get(gfId);
+        if (item) item.circle.setRadius(parseFloat((input as HTMLInputElement).value));
+      });
+    }
   });
 }
 
-/** Read all cards from DOM and sync to hidden input + auto-save. */
-function syncConfig(hiddenInput: HTMLInputElement, container: Element, callbacks: ConfigFieldCallbacks): void {
-  const cards = container.querySelectorAll(".wf-geofence-card");
+/** Read all cards from modal DOM and sync to hidden input + auto-save. */
+function syncModalConfig(hiddenInput: HTMLInputElement, section: Element, callbacks: ConfigFieldCallbacks): void {
+  const cards = document.querySelectorAll(`#${GEOFENCE_MODAL_ID} .wf-gf-card`);
   const geofences: GeofenceItem[] = [];
   cards.forEach(card => {
     const el = card as HTMLElement;
@@ -330,22 +512,38 @@ function syncConfig(hiddenInput: HTMLInputElement, container: Element, callbacks
   });
   hiddenInput.value = JSON.stringify(geofences);
 
-  // Trigger auto-save
-  const wf = callbacks.getWorkflow();
-  const selId = callbacks.getSelectedNodeId();
-  if (wf && selId) {
-    const n = wf.nodes.find(n => n.id === selId);
-    if (n) {
-      n.config.geofences = geofences;
-      callbacks.setDirty();
-      callbacks.autoSave();
+  // Update count badge in config panel
+  const badge = section?.querySelector(".wf-gf-count");
+  if (badge) badge.textContent = `${geofences.length} geofence${geofences.length !== 1 ? "s" : ""}`;
+
+  if (callbacks?.getWorkflow && callbacks?.getSelectedNodeId) {
+    const wf = callbacks.getWorkflow();
+    const selId = callbacks.getSelectedNodeId();
+    if (wf && selId) {
+      const n = wf.nodes.find(n => n.id === selId);
+      if (n) {
+        n.config.geofences = geofences;
+        callbacks.setDirty();
+        callbacks.autoSave();
+      }
     }
   }
 }
 
-/** Find a single geofence by id from the hidden input. */
-function findGeofence(hiddenInput: HTMLInputElement, gfId: string): GeofenceItem | undefined {
-  return parseGeofences(hiddenInput.value).find(gf => gf.id === gfId);
+/** Toast notification inside the modal. */
+let toastTimeout: ReturnType<typeof setTimeout>;
+function showToast(msg: string): void {
+  let toast = document.getElementById("wf-gf-toast");
+  if (!toast) {
+    document.getElementById(GEOFENCE_MODAL_ID)?.insertAdjacentHTML("beforeend",
+      '<div class="wf-gf-toast" id="wf-gf-toast"></div>');
+    toast = document.getElementById("wf-gf-toast");
+  }
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.classList.add("show");
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
 /* ── Workflow settings callbacks ── */
