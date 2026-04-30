@@ -202,6 +202,7 @@ jobs:
       - name: Archive
         run: |
           set -o pipefail
+          mkdir -p build
 
           ARCHIVE_PATH="$RUNNER_TEMP/CameraAccess.xcarchive"
 
