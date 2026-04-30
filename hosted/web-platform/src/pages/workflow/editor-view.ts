@@ -416,14 +416,8 @@ function wireEditorEvents(): void {
     setTimeout(() => document.addEventListener("click", dismiss), 0);
   });
 
-  // Toolbar: start stream — find live session, connect preview, send start_stream via WS
+  // Toolbar: start stream — find live session, send start_stream via REST API
   getContainer()?.querySelector("#wf-stream-start-btn")?.addEventListener("click", async () => {
-    // Already connected via WS — send directly
-    if (isPreviewConnected()) {
-      sendPreviewJson({ type: "start_stream" });
-      return;
-    }
-    // Find a live session (prefer target device from settings)
     const workflow = getWorkflow();
     const targetDeviceId = (workflow?.settings as any)?.targetDeviceId ?? null;
     const sessionId = await findLiveSession(targetDeviceId);
@@ -431,17 +425,13 @@ function wireEditorEvents(): void {
       alert("No live session found. Open the app on a device first.");
       return;
     }
-    // Connect preview WS to this session, then send start_stream once open
-    connectPreview(sessionId);
-    // Wait briefly for WS to open, then send
-    const trySend = () => {
-      if (isPreviewConnected()) {
-        sendPreviewJson({ type: "start_stream" });
-      } else {
-        setTimeout(trySend, 200);
-      }
-    };
-    setTimeout(trySend, 300);
+    const result = await startStream(sessionId);
+    if (!result?.ok) {
+      alert(result?.error ?? "Stream failed to start");
+      return;
+    }
+    // Ensure preview WS is connected for status updates
+    if (!isPreviewConnected()) connectPreview(sessionId);
   });
 
   // Toolbar: stop stream — send stop_stream via preview WS
