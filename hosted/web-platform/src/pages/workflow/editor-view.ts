@@ -21,10 +21,10 @@ import { hideNodeActionPopover } from "./node-actions.js";
 import { renderConfigPanel } from "./config-panel.js";
 import { isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import {
-  findActiveSession, findLiveSession, connectPreview, disconnectPreview,
+  findActiveSession, connectPreview, disconnectPreview,
   startSessionPolling, stopSessionPolling, destroyPreview,
   addPreviewListener, removePreviewListener, getNodePreviews,
-  isPreviewConnected, sendPreviewJson, getPublisherStatus, getConnectedSessionId,
+  isPreviewConnected, getConnectedSessionId,
 } from "./editor-preview.js";
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
@@ -104,10 +104,6 @@ export async function renderEditor(isNew: boolean): Promise<void> {
         <button class="btn btn-danger" id="wf-del-btn">Delete</button>
         <button class="btn" id="wf-settings-btn">Settings</button>
         <span class="wf-toolbar-sep" style="width:1px;height:20px;background:var(--border);margin:0 4px;display:inline-block;vertical-align:middle"></span>
-        <button class="btn wf-toolbar-desktop" id="wf-wake-btn" title="Wake device via push notification">Wake</button>
-        <button class="btn wf-toolbar-desktop" id="wf-activate-btn" title="Activate workflow against a live session">Activate</button>
-        <button class="btn wf-toolbar-desktop" id="wf-stream-start-btn" title="Start camera stream">Start Stream</button>
-        <button class="btn wf-toolbar-desktop" id="wf-stream-stop-btn" title="Stop camera stream" disabled>Stop Stream</button>
         <button class="btn wf-toolbar-desktop" id="wf-test-btn" title="Open fleet testing panel">Testing</button>
         <span id="wf-preview-status" style="font-size:11px;margin-left:8px;${liveSessionId ? "" : "display:none"}">
           <span class="wf-live-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4ade80;margin-right:3px;vertical-align:middle"></span>
@@ -169,9 +165,6 @@ function buildPaletteHTML(): string {
 function buildFABHTML(): string {
   return `
     <div class="wf-fab-group" id="wf-fab-group">
-      <button class="wf-fab wf-fab-sec" id="wf-fab-wake" title="Wake device" style="display:none">Wake</button>
-      <button class="wf-fab wf-fab-sec" id="wf-fab-activate" title="Activate workflow" style="display:none">Activate</button>
-      <button class="wf-fab wf-fab-sec" id="wf-fab-stream" title="Start/Stop stream" style="display:none">Stream</button>
       <button class="wf-fab wf-fab-primary" id="wf-fab-toggle">&#8230;</button>
     </div>`;
 }
@@ -182,45 +175,13 @@ function wireFABEvents(): void {
   const fabGroup = container?.querySelector("#wf-fab-group");
   if (!fabGroup) return;
 
-  // Toggle FAB
+  // Toggle FAB (opens testing panel on mobile)
   fabGroup.querySelector("#wf-fab-toggle")?.addEventListener("click", () => {
-    const open = fabGroup.classList.toggle("wf-fab-open");
-    fabGroup.querySelectorAll(".wf-fab-sec").forEach(btn => {
-      (btn as HTMLElement).style.display = open ? "flex" : "none";
-    });
-  });
-
-  // FAB Wake
-  fabGroup.querySelector("#wf-fab-wake")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    if (!workflow?.id) return;
-    const settings = workflow.settings as any;
-    if (settings?.targetDeviceId) {
-      await wakeDevice(settings.targetDeviceId);
-    }
-  });
-
-  // FAB Activate
-  fabGroup.querySelector("#wf-fab-activate")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    if (!workflow?.id) return;
-    const sessions = await fetchSessions();
-    const liveSessions = sessions.filter(s => s.live);
-    if (liveSessions.length === 0) { alert("No live sessions."); return; }
-    const sessionId = liveSessions[0].sessionId;
-    await activateWorkflow(workflow.id, sessionId);
-  });
-
-  // FAB Stream
-  fabGroup.querySelector("#wf-fab-stream")?.addEventListener("click", () => {
-    if (isPreviewConnected()) {
-      const pubStatus = getPublisherStatus();
-      if (pubStatus === "live") {
-        sendPreviewJson({ type: "stop_stream" });
-      } else {
-        sendPreviewJson({ type: "start_stream" });
-      }
-    }
+    const panel = getContainer()?.querySelector("#wf-testing-panel") as HTMLElement;
+    if (!panel) return;
+    const isOpen = panel.style.display !== "none";
+    panel.style.display = isOpen ? "none" : "flex";
+    if (!isOpen) refreshTestingPanel();
   });
 }
 
@@ -301,144 +262,6 @@ function wireEditorEvents(): void {
     const active = isSettingsPanelActive();
     setSettingsPanelActive(!active);
     renderConfigPanel();
-  });
-
-  // Toolbar: wake — send APNs push to wake a device
-  getContainer()?.querySelector("#wf-wake-btn")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    if (!workflow?.id) return;
-
-    const settings = workflow.settings;
-    if (settings?.targetDeviceId) {
-      // Wake the configured target device directly
-      const result = await wakeDevice(settings.targetDeviceId);
-      if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
-      alert(`Wake sent to device ${settings.targetDeviceId.slice(0, 8)}...`);
-      refreshTestingPanel();
-      return;
-    }
-
-    // No target configured — show device picker
-    const existing = getContainer()?.querySelector(".wf-wake-dropdown");
-    if (existing) { existing.remove(); return; }
-
-    const devices = await fetchDevices();
-    if (devices.length === 0) { alert("No registered devices. Open the app on a device first."); return; }
-
-    const dd = document.createElement("div");
-    dd.className = "wf-wake-dropdown";
-    dd.style.cssText = "position:absolute;right:200px;bottom:60px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:8px;z-index:200;min-width:220px";
-    dd.innerHTML = `
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Select device to wake:</div>
-      <select class="wf-wake-select" style="width:100%;margin-bottom:6px;padding:4px;background:var(--bg-surface-alt);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px">
-        ${devices.map(d => `<option value="${d.device_id}">${d.deviceName ?? d.device_id.slice(0, 8)} ${d.deviceModel ?? ""}</option>`).join("")}
-      </select>
-      <button class="btn" style="width:100%">Wake Device</button>
-    `;
-    getContainer()?.querySelector(".workflow-editor-page")?.appendChild(dd);
-
-    dd.querySelector(".btn")?.addEventListener("click", async () => {
-      const deviceId = (dd.querySelector(".wf-wake-select") as HTMLSelectElement)?.value;
-      if (!deviceId) return;
-      dd.remove();
-      const result = await wakeDevice(deviceId);
-      if (!result?.ok) { alert(result?.error ?? "Wake failed"); return; }
-      alert(`Wake sent to ${deviceId.slice(0, 8)}...`);
-      refreshTestingPanel();
-    });
-
-    const dismiss = (ev: MouseEvent) => {
-      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
-    };
-    setTimeout(() => document.addEventListener("click", dismiss), 0);
-  });
-
-  // Toolbar: activate — session-based workflow activation
-  getContainer()?.querySelector("#wf-activate-btn")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    if (!workflow?.id) return;
-    const existing = getContainer()?.querySelector(".wf-activate-dropdown");
-    if (existing) { existing.remove(); return; }
-
-    // Session-based: show live session picker
-    const sessions = await fetchSessions();
-    const liveSessions = sessions.filter(s => s.live);
-
-    if (liveSessions.length === 0) {
-      alert("No live sessions. Wake a device first, then activate.");
-      return;
-    }
-
-    const dd = document.createElement("div");
-    dd.className = "wf-activate-dropdown";
-    dd.style.cssText = "position:absolute;right:140px;bottom:60px;background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;padding:8px;z-index:200;min-width:260px";
-    dd.innerHTML = `
-      <div style="font-size:11px;color:var(--text-secondary);margin-bottom:4px;">Select session:</div>
-      <select class="wf-activate-select" style="width:100%;margin-bottom:6px;padding:4px;background:var(--bg-surface-alt);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px">
-        ${liveSessions.map(s => `<option value="${s.sessionId}">${s.device?.deviceName ?? "unknown"} (${s.sessionId.slice(0, 8)})</option>`).join("")}
-      </select>
-      <button class="btn" style="width:100%">Activate</button>
-    `;
-    getContainer()?.querySelector(".workflow-editor-page")?.appendChild(dd);
-
-    dd.querySelector(".btn")?.addEventListener("click", async () => {
-      const sessionId = (dd.querySelector(".wf-activate-select") as HTMLSelectElement)?.value;
-      if (!sessionId) return;
-      dd.remove();
-
-      let result = await activateWorkflow(workflow!.id, sessionId);
-      if (!result) { alert("Activation failed"); return; }
-
-      if (result.status === "conflict" && result.conflict) {
-        const c = result.conflict;
-        const activeApp = c.activeAppId ?? "unknown";
-        const activeSince = c.activatedAt ? new Date(c.activatedAt).toLocaleTimeString() : "unknown";
-        const ok = confirm(
-          `Session already has active AI:\n` +
-          `  App: ${activeApp}\n` +
-          `  Active since: ${activeSince}\n\n` +
-          `Override and activate this workflow instead?`
-        );
-        if (!ok) return;
-        result = await activateWorkflow(workflow!.id, sessionId, { override: true, reason: "Manual override" });
-        if (!result) { alert("Override failed"); return; }
-      }
-
-      if (result.status === "passive") alert("Activated (passive). Sinks/transforms configured on device.");
-      else if (result.appId) alert(`Activated! App: ${result.appId}, Status: ${result.status}`);
-      else alert("Activation result: " + result.status);
-      refreshTestingPanel();
-    });
-
-    const dismiss = (ev: MouseEvent) => {
-      if (!dd.contains(ev.target as Node)) { dd.remove(); document.removeEventListener("click", dismiss); }
-    };
-    setTimeout(() => document.addEventListener("click", dismiss), 0);
-  });
-
-  // Toolbar: start stream — find live session, send start_stream via REST API
-  getContainer()?.querySelector("#wf-stream-start-btn")?.addEventListener("click", async () => {
-    const workflow = getWorkflow();
-    const targetDeviceId = (workflow?.settings as any)?.targetDeviceId ?? null;
-    const sessionId = await findLiveSession(targetDeviceId);
-    if (!sessionId) {
-      alert("No live session found. Open the app on a device first.");
-      return;
-    }
-    const result = await startStream(sessionId);
-    if (!result?.ok) {
-      alert(result?.error ?? "Stream failed to start");
-      return;
-    }
-    // Ensure preview WS is connected for status updates
-    if (!isPreviewConnected()) connectPreview(sessionId);
-  });
-
-  // Toolbar: stop stream — send stop_stream via preview WS
-  getContainer()?.querySelector("#wf-stream-stop-btn")?.addEventListener("click", () => {
-    if (isPreviewConnected()) {
-      sendPreviewJson({ type: "stop_stream" });
-    }
   });
 
   // Toolbar: testing panel toggle
@@ -757,25 +580,7 @@ function wirePreview(liveSessionId: string | null, workflowId: string | null): v
       (statusEl as HTMLElement).style.display = isPreviewConnected() ? "" : "none";
     }
 
-    // Update toolbar stream button states based on publisher status
-    const pubStatus = getPublisherStatus();
-    const startBtn = container.querySelector("#wf-stream-start-btn") as HTMLButtonElement | null;
-    const stopBtn = container.querySelector("#wf-stream-stop-btn") as HTMLButtonElement | null;
-    const connected = isPreviewConnected();
-    if (startBtn) {
-      startBtn.disabled = !connected || pubStatus === "live";
-    }
-    if (stopBtn) {
-      stopBtn.disabled = !connected || pubStatus !== "live";
-    }
-
-    // Update FAB stream button text
-    const fabStream = container.querySelector("#wf-fab-stream");
-    if (fabStream) {
-      fabStream.textContent = pubStatus === "live" ? "Stop" : "Stream";
-    }
-
-    // Re-render config panel to update preview section
+    // Re-render testing panel to update device statuses
     renderConfigPanel();
   };
   addPreviewListener(_previewListener);
