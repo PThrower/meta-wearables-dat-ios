@@ -15,6 +15,7 @@ import {
   nanoid, getWorkflowId, getViewBox,
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
+import { isAvailable, getReason } from "./node-availability.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
 import { hideNodeActionPopover } from "./node-actions.js";
@@ -154,11 +155,14 @@ function buildPaletteHTML(): string {
       const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
         ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
         : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
+      const avail = isAvailable(d.type);
+      const lockBadge = avail ? "" : `<span class="wf-avail-badge" title="${esc(getReason(d.type) ?? "")}">&#x1f512;</span>`;
+      const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
       return `
-                  <button class="wf-palette-item" data-type="${d.type}">
+                  <button class="${cls}" data-type="${d.type}" ${avail ? "" : "disabled"}>
                     <span class="wf-palette-dot" style="background:${d.color.header}"></span>
                     <span class="wf-palette-label">${esc(d.label)}</span>
-                    <span class="wf-palette-runtime">${rtBadge}</span>
+                    <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>
                   </button>`;
     }).join("")}`;
   }).join("");

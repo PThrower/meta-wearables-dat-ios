@@ -3011,6 +3011,21 @@ body {
   border-color: var(--border);
 }
 
+/* Unavailable (locked) palette items */
+.wf-palette-item-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: auto;
+}
+.wf-palette-item-locked:hover {
+  background: transparent;
+  border-color: var(--border);
+}
+.wf-avail-badge {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 .wf-palette-dot {
   width: 8px;
   height: 8px;
