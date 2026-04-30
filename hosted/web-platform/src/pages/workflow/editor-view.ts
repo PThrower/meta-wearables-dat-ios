@@ -145,13 +145,13 @@ interface PaletteCategory {
 }
 
 const PALETTE_CATEGORIES: PaletteCategory[] = [
-  { label: "Inputs",   accent: "#14b8a6", match: d => d.role === "source" },
+  { label: "Inputs",   accent: "#14b8a6", match: d => d.role === "source" && d.type !== "gesture-source" },
   { label: "AI",       accent: "#22c55e", match: d => d.activationMode === "ai" || d.activationMode === "jepa" },
   { label: "Vision",   accent: "#8b5cf6", match: d => d.activationMode === "vision" },
   { label: "Enhance",  accent: "#84cc16", match: d => d.activationMode === "enhance" },
   { label: "Audio",    accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
   { label: "Sensors",  accent: "#06b6d4", match: d => d.activationMode === "sensor" },
-  { label: "Triggers", accent: "#eab308", match: d => d.role === "trigger" },
+  { label: "Triggers", accent: "#eab308", match: d => d.role === "trigger" || d.type === "gesture-source" },
   { label: "Outputs",  accent: "#f97316", match: d => d.role === "sink" || d.role === "transform" },
   { label: "Reference",accent: "#94a3b8", match: d => d.role === "reference" },
 ];
