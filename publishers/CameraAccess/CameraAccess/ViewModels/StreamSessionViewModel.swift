@@ -913,14 +913,15 @@ class StreamSessionViewModel: ObservableObject {
         audioClassificationStage = stage
         NSLog("[StreamSession] AudioClassificationStage started source=\(audioSource?.displayName ?? "Phone Mic")")
 
-      case .location:
+      case .location, .locationSignificant, .locationVisits, .locationGeofence:
         let stage = LocationStage()
         let cfg = sensor.config
+        let resolvedMode = cfg["mode"] as? String ?? sensor.type.locationMode ?? "continuous"
         await stage.configure(
           accuracy: cfg["accuracy"] as? String ?? "best",
           minDistance: cfg["minDistance"] as? Double ?? 5,
           updateIntervalSec: cfg["updateIntervalSec"] as? Double ?? 5,
-          mode: cfg["mode"] as? String,
+          mode: resolvedMode,
           geofences: cfg["geofences"] as? [[String: Any]]
         )
         await stage.setOnResult { [weak self] update in
@@ -928,7 +929,7 @@ class StreamSessionViewModel: ObservableObject {
         }
         await stage.start()
         locationStage = stage
-        NSLog("[StreamSession] LocationStage started")
+        NSLog("[StreamSession] LocationStage started mode=\(resolvedMode)")
       }
     }
   }

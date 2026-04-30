@@ -229,15 +229,6 @@ export function wireGeofenceMap(container: Element, callbacks: ConfigFieldCallba
     if (badge) badge.textContent = `${gfs.length} geofence${gfs.length !== 1 ? "s" : ""}`;
   };
 
-  // Conditional visibility: show/hide based on mode select
-  const modeSelect = container.querySelector('[data-field="config.mode"]') as HTMLSelectElement | null;
-  if (modeSelect && section) {
-    const updateVisibility = () => {
-      section.style.display = modeSelect.value === "geofence" ? "" : "none";
-    };
-    updateVisibility();
-    modeSelect.addEventListener("change", updateVisibility);
-  }
 
   // Open modal button
   const openBtn = section.querySelector(".wf-gf-open-btn");

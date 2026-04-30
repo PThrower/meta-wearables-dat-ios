@@ -299,7 +299,7 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     notifyListeners();
   }
 
-  // Sensor results — display on sensor-sound and sensor-location nodes
+  // Sensor results — display on sensor-sound and sensor-location* nodes
   if (msg.type === "sensor_result") {
     for (const [, preview] of nodePreviews) {
       if (msg.sensorType === "sensor-sound" && preview.nodeType === "sensor-sound") {
@@ -312,7 +312,7 @@ function handlePreviewMessage(msg: Record<string, any>): void {
           preview.updated = now;
         }
       }
-      if (msg.sensorType === "sensor-location" && preview.nodeType === "sensor-location") {
+      if (msg.sensorType === "sensor-location" && preview.nodeType?.startsWith("sensor-location")) {
         const lat = typeof msg.latitude === "number" ? msg.latitude.toFixed(5) : "?";
         const lon = typeof msg.longitude === "number" ? msg.longitude.toFixed(5) : "?";
         const eventType = msg.eventType as string ?? "location_update";

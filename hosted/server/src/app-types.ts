@@ -65,7 +65,7 @@ export interface AppsConfig {
 
 // --- Workflow Builder ---
 
-export type WorkflowNodeType = "camera-source" | "phone-mic-source" | "glasses-mic-source" | "gesture-source" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "jepa-vision" | "deepgram-stt" | "vision-face-detect" | "vision-barcode-scan" | "vision-ocr" | "vision-scene-classify" | "vision-person-detect" | "vision-body-pose" | "sensor-sound" | "sensor-location" | "jepa-trigger" | "timer-trigger" | "conditional" | "local-tts" | "tones" | "phone-speaker" | "glasses-speaker" | "overlays";
+export type WorkflowNodeType = "camera-source" | "phone-mic-source" | "glasses-mic-source" | "gesture-source" | "text" | "s2s-live" | "s2s-rest" | "s2s-e4b" | "jepa-vision" | "deepgram-stt" | "vision-face-detect" | "vision-barcode-scan" | "vision-ocr" | "vision-scene-classify" | "vision-person-detect" | "vision-body-pose" | "sensor-sound" | "sensor-location" | "sensor-location-significant" | "sensor-location-visits" | "sensor-location-geofence" | "jepa-trigger" | "timer-trigger" | "conditional" | "local-tts" | "tones" | "phone-speaker" | "glasses-speaker" | "overlays";
 
 /** JEPA vision node config -- provider-abstraction for continuous stream understanding */
 export interface JEPANodeConfig {

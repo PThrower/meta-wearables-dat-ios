@@ -41,7 +41,10 @@ export const NODE_DESCRIPTIONS: Record<string, string> = {
 
   // Sensors
   "sensor-sound": "Classify ambient sounds using on-device ML",
-  "sensor-location": "GPS location tracking with geofencing",
+  "sensor-location": "Continuous GPS tracking with configurable accuracy and interval",
+  "sensor-location-significant": "Battery-efficient GPS updates on ~500m changes",
+  "sensor-location-visits": "Detect arrive, stay, and leave events at locations",
+  "sensor-location-geofence": "Monitor circular regions for entry and exit events",
 
   // Triggers
   "gesture-source": "Hand gesture recognition from camera feed",

@@ -14,6 +14,20 @@ import Foundation
 enum SensorType: String, Sendable, Codable, CaseIterable {
     case sound = "sensor-sound"
     case location = "sensor-location"
+    case locationSignificant = "sensor-location-significant"
+    case locationVisits = "sensor-location-visits"
+    case locationGeofence = "sensor-location-geofence"
+
+    /// Resolve the CLLocationManager mode string for location variants.
+    var locationMode: String? {
+        switch self {
+        case .location: return "continuous"
+        case .locationSignificant: return "significant"
+        case .locationVisits: return "visits"
+        case .locationGeofence: return "geofence"
+        default: return nil
+        }
+    }
 }
 
 // MARK: - Sound Classification
