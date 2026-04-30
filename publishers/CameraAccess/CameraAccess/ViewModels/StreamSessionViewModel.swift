@@ -118,7 +118,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var visionSceneLabel: String?
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
-  @Published var audioInputMode: AudioInputMode = .builtInMic {
+  @Published var audioInputMode: AudioInputMode = .all {
     didSet {
       // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
       // active tears down the BT HFP link and kills video. Audio routing changes

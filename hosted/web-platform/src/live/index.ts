@@ -70,7 +70,7 @@ function _watchLiveInner(sessionId: string, shareToken?: string): boolean {
   document.getElementById("p-latency")!.textContent = "--";
   document.getElementById("p-drop")!.textContent = "--";
   document.getElementById("p-audio")!.textContent = "OFF";
-  setMicActive("phone");
+  setMicActive("all");
   meterFill.style.width = "0%";
   document.getElementById("unmute")!.classList.remove("show");
   setPill(pubPill, "PUB WAIT", "status-off");
@@ -189,7 +189,7 @@ export function closeLive(): void {
   document.getElementById("page-content")!.classList.remove("hidden");
   document.getElementById("connectionOverlay")!.classList.add("hidden");
   siStrip.classList.add("hidden");
-  setMicActive("phone");
+  setMicActive("all");
   resetAudioControls();
   const uptimeInt = getUptimeInterval();
   if (uptimeInt) { clearInterval(uptimeInt); setUptimeInterval(null); }
