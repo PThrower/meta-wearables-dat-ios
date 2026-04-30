@@ -162,12 +162,16 @@ export function render(flows: DetectedFlow[], config: FlowExecutionConfig | null
 
   const effectiveConfig = config ?? buildDefaultFlowConfig(flows);
   const mode: FlowExecutionMode = effectiveConfig?.mode ?? "parallel";
-  // Validate flowOrder against detected flows — prune stale IDs, append new flows
+  // Flow IDs are derived from node IDs (flow_${lexicographically-smallest-node-id}).
+  // When nodes are added/removed/reconnected, detected flow IDs change, but the
+  // persisted flowConfig.flowOrder may still contain stale IDs from a previous
+  // workflow state. Without this filter, flows.find() fails for every stale ID,
+  // producing empty strings instead of flow item cards — header renders, items don't.
   const validFlowIds = new Set(flows.map(f => f.flowId));
   const savedOrder = effectiveConfig?.flowOrder ?? [];
   const flowOrder: string[] = [
-    ...savedOrder.filter(id => validFlowIds.has(id)),
-    ...flows.filter(f => !savedOrder.includes(f.flowId)).map(f => f.flowId),
+    ...savedOrder.filter(id => validFlowIds.has(id)),          // keep valid saved IDs (preserves user reorder)
+    ...flows.filter(f => !savedOrder.includes(f.flowId)).map(f => f.flowId),  // append newly detected flows
   ];
   const flowTriggers = effectiveConfig?.flowTriggers ?? {};
   const isDraggable = mode === "sequential";
