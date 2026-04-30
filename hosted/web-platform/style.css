@@ -859,9 +859,9 @@ header {
   display: block; padding: 4px 0; font-size: 11px;
 }
 .transcription-entry { padding: 3px 0; line-height: 1.4; }
-.transcription-entry.interim { color: rgba(255, 255, 255, 0.55); }
-.transcription-entry.final { color: rgba(255, 255, 255, 0.92); }
-.transcription-entry .stt-time { color: var(--text-tertiary); font-size: 9px; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.transcription-entry.interim { color: rgba(255, 255, 255, 0.75); }
+.transcription-entry.final { color: #e2e8f0; font-weight: 500; }
+.transcription-entry .stt-time { color: #94a3b8; font-size: 9px; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .transcription-entry.error-entry { color: #f87171; font-style: italic; }
 .transcription-entry.vad-entry { color: #8be9fd; font-size: 11px; }
 .transcription-entry.vad-entry .vad-indicator { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
