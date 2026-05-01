@@ -3127,6 +3127,15 @@ body {
   background: transparent;
   border-color: var(--border);
 }
+
+/* Mini-editor locked palette items */
+.mini-editor-palette-item.wf-palette-item-locked {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.mini-editor-palette-item.wf-palette-item-locked:hover {
+  background: transparent;
+}
 .wf-avail-badge {
   font-size: 10px;
   opacity: 0.7;

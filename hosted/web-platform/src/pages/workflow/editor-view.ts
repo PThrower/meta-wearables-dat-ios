@@ -19,7 +19,7 @@ import {
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import type { NodeDefinition } from "../../core/api-client.js";
 import { NODE_W, NODE_H } from "./constants.js";
-import { isAvailable, getReason } from "./node-availability.js";
+import { isAvailable, getReason, renderAvailBadge, availCls, lockedAttrs } from "./node-availability.js";
 import { getDescription } from "./node-descriptions.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
 import { wireSVGEvents, onKeyDown, isTouchDevice } from "./interactions.js";
@@ -192,11 +192,10 @@ function buildPaletteItem(d: NodeDefinition, cat: PaletteCategory): string {
   const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
     ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
     : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
-  const avail = isAvailable(d.type);
-  const lockBadge = avail ? "" : `<span class="wf-avail-badge" title="${esc(getReason(d.type) ?? "")}">&#x1f512;</span>`;
-  const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
+  const lockBadge = renderAvailBadge(d.type);
+  const cls = availCls(d.type, "wf-palette-item");
   const tip = esc(getDescription(d.type));
-  return `<button class="${cls}" data-type="${d.type}" draggable="${avail}" ${avail ? "" : "disabled"} title="${tip}">
+  return `<button class="${cls}" data-type="${d.type}" ${lockedAttrs(d.type)} title="${tip}">
     <span class="wf-palette-dot" style="background:${cat.accent}"></span>
     <span class="wf-palette-label">${esc(d.label)}</span>
     <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>

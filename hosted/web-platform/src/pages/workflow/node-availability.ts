@@ -42,3 +42,28 @@ export function getStatus(type: string): AvailabilityStatus {
 export function getReason(type: string): UnavailabilityReason | null {
   return UNAVAILABLE_NODES[type]?.reason ?? null;
 }
+
+/** Lock badge HTML span, or empty string if available. */
+export function renderAvailBadge(type: string): string {
+  if (isAvailable(type)) return "";
+  const reason = getReason(type) ?? "";
+  return `<span class="wf-avail-badge" title="${reason}">&#x1f512;</span>`;
+}
+
+/** CSS class for locked state, or empty string. */
+export function lockedClass(type: string): string {
+  return isAvailable(type) ? "" : "wf-palette-item-locked";
+}
+
+/** HTML attributes: draggable + disabled for locked nodes, draggable only for available. */
+export function lockedAttrs(type: string): string {
+  return isAvailable(type)
+    ? 'draggable="true"'
+    : 'draggable="false" disabled';
+}
+
+/** Combine a base CSS class with the locked modifier. */
+export function availCls(type: string, base: string): string {
+  const lc = lockedClass(type);
+  return lc ? `${base} ${lc}` : base;
+}

@@ -5,6 +5,7 @@
 
 import { esc } from "../core/api-client.js";
 import { getNodeDefs } from "../pages/workflow/node-defs.js";
+import { renderAvailBadge, availCls, lockedAttrs } from "../pages/workflow/node-availability.js";
 
 const ROLE_ORDER: Array<{ role: string; label: string }> = [
   { role: "source", label: "Source" },
@@ -31,10 +32,12 @@ export function buildMiniPaletteHTML(): string {
             ? `<span class="mini-editor-rt-badge" style="background:#06b6d4">MOB</span>`
             : `<span class="mini-editor-rt-badge" style="background:#8b5cf6">SRV</span>`
         ).join("");
-        return `<button class="mini-editor-palette-item" data-type="${d.type}">
+        const lockBadge = renderAvailBadge(d.type);
+        const cls = availCls(d.type, "mini-editor-palette-item");
+        return `<button class="${cls}" data-type="${d.type}" ${lockedAttrs(d.type)}>
           <span class="mini-editor-palette-dot" style="background:${d.color.header}"></span>
           <span class="mini-editor-palette-label">${esc(d.label)}</span>
-          <span class="mini-editor-palette-badges">${badges}</span>
+          <span class="mini-editor-palette-badges">${badges}${lockBadge}</span>
         </button>`;
       }).join("")}
     `;

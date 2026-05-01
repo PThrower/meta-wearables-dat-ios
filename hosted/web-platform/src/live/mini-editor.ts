@@ -18,6 +18,7 @@ import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";
 import { renderMiniConfigPanel } from "./mini-editor-config.js";
+import { isAvailable } from "../pages/workflow/node-availability.js";
 
 const PANEL_WIDTH = 380;
 const PANEL_PAD = 20;
@@ -382,6 +383,7 @@ export class MiniWorkflowEditor {
 
   private addNode(type: string): void {
     if (!this.workflow) return;
+    if (!isAvailable(type)) return;
     const def = getNodeDef(type);
     const id = `n_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     const config = def ? { ...def.defaultConfig } : {};
