@@ -824,7 +824,14 @@ class StreamSessionViewModel: ObservableObject {
     // Wire result callback to update overlay AND relay to server
     await stage.setOnResult { [weak self] result, thumbnails in
       await MainActor.run {
-        self?.visionDetections = result.detections
+        // When tracking is active, suppress raw vision boxes —
+        // the tracker will emit tracked items with persistent IDs instead.
+        if self?.trackingStage != nil {
+          // Only keep non-bbox detections (scene labels)
+          self?.visionDetections = result.detections.filter { $0.boundingBox == nil }
+        } else {
+          self?.visionDetections = result.detections
+        }
         // Extract scene label if present
         for det in result.detections {
           if case .scene(let cls) = det, let first = cls.labels.first {
@@ -835,6 +842,20 @@ class StreamSessionViewModel: ObservableObject {
       // Relay detection JSON to server for downstream AI context injection
       if !result.isEmpty {
         await self?.relayStage.sendJson(result.jsonDict(thumbnails: thumbnails))
+      }
+      // Feed detections into tracking stage if active
+      if let trackingStage = await self?.trackingStage {
+        let trackDets: [TrackDetection] = result.detections.compactMap { det in
+          guard let bbox = det.boundingBox else { return nil }
+          return TrackDetection(
+            bbox: bbox,
+            confidence: det.confidence,
+            classLabel: det.displayLabel
+          )
+        }
+        if !trackDets.isEmpty {
+          await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
+        }
       }
     }
 
