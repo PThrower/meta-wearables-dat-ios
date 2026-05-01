@@ -214,6 +214,7 @@ struct VisionStageConfig: Sendable, Codable {
 
     // Thumbnail extraction config
     let thumbnailsEnabled: Bool
+    let thumbnailDetectionTypes: [VisionDetectionType]  // only extract for these types; empty = all
     let thumbnailSize: Int       // px, default 64
     let thumbnailMaxCount: Int   // 0 = unlimited, default 4
     let thumbnailQuality: CGFloat // JPEG quality 0-1, default 0.6
@@ -228,6 +229,7 @@ struct VisionStageConfig: Sendable, Codable {
         symbologies: ["QR"],
         maxLabels: 5,
         thumbnailsEnabled: false,
+        thumbnailDetectionTypes: [],
         thumbnailSize: 64,
         thumbnailMaxCount: 4,
         thumbnailQuality: 0.6

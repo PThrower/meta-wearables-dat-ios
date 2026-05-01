@@ -119,6 +119,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
   @Published var trackingTracks: [Track] = []
+  @Published var toolMeasureResult: ToolMeasureResult?
   @Published var audioInputMode: AudioInputMode = .all {
     didSet {
       // DISABLED: Calling routeAudioInput() while the DAT SDK video stream is
@@ -181,6 +182,7 @@ class StreamSessionViewModel: ObservableObject {
   private var speechRecognitionStage: SpeechRecognitionStage?
   private var voiceActivityStage: VoiceActivityStage?
   private var trackingStage: ObjectTrackingStage?
+  private var measureStage: ToolMeasurementStage?
 
   // Preview system
   #if DEBUG
@@ -802,6 +804,8 @@ class StreamSessionViewModel: ObservableObject {
 
     // Thumbnail extraction config
     let thumbnailsEnabled = config["thumbnailsEnabled"] as? Bool ?? false
+    let thumbnailDetTypeStrings = config["thumbnailDetectionTypes"] as? [String] ?? []
+    let thumbnailDetectionTypes = thumbnailDetTypeStrings.compactMap { VisionDetectionType(rawValue: $0) }
     let thumbnailSize = config["thumbnailSize"] as? Int ?? 64
     let thumbnailMaxCount = config["thumbnailMaxCount"] as? Int ?? 4
     let thumbnailQuality = config["thumbnailQuality"] as? Double ?? 0.6
@@ -816,6 +820,7 @@ class StreamSessionViewModel: ObservableObject {
       symbologies: symbologies,
       maxLabels: maxLabels,
       thumbnailsEnabled: thumbnailsEnabled,
+      thumbnailDetectionTypes: thumbnailDetectionTypes,
       thumbnailSize: thumbnailSize,
       thumbnailMaxCount: thumbnailMaxCount,
       thumbnailQuality: CGFloat(thumbnailQuality)
@@ -1085,6 +1090,43 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] ObjectTrackingStage registered: confidence=\(trackingConfig.confidence) iou=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) zones=\(trackingConfig.zones.count)")
   }
 
+  private func configureMeasureStage(config: [String: Any]) async {
+    // Unregister existing measure stage if any
+    if let existing = measureStage {
+      await existing.stop()
+      pipeline.unregister(stageId: existing.stageId)
+      measureStage = nil
+    }
+
+    let measureConfig = ToolMeasureConfig(
+      referenceObject: config["referenceObject"] as? String ?? "auto",
+      maxMeasurementError: config["maxMeasurementError"] as? Double ?? 2.0,
+      targetFPS: config["targetFPS"] as? Double ?? 1,
+      smoothingAlpha: config["smoothingAlpha"] as? Double ?? 0.5,
+      confidence: config["confidence"] as? Double ?? 0.6
+    )
+
+    let stage = ToolMeasurementStage(config: measureConfig)
+
+    // Wire result callback to relay tool measurements to server + update overlay
+    await stage.setOnResult { [weak self] result in
+      await self?.relayStage.sendJson(result.jsonDict())
+      await MainActor.run { [weak self] in
+        self?.toolMeasureResult = result
+      }
+    }
+
+    #if DEBUG
+    await stage.setPreviewBus(previewBus)
+    #endif
+
+    pipeline.register(stage)
+    await stage.start()
+    measureStage = stage
+
+    NSLog("[StreamSession] ToolMeasurementStage registered: ref=\(measureConfig.referenceObject) maxError=\(measureConfig.maxMeasurementError)mm fps=\(measureConfig.targetFPS)")
+  }
+
   // MARK: - Shared Relay Helpers
 
   /// Configure the relay encoder based on the selected videoCodec.
@@ -1308,6 +1350,25 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // Tool measurement stage config from server -- register ToolMeasurementStage
+      if msgType == "measure_stage_config" {
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            guard let self, let existing = measureStage else { return }
+            await existing.stop()
+            pipeline.unregister(stageId: existing.stageId)
+            measureStage = nil
+            NSLog("[StreamSession] ToolMeasurementStage disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.configureMeasureStage(config: msg)
+          }
+        }
+      }
+
       // Audio gain control from viewer
       if msgType == "set_audio_gain",
          let codecType = msg["codecType"] as? Int,
@@ -1511,6 +1572,14 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
     }
     trackingTracks = []
+
+    // Stop tool measurement stage
+    if let mStage = measureStage {
+      await mStage.stop()
+      pipeline.unregister(stageId: mStage.stageId)
+      measureStage = nil
+    }
+    toolMeasureResult = nil
     if let vadStage = voiceActivityStage {
       await vadStage.stop()
       voiceActivityStage = nil

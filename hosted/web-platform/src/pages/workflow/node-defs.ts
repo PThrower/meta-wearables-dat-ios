@@ -17,6 +17,7 @@ const TYPE_ALIASES: Record<string, string> = {
   "output-recording": "recording",
   "output-overlays": "overlays",
   "output": "viewers",
+  "tool-suggest": "overlays",
 };
 
 /** Static fallback palette — used when the /api/node-definitions fetch fails. */
@@ -65,8 +66,7 @@ export const FALLBACK_PALETTE: NodeDefinition[] = [
   { type: "phone-speaker", label: "Phone Speaker", subtitle: "phone audio out", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Phone Speaker", runtime: ["mobile"] },
   { type: "glasses-speaker", label: "Glasses Speaker", subtitle: "HFP/A2DP audio", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Glasses Speaker", runtime: ["mobile"] },
   { type: "vision-tool-measure", label: "Tool Measure", subtitle: "ref: ${referenceObject} | tol: ${maxMeasurementError}mm", color: { fill: "#1a0a3d", header: "#a78bfa", stroke: "#a78bfa" }, allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts", "overlays", "<sink>", "<trigger>"], role: "processor", activationMode: "measure", binding: "vision-tool-measure", defaultModel: null, configSchema: [], defaultConfig: { referenceObject: "auto", maxMeasurementError: 2.0, targetFPS: 1, smoothingAlpha: 0.5, confidence: 0.6 }, defaultLabel: "Tool Measure", runtime: ["mobile"] },
-  { type: "tool-suggest", label: "Tool Suggestion", subtitle: "fastener sizing overlay", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { showDimensions: true, showToolSize: true, showConfidence: true }, defaultLabel: "Tool Suggestion", runtime: ["mobile"] },
-  { type: "overlays", label: "Overlays", subtitle: "bbox annotations", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Overlays", runtime: ["mobile"] },
+  { type: "overlays", label: "Overlays", subtitle: "bbox + transcription + tool sizing", color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: { showToolDimensions: true, showToolSize: true, showToolConfidence: true }, defaultLabel: "Overlays", runtime: ["mobile"] },
   { type: "debug-sink", label: "Debug Log", subtitle: "shows output in viewer", color: { fill: "#1a1a1a", header: "#6b7280", stroke: "#6b7280" }, allowedTargets: [], role: "sink" as const, activationMode: null, binding: null, defaultModel: null, configSchema: [], defaultConfig: {}, defaultLabel: "Debug Log", runtime: ["server"] },
 ];
 

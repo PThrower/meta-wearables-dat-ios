@@ -122,7 +122,29 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
-        await processFrameInternal(packet)
+        // Snapshot pixel buffer SYNCHRONOUSLY before actor hop.
+        // Task.detached in FramePipelineManager introduces a scheduling delay —
+        // by the time the actor runs, the SDK may have recycled the IOSurface.
+        // Capturing here (still synchronous, still on the calling thread) ensures
+        // the snapshot matches the frame that produced the detections.
+        var snapshotBuffer: CVPixelBuffer?
+        if let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) {
+            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
+            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
+            let attrs: [String: Any] = [
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+            ]
+            if bufWidth > 0, bufHeight > 0,
+               CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
+                                    kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
+               let snap = snapshotBuffer {
+                let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
+                ciCtx.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
+                             bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
+                             colorSpace: CGColorSpaceCreateDeviceRGB())
+            }
+        }
+        await processFrameInternal(packet, snapshotBuffer: snapshotBuffer)
     }
 
     func start() async {
@@ -138,7 +160,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
     // MARK: - Private
 
-    private func processFrameInternal(_ packet: FramePacket) {
+    private func processFrameInternal(_ packet: FramePacket, snapshotBuffer: CVPixelBuffer?) {
         // FPS throttle
         let now = ContinuousClock.Instant.now
         if let last = lastProcessTime {
@@ -149,27 +171,6 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
         guard !requests.isEmpty else { return }
-
-        // Snapshot the pixel buffer into a fresh BGRA buffer before async work.
-        // The SDK may recycle the original pixelBuffer while VNRequests run or
-        // during thumbnail extraction, producing black/stale thumbnails.
-        // Only needed when thumbnails are enabled (extra ~1ms copy).
-        var snapshotBuffer: CVPixelBuffer?
-        if visionConfig.thumbnailsEnabled {
-            let attrs: [String: Any] = [
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
-            ]
-            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
-            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
-            if bufWidth > 0, bufHeight > 0,
-               CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
-                                    kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
-               let snap = snapshotBuffer {
-                ciContext.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
-                                 bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
-                                 colorSpace: CGColorSpaceCreateDeviceRGB())
-            }
-        }
 
         let startTime = ContinuousClock.Instant.now
 
@@ -255,20 +256,26 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             inferenceTimeMs: inferenceMs
         )
 
-        // Extract thumbnails if enabled and there are detections with bounding boxes
-        // Use the snapshot buffer (if available) to avoid reading a recycled SDK buffer
+        // Extract thumbnails if enabled and there are detections with bounding boxes.
+        // Only extract for detection types specified in thumbnailDetectionTypes (edge-connected).
+        // Use the pre-snapped buffer from processFrame (captured synchronously before actor hop).
         var thumbnails: [(Int, String)]? = nil
-        let thumbSource = snapshotBuffer ?? pixelBuffer
-        if visionConfig.thumbnailsEnabled {
+        if visionConfig.thumbnailsEnabled, let snapshotBuffer {
+            let allowedTypes = visionConfig.thumbnailDetectionTypes
             let maxSize = visionConfig.thumbnailMaxCount > 0
                 ? visionConfig.thumbnailMaxCount
                 : detections.count
             var extracted: [(Int, String)] = []
             for (i, detection) in detections.enumerated() {
                 guard extracted.count < maxSize else { break }
-                if let bbox = detection.boundingBox,
-                   let thumb = extractThumbnail(from: thumbSource, bbox: bbox) {
-                    extracted.append((i, thumb))
+                // Filter: if thumbnailDetectionTypes is set, only extract for those types
+                if !allowedTypes.isEmpty && !allowedTypes.contains(detection.detectionType) {
+                    continue
+                }
+                if let bbox = detection.boundingBox {
+                    if let thumb = extractThumbnail(from: snapshotBuffer, bbox: bbox) {
+                        extracted.append((i, thumb))
+                    }
                 }
             }
             if !extracted.isEmpty {
@@ -435,17 +442,18 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         let pxH = pxY2 - pxY
         guard pxW > 0, pxH > 0 else { return nil }
 
-        let cropRect = CGRect(x: pxX, y: pxY, width: pxW, height: pxH)
+        // Flip Y for CIImage's bottom-left origin: our bbox uses top-left Y (0=top),
+        // but CIImage expects Y=0 at bottom. So ciCropY = bufHeight - pxY2.
+        let ciCropY = CGFloat(bufHeight) - CGFloat(pxY2)
+        let cropRect = CGRect(x: CGFloat(pxX), y: ciCropY, width: CGFloat(pxW), height: CGFloat(pxH))
         let targetSize = visionConfig.thumbnailSize
 
         // Create CIImage from pixel buffer and crop
-        // CIImage from CVPixelBuffer uses pixel coordinates with (0,0) at top-left
         let fullImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let ciImage = fullImage.cropped(to: cropRect)
+        let cropped = fullImage.cropped(to: cropRect)
 
         // Skip if cropped image extent is empty or doesn't intersect the source
-        let extent = ciImage.extent
-        guard extent.width > 0, extent.height > 0,
+        guard cropped.extent.width > 0, cropped.extent.height > 0,
               fullImage.extent.intersects(cropRect) else { return nil }
 
         // Skip if the crop region is too small (< 4px in either dimension) — produces black/empty thumbnails
@@ -466,10 +474,13 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         )
         guard status == kCVReturnSuccess, let outBuffer else { return nil }
 
-        // Scale the cropped region into the thumbnail buffer via GPU render
-        let scaleX = CGFloat(targetSize) / cropRect.width
-        let scaleY = CGFloat(targetSize) / cropRect.height
-        let scaledImage = ciImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        // Translate cropped image to origin (0,0) then scale to target size.
+        // CIImage.cropped(to:) preserves the crop rect origin in the extent,
+        // so without translating, the scaled image would be offset and not
+        // overlap the render bounds (0,0,targetSize,targetSize) — producing black.
+        let translate = CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y)
+        let scale = CGAffineTransform(scaleX: CGFloat(targetSize) / cropRect.width, y: CGFloat(targetSize) / cropRect.height)
+        let scaledImage = cropped.transformed(by: translate.concatenating(scale))
 
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         ciContext.render(scaledImage, to: outBuffer, bounds: CGRect(x: 0, y: 0, width: targetSize, height: targetSize), colorSpace: colorSpace)
