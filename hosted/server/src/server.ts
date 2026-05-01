@@ -392,7 +392,6 @@ function dispatchWorkflowConfig(
     if (def?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
     if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
     if (def?.activationMode === "measure")   { measureIdx.push(i);  continue; }
-    if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
   }
 
   // Speech config (mobile-stt, vad)
@@ -516,9 +515,9 @@ function dispatchWorkflowConfig(
 
   // Tracking config (OC-SORT)
   if (trackingIdx.length > 0) {
-    // Collect gate nodes (activationMode=null, role="gating")
-    const gateNodes = nodes.filter(n => n.type && typeof n.type === "string" && n.type.startsWith("gate-"));
-    const gateNodeMap = new Map(nodes.filter(n => n.type?.startsWith("gate-")).map(n => [n.id, n]));
+    // Collect gate/cost nodes from workflow nodes
+    const gateNodes = nodes.filter(n => n.type && typeof n.type === "string" && (n.type.startsWith("gate-") || n.type.startsWith("cost-")));
+    const gateNodeMap = new Map(gateNodes.map(n => [n.id, n]));
 
     for (const i of trackingIdx) {
       const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
@@ -526,7 +525,7 @@ function dispatchWorkflowConfig(
         ? (cfg.targetClasses as string).split(",").map(s => s.trim()).filter(s => s.length > 0)
         : [];
 
-      // Build ordered gate chain from edges
+      // Build ordered gate chain via BFS on edges
       const trackerNodeId = nodes[i].id;
       const gates: Array<{ gateType: string; params: Record<string, number> }> = [];
       if (edges && edges.length > 0) {
@@ -537,21 +536,29 @@ function dispatchWorkflowConfig(
           if (visited.has(targetId)) continue;
           visited.add(targetId);
           for (const edge of edges) {
-            if (edge.targetNodeId === targetId) {
-              const srcNode = gateNodeMap.get(edge.sourceNodeId);
-              if (srcNode) {
-                const gateDef = NODE_DEF_MAP.get(srcNode.type);
-                if (gateDef?.role === "gating") {
-                  const gateConfig = (srcNode.config ?? {}) as Record<string, number>;
-                  gates.push({ gateType: srcNode.type, params: gateConfig });
-                  queue.push(edge.sourceNodeId);
-                }
+            if (edge.targetNodeId === targetId && gateNodeMap.has(edge.sourceNodeId)) {
+              const srcNode = gateNodeMap.get(edge.sourceNodeId)!;
+              const gateDef = NODE_DEF_MAP.get(srcNode.type);
+              if (gateDef && gateDef.role === "gating") {
+                const gateConfig = (srcNode.config ?? {}) as Record<string, number>;
+                gates.push({ gateType: srcNode.type, params: gateConfig });
+                queue.push(edge.sourceNodeId);
               }
             }
           }
         }
         gates.reverse();
       }
+
+      // Separate cost function from gate chain
+      let costFunction: string | null = null;
+      const pureGates = gates.filter(g => {
+        if (g.gateType.startsWith("cost-")) {
+          costFunction = g.gateType;
+          return false;
+        }
+        return true;
+      });
 
       ws.send(JSON.stringify({
         type: "tracking_stage_config",
@@ -570,7 +577,8 @@ function dispatchWorkflowConfig(
         inertia: (cfg.inertia as number) ?? 0.2,
         detThresh: (cfg.detThresh as number) ?? 0.5,
         useByte: (cfg.useByte as boolean) ?? false,
-        gates,
+        gates: pureGates,
+        costFunction,
       }));
     }
     console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);
@@ -1985,14 +1993,10 @@ const server = Bun.serve<WsData>({
 
         // 7. Fire-and-forget: send tracking config to iOS
         // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
-        // Gate nodes (gate-mahalanobis, gate-iou, etc.) configure the tracker's
-        // internal association pipeline. They have activationMode=null, so they
-        // aren't in processableNodes. Collect them from the raw nodes array and
-        // build an ordered chain using the workflow edges.
         if (trackingIdx.length > 0) {
-          // Collect gate nodes from raw nodes (they have activationMode=null)
+          // Collect gate/cost nodes from raw nodes (activationMode=null, role="gating")
           const gateNodes = (nodes as any[]).filter((n: any) =>
-            n.type && typeof n.type === "string" && n.type.startsWith("gate-")
+            n.type && typeof n.type === "string" && (n.type.startsWith("gate-") || n.type.startsWith("cost-"))
           );
           const gateNodeMap = new Map<string, any>();
           for (const gn of gateNodes) { gateNodeMap.set(gn.id, gn); }
@@ -2006,12 +2010,7 @@ const server = Bun.serve<WsData>({
             const trackerNodeId = rawNode.id;
             const gates: Array<{ gateType: string; params: Record<string, number> }> = [];
             if (edges && (edges as any[]).length > 0) {
-              // Walk edges to find gate nodes that eventually connect to the tracker
-              // by following the chain: gate → gate → ... → tracker
               const typedEdges = edges as Array<{ sourceNodeId: string; targetNodeId: string }>;
-              // Find all nodes that have a path to the tracker through gate nodes
-              // BFS from tracker backwards through gate-type edges
-              const gateTargets = new Set(["tracking-ocsort", "gate-mahalanobis", "gate-iou"]);
               const visited = new Set<string>();
               const queue: string[] = [trackerNodeId];
               while (queue.length > 0) {
@@ -2030,9 +2029,18 @@ const server = Bun.serve<WsData>({
                   }
                 }
               }
-              // Reverse to get source-to-target order (BFS gives reverse)
               gates.reverse();
             }
+
+            // Separate cost function from gate chain
+            let costFunction: string | null = null;
+            const pureGates = gates.filter(g => {
+              if (g.gateType.startsWith("cost-")) {
+                costFunction = g.gateType;
+                return false;
+              }
+              return true;
+            });
 
             const trackingConfig = {
               type: "tracking_stage_config" as const,
@@ -2052,7 +2060,8 @@ const server = Bun.serve<WsData>({
               inertia: (rawConfig.inertia as number) ?? 0.2,
               detThresh: (rawConfig.detThresh as number) ?? 0.5,
               useByte: (rawConfig.useByte as boolean) ?? false,
-              gates,
+              gates: pureGates,
+              costFunction,
             };
             if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
               session.publisher.ws.send(JSON.stringify(trackingConfig));

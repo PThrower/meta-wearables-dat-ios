@@ -70,12 +70,16 @@ struct TrackingStageConfig: Codable, Sendable {
     /// Empty array = default gating (IoU at iouThreshold).
     let gates: [GateConfig]
 
+    /// Cost function selector from the workflow graph.
+    /// "cost-iou" = IoU-only cost (ByteTrack compatible), null = default OCM cost.
+    let costFunction: String?
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
         case deltaT, inertia, detThresh, useByte
-        case gates
+        case gates, costFunction
     }
 
     init(
@@ -92,7 +96,8 @@ struct TrackingStageConfig: Codable, Sendable {
         inertia: Double = 0.2,
         detThresh: Double = 0.5,
         useByte: Bool = false,
-        gates: [GateConfig] = []
+        gates: [GateConfig] = [],
+        costFunction: String? = nil
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -108,6 +113,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.detThresh = detThresh
         self.useByte = useByte
         self.gates = gates
+        self.costFunction = costFunction
     }
 
     init(from decoder: Decoder) throws {
@@ -126,6 +132,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.detThresh = try c.decodeIfPresent(Double.self, forKey: .detThresh) ?? 0.5
         self.useByte = try c.decodeIfPresent(Bool.self, forKey: .useByte) ?? false
         self.gates = try c.decodeIfPresent([GateConfig].self, forKey: .gates) ?? []
+        self.costFunction = try c.decodeIfPresent(String.self, forKey: .costFunction)
     }
 }
 

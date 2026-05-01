@@ -16,16 +16,16 @@ export type ConfigFieldSchema =
   | { kind: "select"; key: string; label: string; options: Array<{ value: string; label: string }> }
   | { kind: "range"; key: string; label: string; min: number; max: number; step: number; unit?: string }
   | { kind: "checkbox"; key: string; label: string }
-  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number }
+  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; placeholder?: string }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
   | { kind: "geofence-map"; key: string; label: string }
   | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
 
 // --- Structural & Activation Types ---
 
-export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
+export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink" | "gating";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "passthrough" | "gating";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -374,7 +374,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Face Detect",
     subtitle: "${maxFaces} faces | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-face-detect",
@@ -395,7 +395,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Barcode Scan",
     subtitle: "${symbologies}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-barcode-scan",
@@ -421,7 +421,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "OCR",
     subtitle: "${language} | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-ocr",
@@ -473,7 +473,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Person Detect",
     subtitle: "${maxPersons} persons | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-person-detect",
@@ -494,7 +494,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Body Pose",
     subtitle: "${maxPoses} poses | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-body-pose",
@@ -556,7 +556,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Mahalanobis Gate",
     subtitle: "chi-sq: ${chiSquaredThreshold} | KF motion filter",
     color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
-    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou"],
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid"],
     role: "gating",
     activationMode: null,
     binding: null,
@@ -573,7 +573,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "IoU Gate",
     subtitle: "iou >= ${iouThreshold} | spatial overlap",
     color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
-    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou"],
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid"],
     role: "gating",
     activationMode: null,
     binding: null,
@@ -583,6 +583,68 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { iouThreshold: 0.3 },
     defaultLabel: "IoU Gate",
+    runtime: ["mobile"],
+  },
+  {
+    type: "gate-bhattacharyya",
+    label: "Bhattacharyya Gate",
+    subtitle: "hist dist <= ${histDistance} | color histogram",
+    color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid"],
+    role: "gating",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "histDistance", label: "Histogram distance threshold (0=same, 1=opposite)", min: 0.1, max: 1.0, step: 0.05 },
+      { kind: "select", key: "colorSpace", label: "Color space", options: [
+        { value: "rgb", label: "RGB (3x16 bins)" },
+        { value: "hsv", label: "HSV (H:16 S:8 bins)" },
+      ] },
+    ],
+    defaultConfig: { histDistance: 0.5, colorSpace: "hsv" },
+    defaultLabel: "Bhattacharyya Gate",
+    runtime: ["mobile"],
+  },
+  {
+    type: "gate-reid",
+    label: "ReID Gate",
+    subtitle: "embed dist <= ${embedDistance} | appearance",
+    color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid"],
+    role: "gating",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "embedDistance", label: "Embedding distance threshold", min: 0.1, max: 2.0, step: 0.05 },
+      { kind: "select", key: "model", label: "ReID model", options: [
+        { value: "osnet-x025", label: "OSNet x0.25 (fastest)" },
+        { value: "osnet-x05", label: "OSNet x0.5 (balanced)" },
+        { value: "osnet-x10", label: "OSNet x1.0 (accurate)" },
+      ] },
+      { kind: "range", key: "gallerySize", label: "Gallery size (frames kept per track)", min: 1, max: 50, step: 1 },
+    ],
+    defaultConfig: { embedDistance: 0.5, model: "osnet-x05", gallerySize: 10 },
+    defaultLabel: "ReID Gate",
+    runtime: ["mobile"],
+  },
+  {
+    type: "cost-iou",
+    label: "IoU Cost Matrix",
+    subtitle: "IoU-only cost | ByteTrack compatible",
+    color: { fill: "#1a0d1a", header: "#d946ef", stroke: "#d946ef" },
+    allowedTargets: ["tracking-ocsort"],
+    role: "gating",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "highThreshold", label: "High confidence threshold (first pass)", min: 0.1, max: 0.9, step: 0.05 },
+      { kind: "range", key: "lowThreshold", label: "Low confidence threshold (second pass)", min: 0.01, max: 0.5, step: 0.01 },
+    ],
+    defaultConfig: { highThreshold: 0.5, lowThreshold: 0.1 },
+    defaultLabel: "IoU Cost Matrix",
     runtime: ["mobile"],
   },
   {
@@ -607,7 +669,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       { kind: "number", key: "deltaT", label: "Velocity lookback (frames)", placeholder: "3" },
       { kind: "range", key: "inertia", label: "Direction weight (OCM)", min: 0, max: 1, step: 0.05 },
       { kind: "range", key: "detThresh", label: "Detection threshold", min: 0, max: 1, step: 0.05 },
-      { kind: "toggle", key: "useByte", label: "ByteTrack two-pass (low-conf recovery)" },
+      { kind: "checkbox", key: "useByte", label: "ByteTrack two-pass (low-conf recovery)" },
     ],
     defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3, deltaT: 3, inertia: 0.2, detThresh: 0.5, useByte: false },
     defaultLabel: "OC-SORT Tracker",

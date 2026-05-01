@@ -559,6 +559,10 @@ struct InternalTrack: Sendable {
     /// Trail of center points for visualization. Max 30 points.
     var trail: [(x: Double, y: Double)] = []
 
+    /// Appearance gallery for Bhattacharyya and ReID gates.
+    /// nil when no appearance gates are configured (zero overhead).
+    var appearanceGallery: AppearanceGallery?
+
     /// Whether this track has been observed at least once (for ORU).
     var hasBeenObserved: Bool = false
 
@@ -618,8 +622,9 @@ struct OCSORT: Sendable {
 
     // Gating pipeline
     let gatingPipeline: GatingPipeline
-    let costFunction: OCMCostFunction
+    let activeCostFunction: CostFunction
     let iouCostFunction: IoUCostFunction
+    let ocmCostFunction: OCMCostFunction
 
     init(
         detThresh: Double = 0.5,
@@ -630,7 +635,8 @@ struct OCSORT: Sendable {
         inertia: Double = 0.2,
         maxTracks: Int = 0,
         useByte: Bool = false,
-        gates: [GateConfig] = []
+        gates: [GateConfig] = [],
+        costFunctionType: String? = nil
     ) {
         self.detThresh = detThresh
         self.maxAge = maxAge
@@ -655,6 +661,16 @@ struct OCSORT: Sendable {
                 case "gate-iou":
                     let threshold = gateConfig.params["iouThreshold"] ?? iouThreshold
                     return IoUGate(threshold: threshold) as Gate
+                case "gate-bhattacharyya":
+                    let dist = gateConfig.params["histDistance"] ?? 0.5
+                    let cs = gateConfig.params["colorSpace"] == 1 ? "rgb" : "hsv"
+                    return BhattacharyyaGate(histDistance: dist, colorSpace: cs) as Gate
+                case "gate-reid":
+                    let embedDist = gateConfig.params["embedDistance"] ?? 0.5
+                    let model = gateConfig.params["model"] == 0 ? "osnet-x025" :
+                                gateConfig.params["model"] == 2 ? "osnet-x10" : "osnet-x05"
+                    let gallery = Int(gateConfig.params["gallerySize"] ?? 10)
+                    return ReIDGate(embedDistance: embedDist, model: model, gallerySize: gallery) as Gate
                 default:
                     // Unknown gate type — fall through to IoU
                     return IoUGate(threshold: iouThreshold) as Gate
@@ -662,8 +678,14 @@ struct OCSORT: Sendable {
             }
         }
         self.gatingPipeline = GatingPipeline(gates: builtGates)
-        self.costFunction = OCMCostFunction()
+        self.ocmCostFunction = OCMCostFunction()
         self.iouCostFunction = IoUCostFunction()
+        switch costFunctionType {
+        case "cost-iou":
+            self.activeCostFunction = iouCostFunction
+        default:
+            self.activeCostFunction = ocmCostFunction
+        }
     }
 
     // MARK: - Public Interface
@@ -1113,7 +1135,7 @@ struct OCSORT: Sendable {
         )
 
         // --- Cost matrix: OCM (IoU + direction consistency) on gated pairs only ---
-        let costMatrix = costFunction.compute(
+        let costMatrix = activeCostFunction.compute(
             detections: detections,
             predictedBoxes: trackers,
             gateMask: gateMask,
