@@ -1,6 +1,7 @@
 import type { SessionRegistry } from "./session-registry.js";
 import type { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import type { JEPAOrchestrator } from "./jepa-orchestrator.js";
+import type { ReIDOrchestrator } from "./reid-orchestrator.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AudioTapBus } from "./audio-tap.js";
 import type { ControlEventBus } from "./control-event-bus.js";
@@ -30,6 +31,7 @@ export interface WsMessageDeps {
   registry: SessionRegistry;
   orchestrator: GuidanceOrchestrator;
   jepaOrchestrator: JEPAOrchestrator;
+  reidOrchestrator: ReIDOrchestrator;
   appRegistry: AppRegistry;
   detectionThrottle: DetectionThrottle;
   audioTapBus: AudioTapBus;
@@ -95,7 +97,7 @@ export async function handleWsMessage(
 ): Promise<void> {
   const { role, sessionId } = ws.data;
   const {
-    registry, orchestrator, jepaOrchestrator, appRegistry,
+    registry, orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry,
     detectionThrottle, audioTapBus, controlEventBus,
     getH264Decoder, stopH264Decoder, sendCachedFrameToAI,
     broadcastToViewers: broadcast, buildSessionInfo: buildInfo,
@@ -469,6 +471,14 @@ export async function handleWsMessage(
             }
           }
           broadcast(session, cmd);
+        } else if (cmd.type === "reid_crops" && Array.isArray(cmd.crops)) {
+          // Person crops for ReID embedding extraction (JEPA pattern)
+          if (reidOrchestrator.isActive(sessionId)) {
+            const crops = cmd.crops as Array<{ detectionIndex: number; data: string }>;
+            reidOrchestrator.sendCrops(sessionId, crops).catch((err: Error) => {
+              console.error(`[relay] ReID crop processing error session=${sessionId}:`, err.message);
+            });
+          }
         } else if (cmd.type === "tool_measure_result" && cmd.suggestions) {
           if (session.activeAppId) {
             const dims = cmd.dimensions as Record<string, any> ?? {};

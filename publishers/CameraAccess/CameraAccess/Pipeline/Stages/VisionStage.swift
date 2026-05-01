@@ -97,8 +97,11 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     private var previewBus: PreviewBus?
     private let previewSource = PreviewSource(stageId: "vision", label: "Vision")
 
-    // Callback for relaying results to server (includes optional thumbnails)
-    private var onResult: (@Sendable (VisionFrameResult, [(Int, String)]?) async -> Void)?
+    // Callback for relaying results to server (includes optional thumbnails + histograms)
+    private var onResult: (@Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])]) async -> Void)?
+
+    /// Whether to extract HSV histograms for Bhattacharyya gate.
+    var extractHistograms: Bool = false
 
     init(config: VisionStageConfig = .default) {
         self.visionConfig = config
@@ -110,7 +113,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.previewBus = bus
     }
 
-    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult, [(Int, String)]?) async -> Void) {
+    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])]) async -> Void) {
         self.onResult = handler
     }
 
@@ -283,14 +286,25 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             }
         }
 
+        // Extract HSV histograms for Bhattacharyya gate (on-device, cheap <0.5ms per crop)
+        var histograms: [(Int, [Double])] = []
+        if extractHistograms, let snapshotBuffer {
+            for (i, detection) in detections.enumerated() {
+                guard let bbox = detection.boundingBox else { continue }
+                if let hist = HistogramExtractor.extractHSV(from: snapshotBuffer, bbox: bbox) {
+                    histograms.append((i, hist))
+                }
+            }
+        }
+
         // Publish to PreviewBus for overlay rendering
         if let previewBus {
             Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict(thumbnails: nil))) }
         }
 
-        // Relay to server via callback (includes thumbnails for relay)
+        // Relay to server via callback (includes thumbnails + histograms)
         if let onResult {
-            Task { await onResult(result, thumbnails) }
+            Task { await onResult(result, thumbnails, histograms) }
         }
     }
 

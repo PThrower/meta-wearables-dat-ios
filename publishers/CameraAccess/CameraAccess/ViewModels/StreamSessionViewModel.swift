@@ -182,6 +182,7 @@ class StreamSessionViewModel: ObservableObject {
   private var speechRecognitionStage: SpeechRecognitionStage?
   private var voiceActivityStage: VoiceActivityStage?
   private var trackingStage: ObjectTrackingStage?
+  private var trackingConfig: TrackingStageConfig?
   private var measureStage: ToolMeasurementStage?
 
   // Preview system
@@ -829,7 +830,7 @@ class StreamSessionViewModel: ObservableObject {
     let stage = VisionStage(config: visionConfig)
 
     // Wire result callback to update overlay AND relay to server
-    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?) in
+    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?, histograms: [(Int, [Double])]) in
       await MainActor.run {
         // When tracking is active, suppress raw vision boxes —
         // the tracker will emit tracked items with persistent IDs instead.
@@ -852,16 +853,36 @@ class StreamSessionViewModel: ObservableObject {
       }
       // Feed detections into tracking stage if active
       if let trackingStage = await self?.trackingStage {
-        let trackDets: [TrackDetection] = result.detections.compactMap { det in
+        // Build histogram lookup from VisionStage extraction
+        let histMap = Dictionary(uniqueKeysWithValues: histograms)
+        let trackDets: [TrackDetection] = result.detections.enumerated().compactMap { (i, det) in
           guard let bbox = det.boundingBox else { return nil }
           return TrackDetection(
             bbox: bbox,
             confidence: det.confidence,
-            classLabel: det.displayLabel
+            classLabel: det.displayLabel,
+            histogram: histMap[i]
           )
         }
         if !trackDets.isEmpty {
           await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
+        }
+        // Send ReID crops when gate-reid is in tracking config
+        if let self,
+           self.trackingStage != nil,
+           self.trackingConfig?.gates.contains(where: { $0.gateType == "gate-reid" }) == true,
+           let thumbnails {
+          let reidCrops = thumbnails.filter { (i, _) in
+            result.detections[i].boundingBox != nil
+          }.map { (i, data) -> [String: Any] in
+            return ["detectionIndex": i, "data": data]
+          }
+          if !reidCrops.isEmpty {
+            await self.relayStage.sendJson([
+              "type": "reid_crops",
+              "crops": reidCrops
+            ])
+          }
         }
       }
     }
@@ -1038,6 +1059,7 @@ class StreamSessionViewModel: ObservableObject {
       await existing.stop()
       pipeline.unregister(stageId: existing.stageId)
       trackingStage = nil
+      trackingConfig = nil
       trackingTracks = []
     }
 
@@ -1065,10 +1087,24 @@ class StreamSessionViewModel: ObservableObject {
       deltaT: config["deltaT"] as? Int ?? 3,
       inertia: config["inertia"] as? Double ?? 0.2,
       detThresh: config["detThresh"] as? Double ?? 0.5,
-      useByte: config["useByte"] as? Bool ?? false
+      useByte: config["useByte"] as? Bool ?? false,
+      gates: (config["gates"] as? [[String: Any]])?.map { dict -> GateConfig in
+        GateConfig(
+          gateType: dict["gateType"] as? String ?? "",
+          params: dict["params"] as? [String: Double] ?? [:]
+        )
+      } ?? [],
+      costFunction: config["costFunction"] as? String
     )
 
     let stage = ObjectTrackingStage(config: trackingConfig)
+    self.trackingConfig = trackingConfig
+
+    // Enable histogram extraction on VisionStage when Bhattacharyya gate is present
+    let hasBhattacharyya = trackingConfig.gates.contains(where: { $0.gateType == "gate-bhattacharyya" })
+    if let visionStage {
+      visionStage.extractHistograms = hasBhattacharyya
+    }
 
     // Wire result callback to update overlay AND relay to server
     await stage.setOnResult { [weak self] result in
@@ -1087,7 +1123,7 @@ class StreamSessionViewModel: ObservableObject {
     await stage.start()
     trackingStage = stage
 
-    NSLog("[StreamSession] ObjectTrackingStage registered: confidence=\(trackingConfig.confidence) iou=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) zones=\(trackingConfig.zones.count)")
+    NSLog("[StreamSession] ObjectTrackingStage registered: confidence=\(trackingConfig.confidence) iou=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) zones=\(trackingConfig.zones.count) gates=\(trackingConfig.gates.map { $0.gateType }) cost=\(trackingConfig.costFunction ?? "default")")
   }
 
   private func configureMeasureStage(config: [String: Any]) async {
@@ -1346,6 +1382,23 @@ class StreamSessionViewModel: ObservableObject {
           Task { @MainActor [weak self] in
             guard let self else { return }
             await self.configureTrackingStage(config: msg)
+          }
+        }
+      }
+
+      // ReID embeddings from server -- inject into tracking stage galleries
+      if msgType == "reid_embeddings",
+         let embeddings = msg["embeddings"] as? [[String: Any]] {
+        Task { [weak self] in
+          var embedMap: [Int: [Double]] = [:]
+          for item in embeddings {
+            if let idx = item["detectionIndex"] as? Int,
+               let embed = item["embedding"] as? [Double] {
+              embedMap[idx] = embed
+            }
+          }
+          if !embedMap.isEmpty {
+            await self?.trackingStage?.injectEmbeddings(embedMap)
           }
         }
       }

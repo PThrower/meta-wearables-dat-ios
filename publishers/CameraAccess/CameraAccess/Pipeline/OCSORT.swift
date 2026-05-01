@@ -595,6 +595,13 @@ struct InternalTrack: Sendable {
         let cx = (detection.bbox.x1 + detection.bbox.x2) / 2.0
         let cy = (detection.bbox.y1 + detection.bbox.y2) / 2.0
         self.trail = [(x: cx, y: cy)]
+
+        // Initialize appearance gallery from first detection
+        if detection.histogram != nil || detection.embedding != nil {
+            self.appearanceGallery = AppearanceGallery()
+            if let h = detection.histogram { appearanceGallery?.addHistogram(h) }
+            if let e = detection.embedding { appearanceGallery?.addEmbedding(e) }
+        }
     }
 }
 
@@ -607,6 +614,9 @@ struct OCSORT: Sendable {
     private var tracks: [InternalTrack] = []
     private var nextId: Int = 1
     private var frameCount: Int = 0
+    /// Match pairs from last update() call: [(trackIdx, detIdx)].
+    /// Used by injectEmbeddings() to map detection indices to matched tracks.
+    private(set) var lastMatchPairs: [(Int, Int)] = []
 
     // Paper: key parameters from OCSort.__init__
     let detThresh: Double       // 0.5 — detection confidence threshold
@@ -775,6 +785,8 @@ struct OCSORT: Sendable {
         )
 
         // Step 4: Update matched tracks
+        // Store match pairs for late-arriving ReID embeddings
+        lastMatchPairs = matched.map { ($0.1, $0.0) }  // (trackIdx, detIdx)
         var matchedTrackIndices = Set<Int>()
         var matchedDetIndices = Set<Int>()
 
@@ -956,6 +968,24 @@ struct OCSORT: Sendable {
         tracks.removeAll()
         nextId = 1
         frameCount = 0
+        lastMatchPairs = []
+    }
+
+    /// Inject late-arriving ReID embeddings into matched tracks.
+    /// Maps detection indices to matched tracks via lastMatchPairs,
+    /// then adds embeddings to their appearance galleries.
+    /// Asynchronous — embeddings arrive 50-200ms after detections.
+    /// The ReID gate uses cached gallery embeddings from previous frames,
+    /// so it's still effective even without the current frame's embedding.
+    mutating func updateEmbeddings(_ embeddings: [Int: [Double]]) {
+        guard !embeddings.isEmpty else { return }
+        for (trkIdx, detIdx) in lastMatchPairs {
+            guard trkIdx < tracks.count, let embed = embeddings[detIdx] else { continue }
+            var trk = tracks[trkIdx]
+            if trk.appearanceGallery == nil { trk.appearanceGallery = AppearanceGallery() }
+            trk.appearanceGallery?.addEmbedding(embed)
+            tracks[trkIdx] = trk
+        }
     }
 
     // MARK: - Track Update with ORU
@@ -1006,6 +1036,16 @@ struct OCSORT: Sendable {
         track.hitStreak += 1
         track.confidence = detection.confidence
         track.classLabel = detection.classLabel
+
+        // Update appearance gallery with new observation
+        if let hist = detection.histogram {
+            if track.appearanceGallery == nil { track.appearanceGallery = AppearanceGallery() }
+            track.appearanceGallery?.addHistogram(hist)
+        }
+        if let embed = detection.embedding {
+            if track.appearanceGallery == nil { track.appearanceGallery = AppearanceGallery() }
+            track.appearanceGallery?.addEmbedding(embed)
+        }
 
         // KF update with z-vector — only when ORU did NOT already update
         // (ORU's last virtual step incorporates the new observation)

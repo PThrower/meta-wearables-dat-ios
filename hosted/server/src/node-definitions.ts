@@ -627,7 +627,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { embedDistance: 0.5, model: "osnet-x05", gallerySize: 10 },
     defaultLabel: "ReID Gate",
-    runtime: ["mobile"],
+    runtime: ["mobile", "server"],
   },
   {
     type: "cost-iou",

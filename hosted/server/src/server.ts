@@ -54,6 +54,7 @@ import type { FlowTrigger, WorkflowSettings } from "./app-types.js";
 
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
+import { ReIDOrchestrator } from "./reid-orchestrator.js";
 import { NODE_DEFINITIONS, validateStructure } from "./node-definitions.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
@@ -283,6 +284,10 @@ orchestrator.start();
 // --- JEPA Orchestrator setup ---
 
 const jepaOrchestrator = new JEPAOrchestrator();
+
+// --- ReID Orchestrator setup ---
+
+const reidOrchestrator = new ReIDOrchestrator();
 
 // JEPA events fan out to viewer WebSockets (same subscriber list as AI guidance)
 jepaOrchestrator.setEventFanoutFn((sessionId: string, event) => {
@@ -992,7 +997,7 @@ const server = Bun.serve<WsData>({
         const wfId = wfActivateMatch[1];
         const body = await req.json() as { sessionId?: string; deviceId?: string; override?: boolean; reason?: string; wakeActivation?: boolean };
         return await handleWorkflowActivation(
-          { orchestrator, jepaOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI },
+          { orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI },
           wfId,
           body,
         );
@@ -1298,7 +1303,7 @@ const server = Bun.serve<WsData>({
     },
     async message(ws, message) {
       const wsMessageDeps: WsMessageDeps = {
-        registry, orchestrator, jepaOrchestrator, appRegistry,
+        registry, orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry,
         detectionThrottle, audioTapBus, controlEventBus,
         getH264Decoder, stopH264Decoder, sendCachedFrameToAI,
         broadcastToViewers, buildSessionInfo,

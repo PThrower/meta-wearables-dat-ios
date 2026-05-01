@@ -174,32 +174,34 @@ struct BhattacharyyaGate: Sendable {
             return [[Bool]](repeating: row, count: numTrks)
         }
 
-        // When no appearance data is available, pass all pairs (no-op gate).
-        // This gate only filters when the pipeline has extracted histogram features.
+        // Start with all-true: pairs without appearance data pass through.
         var mask = GateMask(
             repeating: [Bool](repeating: true, count: numDets),
             count: numTrks
         )
 
-        // Check if tracks have histogram appearance data
         for t in 0..<numTrks {
-            let gallery = tracks[t].appearanceGallery
-            guard let trackHist = gallery?.lastHistogram, !trackHist.isEmpty else { continue }
+            guard let trackHist = tracks[t].appearanceGallery?.lastHistogram,
+                  !trackHist.isEmpty else { continue }
 
             for d in 0..<numDets {
-                // Detection histograms would need to be extracted from the frame.
-                // Since detections come from VNRequest (no pixel data attached),
-                // we use spatial proximity as a proxy: if the detection bbox
-                // overlaps significantly with the track's last known position,
-                // assume similar appearance. This is a placeholder until
-                // the pipeline provides per-detection histogram features.
-                //
-                // For now: pass through — real filtering requires frame pixel access.
-                mask[t][d] = true
+                guard let detHist = detections[d].histogram, !detHist.isEmpty else { continue }
+                let dist = Self.bhattacharyyaDistance(trackHist, detHist)
+                mask[t][d] = dist <= histDistance
             }
         }
 
         return mask
+    }
+
+    /// Bhattacharyya distance: D_B = -ln(BC) where BC = sum(sqrt(p_i * q_i)).
+    /// Returns 0 for identical histograms, higher = more dissimilar.
+    private static func bhattacharyyaDistance(_ p: [Double], _ q: [Double]) -> Double {
+        var bc = 0.0
+        for i in p.indices where i < q.count {
+            bc += sqrt(p[i] * q[i])
+        }
+        return -log(max(bc, 1e-12))
     }
 }
 
@@ -244,27 +246,21 @@ struct ReIDGate: Sendable {
             return [[Bool]](repeating: row, count: numTrks)
         }
 
+        // Start with all-true: pairs without appearance data pass through.
         var mask = GateMask(
             repeating: [Bool](repeating: true, count: numDets),
             count: numTrks
         )
 
-        // If tracks have embedding gallery data, use it for filtering.
         for t in 0..<numTrks {
-            let gallery = tracks[t].appearanceGallery
-            guard let embeddings = gallery?.embeddings, !embeddings.isEmpty else { continue }
+            guard let gallery = tracks[t].appearanceGallery,
+                  !gallery.embeddings.isEmpty else { continue }
 
             for d in 0..<numDets {
-                // Detection embeddings would come from CoreML inference.
-                // Since we don't have per-detection embeddings yet (requires
-                // running the OSNet model on cropped detection patches),
-                // this gate passes through.
-                //
-                // When embeddings are available:
-                //   let detEmbed = detections[d].embedding
-                //   let minDist = embeddings.map { cosineDistance($0, detEmbed) }.min()!
-                //   mask[t][d] = minDist <= embedDistance
-                mask[t][d] = true
+                guard let detEmbed = detections[d].embedding else { continue }
+                if let minDist = gallery.minCosineDistance(to: detEmbed) {
+                    mask[t][d] = minDist <= embedDistance
+                }
             }
         }
 

@@ -13,6 +13,7 @@ import { detectFlows } from "./flow-detection.js";
 import { buildMobileWorkflowConfig, pushPassiveTTSChains } from "./workflow-utils.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
+import { ReIDOrchestrator } from "./reid-orchestrator.js";
 import { SessionRegistry } from "./session-registry.js";
 import * as q from "./db/queries.js";
 import { dbWriter } from "./db/db-writer.js";
@@ -44,6 +45,7 @@ export function validateEdges(
 export interface ActivationDeps {
   orchestrator: GuidanceOrchestrator;
   jepaOrchestrator: JEPAOrchestrator;
+  reidOrchestrator: ReIDOrchestrator;
   appRegistry: AppRegistry;
   registry: SessionRegistry;
   pendingWakeActivations: Map<string, { workflowId: string; requestedAt: number }>;
@@ -56,7 +58,7 @@ export async function handleWorkflowActivation(
   wfId: string,
   body: { sessionId?: string; deviceId?: string; override?: boolean; reason?: string; wakeActivation?: boolean },
 ): Promise<Response> {
-  const { orchestrator, jepaOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI } = deps;
+  const { orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI } = deps;
 
   const wf = q.getWorkflow(wfId);
   if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
@@ -647,6 +649,19 @@ export async function handleWorkflowActivation(
       if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
         session.publisher.ws.send(JSON.stringify(trackingConfig));
       }
+      // ReID activation locked until provider is implemented.
+      // Gate still passes through on-device (no embedding = accept all pairs).
+      // When a provider exists, uncomment the block below:
+      //
+      // if (pureGates.some(g => g.gateType === "gate-reid")) {
+      //   const reidConfig = (pureGates.find(g => g.gateType === "gate-reid")?.params ?? {}) as Record<string, unknown>;
+      //   await reidOrchestrator.activate(sid, {
+      //     provider: "modal",
+      //     model: (reidConfig.model as string) ?? "osnet-x05",
+      //     gpu: "A10G",
+      //     sessionId: sid,
+      //   }, session.publisher?.ws ?? null);
+      // }
       activatedAppIds.push(appsToActivate[i].id);
     }
     console.log(`[relay] Sent tracking config for ${trackingIdx.length} nodes session=${sid}`);

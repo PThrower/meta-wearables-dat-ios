@@ -143,6 +143,19 @@ struct TrackDetection: Sendable {
     let bbox: NormalizedBoundingBox
     let confidence: Double
     let classLabel: String
+    /// HSV color histogram (on-device, Bhattacharyya gate). 24-dim normalized vector.
+    let histogram: [Double]?
+    /// Deep appearance embedding (server-side, ReID gate). 512-dim vector.
+    let embedding: [Double]?
+
+    init(bbox: NormalizedBoundingBox, confidence: Double, classLabel: String,
+         histogram: [Double]? = nil, embedding: [Double]? = nil) {
+        self.bbox = bbox
+        self.confidence = confidence
+        self.classLabel = classLabel
+        self.histogram = histogram
+        self.embedding = embedding
+    }
 
     /// Center point of the bounding box.
     var center: (x: Double, y: Double) {

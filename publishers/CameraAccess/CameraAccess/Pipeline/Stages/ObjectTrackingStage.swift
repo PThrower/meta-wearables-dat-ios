@@ -96,6 +96,14 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         // Intentionally empty. Tracking consumes vision detections via feedDetections().
     }
 
+    /// Inject late-arriving ReID embeddings into matched tracks.
+    /// Called from ViewModel when server sends reid_embeddings message.
+    /// Maps detection indices to matched tracks via OCSORT.lastMatchPairs.
+    func injectEmbeddings(_ embeddings: [Int: [Double]]) {
+        guard isRunning, !embeddings.isEmpty else { return }
+        tracker.updateEmbeddings(embeddings)
+    }
+
     /// Feed vision detections into OC-SORT tracker. Called from ViewModel
     /// when vision stage produces results and tracking is active.
     // Paper: OCSort.update() — takes detections, returns tracks with persistent IDs
@@ -116,7 +124,9 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
                 return TrackDetection(
                     bbox: det.bbox,
                     confidence: smoothedConf,
-                    classLabel: det.classLabel
+                    classLabel: det.classLabel,
+                    histogram: det.histogram,
+                    embedding: det.embedding
                 )
             }
         }
