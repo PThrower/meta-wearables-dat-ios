@@ -147,6 +147,26 @@ export function updateSaveIndicator(): void {
   else el.textContent = "Saved";
 }
 
+// --- Palette collapse state ---
+
+let _paletteCollapse: Record<string, boolean> = {};
+
+export function getPaletteCollapseState(): Record<string, boolean> { return _paletteCollapse; }
+export function setPaletteCollapseState(state: Record<string, boolean>): void { _paletteCollapse = state; }
+
+export function loadPaletteCollapse(): void {
+  try {
+    const raw = localStorage.getItem("wf-palette-collapse");
+    _paletteCollapse = raw ? JSON.parse(raw) : {};
+  } catch { _paletteCollapse = {}; }
+}
+
+export function savePaletteCollapse(): void {
+  try {
+    localStorage.setItem("wf-palette-collapse", JSON.stringify(_paletteCollapse));
+  } catch { /* ignore quota */ }
+}
+
 // --- Reset (called from page.destroy) ---
 
 export function resetState(): void {

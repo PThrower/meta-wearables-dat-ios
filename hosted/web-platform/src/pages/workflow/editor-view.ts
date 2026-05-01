@@ -11,11 +11,14 @@ import {
 import {
   getContainer, getWorkflow, setWorkflow,
   isDirty, setDirty, setViewX, setViewY, setZoom,
+  getViewX, getViewY, getZoom,
   setSelectedNodeId, getSelectedNodeId, autoSave, doSave, updateSaveIndicator,
   nanoid, getWorkflowId, getViewBox,
+  loadPaletteCollapse, savePaletteCollapse, getPaletteCollapseState, setPaletteCollapseState,
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import type { NodeDefinition } from "../../core/api-client.js";
+import { NODE_W, NODE_H } from "./constants.js";
 import { isAvailable, getReason } from "./node-availability.js";
 import { getDescription } from "./node-descriptions.js";
 import { buildSVG, buildSVGFromData, refreshSVG } from "./svg-renderer.js";
@@ -39,6 +42,7 @@ export async function renderEditor(isNew: boolean): Promise<void> {
   setViewX(0);
   setViewY(0);
   setZoom(1);
+  loadPaletteCollapse();
 
   // Fetch node definitions from server (single source of truth)
   await loadNodeDefs();
@@ -139,53 +143,118 @@ export async function renderEditor(isNew: boolean): Promise<void> {
 }
 
 /** Palette categories — grouped by capability, not DAG role. */
+interface PaletteSubcategory { label: string; match: (d: NodeDefinition) => boolean; }
 interface PaletteCategory {
   label: string;
   accent: string;
   match: (d: NodeDefinition) => boolean;
+  subcategories?: PaletteSubcategory[];
 }
 
 const PALETTE_CATEGORIES: PaletteCategory[] = [
-  { label: "Inputs",   accent: "#14b8a6", match: d => d.role === "source" && d.type !== "gesture-source" },
-  { label: "AI",       accent: "#22c55e", match: d => d.activationMode === "ai" || d.activationMode === "jepa" },
-  { label: "Vision",   accent: "#8b5cf6", match: d => d.activationMode === "vision" },
-  { label: "Tracking", accent: "#10b981", match: d => d.activationMode === "tracking" },
-  { label: "Enhance",  accent: "#84cc16", match: d => d.activationMode === "enhance" },
-  { label: "Audio",    accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
-  { label: "Sensors",  accent: "#06b6d4", match: d => d.activationMode === "sensor" },
-  { label: "Triggers", accent: "#eab308", match: d => d.role === "trigger" || d.type === "gesture-source" },
-  { label: "Outputs",  accent: "#f97316", match: d => d.role === "sink" || d.role === "transform" },
-  { label: "Reference",accent: "#94a3b8", match: d => d.role === "reference" },
+  { label: "Inputs",       accent: "#14b8a6", match: d => d.role === "source" && d.type !== "gesture-source" },
+  { label: "AI",           accent: "#22c55e", match: d => d.activationMode === "ai" || d.activationMode === "jepa",
+    subcategories: [
+      { label: "Realtime",  match: d => d.type === "s2s-live" },
+      { label: "Inference", match: d => d.type === "s2s-rest" || d.type === "s2s-e4b" },
+      { label: "Vision",    match: d => d.type === "jepa-vision" },
+      { label: "STT",       match: d => d.type === "deepgram-stt" },
+    ] },
+  { label: "Vision",       accent: "#8b5cf6", match: d => d.activationMode === "vision",
+    subcategories: [
+      { label: "Detection",   match: d => ["vision-face-detect", "vision-person-detect", "vision-body-pose"].includes(d.type) },
+      { label: "Recognition", match: d => ["vision-barcode-scan", "vision-ocr", "vision-scene-classify"].includes(d.type) },
+      { label: "Utility",     match: d => d.type === "vision-thumbnails" },
+    ] },
+  { label: "Tracking",     accent: "#10b981", match: d => d.activationMode === "tracking" },
+  { label: "Gating",       accent: "#06b6d4", match: d => d.role === "gating" || d.type === "cost-iou" },
+  { label: "Measurement",  accent: "#a78bfa", match: d => d.activationMode === "measure" || d.type === "tool-suggest" },
+  { label: "Enhance",      accent: "#84cc16", match: d => d.activationMode === "enhance" },
+  { label: "Audio",        accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
+  { label: "Sensors",      accent: "#06b6d4", match: d => d.activationMode === "sensor",
+    subcategories: [
+      { label: "Audio",    match: d => d.type === "sensor-sound" },
+      { label: "Location", match: d => d.type.startsWith("sensor-location") },
+    ] },
+  { label: "Triggers",     accent: "#eab308", match: d => d.role === "trigger" || d.type === "gesture-source" },
+  { label: "Outputs",      accent: "#f97316", match: d => d.role === "sink" || d.role === "transform",
+    subcategories: [
+      { label: "Visual", match: d => d.type === "overlays" },
+      { label: "Audio",  match: d => ["tones", "phone-speaker", "glasses-speaker"].includes(d.type) },
+      { label: "Speech", match: d => d.type === "local-tts" },
+      { label: "Debug",  match: d => d.type === "debug-sink" },
+    ] },
+  { label: "Reference",    accent: "#94a3b8", match: d => d.role === "reference" },
 ];
 
-/** Build palette sidebar HTML grouped by capability. */
+/** Build a single palette item button HTML. */
+function buildPaletteItem(d: NodeDefinition, cat: PaletteCategory): string {
+  const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
+    ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
+    : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
+  const avail = isAvailable(d.type);
+  const lockBadge = avail ? "" : `<span class="wf-avail-badge" title="${esc(getReason(d.type) ?? "")}">&#x1f512;</span>`;
+  const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
+  const tip = esc(getDescription(d.type));
+  return `<button class="${cls}" data-type="${d.type}" draggable="${avail}" ${avail ? "" : "disabled"} title="${tip}">
+    <span class="wf-palette-dot" style="background:${cat.accent}"></span>
+    <span class="wf-palette-label">${esc(d.label)}</span>
+    <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>
+  </button>`;
+}
+
+/** Build palette sidebar HTML grouped by capability with accordion + search. */
 function buildPaletteHTML(): string {
   const all = getNodeDefs();
   const assigned = new Set<string>();
+  const collapseState = getPaletteCollapseState();
 
-  return PALETTE_CATEGORIES.map(cat => {
+  const categoriesHTML = PALETTE_CATEGORIES.map(cat => {
     const nodes = all.filter(d => !assigned.has(d.type) && cat.match(d));
     nodes.forEach(d => assigned.add(d.type));
     if (nodes.length === 0) return "";
 
-    return `
-        <h3 class="wf-palette-title" style="border-left:3px solid ${cat.accent};padding-left:6px">${cat.label}</h3>
-        ${nodes.map(d => {
-      const rtBadge = (d.runtime ?? []).map(r => r === "mobile"
-        ? `<span class="wf-rt-badge" style="background:#06b6d4">MOB</span>`
-        : `<span class="wf-rt-badge" style="background:#8b5cf6">SRV</span>`).join("");
-      const avail = isAvailable(d.type);
-      const lockBadge = avail ? "" : `<span class="wf-avail-badge" title="${esc(getReason(d.type) ?? "")}">&#x1f512;</span>`;
-      const cls = avail ? "wf-palette-item" : "wf-palette-item wf-palette-item-locked";
-      const tip = esc(getDescription(d.type));
-      return `
-                  <button class="${cls}" data-type="${d.type}" ${avail ? "" : "disabled"} title="${tip}">
-                    <span class="wf-palette-dot" style="background:${cat.accent}"></span>
-                    <span class="wf-palette-label">${esc(d.label)}</span>
-                    <span class="wf-palette-runtime">${rtBadge}${lockBadge}</span>
-                  </button>`;
-    }).join("")}`;
+    const collapsed = collapseState[cat.label] === true;
+    const openAttr = collapsed ? "" : " open";
+
+    // Build items with optional subcategory labels
+    let itemsHTML: string;
+    if (cat.subcategories && cat.subcategories.length > 0) {
+      const subAssigned = new Set<string>();
+      itemsHTML = cat.subcategories.map(sub => {
+        const subNodes = nodes.filter(d => !subAssigned.has(d.type) && sub.match(d));
+        subNodes.forEach(d => subAssigned.add(d.type));
+        if (subNodes.length === 0) return "";
+        return `<div class="wf-palette-sublabel">${sub.label}</div>` +
+          subNodes.map(d => buildPaletteItem(d, cat)).join("");
+      }).join("");
+      // Remaining nodes without a subcategory
+      const remaining = nodes.filter(d => !subAssigned.has(d.type));
+      if (remaining.length > 0) {
+        itemsHTML += remaining.map(d => buildPaletteItem(d, cat)).join("");
+      }
+    } else {
+      itemsHTML = nodes.map(d => buildPaletteItem(d, cat)).join("");
+    }
+
+    return `<div class="wf-palette-cat" data-cat="${cat.label}"${openAttr}>
+      <button class="wf-palette-cat-header">
+        <span class="wf-palette-cat-title" style="border-left:3px solid ${cat.accent};padding-left:6px">${cat.label}</span>
+        <span class="wf-palette-cat-count">${nodes.length}</span>
+        <span class="info-chevron"></span>
+      </button>
+      <div class="wf-palette-cat-body">${itemsHTML}</div>
+    </div>`;
   }).join("");
+
+  return `<div class="wf-palette-search">
+      <input type="text" id="wf-palette-search" placeholder="Search nodes..." autocomplete="off" />
+    </div>
+    <div class="wf-palette-categories">${categoriesHTML}</div>
+    <div class="wf-palette-controls">
+      <button class="wf-palette-control-btn" id="wf-collapse-all">Collapse All</button>
+      <button class="wf-palette-control-btn" id="wf-expand-all">Expand All</button>
+    </div>`;
 }
 
 /** Build FAB HTML overlay for canvas. */
@@ -212,36 +281,214 @@ function wireFABEvents(): void {
   });
 }
 
-/** Wire toolbar buttons, palette clicks, and keyboard events. */
+/** Add a node to the workflow from palette (shared by click + drag + search). */
+function addNodeFromPalette(type: string, positionX?: number, positionY?: number): void {
+  const workflow = getWorkflow();
+  if (!workflow) return;
+  const def = getNodeDef(type);
+  const id = nanoid();
+  const config = def ? { ...def.defaultConfig } : {};
+  const px = positionX ?? (200 + workflow.nodes.length * 30);
+  const py = positionY ?? (150 + workflow.nodes.length * 30);
+  workflow.nodes.push({
+    id,
+    type,
+    label: def?.defaultLabel ?? type.replace(/-/g, " "),
+    config,
+    positionX: px,
+    positionY: py,
+  });
+  setDirty(true);
+  autoSave();
+  refreshSVG();
+  closeMobileDrawers();
+}
+
+/** Debounce timer for palette search. */
+let _searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+/** Filter palette items by search query. */
+function filterPalette(query: string): void {
+  const container = getContainer();
+  if (!container) return;
+  const categoriesDiv = container.querySelector(".wf-palette-categories");
+  const controlsDiv = container.querySelector(".wf-palette-controls");
+  const palette = container.querySelector("#wf-palette");
+  if (!categoriesDiv || !controlsDiv || !palette) return;
+
+  // Remove previous results
+  palette.querySelector(".wf-palette-results")?.remove();
+
+  if (!query) {
+    categoriesDiv.removeAttribute("hidden");
+    controlsDiv.removeAttribute("hidden");
+    // Restore collapse state
+    categoriesDiv.querySelectorAll(".wf-palette-cat").forEach(el => {
+      const cat = (el as HTMLElement).dataset.cat!;
+      const collapsed = getPaletteCollapseState()[cat] === true;
+      el.classList.toggle("open", !collapsed);
+      if (!collapsed) el.setAttribute("open", "");
+      else el.removeAttribute("open");
+    });
+    return;
+  }
+
+  categoriesDiv.setAttribute("hidden", "");
+  controlsDiv.setAttribute("hidden", "");
+
+  const q = query.toLowerCase();
+  const all = getNodeDefs();
+  const matching = all.filter(d =>
+    d.label.toLowerCase().includes(q) || d.type.toLowerCase().includes(q)
+  );
+
+  if (matching.length === 0) return;
+
+  const cat = PALETTE_CATEGORIES.find(c => c.match(matching[0])) ?? PALETTE_CATEGORIES[0];
+  const resultsHTML = matching.map(d => buildPaletteItem(d, cat)).join("");
+  const resultsDiv = document.createElement("div");
+  resultsDiv.className = "wf-palette-results";
+  resultsDiv.innerHTML = resultsHTML;
+  palette.appendChild(resultsDiv);
+
+  // Wire click handlers on search results
+  resultsDiv.querySelectorAll(".wf-palette-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const type = (btn as HTMLElement).dataset.type as string;
+      addNodeFromPalette(type);
+    });
+  });
+}
+
+/** Wire toolbar buttons, palette clicks, accordion, search, drag-drop, and keyboard events. */
 function wireEditorEvents(): void {
   wireSVGEvents();
 
-  // Palette: add node
+  // Palette: add node on click
   getContainer()?.querySelectorAll(".wf-palette-item").forEach(btn => {
     btn.addEventListener("click", () => {
-      const workflow = getWorkflow();
-      if (!workflow) return;
       const type = (btn as HTMLElement).dataset.type as string;
-      const def = getNodeDef(type);
-      const id = nanoid();
-      const offset = workflow.nodes.length * 30;
-      const config = def ? { ...def.defaultConfig } : {};
-      workflow.nodes.push({
-        id,
-        type,
-        label: def?.defaultLabel ?? type.replace(/-/g, " "),
-        config,
-        positionX: 200 + offset,
-        positionY: 150 + offset,
-      });
-      setDirty(true);
-      autoSave();
-      refreshSVG();
+      addNodeFromPalette(type);
+    });
 
-      // Auto-close palette drawer on mobile after adding
-      closeMobileDrawers();
+    // Drag start
+    btn.addEventListener("dragstart", (e: Event) => {
+      const de = e as DragEvent;
+      const type = (btn as HTMLElement).dataset.type!;
+      de.dataTransfer!.setData("text/plain", type);
+      de.dataTransfer!.effectAllowed = "copy";
     });
   });
+
+  // Palette: accordion header clicks
+  getContainer()?.querySelectorAll(".wf-palette-cat-header").forEach(header => {
+    header.addEventListener("click", () => {
+      const catEl = (header as HTMLElement).closest(".wf-palette-cat") as HTMLElement;
+      if (!catEl) return;
+      const isOpen = catEl.hasAttribute("open");
+      if (isOpen) {
+        catEl.removeAttribute("open");
+      } else {
+        catEl.setAttribute("open", "");
+      }
+      // Persist
+      const catLabel = catEl.dataset.cat!;
+      const state = { ...getPaletteCollapseState() };
+      state[catLabel] = !isOpen;
+      setPaletteCollapseState(state);
+      savePaletteCollapse();
+    });
+  });
+
+  // Palette: collapse/expand all
+  getContainer()?.querySelector("#wf-collapse-all")?.addEventListener("click", () => {
+    const state: Record<string, boolean> = {};
+    getContainer()?.querySelectorAll(".wf-palette-cat").forEach(el => {
+      (el as HTMLElement).removeAttribute("open");
+      state[(el as HTMLElement).dataset.cat!] = true;
+    });
+    setPaletteCollapseState(state);
+    savePaletteCollapse();
+  });
+  getContainer()?.querySelector("#wf-expand-all")?.addEventListener("click", () => {
+    const state: Record<string, boolean> = {};
+    getContainer()?.querySelectorAll(".wf-palette-cat").forEach(el => {
+      (el as HTMLElement).setAttribute("open", "");
+      state[(el as HTMLElement).dataset.cat!] = false;
+    });
+    setPaletteCollapseState(state);
+    savePaletteCollapse();
+  });
+
+  // Palette: search
+  getContainer()?.querySelector("#wf-palette-search")?.addEventListener("input", (e: Event) => {
+    if (_searchDebounce) clearTimeout(_searchDebounce);
+    const q = (e.target as HTMLInputElement).value.trim();
+    _searchDebounce = setTimeout(() => filterPalette(q), 150);
+  });
+  getContainer()?.querySelector("#wf-palette-search")?.addEventListener("keydown", ((e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      const input = e.target as HTMLInputElement;
+      input.value = "";
+      filterPalette("");
+      input.blur();
+    }
+  }) as EventListener);
+
+  // Canvas: drop target for drag-from-palette
+  const canvasWrap = getContainer()?.querySelector("#wf-canvas-wrap");
+  if (canvasWrap) {
+    canvasWrap.addEventListener("dragover", (e: Event) => {
+      (e as DragEvent).preventDefault();
+      (e as DragEvent).dataTransfer!.dropEffect = "copy";
+      canvasWrap.classList.add("wf-drop-active");
+    });
+    canvasWrap.addEventListener("dragleave", () => {
+      canvasWrap.classList.remove("wf-drop-active");
+    });
+    canvasWrap.addEventListener("drop", (e: Event) => {
+      (e as DragEvent).preventDefault();
+      canvasWrap.classList.remove("wf-drop-active");
+      const type = (e as DragEvent).dataTransfer!.getData("text/plain");
+      if (!type) return;
+      const svg = canvasWrap.querySelector("#wf-svg") as SVGSVGElement | null;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      const zoom = getZoom();
+      const cx = getViewX() + ((e as DragEvent).clientX - rect.left) / rect.width * (1100 / zoom);
+      const cy = getViewY() + ((e as DragEvent).clientY - rect.top) / rect.height * (600 / zoom);
+      addNodeFromPalette(type, Math.round(cx - NODE_W / 2), Math.round(cy - NODE_H / 2));
+    });
+  }
+
+  // Smart connect: listen for edge drag events from interactions.ts
+  const palette = getContainer()?.querySelector("#wf-palette");
+  if (palette) {
+    palette.addEventListener("wf-edge-drag-start", ((e: CustomEvent) => {
+      const allowedTargets = e.detail.allowedTargets as string[];
+      palette.querySelectorAll(".wf-palette-item").forEach(btn => {
+        const nodeType = (btn as HTMLElement).dataset.type!;
+        const def = getNodeDef(nodeType);
+        if (!def) return;
+        const direct = allowedTargets.includes(nodeType);
+        const bySink = def.role === "sink" && allowedTargets.includes("<sink>");
+        const byTrigger = def.role === "trigger" && allowedTargets.includes("<trigger>");
+        const bySource = def.role === "source" && allowedTargets.includes("<source>");
+        if (direct || bySink || byTrigger || bySource) {
+          btn.classList.add("wf-palette-compatible");
+          btn.classList.remove("wf-palette-incompatible");
+        } else {
+          btn.classList.add("wf-palette-incompatible");
+          btn.classList.remove("wf-palette-compatible");
+        }
+      });
+    }) as EventListener);
+    palette.addEventListener("wf-edge-drag-end", () => {
+      palette.querySelectorAll(".wf-palette-compatible, .wf-palette-incompatible").forEach(btn => {
+        btn.classList.remove("wf-palette-compatible", "wf-palette-incompatible");
+      });
+    });
+  }
 
   // Toolbar: save (manual trigger, also publishes)
   getContainer()?.querySelector("#wf-save-btn")?.addEventListener("click", async () => {

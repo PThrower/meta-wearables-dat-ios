@@ -3159,6 +3159,143 @@ body {
   letter-spacing: 0.3px;
 }
 
+/* Palette search bar */
+.wf-palette-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-surface);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.wf-palette-search input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  outline: none;
+}
+.wf-palette-search input:focus {
+  border-color: var(--accent-blue);
+}
+
+/* Palette search results */
+.wf-palette-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Palette accordion categories */
+.wf-palette-cat {
+  margin-bottom: 2px;
+}
+.wf-palette-cat-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 0;
+  font-family: inherit;
+}
+.wf-palette-cat-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-tertiary);
+}
+.wf-palette-cat-count {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  background: var(--border-subtle);
+  border-radius: 8px;
+  padding: 0 5px;
+  margin-left: 4px;
+}
+.wf-palette-cat-header .info-chevron {
+  margin-left: auto;
+  transition: transform 0.2s;
+}
+.wf-palette-cat[open] .wf-palette-cat-header .info-chevron {
+  transform: rotate(180deg);
+}
+.wf-palette-cat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+.wf-palette-cat[open] .wf-palette-cat-body {
+  max-height: 2000px;
+}
+
+/* Palette subcategory labels */
+.wf-palette-sublabel {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+  padding: 6px 0 2px 12px;
+  pointer-events: none;
+}
+
+/* Palette controls (collapse/expand all) */
+.wf-palette-controls {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.wf-palette-control-btn {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 9px;
+  font-family: inherit;
+  color: var(--text-tertiary);
+  background: var(--border-subtle);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.wf-palette-control-btn:hover {
+  background: var(--border);
+  color: var(--text-secondary);
+}
+
+/* Drag from palette */
+.wf-palette-item[draggable="true"] { cursor: grab; }
+.wf-palette-item[draggable="true"]:active { cursor: grabbing; }
+.wf-drop-active { outline: 2px dashed var(--accent-blue); outline-offset: -2px; }
+
+/* Smart connect highlight */
+.wf-palette-compatible {
+  border-color: var(--accent-green) !important;
+  box-shadow: 0 0 6px rgba(74,222,128,0.3);
+  animation: wf-pulse-compat 1.5s ease-in-out infinite;
+}
+.wf-palette-incompatible {
+  opacity: 0.25;
+  pointer-events: none;
+}
+@keyframes wf-pulse-compat {
+  0%, 100% { box-shadow: 0 0 4px rgba(74,222,128,0.2); }
+  50% { box-shadow: 0 0 10px rgba(74,222,128,0.5); }
+}
+
 .wf-canvas-wrap {
   flex: 1;
   overflow: hidden;

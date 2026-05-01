@@ -287,6 +287,15 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
 
   _edgeState = { sourceNodeId, tempLine: line };
 
+  // Dispatch smart-connect event to highlight compatible palette items
+  const sourceDef = getNodeDef(source.type);
+  if (sourceDef) {
+    document.dispatchEvent(new CustomEvent("wf-edge-drag-start", {
+      bubbles: true,
+      detail: { allowedTargets: sourceDef.allowedTargets },
+    }));
+  }
+
   const onMove = (e: PointerEvent) => {
     if (!_edgeState) return;
     const rect = svg.getBoundingClientRect();
@@ -301,6 +310,9 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
     if (_edgeState?.tempLine.parentNode) {
       _edgeState.tempLine.parentNode.removeChild(_edgeState.tempLine);
     }
+
+    // Dispatch edge drag end to clear palette highlights
+    document.dispatchEvent(new CustomEvent("wf-edge-drag-end", { bubbles: true }));
 
     const rect = svg.getBoundingClientRect();
     const zoom = getZoom();
