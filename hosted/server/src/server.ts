@@ -51,13 +51,13 @@ import { computeHealth } from "./health.js";
 import { SessionRegistry } from "./session-registry.js";
 import { AudioTapBus } from "./audio-tap.js";
 import { ControlEventBus } from "./control-event-bus.js";
-import { AppRegistry, resolveWorkflowToApp, resolveWorkflowToPipeline, resolveSourceInput } from "./app-registry.js";
+import { AppRegistry, resolveWorkflowToPipeline } from "./app-registry.js";
 import type { AppDefinition, WorkflowControlAction, WorkflowNodeType, NodeExecutionInfo, FlowExecutionConfig, FlowTrigger, DetectedFlow, WorkflowSettings } from "./app-types.js";
-import { detectFlows } from "./flow-detection.js";
+
 import { isSttResult, isVadResult } from "./message-types.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
-import { NODE_DEFINITIONS, NODE_DEF_MAP, buildAllowedEdgeMap, validateStructure, resolveNodeType, isSinkType } from "./node-definitions.js";
+import { NODE_DEFINITIONS, validateStructure } from "./node-definitions.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
 import {
@@ -76,7 +76,8 @@ import { runMigrations } from "./db/migrate.js";
 import { dbWriter } from "./db/db-writer.js";
 import * as q from "./db/queries.js";
 import { isApnsConfigured, sendSilentWake, sendVisibleWake } from "./apns.js";
-import { resolveSinkTarget, estimateGroupDuration, pushPassiveTTSChains, getFlowIdForNode, buildMobileWorkflowConfig } from "./workflow-utils.js";
+import { pushPassiveTTSChains } from "./workflow-utils.js";
+import { handleWorkflowActivation, validateEdges, type ActivationDeps } from "./workflow-activation.js";
 import { dispatchWorkflowConfig } from "./workflow-dispatch.js";
 import { handleWorkflowActivation, type ActivationDeps } from "./workflow-activation.js";
 
@@ -856,28 +857,6 @@ const server = Bun.serve<WsData>({
     }
 
     // --- Workflow CRUD ---
-
-    /** Validate workflow edges — returns error string or null */
-    const ALLOWED_EDGE_MAP = buildAllowedEdgeMap();
-    function validateEdges(
-      nodes: Array<{ id: string; type: string }>,
-      edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
-    ): string | null {
-      const nodeMap = new Map(nodes.map(n => [n.id, n.type]));
-      const nodeIds = new Set(nodes.map(n => n.id));
-
-      for (const e of edges) {
-        if (!nodeIds.has(e.sourceNodeId) || !nodeIds.has(e.targetNodeId)) {
-          return "Edge references unknown node";
-        }
-        const srcType = resolveNodeType(nodeMap.get(e.sourceNodeId)!);
-        const tgtType = resolveNodeType(nodeMap.get(e.targetNodeId)!);
-        if (!ALLOWED_EDGE_MAP.get(srcType)?.has(tgtType)) {
-          return `Invalid edge: ${srcType} -> ${tgtType}`;
-        }
-      }
-      return null;
-    }
 
     // Node definitions (single source of truth for frontend)
     if (url.pathname === "/api/node-definitions" && req.method === "GET") {

@@ -6,7 +6,6 @@
  * config messages to iOS, and activates AI/JEPA nodes.
  */
 
-import type { ObjectStore } from "@ebowwa/object-store";
 import type { AppDefinition, WorkflowSettings, WorkflowNodeType, FlowExecutionConfig } from "./app-types.js";
 import { NODE_DEF_MAP, resolveNodeType, buildAllowedEdgeMap, validateStructure } from "./node-definitions.js";
 import { resolveWorkflowToPipeline, resolveSourceInput, AppRegistry } from "./app-registry.js";
@@ -15,14 +14,13 @@ import { buildMobileWorkflowConfig, pushPassiveTTSChains } from "./workflow-util
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { SessionRegistry } from "./session-registry.js";
-import { HEADER_SIZE } from "./protocol.js";
 import * as q from "./db/queries.js";
 import { dbWriter } from "./db/db-writer.js";
 import { isApnsConfigured, sendSilentWake, sendVisibleWake } from "./apns.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 
 /** Validate workflow edges — returns error string or null */
-function validateEdges(
+export function validateEdges(
   nodes: Array<{ id: string; type: string }>,
   edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
 ): string | null {
