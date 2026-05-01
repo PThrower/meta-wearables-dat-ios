@@ -74,7 +74,7 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
         // FPS throttle
         let now = ContinuousClock.now
         let elapsed = now.duration(to: packet.timestamp).components.seconds
-        if abs(elapsed) < 1.0 / Double(max(1, measureConfig.targetFPS)) { return }
+        if Double(abs(elapsed)) < 1.0 / Double(max(1, measureConfig.targetFPS)) { return }
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
@@ -101,6 +101,7 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
     // MARK: - Frame Analysis
 
     private func analyzeFrame(_ packet: FramePacket) throws -> ToolMeasureResult? {
+        let startTime = CFAbsoluteTimeGetCurrent()
         let pixelBuffer = packet.sampleBuffer.imageBuffer ?? CMSampleBufferGetImageBuffer(packet.sampleBuffer)
         guard let pixelBuffer else { return nil }
 
@@ -302,9 +303,9 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
             guard aspectRatio > 0.8 && aspectRatio < 1.2 else { continue } // near-circular
             guard contour.pointCount >= 20 else { continue } // enough points to be meaningful
 
-            // Get bounding circle
-            let circle = contour.boundingCircle()
-            let normalizedRadius = Double(circle.radius)
+            // Get bounding circle from normalizedPath
+            let pathBounds = contour.normalizedPath.boundingBox
+            let normalizedRadius = Double(max(pathBounds.width, pathBounds.height)) / 2.0
 
             // Skip tiny or huge contours
             guard normalizedRadius > 0.05 && normalizedRadius < 0.4 else { continue }
@@ -322,8 +323,8 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
                 let h = Double(frameHeight)
 
                 // Circle center and radius in pixel coords
-                let cx = Double(circle.center.x) * w
-                let cy = (1 - Double(circle.center.y)) * h
+                let cx = Double(pathBounds.midX) * w
+                let cy = (1 - Double(pathBounds.midY)) * h
                 let pixelRadius = normalizedRadius * max(w, h)
 
                 // Build 4 corners of the bounding square in pixels
@@ -386,8 +387,8 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
         var bestScore: Float = 0
 
         for contour in observation.topLevelContours {
-            let bb = contour.boundingBox
-            let area = contour.calculateArea(useOrientedArea: false)
+            let bb = contour.normalizedPath.boundingBox
+            let area = Float(bb.width * bb.height)
             let aspectRatio = Float(bb.width) / (Float(bb.height) + 1e-6)
 
             // Filter by size

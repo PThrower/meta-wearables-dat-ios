@@ -103,6 +103,11 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     /// Whether to extract HSV histograms for Bhattacharyya gate.
     var extractHistograms: Bool = false
 
+    /// Setter for extractHistograms callable from outside the actor.
+    func setExtractHistograms(_ value: Bool) {
+        extractHistograms = value
+    }
+
     init(config: VisionStageConfig = .default) {
         self.visionConfig = config
         self.config = FrameStageConfig(targetFPS: config.targetFPS, isEnabled: true)

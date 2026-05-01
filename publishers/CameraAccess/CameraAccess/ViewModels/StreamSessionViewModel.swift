@@ -868,9 +868,15 @@ class StreamSessionViewModel: ObservableObject {
           await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
         }
         // Send ReID crops when gate-reid is in tracking config
+        let hasReID: Bool
+        if let self = self {
+          hasReID = await self.trackingConfig?.gates.contains(where: { $0.gateType == "gate-reid" }) ?? false
+        } else {
+          hasReID = false
+        }
         if let self,
-           self.trackingStage != nil,
-           self.trackingConfig?.gates.contains(where: { $0.gateType == "gate-reid" }) == true,
+           await self.trackingStage != nil,
+           hasReID,
            let thumbnails {
           let reidCrops = thumbnails.filter { (i, _) in
             result.detections[i].boundingBox != nil
@@ -1103,7 +1109,7 @@ class StreamSessionViewModel: ObservableObject {
     // Enable histogram extraction on VisionStage when Bhattacharyya gate is present
     let hasBhattacharyya = trackingConfig.gates.contains(where: { $0.gateType == "gate-bhattacharyya" })
     if let visionStage {
-      visionStage.extractHistograms = hasBhattacharyya
+      await visionStage.setExtractHistograms(hasBhattacharyya)
     }
 
     // Wire result callback to update overlay AND relay to server
