@@ -39,12 +39,16 @@ struct TrackingStageConfig: Codable, Sendable {
     let inertia: Double
     /// Detection confidence threshold for first-pass association. Default 0.5.
     let detThresh: Double
+    /// Enable ByteTrack two-pass: match low-confidence detections (0.1..detThresh)
+    /// against remaining tracks after first + second pass association.
+    /// Ref: arXiv:2110.06864 — rescues partially occluded objects. Default false.
+    let useByte: Bool
 
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
-        case deltaT, inertia, detThresh
+        case deltaT, inertia, detThresh, useByte
     }
 
     init(
@@ -59,7 +63,8 @@ struct TrackingStageConfig: Codable, Sendable {
         zones: [ZoneDefinition] = [],
         deltaT: Int = 3,
         inertia: Double = 0.2,
-        detThresh: Double = 0.5
+        detThresh: Double = 0.5,
+        useByte: Bool = false
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -73,6 +78,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.deltaT = deltaT
         self.inertia = inertia
         self.detThresh = detThresh
+        self.useByte = useByte
     }
 
     init(from decoder: Decoder) throws {
@@ -89,6 +95,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.deltaT = try c.decodeIfPresent(Int.self, forKey: .deltaT) ?? 3
         self.inertia = try c.decodeIfPresent(Double.self, forKey: .inertia) ?? 0.2
         self.detThresh = try c.decodeIfPresent(Double.self, forKey: .detThresh) ?? 0.5
+        self.useByte = try c.decodeIfPresent(Bool.self, forKey: .useByte) ?? false
     }
 }
 

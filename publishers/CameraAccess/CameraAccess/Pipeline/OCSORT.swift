@@ -561,6 +561,9 @@ struct OCSORT: Sendable {
     let deltaT: Int             // 3 — steps back for velocity estimation
     let inertia: Double         // 0.2 — OCM direction weight
     let maxTracks: Int          // 0 — unlimited
+    // ByteTrack: match low-confidence detections against remaining tracks.
+    // Ref: arXiv:2110.06864 — two-pass association rescues partially occluded objects.
+    let useByte: Bool           // false — disabled by default
 
     init(
         detThresh: Double = 0.5,
@@ -569,7 +572,8 @@ struct OCSORT: Sendable {
         iouThreshold: Double = 0.3,
         deltaT: Int = 3,
         inertia: Double = 0.2,
-        maxTracks: Int = 0
+        maxTracks: Int = 0,
+        useByte: Bool = false
     ) {
         self.detThresh = detThresh
         self.maxAge = maxAge
@@ -578,6 +582,7 @@ struct OCSORT: Sendable {
         self.deltaT = deltaT
         self.inertia = inertia
         self.maxTracks = maxTracks
+        self.useByte = useByte
     }
 
     // MARK: - Public Interface
@@ -589,9 +594,11 @@ struct OCSORT: Sendable {
 
         // Paper: split detections by confidence threshold.
         // High-confidence (> detThresh) used for first-pass association.
-        // Low-confidence (0.1..detThresh) optionally used for second-pass (ByteTrack).
+        // Low-confidence (0.1..detThresh) optionally used for ByteTrack second-pass.
         // Ref: arXiv:2203.14360 Sec 3.3, noahcao/OC_SORT OCSort.update
+        // Ref: arXiv:2110.06864 ByteTrack — low-confidence rescues partially occluded objects.
         let highConfDets = detections.filter { $0.confidence > detThresh }
+        let lowConfDets = useByte ? detections.filter { $0.confidence > 0.1 && $0.confidence <= detThresh } : []
 
         // Step 1: Predict all existing tracks forward
         // Paper: "get predicted locations from existing trackers"
@@ -738,6 +745,46 @@ struct OCSORT: Sendable {
         for trkIdx in unmatchedTrksAfterOCR {
             guard trkIdx < tracks.count else { continue }
             // No observation — just increment miss counters (already done in predict)
+        }
+
+        // Step 6.5: ByteTrack two-pass — low-confidence detection association.
+        // Ref: arXiv:2110.06864 — associate low-score detections with remaining tracks.
+        // After first-pass (OCM) and second-pass (OCR), any still-unmatched tracks
+        // get a final chance to match against low-confidence detections (0.1..detThresh).
+        // Uses IoU-only matching (no OCM direction cost — low-conf detections have
+        // unreliable position, so simpler cost function is more robust).
+        var byteUnmatchedTrks = unmatchedTrksAfterOCR
+        if useByte && !lowConfDets.isEmpty && !unmatchedTrksAfterOCR.isEmpty {
+            let bytePredictedBoxes = unmatchedTrksAfterOCR.map { predictedBoxes[$0] }
+            let iouByte = iouBatch(detections: lowConfDets, trackerBoxes: bytePredictedBoxes)
+
+            if iouByte.count > 0 && iouByte[0].count > 0 {
+                let maxIou = iouByte.flatMap { $0 }.max() ?? 0
+                if maxIou > iouThreshold {
+                    let costMatrix = iouByte.map { row in row.map { -$0 } }
+                    let byteMatched = hungarianAssignment(
+                        costMatrix: costMatrix,
+                        gateThreshold: 1.0
+                    )
+
+                    var byteMatchedTrks = Set<Int>()
+                    for m in byteMatched {
+                        guard iouByte[m.row][m.col] >= iouThreshold else { continue }
+                        let trkIdx = unmatchedTrksAfterOCR[m.col]
+                        guard trkIdx < tracks.count else { continue }
+
+                        // Update track with low-confidence detection
+                        var trk = tracks[trkIdx]
+                        updateTrack(&trk, with: lowConfDets[m.row])
+                        tracks[trkIdx] = trk
+                        byteMatchedTrks.insert(m.col)
+                    }
+
+                    byteUnmatchedTrks = unmatchedTrksAfterOCR.enumerated()
+                        .filter { !byteMatchedTrks.contains($0.offset) }
+                        .map { $0.element }
+                }
+            }
         }
 
         // Step 7: Create new tracks for remaining unmatched high-confidence detections

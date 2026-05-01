@@ -493,6 +493,7 @@ function dispatchWorkflowConfig(
         deltaT: (cfg.deltaT as number) ?? 3,
         inertia: (cfg.inertia as number) ?? 0.2,
         detThresh: (cfg.detThresh as number) ?? 0.5,
+        useByte: (cfg.useByte as boolean) ?? false,
       }));
     }
     console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);
@@ -1862,6 +1863,7 @@ const server = Bun.serve<WsData>({
               deltaT: (rawConfig.deltaT as number) ?? 3,
               inertia: (rawConfig.inertia as number) ?? 0.2,
               detThresh: (rawConfig.detThresh as number) ?? 0.5,
+              useByte: (rawConfig.useByte as boolean) ?? false,
             };
             if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
               session.publisher.ws.send(JSON.stringify(trackingConfig));
