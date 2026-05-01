@@ -402,31 +402,52 @@ function dispatchWorkflowConfig(
     console.log(`[relay] Replayed speech config (${speechConfigs.length} stages) session=${sid}`);
   }
 
-  // Vision config
-  // Check if a vision-thumbnails node exists in the workflow
+  // Vision config — send ONE combined config with ALL detection types
+  // (same fix as activation dispatch — per-node messages cause unregister race)
   const thumbnailNodeIdx = nodes.findIndex(n => n.type === "vision-thumbnails");
   const thumbnailCfg = thumbnailNodeIdx >= 0
     ? (nodes[thumbnailNodeIdx].config as any)
     : null;
 
-  for (const i of visionIdx) {
-    const cfg = nodes[i].config as any;
+  if (visionIdx.length > 0) {
+    const allDetTypes: string[] = [];
+    let bestConf = 0.5, bestSmooth = 0.3, bestFps = 5, bestMax = 0, bestLabels = 5;
+    let bestLang = "en-US";
+    const allSym: Record<string, boolean> = {};
+
+    for (const i of visionIdx) {
+      allDetTypes.push(nodes[i].type);
+      const cfg = nodes[i].config as any;
+      if (cfg?.confidence != null) bestConf = Math.min(bestConf, cfg.confidence);
+      if (cfg?.smoothingAlpha != null) bestSmooth = Math.min(bestSmooth, cfg.smoothingAlpha);
+      if (cfg?.targetFPS != null) bestFps = Math.max(bestFps, cfg.targetFPS);
+      const mr = cfg?.maxFaces ?? cfg?.maxPersons ?? cfg?.maxPoses ?? 0;
+      if (mr > 0) bestMax = Math.max(bestMax, mr);
+      if (cfg?.language) bestLang = cfg.language;
+      if (cfg?.maxLabels) bestLabels = Math.max(bestLabels, cfg.maxLabels);
+      if (cfg?.symbologies) Object.assign(allSym, cfg.symbologies);
+    }
+    if (Object.keys(allSym).length === 0 && allDetTypes.includes("vision-barcode-scan")) {
+      Object.assign(allSym, { qr: true });
+    }
+
     ws.send(JSON.stringify({
       type: "vision_stage_config",
-      nodeType: nodes[i].type,
-      detectionTypes: [nodes[i].type],
-      confidence: cfg?.confidence ?? 0.5,
-      smoothingAlpha: cfg?.smoothingAlpha ?? 0.3,
-      targetFPS: cfg?.targetFPS ?? 5,
-      maxResults: cfg?.maxFaces ?? cfg?.maxPersons ?? cfg?.maxPoses ?? 0,
-      language: cfg?.language ?? "en-US",
-      symbologies: Object.entries(cfg?.symbologies ?? { qr: true }).filter(([, v]) => v).map(([k]) => k),
-      maxLabels: cfg?.maxLabels ?? 5,
+      nodeType: allDetTypes[0],
+      detectionTypes: allDetTypes,
+      confidence: bestConf,
+      smoothingAlpha: bestSmooth,
+      targetFPS: bestFps,
+      maxResults: bestMax,
+      language: bestLang,
+      symbologies: Object.entries(allSym).filter(([, v]) => v).map(([k]) => k),
+      maxLabels: bestLabels,
       thumbnailsEnabled: !!thumbnailCfg,
       thumbnailSize: thumbnailCfg?.thumbnailSize ?? 64,
       thumbnailMaxCount: thumbnailCfg?.maxCount ?? 4,
       thumbnailQuality: thumbnailCfg?.quality ?? 0.6,
     }));
+    console.log(`[relay] Replayed vision config: types=${allDetTypes.join(",")} session=${sid}`);
   }
 
   // Enhance config
@@ -1671,30 +1692,60 @@ const server = Bun.serve<WsData>({
         }
 
         // 1. Fire-and-forget: send all vision configs to iOS immediately
+        // IMPORTANT: send ONE combined config with ALL detection types.
+        // Sending per-node configs causes each to unregister the previous VisionStage,
+        // so only the last node's detection type survives. Aggregate all types instead.
         // Check if a vision-thumbnails node exists in the workflow
         const thumbnailIdx = processableNodes.findIndex(n => n.type === "vision-thumbnails");
         const thumbnailConfig = thumbnailIdx >= 0
           ? (processableNodes[thumbnailIdx].config as any)
           : null;
 
-        for (const i of visionIdx) {
-          const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
-          if (!rawNode) continue;
+        if (visionIdx.length > 0) {
+          const allDetectionTypes: string[] = [];
+          let bestConfidence = 0.5;
+          let bestSmoothing = 0.3;
+          let bestFPS = 5;
+          let bestMaxResults = 0;
+          let bestLanguage = "en-US";
+          let bestMaxLabels = 5;
+          const allSymbologies: Record<string, boolean> = {};
+
+          for (const i of visionIdx) {
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
+            allDetectionTypes.push(rawNode.type);
+            activatedAppIds.push(appsToActivate[i].id);
+
+            const nc = rawNode.config as any;
+            // Use the most restrictive confidence and smoothing across all nodes
+            if (nc?.confidence != null) bestConfidence = Math.min(bestConfidence, nc.confidence);
+            if (nc?.smoothingAlpha != null) bestSmoothing = Math.min(bestSmoothing, nc.smoothingAlpha);
+            if (nc?.targetFPS != null) bestFPS = Math.max(bestFPS, nc.targetFPS);
+            const maxR = nc?.maxFaces ?? nc?.maxPersons ?? nc?.maxPoses ?? 0;
+            if (maxR > 0) bestMaxResults = Math.max(bestMaxResults, maxR);
+            if (nc?.language) bestLanguage = nc.language;
+            if (nc?.maxLabels) bestMaxLabels = Math.max(bestMaxLabels, nc.maxLabels);
+            // Merge symbologies from barcode nodes
+            if (nc?.symbologies) Object.assign(allSymbologies, nc.symbologies);
+          }
+
+          // Fallback symbologies if no barcode node specified any
+          if (Object.keys(allSymbologies).length === 0 && allDetectionTypes.includes("vision-barcode-scan")) {
+            Object.assign(allSymbologies, { qr: true });
+          }
+
           const visionConfig = {
             type: "vision_stage_config" as const,
-            nodeType: rawNode.type,
-            detectionTypes: [rawNode.type],
-            confidence: (rawNode.config as any)?.confidence ?? 0.5,
-            smoothingAlpha: (rawNode.config as any)?.smoothingAlpha ?? 0.3,
-            targetFPS: (rawNode.config as any)?.targetFPS ?? 5,
-            maxResults: (rawNode.config as any)?.maxFaces
-              ?? (rawNode.config as any)?.maxPersons
-              ?? (rawNode.config as any)?.maxPoses ?? 0,
-            language: (rawNode.config as any)?.language ?? "en-US",
-            symbologies: Object.entries(
-              (rawNode.config as any)?.symbologies ?? { qr: true }
-            ).filter(([, v]) => v).map(([k]) => k),
-            maxLabels: (rawNode.config as any)?.maxLabels ?? 5,
+            nodeType: allDetectionTypes[0], // primary type for logging
+            detectionTypes: allDetectionTypes,
+            confidence: bestConfidence,
+            smoothingAlpha: bestSmoothing,
+            targetFPS: bestFPS,
+            maxResults: bestMaxResults,
+            language: bestLanguage,
+            symbologies: Object.entries(allSymbologies).filter(([, v]) => v).map(([k]) => k),
+            maxLabels: bestMaxLabels,
             thumbnailsEnabled: !!thumbnailConfig,
             thumbnailSize: thumbnailConfig?.thumbnailSize ?? 64,
             thumbnailMaxCount: thumbnailConfig?.maxCount ?? 4,
@@ -1703,7 +1754,7 @@ const server = Bun.serve<WsData>({
           if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
             session.publisher.ws.send(JSON.stringify(visionConfig));
           }
-          activatedAppIds.push(appsToActivate[i].id);
+          console.log(`[relay] Sent combined vision config: types=${allDetectionTypes.join(",")} session=${sid}`);
         }
 
         // 2. Activate all AI nodes in parallel (dependsOn defers internally)

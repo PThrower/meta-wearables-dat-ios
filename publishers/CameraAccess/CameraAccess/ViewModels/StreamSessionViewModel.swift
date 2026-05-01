@@ -785,9 +785,11 @@ class StreamSessionViewModel: ObservableObject {
       visionSceneLabel = nil
     }
 
-    // Parse detection types from nodeType
-    guard let nodeType = config["nodeType"] as? String else { return }
-    guard let detType = VisionDetectionType(rawValue: nodeType) else { return }
+    // Parse detection types — server sends combined array for all active vision nodes
+    let detectionTypeStrings = config["detectionTypes"] as? [String]
+      ?? ((config["nodeType"] as? String).map { [$0] } ?? [])
+    let detectionTypes = detectionTypeStrings.compactMap { VisionDetectionType(rawValue: $0) }
+    guard !detectionTypes.isEmpty else { return }
 
     let confidence = config["confidence"] as? Double ?? 0.5
     let smoothingAlpha = config["smoothingAlpha"] as? Double ?? 0.3
@@ -805,7 +807,7 @@ class StreamSessionViewModel: ObservableObject {
     let thumbnailQuality = config["thumbnailQuality"] as? Double ?? 0.6
 
     let visionConfig = VisionStageConfig(
-      detectionTypes: [detType],
+      detectionTypes: detectionTypes,
       confidence: confidence,
       targetFPS: targetFPS,
       maxResults: maxResults,
@@ -822,7 +824,7 @@ class StreamSessionViewModel: ObservableObject {
     let stage = VisionStage(config: visionConfig)
 
     // Wire result callback to update overlay AND relay to server
-    await stage.setOnResult { [weak self] result, thumbnails in
+    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?) in
       await MainActor.run {
         // When tracking is active, suppress raw vision boxes —
         // the tracker will emit tracked items with persistent IDs instead.
@@ -867,7 +869,7 @@ class StreamSessionViewModel: ObservableObject {
     await stage.start()
     visionStage = stage
 
-    NSLog("[StreamSession] VisionStage registered: \(nodeType) confidence=\(confidence) fps=\(targetFPS)")
+    NSLog("[StreamSession] VisionStage registered: \(detectionTypes.map { $0.rawValue }) confidence=\(confidence) fps=\(targetFPS)")
   }
 
   // MARK: - Enhance Stage
@@ -1054,7 +1056,11 @@ class StreamSessionViewModel: ObservableObject {
           label: label, x1: x1, y1: y1, x2: x2, y2: y2,
           color: z["color"] as? String
         )
-      } ?? []
+      } ?? [],
+      deltaT: config["deltaT"] as? Int ?? 3,
+      inertia: config["inertia"] as? Double ?? 0.2,
+      detThresh: config["detThresh"] as? Double ?? 0.5,
+      useByte: config["useByte"] as? Bool ?? false
     )
 
     let stage = ObjectTrackingStage(config: trackingConfig)
