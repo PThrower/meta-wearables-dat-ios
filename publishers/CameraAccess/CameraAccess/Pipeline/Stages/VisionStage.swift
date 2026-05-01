@@ -150,6 +150,27 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
         guard !requests.isEmpty else { return }
 
+        // Snapshot the pixel buffer into a fresh BGRA buffer before async work.
+        // The SDK may recycle the original pixelBuffer while VNRequests run or
+        // during thumbnail extraction, producing black/stale thumbnails.
+        // Only needed when thumbnails are enabled (extra ~1ms copy).
+        var snapshotBuffer: CVPixelBuffer?
+        if visionConfig.thumbnailsEnabled {
+            let attrs: [String: Any] = [
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
+            ]
+            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
+            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
+            if bufWidth > 0, bufHeight > 0,
+               CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
+                                    kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
+               let snap = snapshotBuffer {
+                ciContext.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
+                                 bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
+                                 colorSpace: CGColorSpaceCreateDeviceRGB())
+            }
+        }
+
         let startTime = ContinuousClock.Instant.now
 
         // VNImageRequestHandler must be created per frame (Apple docs)
@@ -235,7 +256,9 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         )
 
         // Extract thumbnails if enabled and there are detections with bounding boxes
+        // Use the snapshot buffer (if available) to avoid reading a recycled SDK buffer
         var thumbnails: [(Int, String)]? = nil
+        let thumbSource = snapshotBuffer ?? pixelBuffer
         if visionConfig.thumbnailsEnabled {
             let maxSize = visionConfig.thumbnailMaxCount > 0
                 ? visionConfig.thumbnailMaxCount
@@ -244,7 +267,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             for (i, detection) in detections.enumerated() {
                 guard extracted.count < maxSize else { break }
                 if let bbox = detection.boundingBox,
-                   let thumb = extractThumbnail(from: pixelBuffer, bbox: bbox) {
+                   let thumb = extractThumbnail(from: thumbSource, bbox: bbox) {
                     extracted.append((i, thumb))
                 }
             }
@@ -417,10 +440,16 @@ actor VisionStage: @preconcurrency FramePipelineStage {
 
         // Create CIImage from pixel buffer and crop
         // CIImage from CVPixelBuffer uses pixel coordinates with (0,0) at top-left
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer).cropped(to: cropRect)
+        let fullImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let ciImage = fullImage.cropped(to: cropRect)
 
-        // Skip if cropped image is empty
-        guard cropRect.width > 0, cropRect.height > 0 else { return nil }
+        // Skip if cropped image extent is empty or doesn't intersect the source
+        let extent = ciImage.extent
+        guard extent.width > 0, extent.height > 0,
+              fullImage.extent.intersects(cropRect) else { return nil }
+
+        // Skip if the crop region is too small (< 4px in either dimension) — produces black/empty thumbnails
+        guard pxW >= 4, pxH >= 4 else { return nil }
 
         // Allocate a fresh output CVPixelBuffer (BGRA, per pipeline convention)
         var outBuffer: CVPixelBuffer?
