@@ -583,9 +583,15 @@ struct OCSORT: Sendable {
     // MARK: - Public Interface
 
     /// Process one frame of detections. Returns all active tracks.
-    /// Paper: OCSort.update()
+    /// Paper: OCSort.update() — splits detections by detThresh for association.
     mutating func update(detections: [TrackDetection], timestamp: Double) -> [Track] {
         frameCount += 1
+
+        // Paper: split detections by confidence threshold.
+        // High-confidence (> detThresh) used for first-pass association.
+        // Low-confidence (0.1..detThresh) optionally used for second-pass (ByteTrack).
+        // Ref: arXiv:2203.14360 Sec 3.3, noahcao/OC_SORT OCSort.update
+        let highConfDets = detections.filter { $0.confidence > detThresh }
 
         // Step 1: Predict all existing tracks forward
         // Paper: "get predicted locations from existing trackers"
@@ -646,10 +652,11 @@ struct OCSORT: Sendable {
             kObservations.append(kPreviousObs(for: tracks[i]))
         }
 
-        // Step 3: First association with OCM
+        // Step 3: First association with OCM (high-confidence detections only)
         // Paper Sec 4.2: OCM — Observation-Centric Momentum
+        // Paper Sec 3.3: only detections above detThresh enter first-round matching
         let (matched, unmatchedDets, unmatchedTrks) = associate(
-            detections: detections,
+            detections: highConfDets,
             trackers: predictedBoxes,
             iouThreshold: iouThreshold,
             velocities: velocities,
@@ -664,9 +671,9 @@ struct OCSORT: Sendable {
         for m in matched {
             let detIdx = m.0
             let trkIdx = m.1
-            guard trkIdx < tracks.count && detIdx < detections.count else { continue }
+            guard trkIdx < tracks.count && detIdx < highConfDets.count else { continue }
 
-            let det = detections[detIdx]
+            let det = highConfDets[detIdx]
             // Extract-modify-assign to avoid exclusive access violation
             var trk = tracks[trkIdx]
             updateTrack(&trk, with: det)
@@ -682,7 +689,7 @@ struct OCSORT: Sendable {
         var unmatchedTrksAfterOCR = unmatchedTrks
 
         if !unmatchedDets.isEmpty && !unmatchedTrks.isEmpty {
-            let leftDets = unmatchedDets.map { detections[$0] }
+            let leftDets = unmatchedDets.map { highConfDets[$0] }
             let leftTrks = unmatchedTrks.map { lastBoxes[$0] }
 
             // IoU between unmatched detections and last observations
@@ -711,7 +718,7 @@ struct OCSORT: Sendable {
 
                         // Paper Sec 4.3: recover lost track
                         var trk = tracks[trkIdx]
-                        updateTrack(&trk, with: detections[detIdx])
+                        updateTrack(&trk, with: highConfDets[detIdx])
                         tracks[trkIdx] = trk
                         toRemoveDet.insert(m.row)
                         toRemoveTrk.insert(m.col)
@@ -733,12 +740,13 @@ struct OCSORT: Sendable {
             // No observation — just increment miss counters (already done in predict)
         }
 
-        // Step 7: Create new tracks for remaining unmatched detections
+        // Step 7: Create new tracks for remaining unmatched high-confidence detections
+        // Paper: unmatched detections above detThresh become new tentative tracks
         if maxTracks == 0 || tracks.count < maxTracks {
             for detIdx in unmatchedDetsAfterOCR {
                 let newTrack = InternalTrack(
                     id: nextId,
-                    detection: detections[detIdx],
+                    detection: highConfDets[detIdx],
                     deltaT: deltaT
                 )
                 tracks.append(newTrack)
@@ -804,6 +812,7 @@ struct OCSORT: Sendable {
 
     /// Update a track with a new detection.
     /// Paper Sec 4.1: ORU — Observation-Centric Re-Update
+    /// Ref: noahcao/OC_SORT KalmanBoxTracker.update — ORU replaces the final KF update
     private mutating func updateTrack(_ track: inout InternalTrack, with detection: TrackDetection) {
         let detBbox = [
             detection.bbox.x1, detection.bbox.y1,
@@ -829,8 +838,11 @@ struct OCSORT: Sendable {
             }
         }
 
-        // Paper Sec 4.1: ORU — re-update with virtual trajectory when rediscovered
-        if track.timeSinceUpdate > 0 && track.hasBeenObserved {
+        // Paper Sec 4.1: ORU — re-update with virtual trajectory when rediscovered.
+        // The last virtual step updates KF with the new observation, so we skip
+        // the separate KF update below. Ref: noahcao/OC_SORT unfreeze()
+        let oruApplied = track.timeSinceUpdate > 0 && track.hasBeenObserved
+        if oruApplied {
             applyORU(&track, newObservation: detBbox)
         }
 
@@ -845,9 +857,12 @@ struct OCSORT: Sendable {
         track.confidence = detection.confidence
         track.classLabel = detection.classLabel
 
-        // KF update with z-vector
-        let z = bboxToZ(detection.bbox)
-        track.kalman.update(measurement: z)
+        // KF update with z-vector — only when ORU did NOT already update
+        // (ORU's last virtual step incorporates the new observation)
+        if !oruApplied {
+            let z = bboxToZ(detection.bbox)
+            track.kalman.update(measurement: z)
+        }
 
         // Trail: append center point
         let cx = (detection.bbox.x1 + detection.bbox.x2) / 2.0

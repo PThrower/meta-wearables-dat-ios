@@ -136,24 +136,26 @@ struct BoundingBoxOverlayView: View {
               height: (track.bbox.y2 - track.bbox.y1) * geometry.size.height
             )
 
-            // Trajectory trail: polyline connecting bbox centers over last N frames
+            // Trajectory trail: individual segments with fading alpha for older points
             // Ref: Ultralytics tracking docs — draw movement paths of tracked objects
             if track.trail.count > 1 {
-              Path { path in
-                let points = track.trail.map { CGPoint(
-                  x: $0.x * geometry.size.width,
-                  y: $0.y * geometry.size.height
-                )}
-                path.move(to: points[0])
-                for i in 1..<points.count {
-                  path.addLine(to: points[i])
+              let points = track.trail.map { CGPoint(
+                x: $0.x * geometry.size.width,
+                y: $0.y * geometry.size.height
+              )}
+              // Draw each segment individually with increasing alpha toward present
+              ForEach(0..<(points.count - 1), id: \.self) { segIdx in
+                let alpha = 0.15 + 0.7 * Double(segIdx) / Double(max(1, points.count - 1))
+                let width = 0.5 + 1.5 * Double(segIdx) / Double(max(1, points.count - 1))
+                Path { path in
+                  path.move(to: points[segIdx])
+                  path.addLine(to: points[segIdx + 1])
                 }
+                .stroke(
+                  color.opacity(alpha),
+                  style: StrokeStyle(lineWidth: width, lineCap: .round)
+                )
               }
-              .stroke(
-                // Gradient: older points fade, recent points are bright
-                color.opacity(0.6),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-              )
             }
 
             // Bounding box: confirmed=solid, tentative/lost=dashed

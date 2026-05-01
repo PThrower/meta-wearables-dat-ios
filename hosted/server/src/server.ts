@@ -473,7 +473,7 @@ function dispatchWorkflowConfig(
   // Tracking config (OC-SORT)
   if (trackingIdx.length > 0) {
     for (const i of trackingIdx) {
-      const cfg = nodes[i].config as Record<string, unknown> ?? {};
+      const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
       const targetClasses = typeof cfg.targetClasses === "string" && (cfg.targetClasses as string).length > 0
         ? (cfg.targetClasses as string).split(",").map(s => s.trim()).filter(s => s.length > 0)
         : [];
@@ -481,15 +481,15 @@ function dispatchWorkflowConfig(
         type: "tracking_stage_config",
         enabled: true,
         targetClasses,
-        confidence: cfg.confidence ?? 0.5,
+        confidence: (cfg.confidence as number) ?? 0.5,
         // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
-        iouThreshold: cfg.iouThreshold ?? 0.3,
-        maxTracks: cfg.maxTracks ?? 0,
-        maxAge: cfg.maxAge ?? 30,
-        minHits: cfg.minHits ?? 3,
-        targetFPS: cfg.targetFPS ?? 10,
-        smoothingAlpha: cfg.smoothingAlpha ?? 0.3,
-        zones: cfg.zones ?? [],
+        iouThreshold: (cfg.iouThreshold as number) ?? 0.3,
+        maxTracks: (cfg.maxTracks as number) ?? 0,
+        maxAge: (cfg.maxAge as number) ?? 30,
+        minHits: (cfg.minHits as number) ?? 3,
+        targetFPS: (cfg.targetFPS as number) ?? 10,
+        smoothingAlpha: (cfg.smoothingAlpha as number) ?? 0.3,
+        zones: (cfg.zones as Array<Record<string, unknown>>) ?? [],
         deltaT: (cfg.deltaT as number) ?? 3,
         inertia: (cfg.inertia as number) ?? 0.2,
         detThresh: (cfg.detThresh as number) ?? 0.5,
@@ -1859,9 +1859,9 @@ const server = Bun.serve<WsData>({
               targetFPS: (rawConfig.targetFPS as number) ?? 10,
               smoothingAlpha: (rawConfig.smoothingAlpha as number) ?? 0.3,
               zones: (rawConfig.zones as Array<Record<string, unknown>>) ?? [],
-              deltaT: (rawNode?.config?.deltaT as number) ?? 3,
-              inertia: (rawNode?.config?.inertia as number) ?? 0.2,
-              detThresh: (rawNode?.config?.detThresh as number) ?? 0.5,
+              deltaT: (rawConfig.deltaT as number) ?? 3,
+              inertia: (rawConfig.inertia as number) ?? 0.2,
+              detThresh: (rawConfig.detThresh as number) ?? 0.5,
             };
             if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
               session.publisher.ws.send(JSON.stringify(trackingConfig));
