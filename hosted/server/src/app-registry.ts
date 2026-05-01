@@ -173,7 +173,10 @@ export function resolveWorkflowToApp(
 
   // Read input config from granular source nodes via DAG edges
   const input: InputConfig = resolveSourceInput(aiNode.id, nodes, edges);
-  config.visionFps = input.visionFps;
+  // Only override visionFps from source input if AI node didn't set it explicitly
+  if (aiNode.config.visionFps == null) {
+    config.visionFps = input.visionFps;
+  }
   config.input = input;
 
   // Read output config from all sink nodes (OR-merge)

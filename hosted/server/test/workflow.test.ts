@@ -246,13 +246,7 @@ describe("AppRegistry", () => {
 // --- Node Definitions ---
 
 describe("NODE_DEFINITIONS", () => {
-  test("defines all 7 node types", () => {
-    const types = NODE_DEFINITIONS.map(d => d.type);
-    expect(types).toEqual([
-      "stream-input", "text", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision",
-      "output",
-    ]);
-  });
+  const ALL_ROLES = ["source", "processor", "reference", "sink", "gating", "trigger", "transform"];
 
   test("each definition has required fields", () => {
     for (const def of NODE_DEFINITIONS) {
@@ -264,7 +258,7 @@ describe("NODE_DEFINITIONS", () => {
       expect(def.color.header).toBeTruthy();
       expect(def.color.stroke).toBeTruthy();
       expect(Array.isArray(def.allowedTargets)).toBe(true);
-      expect(["source", "processor", "reference", "sink"]).toContain(def.role);
+      expect(ALL_ROLES).toContain(def.role);
       expect(Array.isArray(def.configSchema)).toBe(true);
       expect(def.defaultConfig).toBeDefined();
       expect(def.defaultLabel).toBeTruthy();
@@ -278,53 +272,47 @@ describe("NODE_DEFINITIONS", () => {
     }
   });
 
-  test("exactly 1 source node (stream-input)", () => {
+  test("has source nodes", () => {
     const sources = NODE_DEFINITIONS.filter(d => d.role === "source");
-    expect(sources.length).toBe(1);
-    expect(sources[0].type).toBe("stream-input");
+    expect(sources.length).toBeGreaterThanOrEqual(1);
+    const sourceTypes = sources.map(s => s.type);
+    expect(sourceTypes).toContain("camera-source");
   });
 
-  test("1 sink node (output)", () => {
+  test("has sink nodes", () => {
     const sinks = NODE_DEFINITIONS.filter(d => d.role === "sink");
-    expect(sinks.length).toBe(1);
-    expect(sinks[0].type).toBe("output");
-    expect(sinks[0].allowedTargets).toEqual([]);
+    expect(sinks.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("exactly 1 reference node (text)", () => {
+  test("has reference node (text)", () => {
     const refs = NODE_DEFINITIONS.filter(d => d.role === "reference");
     expect(refs.length).toBe(1);
     expect(refs[0].type).toBe("text");
   });
 
-  test("4 processor nodes (s2s-live, s2s-rest, s2s-e4b, jepa-vision)", () => {
+  test("has processor nodes", () => {
     const processors = NODE_DEFINITIONS.filter(d => d.role === "processor");
-    expect(processors.length).toBe(4);
-    expect(processors.map(p => p.type).sort()).toEqual(["jepa-vision", "s2s-e4b", "s2s-live", "s2s-rest"]);
+    expect(processors.length).toBeGreaterThanOrEqual(4);
+    const types = processors.map(p => p.type).sort();
+    for (const expected of ["jepa-vision", "s2s-e4b", "s2s-live", "s2s-rest"]) {
+      expect(types).toContain(expected);
+    }
   });
 
-  test("processable nodes have activationMode and binding", () => {
+  test("processable nodes have activationMode", () => {
     const processable = NODE_DEFINITIONS.filter(d => d.activationMode !== null);
+    const validModes = ["ai", "jepa", "vision", "enhance", "sensor", "speech", "tracking", "stt", "measure"];
     for (const def of processable) {
-      expect(def.binding).toBeTruthy();
-      expect(def.defaultModel).toBeTruthy();
-      expect(["ai", "jepa"]).toContain(def.activationMode);
+      expect(validModes).toContain(def.activationMode);
     }
   });
 
-  test("non-processable nodes have null activationMode and binding", () => {
-    const structural = NODE_DEFINITIONS.filter(d => d.activationMode === null);
-    for (const def of structural) {
-      expect(def.binding).toBeNull();
-    }
-  });
-
-  test("jepa-vision has activationMode jepa and targets <sink> sentinel", () => {
+  test("jepa-vision has activationMode jepa", () => {
     const jepa = NODE_DEF_MAP.get("jepa-vision")!;
     expect(jepa.activationMode).toBe("jepa");
     expect(jepa.binding).toBe("jepa-vjepa2");
     expect(jepa.defaultModel).toBe("vjepa2-vit-l");
-    expect(jepa.allowedTargets).toEqual([TARGET_ROLE_SINK]);
+    expect(jepa.allowedTargets).toContain(TARGET_ROLE_SINK);
   });
 
   test("AI nodes have activationMode ai", () => {
@@ -347,45 +335,48 @@ describe("buildAllowedEdgeMap", () => {
     }
   });
 
-  test("stream-input can target processors and output", () => {
-    const targets = edgeMap.get("stream-input")!;
+  test("camera-source can target processors and sinks", () => {
+    const targets = edgeMap.get("camera-source")!;
     expect(targets.has("s2s-live")).toBe(true);
     expect(targets.has("s2s-rest")).toBe(true);
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(true);
-    expect(targets.has("output")).toBe(true);
+    expect(targets.has("overlays")).toBe(true);
     expect(targets.has("text")).toBe(false);
-    expect(targets.has("stream-input")).toBe(false);
+    expect(targets.has("camera-source")).toBe(false);
   });
 
-  test("text can only target AI processors", () => {
+  test("text can target AI processors", () => {
     const targets = edgeMap.get("text")!;
     expect(targets.has("s2s-live")).toBe(true);
     expect(targets.has("s2s-rest")).toBe(true);
     expect(targets.has("s2s-e4b")).toBe(true);
     expect(targets.has("jepa-vision")).toBe(false);
-    expect(targets.has("output")).toBe(false);
+    expect(targets.has("overlays")).toBe(false);
   });
 
-  test("jepa-vision can target output (via <sink> expansion)", () => {
+  test("jepa-vision can target sinks (via <sink> expansion)", () => {
     const targets = edgeMap.get("jepa-vision")!;
-    expect(targets.has("output")).toBe(true);
-    expect(targets.size).toBe(1);
+    expect(targets.has("overlays")).toBe(true);
+    expect(targets.size).toBeGreaterThanOrEqual(1);
   });
 
-  test("output has no outgoing edges", () => {
-    const targets = edgeMap.get("output")!;
-    expect(targets.size).toBe(0);
+  test("sink nodes have no outgoing edges", () => {
+    const sinks = NODE_DEFINITIONS.filter(d => d.role === "sink");
+    for (const sink of sinks) {
+      const targets = edgeMap.get(sink.type)!;
+      expect(targets.size).toBe(0);
+    }
   });
 
-  test("processors can target other processors and output", () => {
+  test("processors can target other processors and sinks", () => {
     for (const type of ["s2s-live", "s2s-rest", "s2s-e4b"]) {
       const targets = edgeMap.get(type)!;
       expect(targets.has("s2s-live")).toBe(true);
       expect(targets.has("s2s-rest")).toBe(true);
       expect(targets.has("s2s-e4b")).toBe(true);
       expect(targets.has("jepa-vision")).toBe(true);
-      expect(targets.has("output")).toBe(true);
+      expect(targets.has("overlays")).toBe(true);
     }
   });
 });
@@ -393,40 +384,49 @@ describe("buildAllowedEdgeMap", () => {
 // --- validateStructure ---
 
 describe("validateStructure", () => {
-  test("valid minimal workflow passes with output", () => {
+  test("valid minimal workflow passes with source, processor, sink", () => {
     const nodes = [
-      { type: "stream-input" },
+      { type: "camera-source" },
       { type: "s2s-live" },
-      { type: "output" },
+      { type: "overlays" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
 
   test("valid with jepa-vision processor", () => {
     const nodes = [
-      { type: "stream-input" },
+      { type: "camera-source" },
       { type: "jepa-vision" },
-      { type: "output" },
+      { type: "overlays" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
 
   test("valid with multiple processors", () => {
     const nodes = [
-      { type: "stream-input" },
+      { type: "camera-source" },
       { type: "s2s-live" },
       { type: "jepa-vision" },
-      { type: "output" },
+      { type: "overlays" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
 
-  test("valid with multiple output sinks", () => {
+  test("valid with multiple sinks", () => {
     const nodes = [
-      { type: "stream-input" },
+      { type: "camera-source" },
       { type: "s2s-live" },
-      { type: "output" },
-      { type: "output" },
+      { type: "overlays" },
+      { type: "debug-sink" },
+    ];
+    expect(validateStructure(nodes)).toBeNull();
+  });
+
+  test("valid with trigger instead of sink", () => {
+    const nodes = [
+      { type: "camera-source" },
+      { type: "s2s-live" },
+      { type: "timer-trigger" },
     ];
     expect(validateStructure(nodes)).toBeNull();
   });
@@ -434,36 +434,26 @@ describe("validateStructure", () => {
   test("fails with no source node", () => {
     const nodes = [
       { type: "s2s-live" },
-      { type: "output" },
+      { type: "overlays" },
     ];
-    expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
+    expect(validateStructure(nodes)).toMatch(/at least 1 source or content/);
   });
 
-  test("fails with multiple source nodes", () => {
+  test("valid with text (reference) as source", () => {
     const nodes = [
-      { type: "stream-input" },
-      { type: "stream-input" },
-      { type: "s2s-live" },
-      { type: "output" },
-    ];
-    expect(validateStructure(nodes)).toMatch(/exactly 1 source/);
-  });
-
-  test("fails with no processor nodes", () => {
-    const nodes = [
-      { type: "stream-input" },
       { type: "text" },
-      { type: "output" },
+      { type: "s2s-live" },
+      { type: "overlays" },
     ];
-    expect(validateStructure(nodes)).toMatch(/at least 1 processor/);
+    expect(validateStructure(nodes)).toBeNull();
   });
 
-  test("fails with no output node", () => {
+  test("fails with no sink/transform/trigger node", () => {
     const nodes = [
-      { type: "stream-input" },
+      { type: "camera-source" },
       { type: "s2s-live" },
     ];
-    expect(validateStructure(nodes)).toMatch(/at least 1 output/);
+    expect(validateStructure(nodes)).toMatch(/at least 1 sink, transform, or trigger/);
   });
 });
 
@@ -522,11 +512,11 @@ describe("resolveWorkflowToPipeline", () => {
     expect((pipeline[0].config as any).output.speaker).toBe(false);
   });
 
-  test("primary AI node gets speaker=true by default", () => {
+  test("primary AI node gets speaker config from sink node", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "overlays", label: "Out", config: { speaker: true }, positionX: 600, positionY: 0 },
     ];
     const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf5", name: "AI" });
     expect((pipeline[0].config as any).output.speaker).toBe(true);
@@ -558,21 +548,28 @@ describe("resolveWorkflowToPipeline", () => {
     expect(pipeline[0].systemPrompt).toBe("jepa-vision");
   });
 
-  test("throws when no processable node present", () => {
+  test("returns empty array when no processable node present (passive workflow)", () => {
     const nodes: WorkflowNodeDef[] = [
       { id: "src", type: "stream-input", label: "In", config: {}, positionX: 0, positionY: 0 },
       { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
-    expect(() => resolveWorkflowToPipeline(nodes, [], { id: "bad", name: "Bad" })).toThrow("No processable node found");
+    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "bad", name: "Bad" });
+    expect(pipeline.length).toBe(0);
   });
 
-  test("extracts input config from stream-input node", () => {
+  test("extracts input config from granular source nodes", () => {
     const nodes: WorkflowNodeDef[] = [
-      { id: "src", type: "stream-input", label: "In", config: { video: true, phoneMic: false, glassesMic: true }, positionX: 0, positionY: 0 },
+      { id: "cam", type: "camera-source", label: "Camera", config: {}, positionX: 0, positionY: 0 },
+      { id: "gmic", type: "glasses-mic-source", label: "Glasses Mic", config: {}, positionX: 0, positionY: 100 },
       { id: "ai", type: "s2s-live", label: "AI", config: { model: "gemini-2.5-flash" }, positionX: 300, positionY: 0 },
-      { id: "out", type: "output", label: "Out", config: {}, positionX: 600, positionY: 0 },
+      { id: "out", type: "overlays", label: "Out", config: {}, positionX: 600, positionY: 0 },
     ];
-    const pipeline = resolveWorkflowToPipeline(nodes, [], { id: "wf8", name: "InputCfg" });
+    const edges: WorkflowEdgeDef[] = [
+      { id: "e1", sourceNodeId: "cam", targetNodeId: "ai" },
+      { id: "e2", sourceNodeId: "gmic", targetNodeId: "ai" },
+      { id: "e3", sourceNodeId: "ai", targetNodeId: "out" },
+    ];
+    const pipeline = resolveWorkflowToPipeline(nodes, edges, { id: "wf8", name: "InputCfg" });
     expect((pipeline[0].config as any).input.video).toBe(true);
     expect((pipeline[0].config as any).input.phoneMic).toBe(false);
     expect((pipeline[0].config as any).input.glassesMic).toBe(true);

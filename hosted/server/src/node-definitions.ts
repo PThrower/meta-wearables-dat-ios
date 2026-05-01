@@ -1256,12 +1256,12 @@ export function validateStructure(nodes: Array<{ type: string }>): string | null
 const TYPE_ALIASES: Record<string, string> = {
   // Legacy monolithic source -> granular camera-source (lifecycle config lives there)
   "stream-input": "camera-source",
-  "output-full": "viewers",
-  "output-viewers": "viewers",
+  "output-full": "overlays",
+  "output-viewers": "overlays",
   "output-speaker": "local-tts",
-  "output-recording": "recording",
+  "output-recording": "overlays",
   "output-overlays": "overlays",
-  "output": "viewers",
+  "output": "overlays",
   "speaker": "local-tts",
 };
 
