@@ -233,8 +233,6 @@ jobs:
           xcrun altool --upload-app \
             -t ios \
             -f "${{ env.IPA_PATH }}" \
-            -u "" \
-            -p "" \
             --apiKey "$APP_STORE_CONNECT_API_KEY_ID" \
             --apiIssuer "$APP_STORE_CONNECT_ISSUER_ID"
 
