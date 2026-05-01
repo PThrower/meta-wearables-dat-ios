@@ -17,8 +17,8 @@ import type {
   ReIDServiceStatus,
 } from "./reid-service.js";
 import { createReIDService } from "./reid-service.js";
-// Import to register providers (when available)
-// import "./reid-modal-provider.js";
+// Register Modal provider (side-effect import)
+import "./reid-modal-provider.js";
 
 // --- Types ---
 

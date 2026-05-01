@@ -649,19 +649,16 @@ export async function handleWorkflowActivation(
       if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
         session.publisher.ws.send(JSON.stringify(trackingConfig));
       }
-      // ReID activation locked until provider is implemented.
-      // Gate still passes through on-device (no embedding = accept all pairs).
-      // When a provider exists, uncomment the block below:
-      //
-      // if (pureGates.some(g => g.gateType === "gate-reid")) {
-      //   const reidConfig = (pureGates.find(g => g.gateType === "gate-reid")?.params ?? {}) as Record<string, unknown>;
-      //   await reidOrchestrator.activate(sid, {
-      //     provider: "modal",
-      //     model: (reidConfig.model as string) ?? "osnet-x05",
-      //     gpu: "A10G",
-      //     sessionId: sid,
-      //   }, session.publisher?.ws ?? null);
-      // }
+      // ReID activation: activates Modal OSNet provider when gate-reid is present
+      if (pureGates.some(g => g.gateType === "gate-reid")) {
+        const reidConfig = (pureGates.find(g => g.gateType === "gate-reid")?.params ?? {}) as Record<string, unknown>;
+        await reidOrchestrator.activate(sid, {
+          provider: "modal",
+          model: (reidConfig.model as string) ?? "osnet-x05",
+          gpu: (reidConfig.gpu as string) ?? "A10G",
+          sessionId: sid,
+        }, session.publisher?.ws ?? null);
+      }
       activatedAppIds.push(appsToActivate[i].id);
     }
     console.log(`[relay] Sent tracking config for ${trackingIdx.length} nodes session=${sid}`);
