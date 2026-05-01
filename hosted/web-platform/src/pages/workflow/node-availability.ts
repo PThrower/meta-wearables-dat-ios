@@ -26,6 +26,7 @@ const UNAVAILABLE_NODES: Record<string, AvailabilityEntry> = {
   "deepgram-stt": { status: "unavailable", reason: "Deepgram integration pending" },
   "jepa-vision": { status: "unavailable", reason: "JEPA integration pending" },
   "jepa-trigger": { status: "unavailable", reason: "JEPA integration pending" },
+  "gate-reid": { status: "unavailable", reason: "ReID embedding model pending" },
 };
 
 /** Check if a node type is available for use. */
