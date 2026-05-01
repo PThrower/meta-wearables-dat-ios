@@ -382,6 +382,7 @@ function dispatchWorkflowConfig(
   const enhanceIdx: number[] = [];
   const sensorIdx: number[] = [];
   const trackingIdx: number[] = [];
+  const measureIdx: number[] = [];
 
   for (let i = 0; i < nodes.length; i++) {
     const def = NODE_DEF_MAP.get(nodes[i].type);
@@ -389,6 +390,8 @@ function dispatchWorkflowConfig(
     if (def?.activationMode === "vision")    { visionIdx.push(i);   continue; }
     if (def?.activationMode === "enhance")   { enhanceIdx.push(i);  continue; }
     if (def?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
+    if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
+    if (def?.activationMode === "measure")   { measureIdx.push(i);  continue; }
     if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
   }
 
@@ -408,6 +411,25 @@ function dispatchWorkflowConfig(
   const thumbnailCfg = thumbnailNodeIdx >= 0
     ? (nodes[thumbnailNodeIdx].config as any)
     : null;
+
+  // Determine which detection types get thumbnails — only types that feed into the thumbnail node via edges.
+  // If no edges info, fall back to all detection types (backward compat).
+  const thumbnailDetTypes: string[] = [];
+  if (thumbnailNodeIdx >= 0 && edges && edges.length > 0) {
+    const thumbNodeId = nodes[thumbnailNodeIdx].id;
+    // Find upstream vision nodes connected TO the thumbnail node
+    for (const edge of edges) {
+      if (edge.targetNodeId === thumbNodeId) {
+        const srcIdx = nodes.findIndex(n => n.id === edge.sourceNodeId);
+        if (srcIdx >= 0) {
+          const srcDef = NODE_DEF_MAP.get(nodes[srcIdx].type);
+          if (srcDef?.activationMode === "vision") {
+            thumbnailDetTypes.push(nodes[srcIdx].type);
+          }
+        }
+      }
+    }
+  }
 
   if (visionIdx.length > 0) {
     const allDetTypes: string[] = [];
@@ -443,6 +465,7 @@ function dispatchWorkflowConfig(
       symbologies: Object.entries(allSym).filter(([, v]) => v).map(([k]) => k),
       maxLabels: bestLabels,
       thumbnailsEnabled: !!thumbnailCfg,
+      thumbnailDetectionTypes: thumbnailDetTypes.length > 0 ? thumbnailDetTypes : (thumbnailCfg ? allDetTypes : []),
       thumbnailSize: thumbnailCfg?.thumbnailSize ?? 64,
       thumbnailMaxCount: thumbnailCfg?.maxCount ?? 4,
       thumbnailQuality: thumbnailCfg?.quality ?? 0.6,
@@ -493,11 +516,43 @@ function dispatchWorkflowConfig(
 
   // Tracking config (OC-SORT)
   if (trackingIdx.length > 0) {
+    // Collect gate nodes (activationMode=null, role="gating")
+    const gateNodes = nodes.filter(n => n.type && typeof n.type === "string" && n.type.startsWith("gate-"));
+    const gateNodeMap = new Map(nodes.filter(n => n.type?.startsWith("gate-")).map(n => [n.id, n]));
+
     for (const i of trackingIdx) {
       const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
       const targetClasses = typeof cfg.targetClasses === "string" && (cfg.targetClasses as string).length > 0
         ? (cfg.targetClasses as string).split(",").map(s => s.trim()).filter(s => s.length > 0)
         : [];
+
+      // Build ordered gate chain from edges
+      const trackerNodeId = nodes[i].id;
+      const gates: Array<{ gateType: string; params: Record<string, number> }> = [];
+      if (edges && edges.length > 0) {
+        const visited = new Set<string>();
+        const queue: string[] = [trackerNodeId];
+        while (queue.length > 0) {
+          const targetId = queue.shift()!;
+          if (visited.has(targetId)) continue;
+          visited.add(targetId);
+          for (const edge of edges) {
+            if (edge.targetNodeId === targetId) {
+              const srcNode = gateNodeMap.get(edge.sourceNodeId);
+              if (srcNode) {
+                const gateDef = NODE_DEF_MAP.get(srcNode.type);
+                if (gateDef?.role === "gating") {
+                  const gateConfig = (srcNode.config ?? {}) as Record<string, number>;
+                  gates.push({ gateType: srcNode.type, params: gateConfig });
+                  queue.push(edge.sourceNodeId);
+                }
+              }
+            }
+          }
+        }
+        gates.reverse();
+      }
+
       ws.send(JSON.stringify({
         type: "tracking_stage_config",
         enabled: true,
@@ -515,9 +570,27 @@ function dispatchWorkflowConfig(
         inertia: (cfg.inertia as number) ?? 0.2,
         detThresh: (cfg.detThresh as number) ?? 0.5,
         useByte: (cfg.useByte as boolean) ?? false,
+        gates,
       }));
     }
     console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);
+  }
+
+  // Tool measurement config (homography + reference object)
+  if (measureIdx.length > 0) {
+    for (const i of measureIdx) {
+      const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
+      ws.send(JSON.stringify({
+        type: "measure_stage_config",
+        enabled: true,
+        referenceObject: (cfg.referenceObject as string) ?? "auto",
+        maxMeasurementError: (cfg.maxMeasurementError as number) ?? 2.0,
+        targetFPS: (cfg.targetFPS as number) ?? 1,
+        smoothingAlpha: (cfg.smoothingAlpha as number) ?? 0.5,
+        confidence: (cfg.confidence as number) ?? 0.6,
+      }));
+    }
+    console.log(`[relay] Replayed measure config (${measureIdx.length} nodes) session=${sid}`);
   }
 }
 
@@ -1676,6 +1749,7 @@ const server = Bun.serve<WsData>({
         const sensorIdx: number[] = [];
         const speechIdx: number[] = [];
         const trackingIdx: number[] = [];
+        const measureIdx: number[] = [];
         const jepaIdx: number[] = [];
         const aiIdx: number[] = [];
 
@@ -1687,6 +1761,7 @@ const server = Bun.serve<WsData>({
           if (pDef?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
           if (pDef?.activationMode === "speech")    { speechIdx.push(i);   continue; }
           if (pDef?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
+          if (pDef?.activationMode === "measure")   { measureIdx.push(i);  continue; }
           if (pDef?.activationMode === "jepa")      { jepaIdx.push(i);     continue; }
           aiIdx.push(i);
         }
@@ -1700,6 +1775,23 @@ const server = Bun.serve<WsData>({
         const thumbnailConfig = thumbnailIdx >= 0
           ? (processableNodes[thumbnailIdx].config as any)
           : null;
+
+        // Determine which detection types get thumbnails — only types upstream of the thumbnail node
+        const activationThumbDetTypes: string[] = [];
+        if (thumbnailIdx >= 0 && edges && edges.length > 0) {
+          const thumbNodeId = processableNodes[thumbnailIdx].id;
+          for (const edge of edges as Array<{ sourceNodeId: string; targetNodeId: string }>) {
+            if (edge.targetNodeId === thumbNodeId) {
+              const srcIdx = processableNodes.findIndex(n => n.id === edge.sourceNodeId);
+              if (srcIdx >= 0) {
+                const srcDef = NODE_DEF_MAP.get(processableNodes[srcIdx].type);
+                if (srcDef?.activationMode === "vision") {
+                  activationThumbDetTypes.push(processableNodes[srcIdx].type);
+                }
+              }
+            }
+          }
+        }
 
         if (visionIdx.length > 0) {
           const allDetectionTypes: string[] = [];
@@ -1747,6 +1839,7 @@ const server = Bun.serve<WsData>({
             symbologies: Object.entries(allSymbologies).filter(([, v]) => v).map(([k]) => k),
             maxLabels: bestMaxLabels,
             thumbnailsEnabled: !!thumbnailConfig,
+            thumbnailDetectionTypes: activationThumbDetTypes.length > 0 ? activationThumbDetTypes : (thumbnailConfig ? allDetectionTypes : []),
             thumbnailSize: thumbnailConfig?.thumbnailSize ?? 64,
             thumbnailMaxCount: thumbnailConfig?.maxCount ?? 4,
             thumbnailQuality: thumbnailConfig?.quality ?? 0.6,
@@ -1892,11 +1985,55 @@ const server = Bun.serve<WsData>({
 
         // 7. Fire-and-forget: send tracking config to iOS
         // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
+        // Gate nodes (gate-mahalanobis, gate-iou, etc.) configure the tracker's
+        // internal association pipeline. They have activationMode=null, so they
+        // aren't in processableNodes. Collect them from the raw nodes array and
+        // build an ordered chain using the workflow edges.
         if (trackingIdx.length > 0) {
+          // Collect gate nodes from raw nodes (they have activationMode=null)
+          const gateNodes = (nodes as any[]).filter((n: any) =>
+            n.type && typeof n.type === "string" && n.type.startsWith("gate-")
+          );
+          const gateNodeMap = new Map<string, any>();
+          for (const gn of gateNodes) { gateNodeMap.set(gn.id, gn); }
+
           for (const i of trackingIdx) {
             const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
             if (!rawNode) continue;
             const rawConfig = (rawNode.config ?? {}) as Record<string, unknown>;
+
+            // Build ordered gate chain from edges pointing to this tracker
+            const trackerNodeId = rawNode.id;
+            const gates: Array<{ gateType: string; params: Record<string, number> }> = [];
+            if (edges && (edges as any[]).length > 0) {
+              // Walk edges to find gate nodes that eventually connect to the tracker
+              // by following the chain: gate → gate → ... → tracker
+              const typedEdges = edges as Array<{ sourceNodeId: string; targetNodeId: string }>;
+              // Find all nodes that have a path to the tracker through gate nodes
+              // BFS from tracker backwards through gate-type edges
+              const gateTargets = new Set(["tracking-ocsort", "gate-mahalanobis", "gate-iou"]);
+              const visited = new Set<string>();
+              const queue: string[] = [trackerNodeId];
+              while (queue.length > 0) {
+                const targetId = queue.shift()!;
+                if (visited.has(targetId)) continue;
+                visited.add(targetId);
+                for (const edge of typedEdges) {
+                  if (edge.targetNodeId === targetId && gateNodeMap.has(edge.sourceNodeId)) {
+                    const srcNode = gateNodeMap.get(edge.sourceNodeId)!;
+                    const gateDef = NODE_DEF_MAP.get(srcNode.type);
+                    if (gateDef && gateDef.role === "gating") {
+                      const gateConfig = (srcNode.config ?? {}) as Record<string, number>;
+                      gates.push({ gateType: srcNode.type, params: gateConfig });
+                      queue.push(edge.sourceNodeId);
+                    }
+                  }
+                }
+              }
+              // Reverse to get source-to-target order (BFS gives reverse)
+              gates.reverse();
+            }
+
             const trackingConfig = {
               type: "tracking_stage_config" as const,
               enabled: true,
@@ -1915,6 +2052,7 @@ const server = Bun.serve<WsData>({
               inertia: (rawConfig.inertia as number) ?? 0.2,
               detThresh: (rawConfig.detThresh as number) ?? 0.5,
               useByte: (rawConfig.useByte as boolean) ?? false,
+              gates,
             };
             if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
               session.publisher.ws.send(JSON.stringify(trackingConfig));
@@ -1922,6 +2060,30 @@ const server = Bun.serve<WsData>({
             activatedAppIds.push(appsToActivate[i].id);
           }
           console.log(`[relay] Sent tracking config for ${trackingIdx.length} nodes session=${sid}`);
+        }
+
+        // 8. Fire-and-forget: send tool measure config to iOS
+        // Uses homography + reference object to measure fastener dimensions in mm.
+        if (measureIdx.length > 0) {
+          for (const i of measureIdx) {
+            const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+            if (!rawNode) continue;
+            const rawConfig = (rawNode.config ?? {}) as Record<string, unknown>;
+            const measureConfig = {
+              type: "measure_stage_config" as const,
+              enabled: true,
+              referenceObject: (rawConfig.referenceObject as string) ?? "auto",
+              maxMeasurementError: (rawConfig.maxMeasurementError as number) ?? 2.0,
+              targetFPS: (rawConfig.targetFPS as number) ?? 1,
+              smoothingAlpha: (rawConfig.smoothingAlpha as number) ?? 0.5,
+              confidence: (rawConfig.confidence as number) ?? 0.6,
+            };
+            if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+              session.publisher.ws.send(JSON.stringify(measureConfig));
+            }
+            activatedAppIds.push(appsToActivate[i].id);
+          }
+          console.log(`[relay] Sent measure config for ${measureIdx.length} nodes session=${sid}`);
         }
 
         const cachedFrame = registry.getLastFrame(body.sessionId);
@@ -2628,6 +2790,27 @@ const server = Bun.serve<WsData>({
                 const throttled = detectionThrottle.check(sessionId, "tracking", summary);
                 if (throttled) {
                   orchestrator.sendTrigger(sessionId, `[Tracking: ${throttled}]`);
+                }
+              }
+              // Fan out to viewers
+              broadcastToViewers(session, cmd);
+            } else if (cmd.type === "tool_measure_result" && cmd.suggestions) {
+              // iOS ToolMeasurementStage results — inject as context into active AI sessions
+              if (session.activeAppId) {
+                const dims = cmd.dimensions as Record<string, any> ?? {};
+                const suggestions = cmd.suggestions as any[] ?? [];
+                const primaryMm = dims.diameterMm ?? dims.widthMm;
+                const bestSuggestion = suggestions[0];
+                let summary = `Tool Measure: ${dims.isCircular ? `dia ${dims.diameterMm?.toFixed(1)}` : `${dims.widthMm?.toFixed(1)} x ${dims.heightMm?.toFixed(1)}`}mm`;
+                if (bestSuggestion) {
+                  summary += ` → ${bestSuggestion.sizeLabel} ${bestSuggestion.toolCategory} (${(bestSuggestion.confidence * 100).toFixed(0)}%)`;
+                }
+                if (cmd.fastenerType) {
+                  summary += ` [${cmd.fastenerType}]`;
+                }
+                const throttled = detectionThrottle.check(sessionId, "measure", summary);
+                if (throttled) {
+                  orchestrator.sendTrigger(sessionId, `[Measure: ${throttled}]`);
                 }
               }
               // Fan out to viewers

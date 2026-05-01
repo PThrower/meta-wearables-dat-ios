@@ -423,6 +423,57 @@ struct KalmanFilter7: Sendable {
     var position: [Double] {
         Array(state.prefix(4))
     }
+
+    // MARK: - Mahalanobis Gating
+
+    /// Compute squared Mahalanobis distance from predicted state to measurement.
+    /// d^2 = (z - H*x)^T * S^{-1} * (z - H*x), where S = H*P*H^T + R.
+    /// Returns d^2 (squared distance). Compare against chi-squared threshold.
+    /// Used for pre-gating: reject impossible matches before expensive Hungarian solve.
+    func mahalanobisSquared(to measurement: [Double]) -> Double {
+        precondition(measurement.count == 4, "Expected [x, y, s, r]")
+
+        // Innovation: y = z - H * x
+        let Hx = H.mulVec(state)
+        var innov = [Double](repeating: 0, count: 4)
+        for i in 0..<4 { innov[i] = measurement[i] - Hx[i] }
+
+        // Innovation covariance: S = H * P * H^T + R
+        let Ht = H.transposed() // 7x4
+
+        // PHt = P * H^T (7x4)
+        var PHt = Matrix7x4(zero: ())
+        for i in 0..<7 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += covariance[i, k] * Ht[k, j] }
+                PHt[i, j] = sum
+            }
+        }
+
+        // S = H * PHt + R (4x4)
+        var S = Matrix4x4(zero: ())
+        for i in 0..<4 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += H[i, k] * PHt[k, j] }
+                S[i, j] = sum + R[i, j]
+            }
+        }
+
+        let SI = S.inverse()
+
+        // d^2 = innov^T * S^{-1} * innov
+        var SIy = [Double](repeating: 0, count: 4)
+        for i in 0..<4 {
+            for j in 0..<4 { SIy[i] += SI[i, j] * innov[j] }
+        }
+        var d2 = 0.0
+        for i in 0..<4 { d2 += innov[i] * SIy[i] }
+
+        // Guard against NaN from degenerate covariance
+        return d2.isNaN ? .infinity : d2
+    }
 }
 
 // MARK: - Bbox Conversion
@@ -565,6 +616,11 @@ struct OCSORT: Sendable {
     // Ref: arXiv:2110.06864 — two-pass association rescues partially occluded objects.
     let useByte: Bool           // false — disabled by default
 
+    // Gating pipeline
+    let gatingPipeline: GatingPipeline
+    let costFunction: OCMCostFunction
+    let iouCostFunction: IoUCostFunction
+
     init(
         detThresh: Double = 0.5,
         maxAge: Int = 30,
@@ -573,7 +629,8 @@ struct OCSORT: Sendable {
         deltaT: Int = 3,
         inertia: Double = 0.2,
         maxTracks: Int = 0,
-        useByte: Bool = false
+        useByte: Bool = false,
+        gates: [GateConfig] = []
     ) {
         self.detThresh = detThresh
         self.maxAge = maxAge
@@ -583,6 +640,30 @@ struct OCSORT: Sendable {
         self.inertia = inertia
         self.maxTracks = maxTracks
         self.useByte = useByte
+
+        // Build gating pipeline from workflow gate chain.
+        // If no gates provided, use default IoU gating at iouThreshold.
+        let builtGates: [Gate]
+        if gates.isEmpty {
+            builtGates = [IoUGate(threshold: iouThreshold)]
+        } else {
+            builtGates = gates.map { gateConfig in
+                switch gateConfig.gateType {
+                case "gate-mahalanobis":
+                    let chiSq = gateConfig.params["chiSquaredThreshold"] ?? 9.49
+                    return MahalanobisGate(chiSquaredThreshold: chiSq) as Gate
+                case "gate-iou":
+                    let threshold = gateConfig.params["iouThreshold"] ?? iouThreshold
+                    return IoUGate(threshold: threshold) as Gate
+                default:
+                    // Unknown gate type — fall through to IoU
+                    return IoUGate(threshold: iouThreshold) as Gate
+                }
+            }
+        }
+        self.gatingPipeline = GatingPipeline(gates: builtGates)
+        self.costFunction = OCMCostFunction()
+        self.iouCostFunction = IoUCostFunction()
     }
 
     // MARK: - Public Interface
@@ -1002,8 +1083,9 @@ struct OCSORT: Sendable {
         return [-1, -1, -1, -1, -1]
     }
 
-    // MARK: - Association (First Round with OCM)
+    // MARK: - Association (First Round with OCM + Pre-Gating)
     // Paper Sec 4.2: associate() from association.py
+    // Extended with Mahalanobis pre-gating to reject impossible matches before Hungarian.
 
     private func associate(
         detections: [TrackDetection],
@@ -1023,69 +1105,30 @@ struct OCSORT: Sendable {
             return ([], [], Array(0..<numTrks))
         }
 
-        // Paper Sec 4.2: compute direction consistency cost
-        // speed_direction_batch: direction from k_previous_obs to each detection
-        var angleDiffCost = [[Double]](
-            repeating: [Double](repeating: 0, count: numDets),
-            count: numTrks
+        // --- Pre-gating: reject impossible matches before cost computation ---
+        let gateMask = gatingPipeline.apply(
+            tracks: tracks,
+            predictedBoxes: trackers,
+            detections: detections
         )
 
-        for trkIdx in 0..<numTrks {
-            let prevObs = kObservations[trkIdx]
-            let validMask = prevObs[4] >= 0 // score >= 0 means valid observation
-
-            if validMask {
-                let prevCx = (prevObs[0] + prevObs[2]) / 2.0
-                let prevCy = (prevObs[1] + prevObs[3]) / 2.0
-
-                for detIdx in 0..<numDets {
-                    let detBbox = detections[detIdx].bbox
-                    let detCx = (detBbox.x1 + detBbox.x2) / 2.0
-                    let detCy = (detBbox.y1 + detBbox.y2) / 2.0
-
-                    // Direction from k_previous_obs to detection
-                    let dx = detCx - prevCx
-                    let dy = detCy - prevCy
-                    let norm = sqrt(dx * dx + dy * dy) + 1e-6
-                    let dirX = dx / norm
-                    let dirY = dy / norm
-
-                    // Cosine similarity with track velocity
-                    let velY = velocities[trkIdx][0] // dy component
-                    let velX = velocities[trkIdx][1] // dx component
-                    let cosSim = velX * dirX + velY * dirY
-                    let clippedCos = max(-1.0, min(1.0, cosSim))
-                    let angle = acos(clippedCos)
-                    let diffAngle = (Double.pi / 2.0 - abs(angle)) / Double.pi
-
-                    // Weighted by detection score
-                    angleDiffCost[trkIdx][detIdx] = diffAngle * inertia * detections[detIdx].confidence
-                }
-            }
-        }
-
-        // IoU matrix: numTrks x numDets
-        let iouMatrix = iouBatchDetections(detections: detections, trackerBoxes: trackers)
-
-        // Combined cost: -(IoU + angleDiffCost)
-        // Transpose angleDiffCost from [trk][det] to [det][trk] for hungarianAssignment
-        var costMatrix = [[Double]](
-            repeating: [Double](repeating: 0, count: numTrks),
-            count: numDets
+        // --- Cost matrix: OCM (IoU + direction consistency) on gated pairs only ---
+        let costMatrix = costFunction.compute(
+            detections: detections,
+            predictedBoxes: trackers,
+            gateMask: gateMask,
+            velocities: velocities,
+            kObservations: kObservations,
+            inertia: inertia
         )
-        for detIdx in 0..<numDets {
-            for trkIdx in 0..<numTrks {
-                costMatrix[detIdx][trkIdx] = -(iouMatrix[trkIdx][detIdx] + angleDiffCost[trkIdx][detIdx])
-            }
-        }
 
-        // Hungarian matching
+        // --- Hungarian matching on gated cost matrix ---
         let matchedIndices = hungarianAssignment(
             costMatrix: costMatrix,
-            gateThreshold: 1.0 // We gate on IoU manually below
+            gateThreshold: 1.0 // Gating already applied via gateMask
         )
 
-        // Filter matches by IoU threshold
+        // Collect matches (pairs already passed all gates)
         var matches: [(Int, Int)] = []
         var matchedDetSet = Set<Int>()
         var matchedTrkSet = Set<Int>()
@@ -1093,11 +1136,11 @@ struct OCSORT: Sendable {
         for m in matchedIndices {
             let detIdx = m.row
             let trkIdx = m.col
-            if iouMatrix[trkIdx][detIdx] >= iouThreshold {
-                matches.append((detIdx, trkIdx))
-                matchedDetSet.insert(detIdx)
-                matchedTrkSet.insert(trkIdx)
-            }
+            // Double-check gate mask (should always be true after gated cost)
+            guard gateMask[trkIdx][detIdx] else { continue }
+            matches.append((detIdx, trkIdx))
+            matchedDetSet.insert(detIdx)
+            matchedTrkSet.insert(trkIdx)
         }
 
         let unmatchedDets = Array(0..<numDets).filter { !matchedDetSet.contains($0) }

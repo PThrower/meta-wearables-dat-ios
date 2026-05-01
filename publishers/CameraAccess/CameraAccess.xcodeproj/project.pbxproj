@@ -87,6 +87,7 @@
 		VISNTYPBLD01 /* VisionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNTYPFLE01 /* VisionTypes.swift */; };
 		TRKTYPBLD01 /* TrackingTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TRKTYPFLE01 /* TrackingTypes.swift */; };
 		HNGALGBLD01 /* HungarianAlgorithm.swift in Sources */ = {isa = PBXBuildFile; fileRef = HNGALGFLE01 /* HungarianAlgorithm.swift */; };
+		GTNGPLBLD01 /* GatingPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = GTNGPLFLE01 /* GatingPipeline.swift */; };
 		OCSORTBLD01 /* OCSORT.swift in Sources */ = {isa = PBXBuildFile; fileRef = OCSORTFLE01 /* OCSORT.swift */; };
 		ITMREGBLD01 /* ItemRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ITMREGFLE01 /* ItemRegistry.swift */; };
 		OBJTRKBLD01 /* ObjectTrackingStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = OBJTRKFLE01 /* ObjectTrackingStage.swift */; };
@@ -207,6 +208,7 @@
 		VISNTYPFLE01 /* VisionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionTypes.swift; sourceTree = "<group>"; };
 		TRKTYPFLE01 /* TrackingTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackingTypes.swift; sourceTree = "<group>"; };
 		HNGALGFLE01 /* HungarianAlgorithm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungarianAlgorithm.swift; sourceTree = "<group>"; };
+		GTNGPLFLE01 /* GatingPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GatingPipeline.swift; sourceTree = "<group>"; };
 		OCSORTFLE01 /* OCSORT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCSORT.swift; sourceTree = "<group>"; };
 		ITMREGFLE01 /* ItemRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItemRegistry.swift; sourceTree = "<group>"; };
 		OBJTRKFLE01 /* ObjectTrackingStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjectTrackingStage.swift; sourceTree = "<group>"; };
@@ -406,6 +408,7 @@
 				450DDFDB5AE97C946EA02122 /* ConfidenceSmoother.swift */,
 				TRKTYPFLE01 /* TrackingTypes.swift */,
 				HNGALGFLE01 /* HungarianAlgorithm.swift */,
+				GTNGPLFLE01 /* GatingPipeline.swift */,
 				OCSORTFLE01 /* OCSORT.swift */,
 				ITMREGFLE01 /* ItemRegistry.swift */,
 			);
@@ -684,6 +687,7 @@
 				0086DA8943BFBECDED980040 /* ConfidenceSmoother.swift in Sources */,
 				TRKTYPBLD01 /* TrackingTypes.swift in Sources */,
 				HNGALGBLD01 /* HungarianAlgorithm.swift in Sources */,
+				GTNGPLBLD01 /* GatingPipeline.swift in Sources */,
 				OCSORTBLD01 /* OCSORT.swift in Sources */,
 				ITMREGBLD01 /* ItemRegistry.swift in Sources */,
 				OBJTRKBLD01 /* ObjectTrackingStage.swift in Sources */,

@@ -4,6 +4,25 @@
 
 import Foundation
 
+// MARK: - Gate Configuration
+
+/// Configuration for a single gate in the association pipeline.
+/// Each gate is a workflow node that connects to tracking-ocsort.
+/// The server collects gate nodes from the workflow graph and sends them
+/// as an ordered chain in the tracking config.
+/// Ref: Bar-Shalom & Fortmann, "Tracking and Data Association" (1988)
+struct GateConfig: Codable, Sendable, Equatable {
+    /// Gate type identifier matching the workflow node type.
+    /// "gate-mahalanobis" | "gate-iou" | future gate types.
+    let gateType: String
+    /// Gate-specific parameters extracted from the node's config.
+    let params: [String: Double]
+
+    enum CodingKeys: String, CodingKey {
+        case gateType, params
+    }
+}
+
 // MARK: - Configuration
 
 /// Server-provided configuration for the tracking stage.
@@ -44,11 +63,19 @@ struct TrackingStageConfig: Codable, Sendable {
     /// Ref: arXiv:2110.06864 — rescues partially occluded objects. Default false.
     let useByte: Bool
 
+    // MARK: Gating Pipeline — ordered chain from workflow nodes
+
+    /// Ordered chain of gates from the workflow graph.
+    /// Built by the server from gate-* nodes that connect to this tracker.
+    /// Empty array = default gating (IoU at iouThreshold).
+    let gates: [GateConfig]
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
         case deltaT, inertia, detThresh, useByte
+        case gates
     }
 
     init(
@@ -64,7 +91,8 @@ struct TrackingStageConfig: Codable, Sendable {
         deltaT: Int = 3,
         inertia: Double = 0.2,
         detThresh: Double = 0.5,
-        useByte: Bool = false
+        useByte: Bool = false,
+        gates: [GateConfig] = []
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -79,6 +107,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.inertia = inertia
         self.detThresh = detThresh
         self.useByte = useByte
+        self.gates = gates
     }
 
     init(from decoder: Decoder) throws {
@@ -96,6 +125,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.inertia = try c.decodeIfPresent(Double.self, forKey: .inertia) ?? 0.2
         self.detThresh = try c.decodeIfPresent(Double.self, forKey: .detThresh) ?? 0.5
         self.useByte = try c.decodeIfPresent(Bool.self, forKey: .useByte) ?? false
+        self.gates = try c.decodeIfPresent([GateConfig].self, forKey: .gates) ?? []
     }
 }
 

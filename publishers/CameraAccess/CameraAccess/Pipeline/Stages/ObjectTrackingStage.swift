@@ -42,7 +42,8 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             deltaT: config.deltaT,
             inertia: config.inertia,
             maxTracks: config.maxTracks,
-            useByte: config.useByte
+            useByte: config.useByte,
+            gates: config.gates
         )
         self.registry = ItemRegistry()
         self.smoother = ConfidenceSmoother()
@@ -65,7 +66,9 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             iouThreshold: newConfig.iouThreshold,
             deltaT: newConfig.deltaT,
             inertia: newConfig.inertia,
-            maxTracks: newConfig.maxTracks
+            maxTracks: newConfig.maxTracks,
+            useByte: newConfig.useByte,
+            gates: newConfig.gates
         )
         self.registry.setZones(newConfig.zones)
         self.smoother.reset()

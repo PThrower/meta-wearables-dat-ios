@@ -25,7 +25,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "passthrough";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "passthrough";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -95,7 +95,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -374,7 +374,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Face Detect",
     subtitle: "${maxFaces} faces | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-face-detect",
@@ -395,7 +395,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Barcode Scan",
     subtitle: "${symbologies}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-barcode-scan",
@@ -421,7 +421,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "OCR",
     subtitle: "${language} | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-ocr",
@@ -473,7 +473,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Person Detect",
     subtitle: "${maxPersons} persons | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-person-detect",
@@ -494,7 +494,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Body Pose",
     subtitle: "${maxPoses} poses | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-body-pose",
@@ -536,6 +536,55 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   // activationMode: "tracking" sends config to iOS publisher.
   // Ref: arXiv:2203.14360 — deltaT (OCM velocity lookback), inertia (direction weight), detThresh
   //
+  // --- Association Gate nodes (configurable pre-gating chain for OC-SORT) ---
+  //
+  // Gate nodes configure the tracker's internal association pipeline.
+  // They are config-only — the server collects them from the workflow graph
+  // and sends the ordered chain to iOS as `gates: [{gateType, params}]`.
+  // The iOS tracker builds its GatingPipeline from this chain.
+  //
+  // Chain order matters: Mahalanobis (cheap KF motion filter) → IoU (spatial) → future gates.
+  // Users compose the right strategy per domain:
+  //   Surveillance: gate-mahalanobis (strict) → gate-iou
+  //   Sports/fast motion: gate-mahalanobis (loose) → gate-iou
+  //   Close-range: gate-iou only
+  //
+  // Ref: Bar-Shalom & Fortmann, "Tracking and Data Association" (1988)
+  //
+  {
+    type: "gate-mahalanobis",
+    label: "Mahalanobis Gate",
+    subtitle: "chi-sq: ${chiSquaredThreshold} | KF motion filter",
+    color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou"],
+    role: "gating",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "chiSquaredThreshold", label: "Chi-squared threshold (4 DOF)", min: 1, max: 25, step: 0.5 },
+    ],
+    defaultConfig: { chiSquaredThreshold: 9.49 },
+    defaultLabel: "Mahalanobis Gate",
+    runtime: ["mobile"],
+  },
+  {
+    type: "gate-iou",
+    label: "IoU Gate",
+    subtitle: "iou >= ${iouThreshold} | spatial overlap",
+    color: { fill: "#0d2d2d", header: "#06b6d4", stroke: "#06b6d4" },
+    allowedTargets: ["tracking-ocsort", "gate-mahalanobis", "gate-iou"],
+    role: "gating",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "range", key: "iouThreshold", label: "IoU Threshold", min: 0.05, max: 0.9, step: 0.05 },
+    ],
+    defaultConfig: { iouThreshold: 0.3 },
+    defaultLabel: "IoU Gate",
+    runtime: ["mobile"],
+  },
   {
     type: "tracking-ocsort",
     label: "OC-SORT Tracker",
@@ -1011,6 +1060,58 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { profile: "hfp" },
     defaultLabel: "Glasses Speaker",
+    runtime: ["mobile"],
+  },
+  // --- Tool Measurement nodes (fastener sizing for maintenance/training) ---
+  //
+  // vision-tool-measure uses homography + reference object to measure fastener
+  // dimensions in mm. activationMode: "measure" sends config to iOS publisher.
+  //
+  {
+    type: "vision-tool-measure",
+    label: "Tool Measure",
+    subtitle: "ref: ${referenceObject} | tol: ${maxMeasurementError}mm",
+    color: { fill: "#1a0a3d", header: "#a78bfa", stroke: "#a78bfa" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "local-tts", "overlays", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "measure",
+    binding: "vision-tool-measure",
+    defaultModel: null,
+    configSchema: [
+      { kind: "select", key: "referenceObject", label: "Reference Object", options: [
+        { value: "auto", label: "Auto-detect" },
+        { value: "credit_card", label: "Credit Card (85.6 x 54mm)" },
+        { value: "us_quarter", label: "US Quarter (24.26mm)" },
+        { value: "us_penny", label: "US Penny (19.05mm)" },
+        { value: "us_nickel", label: "US Nickel (21.21mm)" },
+        { value: "us_dime", label: "US Dime (17.91mm)" },
+      ]},
+      { kind: "range", key: "maxMeasurementError", label: "Max Error Tolerance (mm)", min: 0.5, max: 5.0, step: 0.25, unit: "mm" },
+      { kind: "range", key: "targetFPS", label: "Measurement FPS", min: 0.5, max: 5, step: 0.5 },
+      { kind: "range", key: "smoothingAlpha", label: "Smoothing", min: 0.1, max: 1.0, step: 0.05 },
+      { kind: "range", key: "confidence", label: "Confidence Threshold", min: 0.1, max: 1.0, step: 0.05 },
+    ],
+    defaultConfig: { referenceObject: "auto", maxMeasurementError: 2.0, targetFPS: 1, smoothingAlpha: 0.5, confidence: 0.6 },
+    defaultLabel: "Tool Measure",
+    runtime: ["mobile"],
+  },
+  {
+    type: "tool-suggest",
+    label: "Tool Suggestion",
+    subtitle: "fastener sizing overlay",
+    color: { fill: "#3d2000", header: "#f97316", stroke: "#f97316" },
+    allowedTargets: [],
+    role: "sink",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "checkbox", key: "showDimensions", label: "Show dimensions (mm)" },
+      { kind: "checkbox", key: "showToolSize", label: "Show suggested tool" },
+      { kind: "checkbox", key: "showConfidence", label: "Show confidence indicator" },
+    ],
+    defaultConfig: { showDimensions: true, showToolSize: true, showConfidence: true },
+    defaultLabel: "Tool Suggestion",
     runtime: ["mobile"],
   },
   {
