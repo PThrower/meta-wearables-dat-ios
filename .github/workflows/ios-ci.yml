@@ -31,7 +31,7 @@ env:
 jobs:
   build-and-test:
     name: Build & Test
-    runs-on: macos-15
+    runs-on: macos-26-xlarge
     timeout-minutes: 30
 
     steps:
@@ -40,27 +40,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Xcode and iOS Platform
+      - name: Setup Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
           xcodebuild -version
-
-          if ! xcrun simctl list runtimes | grep -q "iOS 18"; then
-            echo "Downloading iOS simulator runtime..."
-            xcodebuild -downloadPlatform iOS
-          else
-            echo "iOS 18 runtime already installed"
-          fi
+          xcrun simctl list runtimes | head -20
 
       - name: Build and Test
         run: |
-          # Pick first available iPhone simulator (prefer iOS 18)
+          # Pick first available iPhone simulator (prefer iOS 26)
           DESTINATION=$(xcrun simctl list devices available -j | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
           for runtime, devs in sorted(data['devices'].items(), reverse=True):
               for d in devs:
-                  if 'iPhone 16 Pro' in d['name'] and d['isAvailable'] and '18' in runtime:
+                  if 'iPhone' in d['name'] and 'Pro' in d['name'] and d['isAvailable'] and '26' in runtime:
                       print(d['udid']); sys.exit(0)
           for runtime, devs in sorted(data['devices'].items(), reverse=True):
               for d in devs:
@@ -105,7 +99,7 @@ jobs:
     if: >
       (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/feat/'))) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.upload_testflight == 'true')
-    runs-on: macos-15
+    runs-on: macos-26-xlarge
     timeout-minutes: 45
 
     steps:
@@ -114,13 +108,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Xcode and iOS Platform
+      - name: Setup Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
           xcodebuild -version
-
-          echo "Downloading iOS platform (device SDK)..."
-          xcodebuild -downloadPlatform iOS
 
       - name: Install signing certificate
         env:
@@ -174,7 +165,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>app-store</string>
+            <string>app-store-connect</string>
             <key>teamID</key>
             <string>42R8ZPM5N8</string>
             <key>signingStyle</key>
