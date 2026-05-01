@@ -28,10 +28,23 @@ struct TrackingStageConfig: Codable, Sendable {
     /// Zone definitions for spatial accounting.
     let zones: [ZoneDefinition]
 
+    // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
+    // Ref: noahcao/OC_SORT, KalmanBoxTracker.__init__
+
+    /// Steps back for velocity estimation (OCM). Default 3.
+    /// Ref: arXiv:2203.14360 Sec 4.2
+    let deltaT: Int
+    /// Direction consistency weight (OCM). Default 0.2.
+    /// Ref: arXiv:2203.14360 Sec 4.2
+    let inertia: Double
+    /// Detection confidence threshold for first-pass association. Default 0.5.
+    let detThresh: Double
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
+        case deltaT, inertia, detThresh
     }
 
     init(
@@ -43,7 +56,10 @@ struct TrackingStageConfig: Codable, Sendable {
         maxTracks: Int = 0,
         targetFPS: Double = 10,
         smoothingAlpha: Double = 0.3,
-        zones: [ZoneDefinition] = []
+        zones: [ZoneDefinition] = [],
+        deltaT: Int = 3,
+        inertia: Double = 0.2,
+        detThresh: Double = 0.5
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -54,6 +70,9 @@ struct TrackingStageConfig: Codable, Sendable {
         self.targetFPS = targetFPS
         self.smoothingAlpha = smoothingAlpha
         self.zones = zones
+        self.deltaT = deltaT
+        self.inertia = inertia
+        self.detThresh = detThresh
     }
 
     init(from decoder: Decoder) throws {
@@ -67,6 +86,9 @@ struct TrackingStageConfig: Codable, Sendable {
         self.targetFPS = try c.decodeIfPresent(Double.self, forKey: .targetFPS) ?? 10
         self.smoothingAlpha = try c.decodeIfPresent(Double.self, forKey: .smoothingAlpha) ?? 0.3
         self.zones = try c.decodeIfPresent([ZoneDefinition].self, forKey: .zones) ?? []
+        self.deltaT = try c.decodeIfPresent(Int.self, forKey: .deltaT) ?? 3
+        self.inertia = try c.decodeIfPresent(Double.self, forKey: .inertia) ?? 0.2
+        self.detThresh = try c.decodeIfPresent(Double.self, forKey: .detThresh) ?? 0.5
     }
 }
 
@@ -83,13 +105,25 @@ struct TrackDetection: Sendable {
         ((bbox.x1 + bbox.x2) / 2, (bbox.y1 + bbox.y2) / 2)
     }
 
-    /// Bounding box as [x, y, w, h] for Kalman filter input.
+    /// Bounding box as [x, y, w, h] — used for logging only.
     var xywh: [Double] {
         let cx = (bbox.x1 + bbox.x2) / 2
         let cy = (bbox.y1 + bbox.y2) / 2
         let w = bbox.x2 - bbox.x1
         let h = bbox.y2 - bbox.y1
         return [cx, cy, w, h]
+    }
+
+    /// Convert to 7-state KF observation vector [x, y, s, r] where s=area, r=aspect.
+    /// Ref: arXiv:2203.14360, convert_bbox_to_z
+    var zVector: [Double] {
+        let w = bbox.x2 - bbox.x1
+        let h = bbox.y2 - bbox.y1
+        let cx = (bbox.x1 + bbox.x2) / 2
+        let cy = (bbox.y1 + bbox.y2) / 2
+        let s = w * h  // scale = area
+        let r = w / (h + 1e-6)  // aspect ratio
+        return [cx, cy, s, r]
     }
 }
 
@@ -115,9 +149,13 @@ struct Track: Sendable {
     let hits: Int
     /// Frame timestamp when track was last updated.
     let lastSeenTimestamp: Double
+    // Ref: Ultralytics YOLO tracking modes — trajectory visualization
+    /// Trajectory trail: center points of last N observations for polyline rendering.
+    /// Ref: Ultralytics tracking docs — draw movement paths of tracked objects.
+    let trail: [(x: Double, y: Double)]
 
     var displayLabel: String {
-        "#\(trackId) \(classLabel)"
+        "#\(trackId) \(classLabel) \(Int(confidence * 100))%"
     }
 }
 
@@ -219,6 +257,7 @@ struct TrackingFrameResult: Sendable {
                     ],
                     "age": t.age,
                     "hits": t.hits,
+                    "trail": t.trail.map { ["x": $0.x, "y": $0.y] },
                     "displayLabel": t.displayLabel,
                 ] as [String: Any]
             },

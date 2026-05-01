@@ -482,6 +482,7 @@ function dispatchWorkflowConfig(
         enabled: true,
         targetClasses,
         confidence: cfg.confidence ?? 0.5,
+        // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
         iouThreshold: cfg.iouThreshold ?? 0.3,
         maxTracks: cfg.maxTracks ?? 0,
         maxAge: cfg.maxAge ?? 30,
@@ -489,6 +490,9 @@ function dispatchWorkflowConfig(
         targetFPS: cfg.targetFPS ?? 10,
         smoothingAlpha: cfg.smoothingAlpha ?? 0.3,
         zones: cfg.zones ?? [],
+        deltaT: (cfg.deltaT as number) ?? 3,
+        inertia: (cfg.inertia as number) ?? 0.2,
+        detThresh: (cfg.detThresh as number) ?? 0.5,
       }));
     }
     console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);
@@ -1835,6 +1839,7 @@ const server = Bun.serve<WsData>({
         }
 
         // 7. Fire-and-forget: send tracking config to iOS
+        // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters
         if (trackingIdx.length > 0) {
           for (const i of trackingIdx) {
             const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
@@ -1854,6 +1859,9 @@ const server = Bun.serve<WsData>({
               targetFPS: (rawConfig.targetFPS as number) ?? 10,
               smoothingAlpha: (rawConfig.smoothingAlpha as number) ?? 0.3,
               zones: (rawConfig.zones as Array<Record<string, unknown>>) ?? [],
+              deltaT: (rawNode?.config?.deltaT as number) ?? 3,
+              inertia: (rawNode?.config?.inertia as number) ?? 0.2,
+              detThresh: (rawNode?.config?.detThresh as number) ?? 0.5,
             };
             if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
               session.publisher.ws.send(JSON.stringify(trackingConfig));

@@ -1,356 +1,1132 @@
 // OCSORT.swift
 // OC-SORT (Observation-Centric SORT) multi-object tracker.
-// Pure struct -- mutations protected by owning ObjectTrackingStage actor isolation.
-// Kalman state: 8-dim [x, y, w, h, vx, vy, vw, vh] constant-velocity model.
+// Paper: arXiv:2203.14360 (CVPR 2023)
+// Ref: noahcao/OC_SORT trackers/ocsort_tracker/ocsort.py
+//
+// Faithful implementation of the three OC-SORT innovations:
+//   Sec 4.1: ORU — Observation-Centric Re-Update (virtual trajectory on rediscovery)
+//   Sec 4.2: OCM — Observation-Centric Momentum (direction-consistent association)
+//   Sec 4.3: OCR — Observation-Centric Recovery (second-round match on last_obs)
+//
+// Kalman state: 7-dim [x, y, s, r, vx, vy, vs] constant-velocity model.
+// Observation: 4-dim [x, y, s, r] where s=area, r=aspect ratio.
+// Pure struct — mutations protected by owning ObjectTrackingStage actor isolation.
 
 import Foundation
-import Accelerate
 
-// MARK: - 8x8 Matrix
+// MARK: - 7x7 Matrix
 
-/// Fixed-size 8x8 matrix using flat array storage.
-/// Used by KalmanFilter8 for state covariance operations.
-struct Matrix8x8: Sendable {
-    var elements: [Double]  // 64 elements, row-major
+/// Fixed-size 7x7 matrix using flat array storage.
+/// Used by KalmanFilter7 for state covariance operations.
+struct Matrix7x7: Sendable {
+    var elements: [Double] // 49 elements, row-major
 
     init(zero: Void) {
-        self.elements = [Double](repeating: 0, count: 64)
+        self.elements = [Double](repeating: 0, count: 49)
     }
 
     init(identity: Void) {
-        self.elements = [Double](repeating: 0, count: 64)
-        for i in 0..<8 { self.elements[i * 8 + i] = 1.0 }
+        self.elements = [Double](repeating: 0, count: 49)
+        for i in 0..<7 { self.elements[i * 7 + i] = 1.0 }
     }
 
     init(diagonal values: [Double]) {
         self.init(zero: ())
-        for i in 0..<min(8, values.count) { self.elements[i * 8 + i] = values[i] }
+        for i in 0..<min(7, values.count) { self.elements[i * 7 + i] = values[i] }
     }
 
     subscript(row: Int, col: Int) -> Double {
-        get { elements[row * 8 + col] }
-        set { elements[row * 8 + col] = newValue }
+        get { elements[row * 7 + col] }
+        set { elements[row * 7 + col] = newValue }
     }
 
-    static func * (_ a: Matrix8x8, _ b: Matrix8x8) -> Matrix8x8 {
-        var result = Matrix8x8(zero: ())
-        for i in 0..<8 {
-            for j in 0..<8 {
+    static func * (_ a: Matrix7x7, _ b: Matrix7x7) -> Matrix7x7 {
+        var result = Matrix7x7(zero: ())
+        for i in 0..<7 {
+            for j in 0..<7 {
                 var sum = 0.0
-                for k in 0..<8 { sum += a[i, k] * b[k, j] }
+                for k in 0..<7 { sum += a[i, k] * b[k, j] }
                 result[i, j] = sum
             }
         }
         return result
     }
 
-    static func * (_ m: Matrix8x8, _ v: [Double]) -> [Double] {
-        var result = [Double](repeating: 0, count: 8)
-        for i in 0..<8 {
-            for j in 0..<8 { result[i] += m[i, j] * v[j] }
+    /// Matrix-vector multiply: 7x7 * [Double](7) -> [Double](7)
+    static func * (_ m: Matrix7x7, _ v: [Double]) -> [Double] {
+        var result = [Double](repeating: 0, count: 7)
+        for i in 0..<7 {
+            for j in 0..<7 { result[i] += m[i, j] * v[j] }
         }
         return result
     }
 
-    static func + (_ a: Matrix8x8, _ b: Matrix8x8) -> Matrix8x8 {
+    static func + (_ a: Matrix7x7, _ b: Matrix7x7) -> Matrix7x7 {
         var result = a
-        for i in 0..<64 { result.elements[i] += b.elements[i] }
+        for i in 0..<49 { result.elements[i] += b.elements[i] }
         return result
     }
 
-    static func - (_ a: Matrix8x8, _ b: Matrix8x8) -> Matrix8x8 {
+    static func - (_ a: Matrix7x7, _ b: Matrix7x7) -> Matrix7x7 {
         var result = a
-        for i in 0..<64 { result.elements[i] -= b.elements[i] }
+        for i in 0..<49 { result.elements[i] -= b.elements[i] }
         return result
     }
 
-    func transposed() -> Matrix8x8 {
-        var result = Matrix8x8(zero: ())
-        for i in 0..<8 {
-            for j in 0..<8 { result[j, i] = self[i, j] }
+    func transposed() -> Matrix7x7 {
+        var result = Matrix7x7(zero: ())
+        for i in 0..<7 {
+            for j in 0..<7 { result[j, i] = self[i, j] }
         }
         return result
     }
 
     /// Invert via Gauss-Jordan elimination.
-    func inverse() -> Matrix8x8 {
-        var aug = [Double](repeating: 0, count: 128)
-        for i in 0..<8 {
-            for j in 0..<8 { aug[i * 16 + j] = self[i, j] }
-            aug[i * 16 + 8 + i] = 1.0
+    func inverse() -> Matrix7x7 {
+        var aug = [Double](repeating: 0, count: 98) // 7 * (7+7)
+        for i in 0..<7 {
+            for j in 0..<7 { aug[i * 14 + j] = self[i, j] }
+            aug[i * 14 + 7 + i] = 1.0
         }
-        for col in 0..<8 {
+        for col in 0..<7 {
             var maxRow = col
-            for row in (col + 1)..<8 {
-                if abs(aug[row * 16 + col]) > abs(aug[maxRow * 16 + col]) { maxRow = row }
+            for row in (col + 1)..<7 {
+                if abs(aug[row * 14 + col]) > abs(aug[maxRow * 14 + col]) { maxRow = row }
             }
             if maxRow != col {
-                for j in 0..<16 {
-                    let tmp = aug[col * 16 + j]
-                    aug[col * 16 + j] = aug[maxRow * 16 + j]
-                    aug[maxRow * 16 + j] = tmp
+                for j in 0..<14 {
+                    let tmp = aug[col * 14 + j]
+                    aug[col * 14 + j] = aug[maxRow * 14 + j]
+                    aug[maxRow * 14 + j] = tmp
                 }
             }
-            let pivot = aug[col * 16 + col]
-            guard abs(pivot) > 1e-12 else { return Matrix8x8(identity: ()) }
-            for j in 0..<16 { aug[col * 16 + j] /= pivot }
-            for row in 0..<8 {
+            let pivot = aug[col * 14 + col]
+            guard abs(pivot) > 1e-12 else { return Matrix7x7(identity: ()) }
+            for j in 0..<14 { aug[col * 14 + j] /= pivot }
+            for row in 0..<7 {
                 guard row != col else { continue }
-                let factor = aug[row * 16 + col]
-                for j in 0..<16 { aug[row * 16 + j] -= factor * aug[col * 16 + j] }
+                let factor = aug[row * 14 + col]
+                for j in 0..<14 { aug[row * 14 + j] -= factor * aug[col * 14 + j] }
             }
         }
-        var result = Matrix8x8(zero: ())
-        for i in 0..<8 {
-            for j in 0..<8 { result[i, j] = aug[i * 16 + 8 + j] }
+        var result = Matrix7x7(zero: ())
+        for i in 0..<7 {
+            for j in 0..<7 { result[i, j] = aug[i * 14 + 7 + j] }
         }
         return result
     }
 }
 
-// MARK: - Kalman Filter (8-state)
+// MARK: - 4x7 and 4x4 Matrix helpers
 
-/// 8-state Kalman filter: [x, y, w, h, vx, vy, vw, vh].
-/// Constant-velocity model. Measurement is 4-dim [x, y, w, h].
-struct KalmanFilter8: Sendable {
-    var state: [Double]         // 8-element state vector
-    var covariance: Matrix8x8   // 8x8 state covariance
+/// Fixed-size 4x7 matrix for the observation model H.
+/// Stored row-major: 4 rows x 7 cols = 28 elements.
+struct Matrix4x7: Sendable {
+    var elements: [Double] // 28 elements, row-major
 
-    private let F: Matrix8x8    // State transition
-    private let H: Matrix8x8    // Measurement matrix (4x8, stored as 8x8 with zeros)
-    private let Q: Matrix8x8   // Process noise
-    private let R: Matrix8x8    // Measurement noise
+    init(zero: Void) {
+        self.elements = [Double](repeating: 0, count: 28)
+    }
 
-    init(xywh: [Double]) {
-        precondition(xywh.count == 4, "Expected [x, y, w, h]")
-        self.state = [xywh[0], xywh[1], xywh[2], xywh[3], 0, 0, 0, 0]
+    subscript(row: Int, col: Int) -> Double {
+        get { elements[row * 7 + col] }
+        set { elements[row * 7 + col] = newValue }
+    }
 
-        // High initial velocity uncertainty
-        self.covariance = Matrix8x8(diagonal: [
-            2, 2, 2, 2,   // position uncertainty (low)
-            10, 10, 10, 10 // velocity uncertainty (high)
+    /// H * P (4x7 * 7x7) -> 4x4
+    func mul7x7(_ m: Matrix7x7) -> Matrix4x4 {
+        var result = Matrix4x4(zero: ())
+        for i in 0..<4 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += self[i, k] * m[k, j] }
+                result[i, j] = sum
+            }
+        }
+        return result
+    }
+
+    /// H * state (4x7 * 7-vector) -> 4-vector
+    func mulVec(_ v: [Double]) -> [Double] {
+        var result = [Double](repeating: 0, count: 4)
+        for i in 0..<4 {
+            for j in 0..<7 { result[i] += self[i, j] * v[j] }
+        }
+        return result
+    }
+
+    func transposed() -> Matrix7x4 {
+        var result = Matrix7x4(zero: ())
+        for i in 0..<4 {
+            for j in 0..<7 { result[j, i] = self[i, j] }
+        }
+        return result
+    }
+}
+
+/// Fixed-size 7x4 matrix for H^T.
+/// Stored row-major: 7 rows x 4 cols = 28 elements.
+struct Matrix7x4: Sendable {
+    var elements: [Double]
+
+    init(zero: Void) {
+        self.elements = [Double](repeating: 0, count: 28)
+    }
+
+    subscript(row: Int, col: Int) -> Double {
+        get { elements[row * 4 + col] }
+        set { elements[row * 4 + col] = newValue }
+    }
+
+    /// P * H^T (7x7 * 7x4) -> 7x4
+    func mul7x7(_ m: Matrix7x7) -> Matrix7x4 {
+        var result = Matrix7x4(zero: ())
+        for i in 0..<7 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += m[i, k] * self[k, j] }
+                result[i, j] = sum
+            }
+        }
+        return result
+    }
+
+    /// K * innovation (7x4 * 4-vector) -> 7-vector
+    func mulVec(_ v: [Double]) -> [Double] {
+        var result = [Double](repeating: 0, count: 7)
+        for i in 0..<7 {
+            for j in 0..<4 { result[i] += self[i, j] * v[j] }
+        }
+        return result
+    }
+
+    /// K * H (7x4 * 4x7) -> 7x7
+    func mul4x7(_ m: Matrix4x7) -> Matrix7x7 {
+        var result = Matrix7x7(zero: ())
+        for i in 0..<7 {
+            for j in 0..<7 {
+                var sum = 0.0
+                for k in 0..<4 { sum += self[i, k] * m[k, j] }
+                result[i, j] = sum
+            }
+        }
+        return result
+    }
+}
+
+/// Fixed-size 4x4 matrix for measurement noise and innovation covariance.
+struct Matrix4x4: Sendable {
+    var elements: [Double] // 16 elements, row-major
+
+    init(zero: Void) {
+        self.elements = [Double](repeating: 0, count: 16)
+    }
+
+    init(diagonal values: [Double]) {
+        self.init(zero: ())
+        for i in 0..<min(4, values.count) { self.elements[i * 4 + i] = values[i] }
+    }
+
+    subscript(row: Int, col: Int) -> Double {
+        get { elements[row * 4 + col] }
+        set { elements[row * 4 + col] = newValue }
+    }
+
+    static func + (_ a: Matrix4x4, _ b: Matrix4x4) -> Matrix4x4 {
+        var result = a
+        for i in 0..<16 { result.elements[i] += b.elements[i] }
+        return result
+    }
+
+    func inverse() -> Matrix4x4 {
+        var aug = [Double](repeating: 0, count: 32) // 4 * (4+4)
+        for i in 0..<4 {
+            for j in 0..<4 { aug[i * 8 + j] = self[i, j] }
+            aug[i * 8 + 4 + i] = 1.0
+        }
+        for col in 0..<4 {
+            var maxRow = col
+            for row in (col + 1)..<4 {
+                if abs(aug[row * 8 + col]) > abs(aug[maxRow * 8 + col]) { maxRow = row }
+            }
+            if maxRow != col {
+                for j in 0..<8 {
+                    let tmp = aug[col * 8 + j]
+                    aug[col * 8 + j] = aug[maxRow * 8 + j]
+                    aug[maxRow * 8 + j] = tmp
+                }
+            }
+            let pivot = aug[col * 8 + col]
+            guard abs(pivot) > 1e-12 else { return Matrix4x4(diagonal: [1, 1, 1, 1]) }
+            for j in 0..<8 { aug[col * 8 + j] /= pivot }
+            for row in 0..<4 {
+                guard row != col else { continue }
+                let factor = aug[row * 8 + col]
+                for j in 0..<8 { aug[row * 8 + j] -= factor * aug[col * 8 + j] }
+            }
+        }
+        var result = Matrix4x4(zero: ())
+        for i in 0..<4 {
+            for j in 0..<4 { result[i, j] = aug[i * 8 + 4 + j] }
+        }
+        return result
+    }
+}
+
+// MARK: - Kalman Filter (7-state)
+
+/// 7-state Kalman filter: [x, y, s, r, vx, vy, vs].
+/// Constant-velocity model. Observation is 4-dim [x, y, s, r].
+/// Paper: arXiv:2203.14360 — noise params from KalmanBoxTracker.__init__
+struct KalmanFilter7: Sendable {
+    var state: [Double]       // 7-element state vector
+    var covariance: Matrix7x7 // 7x7 state covariance
+
+    private let F: Matrix7x7  // State transition (7x7)
+    private let H: Matrix4x7  // Measurement matrix (4x7)
+    private let Q: Matrix7x7  // Process noise (7x7)
+    private let R: Matrix4x4  // Measurement noise (4x4)
+
+    init(z: [Double]) {
+        precondition(z.count == 4, "Expected [x, y, s, r]")
+        self.state = [z[0], z[1], z[2], z[3], 0, 0, 0]
+
+        // Paper: P *= 10, P[4:,4:] *= 1000
+        // Combined: diag position = 10, diag velocity = 10000
+        self.covariance = Matrix7x7(diagonal: [
+            10, 10, 10, 10,      // position: P *= 10
+            10000, 10000, 10000   // velocity: P *= 10, then P[4:,4:] *= 1000
         ])
 
-        // State transition: constant velocity
-        var f = Matrix8x8(identity: ())
-        f[0, 4] = 1; f[1, 5] = 1; f[2, 6] = 1; f[3, 7] = 1
+        // State transition: constant velocity model (7x7)
+        // Paper: KalmanBoxTracker._F
+        var f = Matrix7x7(identity: ())
+        f[0, 4] = 1  // x += vx
+        f[1, 5] = 1  // y += vy
+        f[2, 6] = 1  // s += vs
         self.F = f
 
-        // Measurement matrix: observe position only
-        var h = Matrix8x8(zero: ())
-        h[0, 0] = 1; h[1, 1] = 1; h[2, 2] = 1; h[3, 3] = 1
+        // Measurement matrix: observe [x, y, s, r] (4x7)
+        // Paper: KalmanBoxTracker._H
+        var h = Matrix4x7(zero: ())
+        h[0, 0] = 1  // observe x
+        h[1, 1] = 1  // observe y
+        h[2, 2] = 1  // observe s
+        h[3, 3] = 1  // observe r
         self.H = h
 
-        // Process noise
-        self.Q = Matrix8x8(diagonal: [1, 1, 1, 1, 0.01, 0.01, 0.01, 0.01])
+        // Process noise: Q[-1,-1] *= 0.01, Q[4:,4:] *= 0.01
+        // Start with identity, then scale
+        var q = Matrix7x7(identity: ())
+        q[4, 4] = 0.01
+        q[5, 5] = 0.01
+        q[6, 6] = 0.01 * 0.01 // Q[-1,-1] *= 0.01 on top of Q[4:,4:] *= 0.01
+        self.Q = q
 
-        // Measurement noise
-        self.R = Matrix8x8(diagonal: [1, 1, 1, 1])
+        // Measurement noise: R[2:,2:] *= 10
+        // R starts as identity(4), then scale rows/cols 2-3 by 10
+        self.R = Matrix4x4(diagonal: [1, 1, 10, 10])
     }
 
     /// Predict next state (called every frame for each track).
     mutating func predict() -> [Double] {
+        // Paper: if (x[6] + x[2]) <= 0, zero out vs
+        if state[6] + state[2] <= 0 {
+            state[6] = 0.0
+        }
+
         state = F * state
         covariance = F * covariance * F.transposed() + Q
-        return Array(state.prefix(4))  // predicted [x, y, w, h]
+        return Array(state.prefix(4)) // predicted [x, y, s, r]
     }
 
-    /// Update with measurement [x, y, w, h].
+    /// Update with measurement [x, y, s, r].
+    /// Paper: KalmanBoxTracker.update — standard KF update cycle.
     mutating func update(measurement: [Double]) {
         precondition(measurement.count == 4)
-        let Ht = H.transposed()
-        let S = H * covariance * Ht + R
-        let K = covariance * Ht * S.inverse()
+        let Ht = H.transposed() // 7x4
 
-        // Innovation: measurement - predicted measurement
-        var y = [Double](repeating: 0, count: 8)
-        for i in 0..<4 { y[i] = measurement[i] - (H * state)[i] }
+        // PHt = P * H^T (7x7 * 7x4 -> 7x4)
+        var PHt = Matrix7x4(zero: ())
+        for i in 0..<7 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += covariance[i, k] * Ht[k, j] }
+                PHt[i, j] = sum
+            }
+        }
 
-        // State update
-        let gain = K * y
-        for i in 0..<8 { state[i] += gain[i] }
+        // S = H * PHt + R (4x7 * 7x4 + 4x4 -> 4x4)
+        var S = Matrix4x4(zero: ())
+        for i in 0..<4 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<7 { sum += H[i, k] * PHt[k, j] }
+                S[i, j] = sum + R[i, j]
+            }
+        }
 
-        // Covariance update: P = (I - K*H)*P
-        let I = Matrix8x8(identity: ())
-        let KH = K * H  // Approximate: K is 8x4 padded to 8x8
-        covariance = (I - KH) * covariance
+        let SI = S.inverse() // 4x4
+
+        // K = P * H^T * S^{-1} (7x4)
+        var K = Matrix7x4(zero: ())
+        for i in 0..<7 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<4 { sum += PHt[i, k] * SI[k, j] }
+                K[i, j] = sum
+            }
+        }
+
+        // Innovation: y = z - H * x (4-vector)
+        let Hx = H.mulVec(state) // 4-vector
+        var innovation = [Double](repeating: 0, count: 4)
+        for i in 0..<4 { innovation[i] = measurement[i] - Hx[i] }
+
+        // State update: x = x + K * y
+        let gain = K.mulVec(innovation) // 7-vector
+        for i in 0..<7 { state[i] += gain[i] }
+
+        // Covariance update: P = (I - K*H)*P*(I - K*H)^T + K*R*K^T
+        // Joseph form for numerical stability (matches reference kalmanfilter.py)
+        let KH = K.mul4x7(H) // 7x4 * 4x7 -> 7x7
+        var I_KH = Matrix7x7(identity: ())
+        for i in 0..<49 { I_KH.elements[i] -= KH.elements[i] }
+
+        let I_KH_P = I_KH * covariance // 7x7 * 7x7
+        let I_KH_P_IKHt = I_KH_P * I_KH.transposed() // 7x7
+
+        // K * R * K^T (7x4 * 4x4 * 4x7)
+        // KR = K * R (7x4 * 4x4 -> 7x4)
+        var KR = Matrix7x4(zero: ())
+        for i in 0..<7 {
+            for j in 0..<4 {
+                var sum = 0.0
+                for k in 0..<4 { sum += K[i, k] * R[k, j] }
+                KR[i, j] = sum
+            }
+        }
+        // KRKt = KR * K^T (7x4 * 4x7 -> 7x7)
+        var KRKt = Matrix7x7(zero: ())
+        for i in 0..<7 {
+            for j in 0..<7 {
+                var sum = 0.0
+                for k in 0..<4 { sum += KR[i, k] * K[j, k] }
+                KRKt[i, j] = sum
+            }
+        }
+
+        covariance = I_KH_P_IKHt + KRKt
     }
 
-    /// Current position as [x, y, w, h].
+    /// Current state as [x, y, s, r].
     var position: [Double] {
         Array(state.prefix(4))
     }
 }
 
+// MARK: - Bbox Conversion
+
+/// [x1, y1, x2, y2] -> [x, y, s, r] where x,y is center, s=area, r=aspect ratio.
+/// Ref: noahcao/OC_SORT convert_bbox_to_z
+func bboxToZ(_ bbox: NormalizedBoundingBox) -> [Double] {
+    let w = bbox.x2 - bbox.x1
+    let h = bbox.y2 - bbox.y1
+    let cx = bbox.x1 + w / 2.0
+    let cy = bbox.y1 + h / 2.0
+    let s = w * h // scale = area
+    let r = w / (h + 1e-6) // aspect ratio
+    return [cx, cy, s, r]
+}
+
+/// [x, y, s, r] -> NormalizedBoundingBox [x1, y1, x2, y2].
+/// Ref: noahcao/OC_SORT convert_x_to_bbox
+func zToBbox(_ z: [Double]) -> NormalizedBoundingBox {
+    precondition(z.count >= 4, "Expected [x, y, s, r]")
+    let w = sqrt(z[2] * z[3]) // w = sqrt(s * r)
+    let h = z[2] / (w + 1e-6)  // h = s / w
+    return NormalizedBoundingBox(
+        x1: z[0] - w / 2.0,
+        y1: z[1] - h / 2.0,
+        x2: z[0] + w / 2.0,
+        y2: z[1] + h / 2.0
+    )
+}
+
+/// Convert [x, y, s, r] state to [x1, y1, x2, y2] array.
+/// Ref: noahcao/OC_SORT convert_x_to_bbox (without score)
+func stateToBboxArray(_ z: [Double]) -> [Double] {
+    precondition(z.count >= 4)
+    let w = sqrt(z[2] * z[3])
+    let h = z[2] / (w + 1e-6)
+    return [z[0] - w / 2.0, z[1] - h / 2.0, z[0] + w / 2.0, z[1] + h / 2.0]
+}
+
 // MARK: - Internal Track State
 
 /// Internal track used by OCSORT. Not exposed outside the tracker.
+/// Paper: arXiv:2203.14360 — KalmanBoxTracker
 struct InternalTrack: Sendable {
     let id: Int
-    var kalman: KalmanFilter8
-    var hits: Int = 1
-    var age: Int = 0            // Frames since creation
-    var consecutiveMisses: Int = 0  // Frames since last detection
-    var classLabel: String
-    var confidence: Double
-    var lastBbox: NormalizedBoundingBox
-    var state: TrackState = .tentative
-    /// OC-SORT: buffer of recent observations for re-update on rediscovery.
-    var observationHistory: [[Double]] = []
+    var kalman: KalmanFilter7
 
-    init(id: Int, detection: TrackDetection) {
+    /// Total frames since track creation (incremented in predict).
+    var age: Int = 0
+
+    /// Frames since last detection match.
+    var timeSinceUpdate: Int = 0
+
+    /// Total successful detection matches.
+    var hits: Int = 0
+
+    /// Consecutive frames with detection (reset to 0 on miss).
+    var hitStreak: Int = 0
+
+    /// Detection class label.
+    var classLabel: String
+
+    /// Most recent detection confidence.
+    var confidence: Double
+
+    // Paper Sec 4.1: observations keyed by age, value is [x1, y1, x2, y2, score]
+    var observations: [Int: [Double]] = [:]
+
+    // Paper Sec 4.1: most recent detection bbox [x1, y1, x2, y2].
+    // nil if never observed. Stored WITHOUT score (just 4 coords).
+    var lastObservation: [Double]?
+
+    // Paper Sec 4.2: velocity direction from observations, NOT from KF state.
+    // [dy, dx] normalized direction vector. nil if not yet computed.
+    var velocity: [Double]?
+
+    /// The delta_t parameter for velocity estimation.
+    let deltaT: Int
+
+    /// Track state for external reporting.
+    var state: TrackState = .tentative
+
+    /// Trail of center points for visualization. Max 30 points.
+    var trail: [(x: Double, y: Double)] = []
+
+    /// Whether this track has been observed at least once (for ORU).
+    var hasBeenObserved: Bool = false
+
+    init(id: Int, detection: TrackDetection, deltaT: Int = 3) {
         self.id = id
-        self.kalman = KalmanFilter8(xywh: detection.xywh)
         self.classLabel = detection.classLabel
         self.confidence = detection.confidence
-        self.lastBbox = detection.bbox
-        self.observationHistory = [detection.xywh]
+        self.deltaT = deltaT
+
+        // Initialize KF with z-vector from detection bbox
+        let z = bboxToZ(detection.bbox)
+        self.kalman = KalmanFilter7(z: z)
+
+        // Store initial observation as [x1, y1, x2, y2, score]
+        // age starts at 0, will be incremented in predict before first observation key
+        self.observations = [0: [
+            detection.bbox.x1, detection.bbox.y1,
+            detection.bbox.x2, detection.bbox.y2,
+            detection.confidence
+        ]]
+        self.lastObservation = [
+            detection.bbox.x1, detection.bbox.y1,
+            detection.bbox.x2, detection.bbox.y2
+        ]
+        self.hasBeenObserved = true
+        self.hits = 1
+        self.hitStreak = 1
+
+        // Trail: store center
+        let cx = (detection.bbox.x1 + detection.bbox.x2) / 2.0
+        let cy = (detection.bbox.y1 + detection.bbox.y2) / 2.0
+        self.trail = [(x: cx, y: cy)]
     }
 }
 
 // MARK: - OC-SORT Tracker
 
 /// OC-SORT multi-object tracker.
-/// Call `update(detections:)` each frame with the current detections.
-/// Returns the current set of tracks (confirmed + tentative).
+/// Paper: arXiv:2203.14360 (CVPR 2023)
+/// Ref: noahcao/OC_SORT trackers/ocsort_tracker/ocsort.py
 struct OCSORT: Sendable {
     private var tracks: [InternalTrack] = []
     private var nextId: Int = 1
-    let iouThreshold: Double
-    let maxAge: Int
-    let minHits: Int
-    let maxTracks: Int
+    private var frameCount: Int = 0
 
-    init(iouThreshold: Double = 0.3, maxAge: Int = 30, minHits: Int = 3, maxTracks: Int = 0) {
-        self.iouThreshold = iouThreshold
+    // Paper: key parameters from OCSort.__init__
+    let detThresh: Double       // 0.5 — detection confidence threshold
+    let maxAge: Int             // 30 — frames before track deletion
+    let minHits: Int            // 3 — consecutive hits to confirm
+    let iouThreshold: Double    // 0.3 — IoU gate for association
+    let deltaT: Int             // 3 — steps back for velocity estimation
+    let inertia: Double         // 0.2 — OCM direction weight
+    let maxTracks: Int          // 0 — unlimited
+
+    init(
+        detThresh: Double = 0.5,
+        maxAge: Int = 30,
+        minHits: Int = 3,
+        iouThreshold: Double = 0.3,
+        deltaT: Int = 3,
+        inertia: Double = 0.2,
+        maxTracks: Int = 0
+    ) {
+        self.detThresh = detThresh
         self.maxAge = maxAge
         self.minHits = minHits
+        self.iouThreshold = iouThreshold
+        self.deltaT = deltaT
+        self.inertia = inertia
         self.maxTracks = maxTracks
     }
 
     // MARK: - Public Interface
 
     /// Process one frame of detections. Returns all active tracks.
+    /// Paper: OCSort.update()
     mutating func update(detections: [TrackDetection], timestamp: Double) -> [Track] {
+        frameCount += 1
+
         // Step 1: Predict all existing tracks forward
-        var predictedBoxes: [[Double]] = []
+        // Paper: "get predicted locations from existing trackers"
+        var predictedBoxes: [[Double]] = [] // [x1, y1, x2, y2] per track
+        var toDelete: [Int] = []
+
         for i in tracks.indices {
             let pred = tracks[i].kalman.predict()
-            predictedBoxes.append(pred)
+            let bboxArray = stateToBboxArray(pred)
+            predictedBoxes.append(bboxArray)
             tracks[i].age += 1
-            tracks[i].consecutiveMisses += 1
+            tracks[i].timeSinceUpdate += 1
+
+            // Reset hit streak on miss
+            if tracks[i].timeSinceUpdate > 1 {
+                tracks[i].hitStreak = 0
+            }
+
+            // Remove tracks with NaN predictions
+            if bboxArray.contains(where: { $0.isNaN }) {
+                toDelete.append(i)
+            }
         }
 
-        // Step 2: Build cost matrix (1 - IoU) between predicted and detected
-        let costMatrix = buildCostMatrix(predicted: predictedBoxes, detections: detections)
+        // Remove invalid tracks (reversed to preserve indices)
+        for idx in toDelete.reversed() {
+            tracks.remove(at: idx)
+            predictedBoxes.remove(at: idx)
+        }
 
-        // Step 3: Hungarian assignment
-        let matched = hungarianAssignment(costMatrix: costMatrix, gateThreshold: 1.0 - iouThreshold)
+        guard !detections.isEmpty || !tracks.isEmpty else {
+            return []
+        }
 
-        // Track which rows/cols were matched
+        // Step 2: Collect track metadata for association
+        // Paper Sec 4.2: velocities from observations
+        var velocities: [[Double]] = [] // [dy, dx] per track
+        var lastBoxes: [[Double]] = []  // last_observation [x1,y1,x2,y2] per track
+        var kObservations: [[Double]] = [] // observation delta_t steps back
+
+        for i in tracks.indices {
+            // Velocity from InternalTrack (computed during update)
+            if let vel = tracks[i].velocity {
+                velocities.append(vel)
+            } else {
+                velocities.append([0, 0])
+            }
+
+            // Last observation for OCR (Sec 4.3)
+            if let last = tracks[i].lastObservation {
+                lastBoxes.append(last)
+            } else {
+                // Placeholder: [-1, -1, -1, -1] means no previous observation
+                lastBoxes.append([-1, -1, -1, -1])
+            }
+
+            // k_previous_obs: observation delta_t steps back
+            kObservations.append(kPreviousObs(for: tracks[i]))
+        }
+
+        // Step 3: First association with OCM
+        // Paper Sec 4.2: OCM — Observation-Centric Momentum
+        let (matched, unmatchedDets, unmatchedTrks) = associate(
+            detections: detections,
+            trackers: predictedBoxes,
+            iouThreshold: iouThreshold,
+            velocities: velocities,
+            kObservations: kObservations,
+            inertia: inertia
+        )
+
+        // Step 4: Update matched tracks
         var matchedTrackIndices = Set<Int>()
         var matchedDetIndices = Set<Int>()
 
-        // Step 4: Update matched tracks
-        for match in matched {
-            guard match.row < tracks.count && match.col < detections.count else { continue }
-            let trackIdx = match.row
-            let det = detections[match.col]
+        for m in matched {
+            let detIdx = m.0
+            let trkIdx = m.1
+            guard trkIdx < tracks.count && detIdx < detections.count else { continue }
 
-            tracks[trackIdx].kalman.update(measurement: det.xywh)
-            tracks[trackIdx].hits += 1
-            tracks[trackIdx].consecutiveMisses = 0
-            tracks[trackIdx].confidence = det.confidence
-            tracks[trackIdx].lastBbox = det.bbox
-            tracks[trackIdx].classLabel = det.classLabel
-            tracks[trackIdx].observationHistory.append(det.xywh)
-            if tracks[trackIdx].observationHistory.count > 50 {
-                tracks[trackIdx].observationHistory.removeFirst()
-            }
-            // OC-SORT: re-update with observation history when rediscovered
-            if tracks[trackIdx].state == .lost {
-                tracks[trackIdx].state = .confirmed
-            }
-            if tracks[trackIdx].hits >= minHits {
-                tracks[trackIdx].state = .confirmed
-            }
-            matchedTrackIndices.insert(trackIdx)
-            matchedDetIndices.insert(match.col)
+            let det = detections[detIdx]
+            // Extract-modify-assign to avoid exclusive access violation
+            var trk = tracks[trkIdx]
+            updateTrack(&trk, with: det)
+            tracks[trkIdx] = trk
+
+            matchedTrackIndices.insert(trkIdx)
+            matchedDetIndices.insert(detIdx)
         }
 
-        // Step 5: Mark unmatched tracks as lost
-        for i in tracks.indices where !matchedTrackIndices.contains(i) {
-            tracks[i].consecutiveMisses += 1
-            if tracks[i].state == .confirmed {
-                tracks[i].state = .lost
+        // Step 5: Second association — OCR (Observation-Centric Recovery)
+        // Paper Sec 4.3: match unmatched detections against last observations of unmatched tracks
+        var unmatchedDetsAfterOCR = unmatchedDets
+        var unmatchedTrksAfterOCR = unmatchedTrks
+
+        if !unmatchedDets.isEmpty && !unmatchedTrks.isEmpty {
+            let leftDets = unmatchedDets.map { detections[$0] }
+            let leftTrks = unmatchedTrks.map { lastBoxes[$0] }
+
+            // IoU between unmatched detections and last observations
+            let iouLeft = iouBatch(detections: leftDets, trackerBoxes: leftTrks)
+
+            if iouLeft.count > 0 && iouLeft[0].count > 0 {
+                let maxIou = iouLeft.flatMap { $0 }.max() ?? 0
+                if maxIou > iouThreshold {
+                    // Hungarian matching on -IoU
+                    let costMatrix = iouLeft.map { row in row.map { -$0 } }
+                    let rematched = hungarianAssignment(
+                        costMatrix: costMatrix,
+                        gateThreshold: 1.0 // We gate manually below
+                    )
+
+                    var toRemoveDet = Set<Int>()
+                    var toRemoveTrk = Set<Int>()
+
+                    for m in rematched {
+                        let detIdx = unmatchedDets[m.row]
+                        let trkIdx = unmatchedTrks[m.col]
+
+                        if iouLeft[m.row][m.col] < iouThreshold {
+                            continue
+                        }
+
+                        // Paper Sec 4.3: recover lost track
+                        var trk = tracks[trkIdx]
+                        updateTrack(&trk, with: detections[detIdx])
+                        tracks[trkIdx] = trk
+                        toRemoveDet.insert(m.row)
+                        toRemoveTrk.insert(m.col)
+                    }
+
+                    unmatchedDetsAfterOCR = unmatchedDets.enumerated()
+                        .filter { !toRemoveDet.contains($0.offset) }
+                        .map { $0.element }
+                    unmatchedTrksAfterOCR = unmatchedTrks.enumerated()
+                        .filter { !toRemoveTrk.contains($0.offset) }
+                        .map { $0.element }
+                }
             }
         }
 
-        // Step 6: Create new tracks for unmatched detections
+        // Step 6: Update unmatched tracks with nil (KF predict only)
+        for trkIdx in unmatchedTrksAfterOCR {
+            guard trkIdx < tracks.count else { continue }
+            // No observation — just increment miss counters (already done in predict)
+        }
+
+        // Step 7: Create new tracks for remaining unmatched detections
         if maxTracks == 0 || tracks.count < maxTracks {
-            for detIdx in detections.indices where !matchedDetIndices.contains(detIdx) {
-                let newTrack = InternalTrack(id: nextId, detection: detections[detIdx])
+            for detIdx in unmatchedDetsAfterOCR {
+                let newTrack = InternalTrack(
+                    id: nextId,
+                    detection: detections[detIdx],
+                    deltaT: deltaT
+                )
                 tracks.append(newTrack)
                 nextId += 1
             }
         }
 
-        // Step 7: Delete old tracks that exceeded maxAge
-        tracks.removeAll { $0.consecutiveMisses > maxAge }
+        // Step 8: Collect output and delete dead tracks
+        // Paper: "remove dead tracklet" where timeSinceUpdate > maxAge
+        var results: [Track] = []
+        var i = tracks.count - 1
+        while i >= 0 {
+            let trk = tracks[i]
 
-        // Build result
-        return tracks.map { t in
-            Track(
-                trackId: t.id,
-                bbox: t.lastBbox,
-                classLabel: t.classLabel,
-                confidence: t.confidence,
-                state: t.state,
-                age: t.consecutiveMisses,
-                hits: t.hits,
-                lastSeenTimestamp: timestamp
-            )
+            if trk.timeSinceUpdate > maxAge {
+                tracks.remove(at: i)
+                i -= 1
+                continue
+            }
+
+            // Use lastObservation bbox when available, else KF prediction
+            // Paper: "this is optional to use the recent observation or the kalman filter prediction"
+            let outputBbox: NormalizedBoundingBox
+            if let lastObs = trk.lastObservation {
+                outputBbox = NormalizedBoundingBox(
+                    x1: lastObs[0], y1: lastObs[1],
+                    x2: lastObs[2], y2: lastObs[3]
+                )
+            } else {
+                outputBbox = zToBbox(trk.kalman.position)
+            }
+
+            // Only output tracks that were recently matched and have enough hits
+            if trk.timeSinceUpdate < 1 &&
+                (trk.hitStreak >= minHits || frameCount <= minHits) {
+                let track = Track(
+                    trackId: trk.id,
+                    bbox: outputBbox,
+                    classLabel: trk.classLabel,
+                    confidence: trk.confidence,
+                    state: resolveState(for: trk),
+                    age: trk.timeSinceUpdate,
+                    hits: trk.hits,
+                    lastSeenTimestamp: timestamp,
+                    trail: trk.trail
+                )
+                results.append(track)
+            }
+            i -= 1
         }
+
+        return results.reversed() // Maintain ID order
     }
 
     /// Reset tracker state.
     mutating func reset() {
         tracks.removeAll()
         nextId = 1
+        frameCount = 0
+    }
+
+    // MARK: - Track Update with ORU
+
+    /// Update a track with a new detection.
+    /// Paper Sec 4.1: ORU — Observation-Centric Re-Update
+    private mutating func updateTrack(_ track: inout InternalTrack, with detection: TrackDetection) {
+        let detBbox = [
+            detection.bbox.x1, detection.bbox.y1,
+            detection.bbox.x2, detection.bbox.y2,
+            detection.confidence
+        ]
+
+        // Paper Sec 4.2: compute velocity from observations delta_t steps apart
+        if track.lastObservation != nil {
+            var previousBox: [Double]? = nil
+            for i in 0..<track.deltaT {
+                let dt = track.deltaT - i
+                if let obs = track.observations[track.age - dt] {
+                    previousBox = obs
+                    break
+                }
+            }
+            if previousBox == nil {
+                previousBox = track.lastObservation
+            }
+            if let prev = previousBox {
+                track.velocity = speedDirection(prev: prev, curr: detBbox)
+            }
+        }
+
+        // Paper Sec 4.1: ORU — re-update with virtual trajectory when rediscovered
+        if track.timeSinceUpdate > 0 && track.hasBeenObserved {
+            applyORU(&track, newObservation: detBbox)
+        }
+
+        // Store observation
+        track.lastObservation = [detBbox[0], detBbox[1], detBbox[2], detBbox[3]]
+        track.observations[track.age] = detBbox
+        track.hasBeenObserved = true
+
+        track.timeSinceUpdate = 0
+        track.hits += 1
+        track.hitStreak += 1
+        track.confidence = detection.confidence
+        track.classLabel = detection.classLabel
+
+        // KF update with z-vector
+        let z = bboxToZ(detection.bbox)
+        track.kalman.update(measurement: z)
+
+        // Trail: append center point
+        let cx = (detection.bbox.x1 + detection.bbox.x2) / 2.0
+        let cy = (detection.bbox.y1 + detection.bbox.y2) / 2.0
+        track.trail.append((x: cx, y: cy))
+        if track.trail.count > 30 {
+            track.trail.removeFirst()
+        }
+    }
+
+    // MARK: - ORU: Observation-Centric Re-Update
+    // Paper Sec 4.1: When a track is rediscovered after being lost,
+    // create virtual trajectory via linear interpolation and re-update KF.
+
+    private mutating func applyORU(_ track: inout InternalTrack, newObservation: [Double]) {
+        // Find the last observation before the gap
+        // We need the last real observation (not the new one)
+        guard let lastObs = track.lastObservation else { return }
+
+        // Linearly interpolate between last observation and new observation
+        // Ref: noahcao/OC_SORT kalmanfilter.py unfreeze()
+        let gap = track.timeSinceUpdate
+        guard gap > 0 else { return }
+
+        // Convert bboxes to [x, y, s, r]
+        let box1 = lastObs // [x1, y1, x2, y2]
+        let box2 = [newObservation[0], newObservation[1],
+                     newObservation[2], newObservation[3]] // [x1, y1, x2, y2]
+
+        let cx1 = (box1[0] + box1[2]) / 2.0
+        let cy1 = (box1[1] + box1[3]) / 2.0
+        let w1 = box1[2] - box1[0]
+        let h1 = box1[3] - box1[1]
+
+        let cx2 = (box2[0] + box2[2]) / 2.0
+        let cy2 = (box2[1] + box2[3]) / 2.0
+        let w2 = box2[2] - box2[0]
+        let h2 = box2[3] - box2[1]
+
+        let dx = (cx2 - cx1) / Double(gap)
+        let dy = (cy2 - cy1) / Double(gap)
+        let dw = (w2 - w1) / Double(gap)
+        let dh = (h2 - h1) / Double(gap)
+
+        // Virtual trajectory: predict + update for each virtual step
+        for step in 0..<(gap) {
+            let vx = cx1 + Double(step + 1) * dx
+            let vy = cy1 + Double(step + 1) * dy
+            let vw = w1 + Double(step + 1) * dw
+            let vh = h1 + Double(step + 1) * dh
+            let vs = vw * vh
+            let vr = vw / (vh + 1e-6)
+
+            // Predict then update for each virtual step
+            let _ = track.kalman.predict()
+            track.kalman.update(measurement: [vx, vy, vs, vr])
+        }
+    }
+
+    // MARK: - OCM: Observation-Centric Momentum
+    // Paper Sec 4.2: direction consistency cost added to IoU in association.
+
+    /// Compute speed direction from two bboxes [x1, y1, x2, y2, ...].
+    /// Returns [dy, dx] normalized direction vector.
+    /// Ref: noahcao/OC_SORT association.py speed_direction
+    private func speedDirection(prev: [Double], curr: [Double]) -> [Double] {
+        let cx1 = (prev[0] + prev[2]) / 2.0
+        let cy1 = (prev[1] + prev[3]) / 2.0
+        let cx2 = (curr[0] + curr[2]) / 2.0
+        let cy2 = (curr[1] + curr[3]) / 2.0
+        let dy = cy2 - cy1
+        let dx = cx2 - cx1
+        let norm = sqrt(dy * dy + dx * dx) + 1e-6
+        return [dy / norm, dx / norm]
+    }
+
+    /// Get observation delta_t steps back from current age.
+    /// Ref: noahcao/OC_SORT k_previous_obs
+    private func kPreviousObs(for track: InternalTrack) -> [Double] {
+        for i in 0..<track.deltaT {
+            let dt = track.deltaT - i
+            if let obs = track.observations[track.age - dt] {
+                return obs
+            }
+        }
+        // Fallback to most recent observation
+        if let last = track.lastObservation {
+            return [last[0], last[1], last[2], last[3], 0]
+        }
+        return [-1, -1, -1, -1, -1]
+    }
+
+    // MARK: - Association (First Round with OCM)
+    // Paper Sec 4.2: associate() from association.py
+
+    private func associate(
+        detections: [TrackDetection],
+        trackers: [[Double]],        // predicted [x1,y1,x2,y2] per track
+        iouThreshold: Double,
+        velocities: [[Double]],      // [dy, dx] per track
+        kObservations: [[Double]],   // [x1,y1,x2,y2,score] per track (delta_t back)
+        inertia: Double
+    ) -> (matched: [(Int, Int)], unmatchedDets: [Int], unmatchedTrks: [Int]) {
+        let numDets = detections.count
+        let numTrks = trackers.count
+
+        if numTrks == 0 {
+            return ([], Array(0..<numDets), [])
+        }
+        if numDets == 0 {
+            return ([], [], Array(0..<numTrks))
+        }
+
+        // Paper Sec 4.2: compute direction consistency cost
+        // speed_direction_batch: direction from k_previous_obs to each detection
+        var angleDiffCost = [[Double]](
+            repeating: [Double](repeating: 0, count: numDets),
+            count: numTrks
+        )
+
+        for trkIdx in 0..<numTrks {
+            let prevObs = kObservations[trkIdx]
+            let validMask = prevObs[4] >= 0 // score >= 0 means valid observation
+
+            if validMask {
+                let prevCx = (prevObs[0] + prevObs[2]) / 2.0
+                let prevCy = (prevObs[1] + prevObs[3]) / 2.0
+
+                for detIdx in 0..<numDets {
+                    let detBbox = detections[detIdx].bbox
+                    let detCx = (detBbox.x1 + detBbox.x2) / 2.0
+                    let detCy = (detBbox.y1 + detBbox.y2) / 2.0
+
+                    // Direction from k_previous_obs to detection
+                    let dx = detCx - prevCx
+                    let dy = detCy - prevCy
+                    let norm = sqrt(dx * dx + dy * dy) + 1e-6
+                    let dirX = dx / norm
+                    let dirY = dy / norm
+
+                    // Cosine similarity with track velocity
+                    let velY = velocities[trkIdx][0] // dy component
+                    let velX = velocities[trkIdx][1] // dx component
+                    let cosSim = velX * dirX + velY * dirY
+                    let clippedCos = max(-1.0, min(1.0, cosSim))
+                    let angle = acos(clippedCos)
+                    let diffAngle = (Double.pi / 2.0 - abs(angle)) / Double.pi
+
+                    // Weighted by detection score
+                    angleDiffCost[trkIdx][detIdx] = diffAngle * inertia * detections[detIdx].confidence
+                }
+            }
+        }
+
+        // IoU matrix: numTrks x numDets
+        let iouMatrix = iouBatchDetections(detections: detections, trackerBoxes: trackers)
+
+        // Combined cost: -(IoU + angleDiffCost)
+        // Transpose angleDiffCost from [trk][det] to [det][trk] for hungarianAssignment
+        var costMatrix = [[Double]](
+            repeating: [Double](repeating: 0, count: numTrks),
+            count: numDets
+        )
+        for detIdx in 0..<numDets {
+            for trkIdx in 0..<numTrks {
+                costMatrix[detIdx][trkIdx] = -(iouMatrix[trkIdx][detIdx] + angleDiffCost[trkIdx][detIdx])
+            }
+        }
+
+        // Hungarian matching
+        let matchedIndices = hungarianAssignment(
+            costMatrix: costMatrix,
+            gateThreshold: 1.0 // We gate on IoU manually below
+        )
+
+        // Filter matches by IoU threshold
+        var matches: [(Int, Int)] = []
+        var matchedDetSet = Set<Int>()
+        var matchedTrkSet = Set<Int>()
+
+        for m in matchedIndices {
+            let detIdx = m.row
+            let trkIdx = m.col
+            if iouMatrix[trkIdx][detIdx] >= iouThreshold {
+                matches.append((detIdx, trkIdx))
+                matchedDetSet.insert(detIdx)
+                matchedTrkSet.insert(trkIdx)
+            }
+        }
+
+        let unmatchedDets = Array(0..<numDets).filter { !matchedDetSet.contains($0) }
+        let unmatchedTrks = Array(0..<numTrks).filter { !matchedTrkSet.contains($0) }
+
+        return (matches, unmatchedDets, unmatchedTrks)
     }
 
     // MARK: - IoU Computation
 
-    private func buildCostMatrix(predicted: [[Double]], detections: [TrackDetection]) -> [[Double]] {
-        guard !predicted.isEmpty && !detections.isEmpty else { return [] }
-        var cost = [[Double]](
-            repeating: [Double](repeating: 1.0, count: detections.count),
-            count: predicted.count
-        )
-        for (i, pred) in predicted.enumerated() {
-            for (j, det) in detections.enumerated() {
-                cost[i][j] = 1.0 - iou(box1: pred, box2: det.xywh)
-            }
-        }
-        return cost
-    }
-
-    /// IoU between two [x, y, w, h] boxes.
+    /// IoU between two [x1, y1, x2, y2] boxes.
     private func iou(box1: [Double], box2: [Double]) -> Double {
-        let x1 = max(box1[0] - box1[2] / 2, box2[0] - box2[2] / 2)
-        let y1 = max(box1[1] - box1[3] / 2, box2[1] - box2[3] / 2)
-        let x2 = min(box1[0] + box1[2] / 2, box2[0] + box2[2] / 2)
-        let y2 = min(box1[1] + box1[3] / 2, box2[1] + box2[3] / 2)
+        precondition(box1.count >= 4 && box2.count >= 4)
+        let xx1 = max(box1[0], box2[0])
+        let yy1 = max(box1[1], box2[1])
+        let xx2 = min(box1[2], box2[2])
+        let yy2 = min(box1[3], box2[3])
 
-        let interW = max(0, x2 - x1)
-        let interH = max(0, y2 - y1)
-        let inter = interW * interH
+        let w = max(0.0, xx2 - xx1)
+        let h = max(0.0, yy2 - yy1)
+        let inter = w * h
 
-        let area1 = box1[2] * box1[3]
-        let area2 = box2[2] * box2[3]
+        let area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        let area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
         let union = area1 + area2 - inter
 
         guard union > 0 else { return 0 }
         return inter / union
+    }
+
+    /// Batch IoU: tracker predictions vs detections.
+    /// Returns [numTrks][numDets] IoU matrix.
+    /// Ref: noahcao/OC_SORT association.py iou_batch
+    private func iouBatchDetections(
+        detections: [TrackDetection],
+        trackerBoxes: [[Double]]
+    ) -> [[Double]] {
+        let numTrks = trackerBoxes.count
+        let numDets = detections.count
+        guard numTrks > 0 && numDets > 0 else { return [] }
+
+        var result = [[Double]](
+            repeating: [Double](repeating: 0, count: numDets),
+            count: numTrks
+        )
+
+        for trkIdx in 0..<numTrks {
+            let trkBbox = trackerBoxes[trkIdx]
+            for detIdx in 0..<numDets {
+                let det = detections[detIdx]
+                let detBbox = [det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2]
+                result[trkIdx][detIdx] = iou(box1: trkBbox, box2: detBbox)
+            }
+        }
+        return result
+    }
+
+    /// Batch IoU between detection bboxes and arbitrary [x1,y1,x2,y2] boxes.
+    /// Used for OCR second-round matching against last observations.
+    private func iouBatch(
+        detections: [TrackDetection],
+        trackerBoxes: [[Double]]
+    ) -> [[Double]] {
+        let numDets = detections.count
+        let numTrks = trackerBoxes.count
+        guard numDets > 0 && numTrks > 0 else { return [] }
+
+        var result = [[Double]](
+            repeating: [Double](repeating: 0, count: numTrks),
+            count: numDets
+        )
+
+        for detIdx in 0..<numDets {
+            let det = detections[detIdx]
+            let detBbox = [det.bbox.x1, det.bbox.y1, det.bbox.x2, det.bbox.y2]
+            for trkIdx in 0..<numTrks {
+                result[detIdx][trkIdx] = iou(box1: detBbox, box2: trackerBoxes[trkIdx])
+            }
+        }
+        return result
+    }
+
+    // MARK: - State Resolution
+
+    private func resolveState(for track: InternalTrack) -> TrackState {
+        if track.timeSinceUpdate == 0 && track.hitStreak >= minHits {
+            return .confirmed
+        } else if track.timeSinceUpdate > 0 {
+            return .lost
+        } else {
+            return .tentative
+        }
     }
 }

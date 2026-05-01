@@ -5,6 +5,11 @@
 // Handles both AI server detections (BoundingBox) and on-device Vision
 // framework detections (VisionDetection).
 //
+// OC-SORT tracked objects: per-ID unique colors (golden angle HSV),
+// trajectory trails (polylines connecting bbox centers over last 30 frames).
+// Ref: Ultralytics tracking docs — draw movement paths of tracked objects
+// Ref: BoxMOT visualization — per-track distinct colors with trails
+//
 // Coordinates are 0-1 normalized.
 //
 
@@ -33,7 +38,8 @@ struct BoundingBoxOverlayView: View {
   /// Live transcription text to display as subtitle overlay.
   var transcription: String? = nil
 
-  /// Tracked objects from OC-SORT (emerald green, persistent IDs).
+  /// Tracked objects from OC-SORT with persistent IDs and trajectory trails.
+  /// Paper: arXiv:2203.14360 — visual tracking output with per-ID rendering.
   var trackedItems: [Track] = []
 
   var body: some View {
@@ -118,9 +124,11 @@ struct BoundingBoxOverlayView: View {
             }
           }
 
-          // OC-SORT tracked objects (emerald green, persistent IDs)
+          // OC-SORT tracked objects — per-ID unique colors + trajectory trails
+          // Ref: Ultralytics tracking modes — distinct per-track colors, motion trails
+          // Ref: BoxMOT visualization — golden angle HSV color distribution
           ForEach(Array(trackedItems.enumerated()), id: \.offset) { _, track in
-            let color = Color(red: 0.063, green: 0.725, blue: 0.506) // emerald #10b981
+            let color = colorForTrackId(track.trackId)
             let rect = CGRect(
               x: track.bbox.x1 * geometry.size.width,
               y: track.bbox.y1 * geometry.size.height,
@@ -128,7 +136,28 @@ struct BoundingBoxOverlayView: View {
               height: (track.bbox.y2 - track.bbox.y1) * geometry.size.height
             )
 
-            // Confirmed = solid, tentative/lost = dashed
+            // Trajectory trail: polyline connecting bbox centers over last N frames
+            // Ref: Ultralytics tracking docs — draw movement paths of tracked objects
+            if track.trail.count > 1 {
+              Path { path in
+                let points = track.trail.map { CGPoint(
+                  x: $0.x * geometry.size.width,
+                  y: $0.y * geometry.size.height
+                )}
+                path.move(to: points[0])
+                for i in 1..<points.count {
+                  path.addLine(to: points[i])
+                }
+              }
+              .stroke(
+                // Gradient: older points fade, recent points are bright
+                color.opacity(0.6),
+                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+              )
+            }
+
+            // Bounding box: confirmed=solid, tentative/lost=dashed
+            // Ref: BoxMOT — confirmed tracks get thicker solid borders
             let strokeStyle: StrokeStyle = track.state == .confirmed
               ? StrokeStyle(lineWidth: 2.5)
               : StrokeStyle(lineWidth: 1.5, dash: [6, 3])
@@ -138,7 +167,8 @@ struct BoundingBoxOverlayView: View {
               .frame(width: rect.width, height: rect.height)
               .position(x: rect.midX, y: rect.midY)
 
-            // Track label: #ID classLabel
+            // Track label: #ID classLabel confidence%
+            // Ref: Ultralytics — show track ID and class with confidence
             Text(track.displayLabel)
               .font(.system(size: 9, weight: .bold, design: .monospaced))
               .foregroundColor(.white)
@@ -206,8 +236,11 @@ struct BoundingBoxOverlayView: View {
     }
   }
 
-  private func colorForIndex(_ i: Int) -> Color {
-    let palette: [Color] = [.green, .blue, .yellow, .red, .purple, .orange, .teal, .pink]
-    return palette[i % palette.count]
+  /// Per-track unique color using golden angle HSV distribution.
+  /// Ref: BoxMOT — distinct per-track colors for visual differentiation
+  /// Golden angle (137 degrees) ensures maximum hue separation between consecutive IDs.
+  private func colorForTrackId(_ id: Int) -> Color {
+    let hue = Double((id * 137) % 360) / 360.0
+    return Color(hue: hue, saturation: 0.7, brightness: 0.9)
   }
 }

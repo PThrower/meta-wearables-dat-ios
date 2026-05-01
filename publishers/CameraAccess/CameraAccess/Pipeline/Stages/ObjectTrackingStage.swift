@@ -1,5 +1,6 @@
 // ObjectTrackingStage.swift
 // Pipeline stage actor for OC-SORT multi-object tracking.
+// Paper: arXiv:2203.14360 (CVPR 2023)
 // Consumes detections from VisionStage via feedDetections(), runs OC-SORT
 // for persistent ID assignment, zone accounting, and dual output (relay + overlay).
 // processFrame is a no-op — tracking is detection-driven, not frame-driven.
@@ -19,6 +20,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     private var smoother: ConfidenceSmoother
 
     // Tracking config
+    // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters (deltaT, inertia, detThresh)
     private var trackingConfig: TrackingStageConfig
 
     // Dual output
@@ -31,10 +33,14 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     init(config: TrackingStageConfig = TrackingStageConfig()) {
         self.config = FrameStageConfig()
         self.trackingConfig = config
+        // Paper: OCSort.__init__ — detThresh, maxAge, minHits, iouThreshold, deltaT, inertia
         self.tracker = OCSORT(
-            iouThreshold: config.iouThreshold,
+            detThresh: config.detThresh,
             maxAge: config.maxAge,
             minHits: config.minHits,
+            iouThreshold: config.iouThreshold,
+            deltaT: config.deltaT,
+            inertia: config.inertia,
             maxTracks: config.maxTracks
         )
         self.registry = ItemRegistry()
@@ -52,9 +58,12 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     func updateConfig(_ newConfig: TrackingStageConfig) {
         self.trackingConfig = newConfig
         self.tracker = OCSORT(
-            iouThreshold: newConfig.iouThreshold,
+            detThresh: newConfig.detThresh,
             maxAge: newConfig.maxAge,
             minHits: newConfig.minHits,
+            iouThreshold: newConfig.iouThreshold,
+            deltaT: newConfig.deltaT,
+            inertia: newConfig.inertia,
             maxTracks: newConfig.maxTracks
         )
         self.registry.setZones(newConfig.zones)
@@ -65,7 +74,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         guard !isRunning else { return }
         isRunning = true
         registry.setZones(trackingConfig.zones)
-        NSLog("[ObjectTrackingStage] Started: iouThreshold=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) minHits=\(trackingConfig.minHits)")
+        NSLog("[ObjectTrackingStage] Started: detThresh=\(trackingConfig.detThresh) iouThreshold=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) minHits=\(trackingConfig.minHits) deltaT=\(trackingConfig.deltaT) inertia=\(trackingConfig.inertia)")
     }
 
     func stop() async {
@@ -83,6 +92,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
     /// Feed vision detections into OC-SORT tracker. Called from ViewModel
     /// when vision stage produces results and tracking is active.
+    // Paper: OCSort.update() — takes detections, returns tracks with persistent IDs
     func feedDetections(_ detections: [TrackDetection], timestamp: Double) async {
         guard isRunning else { return }
 
@@ -105,10 +115,10 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             }
         }
 
-        // OC-SORT update
+        // OC-SORT update — runs ORU, OCM, OCR internally
         let tracks = tracker.update(detections: smoothed, timestamp: timestamp)
 
-        // ItemRegistry update
+        // ItemRegistry update — zone accounting
         let _ = registry.update(tracks: tracks, timestamp: timestamp)
         let snapshot = registry.snapshot(tracks: tracks)
 

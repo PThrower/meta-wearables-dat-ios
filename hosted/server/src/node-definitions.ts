@@ -534,6 +534,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
   // Tracking nodes use OC-SORT to maintain persistent object IDs through
   // occlusion. Uses Apple Vision for detection front-end (VNDetectHumanRectanglesRequest).
   // activationMode: "tracking" sends config to iOS publisher.
+  // Ref: arXiv:2203.14360 — deltaT (OCM velocity lookback), inertia (direction weight), detThresh
   //
   {
     type: "tracking-ocsort",
@@ -554,8 +555,11 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       { kind: "number", key: "minHits", label: "Min Hits (frames to confirm)", min: 1, max: 30, step: 1 },
       { kind: "range", key: "targetFPS", label: "Target FPS", min: 1, max: 30, step: 1 },
       { kind: "range", key: "smoothingAlpha", label: "Confidence Smoothing", min: 0.1, max: 1.0, step: 0.05 },
+      { kind: "number", key: "deltaT", label: "Velocity lookback (frames)", placeholder: "3" },
+      { kind: "range", key: "inertia", label: "Direction weight (OCM)", min: 0, max: 1, step: 0.05 },
+      { kind: "range", key: "detThresh", label: "Detection threshold", min: 0, max: 1, step: 0.05 },
     ],
-    defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3 },
+    defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3, deltaT: 3, inertia: 0.2, detThresh: 0.5 },
     defaultLabel: "OC-SORT Tracker",
     runtime: ["mobile"],
   },
