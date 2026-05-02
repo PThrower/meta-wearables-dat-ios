@@ -161,6 +161,11 @@ struct BoundingBoxOverlayView: View {
               }
             }
 
+            // Forecast trail: dashed polyline extending from current position into the future.
+            // Distinct from history trail — dashed, fading toward future.
+            // Used for pre-positioning UI, zone breach anticipation, gap interpolation.
+            forecastTrail(for: track, color: color, size: geometry.size)
+
             // Bounding box: confirmed=solid, tentative/lost=dashed
             // Ref: BoxMOT — confirmed tracks get thicker solid borders
             let strokeStyle: StrokeStyle = track.state == .confirmed
@@ -286,5 +291,44 @@ struct BoundingBoxOverlayView: View {
   private func colorForTrackId(_ id: Int) -> Color {
     let hue = Double((id * 137) % 360) / 360.0
     return Color(hue: hue, saturation: 0.7, brightness: 0.9)
+  }
+
+  /// Render trajectory forecast trail as dashed polyline extending into the future.
+  /// Extracted from body to reduce SwiftUI type-checker complexity.
+  @ViewBuilder
+  private func forecastTrail(for track: Track, color: Color, size: CGSize) -> some View {
+    if track.forecast.isEmpty {
+      EmptyView()
+    } else {
+      let w = size.width
+      let h = size.height
+      let cx = (track.bbox.x1 + track.bbox.x2) / 2 * w
+      let cy = (track.bbox.y1 + track.bbox.y2) / 2 * h
+      let segments: [(start: CGPoint, end: CGPoint, alpha: Double, lineWidth: CGFloat)] = {
+        var pts: [CGPoint] = [CGPoint(x: cx, y: cy)]
+        for p in track.forecast {
+          pts.append(CGPoint(x: p.center.x * w, y: p.center.y * h))
+        }
+        let total = max(1, pts.count - 1)
+        var segs: [(start: CGPoint, end: CGPoint, alpha: Double, lineWidth: CGFloat)] = []
+        for i in 0..<(pts.count - 1) {
+          let a = 0.6 * (1.0 - Double(i) / Double(total))
+          let lw: CGFloat = CGFloat(1.5 * (1.0 - 0.7 * Double(i) / Double(total)))
+          segs.append((pts[i], pts[i + 1], a, max(0.5, lw)))
+        }
+        return segs
+      }()
+
+      ForEach(0..<segments.count, id: \.self) { idx in
+        let seg = segments[idx]
+        let segColor = color.opacity(seg.alpha)
+        let style = StrokeStyle(lineWidth: seg.lineWidth, lineCap: .round, dash: [4, 4])
+        Path { path in
+          path.move(to: seg.start)
+          path.addLine(to: seg.end)
+        }
+        .stroke(segColor, style: style)
+      }
+    }
   }
 }

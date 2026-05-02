@@ -74,12 +74,21 @@ struct TrackingStageConfig: Codable, Sendable {
     /// "cost-iou" = IoU-only cost (ByteTrack compatible), null = default OCM cost.
     let costFunction: String?
 
+    // MARK: Trajectory Forecasting
+
+    /// Number of frames to forecast ahead via KF prediction (0 = disabled).
+    /// Exposes predicted positions N frames ahead for:
+    /// - Pre-positioning UI elements before objects arrive
+    /// - Proactive zone breach alerts before entry
+    /// - Smooth overlay rendering during detection gaps
+    let forecastSteps: Int
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
         case deltaT, inertia, detThresh, useByte
-        case gates, costFunction
+        case gates, costFunction, forecastSteps
     }
 
     init(
@@ -97,7 +106,8 @@ struct TrackingStageConfig: Codable, Sendable {
         detThresh: Double = 0.5,
         useByte: Bool = false,
         gates: [GateConfig] = [],
-        costFunction: String? = nil
+        costFunction: String? = nil,
+        forecastSteps: Int = 0
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -114,6 +124,7 @@ struct TrackingStageConfig: Codable, Sendable {
         self.useByte = useByte
         self.gates = gates
         self.costFunction = costFunction
+        self.forecastSteps = forecastSteps
     }
 
     init(from decoder: Decoder) throws {
@@ -133,7 +144,25 @@ struct TrackingStageConfig: Codable, Sendable {
         self.useByte = try c.decodeIfPresent(Bool.self, forKey: .useByte) ?? false
         self.gates = try c.decodeIfPresent([GateConfig].self, forKey: .gates) ?? []
         self.costFunction = try c.decodeIfPresent(String.self, forKey: .costFunction)
+        self.forecastSteps = try c.decodeIfPresent(Int.self, forKey: .forecastSteps) ?? 0
     }
+}
+
+// MARK: - Trajectory Forecast
+
+/// A single predicted position from multi-step Kalman filter forecasting.
+/// Computed by advancing the KF state transition without measurement updates.
+/// Ref: Bar-Shalom & Fortmann, "Tracking and Data Association" Ch. 3 — prediction
+struct PredictedPosition: Sendable {
+    /// Frame offset from current (1 = next frame, 2 = two frames ahead, etc.).
+    let step: Int
+    /// Predicted center in normalized coordinates.
+    let center: (x: Double, y: Double)
+    /// Predicted bounding box.
+    let bbox: NormalizedBoundingBox
+    /// Position uncertainty radius (sqrt of position variance sum, normalized units).
+    /// Grows with each forecast step as covariance propagates through F*P*F^T + Q.
+    let uncertainty: Double
 }
 
 // MARK: - Detection Input
@@ -210,6 +239,26 @@ struct Track: Sendable {
     /// Trajectory trail: center points of last N observations for polyline rendering.
     /// Ref: Ultralytics tracking docs — draw movement paths of tracked objects.
     let trail: [(x: Double, y: Double)]
+    /// Kalman filter velocity estimates (normalized coords/frame).
+    /// vx, vy = center velocity; vs = scale (area) velocity.
+    let velocity: (vx: Double, vy: Double, vs: Double)
+    /// Trajectory forecast: predicted positions N frames ahead from KF state.
+    /// Empty when forecasting is disabled (forecastSteps = 0).
+    let forecast: [PredictedPosition]
+
+    /// Magnitude of center velocity in normalized coords/frame.
+    var speed: Double {
+        sqrt(velocity.vx * velocity.vx + velocity.vy * velocity.vy)
+    }
+
+    /// Heading in degrees [0, 360). 0 = right, 90 = down (image coords).
+    /// nil when speed is near zero (< 1e-4).
+    var heading: Double? {
+        guard speed > 1e-4 else { return nil }
+        let radians = atan2(velocity.vy, velocity.vx)
+        let degrees = radians * 180.0 / .pi
+        return degrees < 0 ? degrees + 360.0 : degrees
+    }
 
     var displayLabel: String {
         "#\(trackId) \(classLabel) \(Int(confidence * 100))%"
@@ -260,6 +309,27 @@ struct ZoneTransition: Codable, Sendable {
     let fromZone: String?
     let toZone: String?
     let timestamp: Double
+    /// True if this transition was predicted from trajectory forecast, not observed.
+    let predicted: Bool
+
+    init(trackId: Int, classLabel: String, fromZone: String?, toZone: String?, timestamp: Double, predicted: Bool = false) {
+        self.trackId = trackId
+        self.classLabel = classLabel
+        self.fromZone = fromZone
+        self.toZone = toZone
+        self.timestamp = timestamp
+        self.predicted = predicted
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trackId = try c.decode(Int.self, forKey: .trackId)
+        classLabel = try c.decode(String.self, forKey: .classLabel)
+        fromZone = try c.decodeIfPresent(String.self, forKey: .fromZone)
+        toZone = try c.decodeIfPresent(String.self, forKey: .toZone)
+        timestamp = try c.decode(Double.self, forKey: .timestamp)
+        predicted = try c.decodeIfPresent(Bool.self, forKey: .predicted) ?? false
+    }
 }
 
 // MARK: - Frame Result
@@ -284,6 +354,7 @@ struct RegistrySnapshot: Sendable {
                 "fromZone": t.fromZone as Any,
                 "toZone": t.toZone as Any,
                 "timestamp": t.timestamp,
+                "predicted": t.predicted,
             ] as [String: Any]
         }
         return dict
@@ -296,12 +367,14 @@ struct TrackingFrameResult: Sendable {
     let registry: RegistrySnapshot
     let inferenceTimeMs: Double
     let timestamp: Double
+    /// Zone breaches predicted from trajectory forecasts (empty when forecast disabled).
+    let predictedZoneBreaches: [ZoneTransition]
 
     func jsonDict() -> [String: Any] {
         return [
             "type": "tracking_result",
             "tracks": tracks.map { t in
-                return [
+                var trackDict: [String: Any] = [
                     "trackId": t.trackId,
                     "classLabel": t.classLabel,
                     "confidence": t.confidence,
@@ -316,11 +389,44 @@ struct TrackingFrameResult: Sendable {
                     "hits": t.hits,
                     "trail": t.trail.map { ["x": $0.x, "y": $0.y] },
                     "displayLabel": t.displayLabel,
-                ] as [String: Any]
+                    "velocity": [
+                        "vx": t.velocity.vx,
+                        "vy": t.velocity.vy,
+                        "vs": t.velocity.vs,
+                    ],
+                    "speed": t.speed,
+                    "forecast": t.forecast.map { p in
+                        return [
+                            "step": p.step,
+                            "center": ["x": p.center.x, "y": p.center.y],
+                            "uncertainty": p.uncertainty,
+                            "bbox": [
+                                "x1": p.bbox.x1,
+                                "y1": p.bbox.y1,
+                                "x2": p.bbox.x2,
+                                "y2": p.bbox.y2,
+                            ],
+                        ] as [String: Any]
+                    },
+                ]
+                if let heading = t.heading {
+                    trackDict["heading"] = heading
+                }
+                return trackDict
             },
             "registry": registry.jsonDict(),
             "inferenceTimeMs": inferenceTimeMs,
             "timestamp": timestamp,
+            "predictedZoneBreaches": predictedZoneBreaches.map { t in
+                return [
+                    "trackId": t.trackId,
+                    "classLabel": t.classLabel,
+                    "fromZone": t.fromZone as Any,
+                    "toZone": t.toZone as Any,
+                    "timestamp": t.timestamp,
+                    "predicted": t.predicted,
+                ] as [String: Any]
+            },
         ]
     }
 }

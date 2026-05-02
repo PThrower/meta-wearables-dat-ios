@@ -255,16 +255,19 @@ actor YOLOModelManager {
                 continue
             }
 
-            // Sanitize path — strip leading directories, prevent traversal
-            let sanitized = filename
+            // Sanitize path — preserve directory tree, prevent traversal
+            let components = filename
                 .components(separatedBy: "/")
-                .last ?? filename
-            guard !sanitized.isEmpty, !sanitized.hasPrefix(".") else {
+                .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
+            guard !components.isEmpty else {
                 offset = dataOffset + compressedSize
                 continue
             }
+            let sanitized = components.joined(separator: "/")
 
             let destFile = destination.appendingPathComponent(sanitized)
+            let destDir = destFile.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
             if compressionMethod == 0 {
                 // Stored (no compression)

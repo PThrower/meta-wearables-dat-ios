@@ -424,6 +424,51 @@ struct KalmanFilter7: Sendable {
         Array(state.prefix(4))
     }
 
+    // MARK: - Trajectory Forecasting
+
+    /// Forecast N steps ahead without mutating this filter.
+    /// Advances state via F (constant-velocity model) with growing covariance.
+    /// Returns predicted positions with uncertainty for overlay rendering,
+    /// zone breach prediction, and gap interpolation.
+    /// Ref: Bar-Shalom & Fortmann, Ch. 3 — KF prediction without measurement update.
+    func forecast(steps: Int) -> [PredictedPosition] {
+        precondition(steps > 0, "Forecast steps must be > 0")
+        // Copy the filter state and covariance (struct copy — independent mutation)
+        var forecastedState = state
+        var forecastedCov = covariance
+
+        var result: [PredictedPosition] = []
+        result.reserveCapacity(steps)
+
+        for step in 1...steps {
+            // Clamp negative scale velocity (same as predict())
+            if forecastedState[6] + forecastedState[2] <= 0 {
+                forecastedState[6] = 0
+            }
+
+            // State transition: x' = F * x
+            forecastedState = F * forecastedState
+            // Covariance propagation: P' = F * P * F^T + Q
+            forecastedCov = F * forecastedCov * F.transposed() + Q
+
+            // Extract predicted [x, y, s, r] and convert to bbox
+            let z = Array(forecastedState.prefix(4))
+            let bbox = zToBbox(z)
+
+            // Position uncertainty: sqrt of position variance sum
+            let posUncertainty = sqrt(max(0, forecastedCov[0, 0] + forecastedCov[1, 1]))
+
+            result.append(PredictedPosition(
+                step: step,
+                center: ((bbox.x1 + bbox.x2) / 2, (bbox.y1 + bbox.y2) / 2),
+                bbox: bbox,
+                uncertainty: posUncertainty
+            ))
+        }
+
+        return result
+    }
+
     // MARK: - Mahalanobis Gating
 
     /// Compute squared Mahalanobis distance from predicted state to measurement.
@@ -630,6 +675,9 @@ struct OCSORT: Sendable {
     // Ref: arXiv:2110.06864 — two-pass association rescues partially occluded objects.
     let useByte: Bool           // false — disabled by default
 
+    // Trajectory forecasting
+    let forecastSteps: Int      // 0 — disabled by default
+
     // Gating pipeline
     let gatingPipeline: GatingPipeline
     let activeCostFunction: CostFunction
@@ -645,6 +693,7 @@ struct OCSORT: Sendable {
         inertia: Double = 0.2,
         maxTracks: Int = 0,
         useByte: Bool = false,
+        forecastSteps: Int = 0,
         gates: [GateConfig] = [],
         costFunctionType: String? = nil
     ) {
@@ -656,6 +705,7 @@ struct OCSORT: Sendable {
         self.inertia = inertia
         self.maxTracks = maxTracks
         self.useByte = useByte
+        self.forecastSteps = forecastSteps
 
         // Build gating pipeline from workflow gate chain.
         // If no gates provided, use default IoU gating at iouThreshold.
@@ -944,6 +994,10 @@ struct OCSORT: Sendable {
             // Only output tracks that were recently matched and have enough hits
             if trk.timeSinceUpdate < 1 &&
                 (trk.hitStreak >= minHits || frameCount <= minHits) {
+                let kf = trk.kalman
+                let forecast: [PredictedPosition] = forecastSteps > 0
+                    ? kf.forecast(steps: forecastSteps)
+                    : []
                 let track = Track(
                     trackId: trk.id,
                     bbox: outputBbox,
@@ -953,7 +1007,9 @@ struct OCSORT: Sendable {
                     age: trk.timeSinceUpdate,
                     hits: trk.hits,
                     lastSeenTimestamp: timestamp,
-                    trail: trk.trail
+                    trail: trk.trail,
+                    velocity: (vx: kf.state[4], vy: kf.state[5], vs: kf.state[6]),
+                    forecast: forecast
                 )
                 results.append(track)
             }

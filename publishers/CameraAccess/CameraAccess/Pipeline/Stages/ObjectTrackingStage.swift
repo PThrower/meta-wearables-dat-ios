@@ -27,6 +27,9 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     var onResult: ((TrackingFrameResult) async -> Void)?
     var previewBus: PreviewBus?
 
+    // Frame-skip throttle state
+    private var lastTrackTime: Double = 0
+
     // Stage state
     private var isRunning = false
 
@@ -43,6 +46,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             inertia: config.inertia,
             maxTracks: config.maxTracks,
             useByte: config.useByte,
+            forecastSteps: config.forecastSteps,
             gates: config.gates,
             costFunctionType: config.costFunction
         )
@@ -69,6 +73,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             inertia: newConfig.inertia,
             maxTracks: newConfig.maxTracks,
             useByte: newConfig.useByte,
+            forecastSteps: newConfig.forecastSteps,
             gates: newConfig.gates,
             costFunctionType: newConfig.costFunction
         )
@@ -80,11 +85,12 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         guard !isRunning else { return }
         isRunning = true
         registry.setZones(trackingConfig.zones)
-        NSLog("[ObjectTrackingStage] Started: detThresh=\(trackingConfig.detThresh) iouThreshold=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) minHits=\(trackingConfig.minHits) deltaT=\(trackingConfig.deltaT) inertia=\(trackingConfig.inertia)")
+        NSLog("[ObjectTrackingStage] Started: detThresh=\(trackingConfig.detThresh) iouThreshold=\(trackingConfig.iouThreshold) maxAge=\(trackingConfig.maxAge) minHits=\(trackingConfig.minHits) deltaT=\(trackingConfig.deltaT) inertia=\(trackingConfig.inertia) forecastSteps=\(trackingConfig.forecastSteps)")
     }
 
     func stop() async {
         isRunning = false
+        lastTrackTime = 0
         tracker.reset()
         registry.reset()
         smoother.reset()
@@ -109,6 +115,11 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     // Paper: OCSort.update() — takes detections, returns tracks with persistent IDs
     func feedDetections(_ detections: [TrackDetection], timestamp: Double) async {
         guard isRunning else { return }
+
+        // Frame-skip: drop detections arriving faster than targetFPS
+        let interval = 1.0 / max(trackingConfig.targetFPS, 1)
+        if timestamp - lastTrackTime < interval { return }
+        lastTrackTime = timestamp
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
@@ -145,13 +156,42 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         let _ = registry.update(tracks: tracks, timestamp: timestamp, lostTrackIds: tracker.lostTrackIds)
         let snapshot = registry.snapshot(tracks: tracks)
 
+        // Zone breach prediction from trajectory forecasts.
+        // Check if any forecast position enters a zone that the track is not currently in.
+        var predictedBreaches: [ZoneTransition] = []
+        if !trackingConfig.zones.isEmpty {
+            for track in tracks {
+                guard !track.forecast.isEmpty else { continue }
+                // Determine which zone the track is currently in (if any)
+                let currentCenter = ((track.bbox.x1 + track.bbox.x2) / 2, (track.bbox.y1 + track.bbox.y2) / 2)
+                let currentZone = trackingConfig.zones.first { $0.contains(center: currentCenter) }
+
+                for pos in track.forecast {
+                    let enteredZone = trackingConfig.zones.first { $0.contains(center: pos.center) }
+                    // Only flag if entering a DIFFERENT zone than current
+                    if let entered = enteredZone, entered.id != currentZone?.id {
+                        predictedBreaches.append(ZoneTransition(
+                            trackId: track.trackId,
+                            classLabel: track.classLabel,
+                            fromZone: currentZone?.label,
+                            toZone: entered.label,
+                            timestamp: timestamp + Double(pos.step) / max(trackingConfig.targetFPS, 1),
+                            predicted: true
+                        ))
+                        break // One breach per track per frame
+                    }
+                }
+            }
+        }
+
         // Build result
         let inferenceTimeMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
         let result = TrackingFrameResult(
             tracks: tracks,
             registry: snapshot,
             inferenceTimeMs: inferenceTimeMs,
-            timestamp: timestamp
+            timestamp: timestamp,
+            predictedZoneBreaches: predictedBreaches
         )
 
         // Dual output
