@@ -971,6 +971,13 @@ struct OCSORT: Sendable {
         lastMatchPairs = []
     }
 
+    /// Track IDs that are alive but currently unmatched (lost/occluded).
+    /// Used by ItemRegistry to preserve zone history during temporary occlusion.
+    var lostTrackIds: Set<Int> {
+        let alive = tracks.filter { $0.timeSinceUpdate > 0 && $0.timeSinceUpdate <= maxAge }
+        return Set(alive.map { $0.id })
+    }
+
     /// Inject late-arriving ReID embeddings into matched tracks.
     /// Maps detection indices to matched tracks via lastMatchPairs,
     /// then adds embeddings to their appearance galleries.

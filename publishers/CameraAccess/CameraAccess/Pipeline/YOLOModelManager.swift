@@ -8,6 +8,7 @@
  */
 
 import CoreML
+import Compression
 import Foundation
 
 actor YOLOModelManager {
@@ -149,7 +150,16 @@ actor YOLOModelManager {
             try FileManager.default.copyItem(at: downloadedFile, to: dest)
         }
 
-        // Find .mlpackage in extracted contents
+        // Find .mlpackage or .mlmodelc in extracted contents
+        if let mlmodelcUrl = findMLModelC(in: extractedDir) {
+            // Server sent pre-compiled model — copy directly to cache
+            if FileManager.default.fileExists(atPath: compiledUrl.path) {
+                try FileManager.default.removeItem(at: compiledUrl)
+            }
+            try FileManager.default.copyItem(at: mlmodelcUrl, to: compiledUrl)
+            return try await loadCompiledModel(at: compiledUrl)
+        }
+
         guard let mlpackageUrl = findMLPackage(in: extractedDir) else {
             throw YOLOModelError.invalidArchive
         }
@@ -195,19 +205,134 @@ actor YOLOModelManager {
         return nil
     }
 
-    /// Extract a ZIP file using iOS-native APIs.
-    /// Uses Compression framework via NSData / NSItemProvider.
+    /// Find .mlmodelc (pre-compiled) inside an extracted directory.
+    private func findMLModelC(in directory: URL) -> URL? {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        ) else { return nil }
+
+        for item in contents {
+            if item.pathExtension == "mlmodelc" { return item }
+            if item.hasDirectoryPath {
+                if let nested = findMLModelC(in: item) { return nested }
+            }
+        }
+        return nil
+    }
+
+    /// Extract a ZIP file using iOS Compression framework.
+    /// Parses ZIP local file headers and extracts stored or deflated entries.
+    /// Ref: PKZIP APPNOTE — local file header signature = 0x04034b50
     private nonisolated func extractZip(at source: URL, to destination: URL) throws {
-        // Use FileManager's built-in — on iOS 16+, we can use
-        // the system-level decompression. Fall back to manual extraction.
-        // For simplicity, we use the Compression framework via a C interop approach.
-        // In practice, the server should send pre-compiled .mlmodelc or use a
-        // ZIP library. For now, attempt to use NSItemProvider.
         let data = try Data(contentsOf: source)
-        // Try writing as-is and let the OS handle extraction
-        // This is a placeholder — production will use a proper ZIP library
-        // or the server will serve .mlmodelc directly
-        try data.write(to: destination.appendingPathComponent(source.lastPathComponent))
+
+        // ZIP structures
+        let localFileHeaderSignature: UInt32 = 0x04034b50
+        let dataDescriptorSignature: UInt32 = 0x08074b50
+
+        var offset = 0
+
+        while offset < data.count - 4 {
+            // Read local file header signature
+            let sig = data.readUInt32(at: offset)
+            guard sig == localFileHeaderSignature else { break }
+
+            // Parse local file header (30 bytes fixed + variable)
+            // Offset 26: filename length (2), offset 28: extra field length (2)
+            let compressionMethod = data.readUInt16(at: offset + 8)
+            let compressedSize = Int(data.readUInt32(at: offset + 18))
+            let uncompressedSize = Int(data.readUInt32(at: offset + 22))
+            let filenameLength = Int(data.readUInt16(at: offset + 26))
+            let extraLength = Int(data.readUInt16(at: offset + 28))
+
+            let dataOffset = offset + 30 + filenameLength + extraLength
+            let filenameData = data[offset + 30 ..< offset + 30 + filenameLength]
+            let filename = String(data: filenameData, encoding: .utf8) ?? ""
+
+            // Skip directories
+            guard !filename.hasSuffix("/"), !filename.isEmpty else {
+                offset = dataOffset + compressedSize
+                continue
+            }
+
+            // Sanitize path — strip leading directories, prevent traversal
+            let sanitized = filename
+                .components(separatedBy: "/")
+                .last ?? filename
+            guard !sanitized.isEmpty, !sanitized.hasPrefix(".") else {
+                offset = dataOffset + compressedSize
+                continue
+            }
+
+            let destFile = destination.appendingPathComponent(sanitized)
+
+            if compressionMethod == 0 {
+                // Stored (no compression)
+                let fileData = data[dataOffset ..< dataOffset + compressedSize]
+                try fileData.write(to: destFile)
+            } else if compressionMethod == 8 {
+                // Deflate — use Compression framework
+                let compressed = data[dataOffset ..< dataOffset + compressedSize]
+                let decompressed = try Self.inflate(compressed, uncompressedSize: uncompressedSize)
+                try decompressed.write(to: destFile)
+            } else {
+                // Unsupported compression — skip
+            }
+
+            offset = dataOffset + compressedSize
+
+            // Skip data descriptor if present (bit 3 of general purpose flags)
+            let flags = data.readUInt16(at: offset - compressedSize - filenameLength - extraLength - 30 + 6)
+            if flags & 0x08 != 0 {
+                // Data descriptor follows compressed data
+                if offset + 4 < data.count {
+                    let ddSig = data.readUInt32(at: offset)
+                    if ddSig == dataDescriptorSignature {
+                        offset += 16 // sig(4) + crc32(4) + compressed(4) + uncompressed(4)
+                    } else {
+                        offset += 12 // no sig: crc32(4) + compressed(4) + uncompressed(4)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Inflate deflated data using iOS Compression framework.
+    private static func inflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
+        let bufferSize = max(uncompressedSize, 4096)
+        var output = Data(capacity: bufferSize)
+        var offset = 0
+
+        // Process in chunks through libcompression
+        let chunkSize = 64 * 1024
+        var inputIndex = data.startIndex
+
+        while inputIndex < data.endIndex {
+            let remaining = data.distance(from: inputIndex, to: data.endIndex)
+            let inputChunkSize = min(remaining, chunkSize)
+            let inputChunk = data[inputIndex ..< data.index(inputIndex, offsetBy: inputChunkSize)]
+
+            var outputBuffer = [UInt8](repeating: 0, count: chunkSize)
+
+            let decoded = inputChunk.withUnsafeBytes { inputPtr in
+                outputBuffer.withUnsafeMutableBytes { outputPtr in
+                    compression_decode_buffer(
+                        outputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                        outputPtr.count,
+                        inputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                        inputPtr.count,
+                        nil,
+                        COMPRESSION_ZLIB
+                    )
+                }
+            }
+
+            if decoded == 0 { break }
+            output.append(contentsOf: outputBuffer.prefix(decoded))
+            inputIndex = data.index(inputIndex, offsetBy: inputChunkSize)
+        }
+
+        return output
     }
 }
 
@@ -233,5 +358,22 @@ enum YOLOModelError: LocalizedError {
         case .compilationFailed(let error):
             return "Model compilation failed: \(error.localizedDescription)"
         }
+    }
+}
+
+// MARK: - Data ZIP helpers
+
+private extension Data {
+    func readUInt16(at offset: Int) -> UInt16 {
+        guard offset + 2 <= count else { return 0 }
+        return UInt16(self[offset]) | UInt16(self[offset + 1]) << 8
+    }
+
+    func readUInt32(at offset: Int) -> UInt32 {
+        guard offset + 4 <= count else { return 0 }
+        return UInt32(self[offset])
+            | UInt32(self[offset + 1]) << 8
+            | UInt32(self[offset + 2]) << 16
+            | UInt32(self[offset + 3]) << 24
     }
 }

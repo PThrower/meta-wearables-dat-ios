@@ -112,12 +112,17 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        // Confidence smoothing
+        // Confidence smoothing (spatial matching — same pattern as YOLOStage)
         var smoothed = detections
         if trackingConfig.smoothingAlpha < 1.0 {
+            smoother.alpha = trackingConfig.smoothingAlpha
             smoothed = detections.map { det in
+                let key = smoother.spatialKey(
+                    type: "tracking-\(det.classLabel)",
+                    bbox: det.bbox
+                )
                 let smoothedConf = smoother.smooth(
-                    key: "tracking-\(det.classLabel)",
+                    key: key,
                     raw: det.confidence,
                     bbox: det.bbox
                 )
@@ -129,13 +134,15 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
                     embedding: det.embedding
                 )
             }
+            smoother.prune()
         }
 
         // OC-SORT update — runs ORU, OCM, OCR internally
         let tracks = tracker.update(detections: smoothed, timestamp: timestamp)
 
         // ItemRegistry update — zone accounting
-        let _ = registry.update(tracks: tracks, timestamp: timestamp)
+        // Pass lost track IDs to preserve zone history during temporary occlusion
+        let _ = registry.update(tracks: tracks, timestamp: timestamp, lostTrackIds: tracker.lostTrackIds)
         let snapshot = registry.snapshot(tracks: tracks)
 
         // Build result

@@ -6,6 +6,7 @@
  * FramePipelineStage is the protocol every stage conforms to.
  */
 
+import CoreImage
 import CoreMedia
 import Foundation
 
@@ -67,4 +68,14 @@ protocol FramePipelineStage: AnyObject, Sendable {
 extension FramePipelineStage {
     func start() async {}
     func stop() async {}
+}
+
+// MARK: - Shared CIContext
+
+/// Pipeline-wide shared CIContext.
+/// CIContext is expensive to create (backs onto Metal/EAGL context).
+/// Sharing one instance avoids Metal context thrashing across stages.
+/// Safe to use from any isolation domain — CIContext is thread-safe.
+enum PipelineCIContext {
+    static let shared = CIContext(options: [.useSoftwareRenderer: false])
 }

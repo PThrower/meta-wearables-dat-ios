@@ -86,8 +86,7 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
                CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
                                     kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
                let snap = snapshotBuffer {
-                let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
-                ciCtx.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
+                PipelineCIContext.shared.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
                              bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
                              colorSpace: CGColorSpaceCreateDeviceRGB())
             }
@@ -257,7 +256,7 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
         }
 
         let result = YOLOFrameResult(
-            timestamp: packet.timestamp,
+            timestamp: CFAbsoluteTimeGetCurrent(),
             sequenceNumber: packet.sequenceNumber,
             detections: detections,
             inferenceTimeMs: inferenceMs,

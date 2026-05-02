@@ -47,7 +47,7 @@ struct YOLOKeypoint: Sendable, Identifiable {
 // MARK: - Frame Result
 
 struct YOLOFrameResult: Sendable {
-    let timestamp: ContinuousClock.Instant
+    let timestamp: Double
     let sequenceNumber: UInt64
     let detections: [YOLODetection]
     let inferenceTimeMs: Double
@@ -157,6 +157,7 @@ extension YOLOFrameResult {
         return [
             "type": "yolo_result",
             "task": task.rawValue,
+            "timestamp": timestamp,
             "inferenceTimeMs": inferenceTimeMs,
             "detectionCount": detections.count,
             "detections": detectionsJson,

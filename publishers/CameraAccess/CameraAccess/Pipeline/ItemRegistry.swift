@@ -19,8 +19,11 @@ struct ItemRegistry: Sendable {
     }
 
     /// Update registry with current frame's tracks. Returns transitions detected this frame.
-    mutating func update(tracks: [Track], timestamp: Double) -> [ZoneTransition] {
+    /// - Parameter lostTrackIds: Track IDs that are still alive but unmatched this frame.
+    ///   These are preserved in the registry for zone history continuity during occlusion.
+    mutating func update(tracks: [Track], timestamp: Double, lostTrackIds: Set<Int> = []) -> [ZoneTransition] {
         var newTransitions: [ZoneTransition] = []
+        let activeIds = Set(tracks.map { $0.trackId })
 
         for track in tracks {
             let center = ((track.bbox.x1 + track.bbox.x2) / 2, (track.bbox.y1 + track.bbox.y2) / 2)
@@ -81,9 +84,11 @@ struct ItemRegistry: Sendable {
             }
         }
 
-        // Prune items whose tracks are no longer active
-        let activeIds = Set(tracks.map { $0.trackId })
-        items = items.filter { activeIds.contains($0.key) }
+        // Prune items whose tracks are no longer active AND not in lost set.
+        // Lost tracks (within maxAge but unmatched this frame) are kept for
+        // zone history continuity during temporary occlusion.
+        let survivingIds = activeIds.union(lostTrackIds)
+        items = items.filter { survivingIds.contains($0.key) }
 
         // Cap transition log
         if transitionLog.count > 100 {

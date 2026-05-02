@@ -63,9 +63,8 @@ struct HistogramExtractor: Sendable {
                                       y: CGFloat(cropH) / cropRect.height)
         let scaledImage = cropped.transformed(by: translate.concatenating(scale))
 
-        let ciContext = CIContext(options: [.useSoftwareRenderer: false])
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        ciContext.render(scaledImage, to: outBuffer,
+        PipelineCIContext.shared.render(scaledImage, to: outBuffer,
                          bounds: CGRect(x: 0, y: 0, width: cropW, height: cropH),
                          colorSpace: colorSpace)
 
