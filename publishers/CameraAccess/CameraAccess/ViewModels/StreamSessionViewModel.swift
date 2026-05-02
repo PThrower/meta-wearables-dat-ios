@@ -119,6 +119,11 @@ class StreamSessionViewModel: ObservableObject {
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
   @Published var trackingTracks: [Track] = []
+
+  /// Zone definitions from the active tracking config (for overlay rendering).
+  var activeZones: [ZoneDefinition] {
+    trackingConfig?.zones ?? []
+  }
   @Published var toolMeasureResult: ToolMeasureResult?
   @Published var audioInputMode: AudioInputMode = .all {
     didSet {

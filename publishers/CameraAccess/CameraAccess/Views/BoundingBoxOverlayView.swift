@@ -45,12 +45,19 @@ struct BoundingBoxOverlayView: View {
   /// YOLO CoreML on-device detections (bounding boxes, masks, keypoints).
   var yoloDetections: [YOLODetection] = []
 
+  /// Zone definitions for rendering on the camera feed (background layer).
+  var zones: [ZoneDefinition] = []
+
   var body: some View {
     let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || !yoloDetections.isEmpty || sceneLabel != nil)
     let hasTranscription = transcription != nil
-    if hasBoxes || hasTranscription {
+    let hasZones = !zones.isEmpty
+    if hasBoxes || hasTranscription || hasZones {
       GeometryReader { geometry in
         ZStack {
+          // Zone overlay (background layer — rendered first, behind detections)
+          zoneOverlay(zones: zones, size: geometry.size)
+
           // Server AI bounding boxes (existing)
           if showOverlay {
           ForEach(Array(boxes.enumerated()), id: \.element.id) { index, box in
@@ -330,5 +337,71 @@ struct BoundingBoxOverlayView: View {
         .stroke(segColor, style: style)
       }
     }
+  }
+
+  // MARK: - Zone Overlay
+
+  /// Render zones as semi-transparent colored rectangles with dashed borders.
+  /// Extracted from body to reduce SwiftUI type-checker complexity.
+  @ViewBuilder
+  private func zoneOverlay(zones: [ZoneDefinition], size: CGSize) -> some View {
+    ForEach(Array(zones.enumerated()), id: \.element.id) { index, zone in
+      let color = colorForZone(zone: zone, index: index)
+      let rect = CGRect(
+        x: zone.x1 * size.width,
+        y: zone.y1 * size.height,
+        width: (zone.x2 - zone.x1) * size.width,
+        height: (zone.y2 - zone.y1) * size.height
+      )
+
+      // Semi-transparent fill
+      Rectangle()
+        .fill(color.opacity(0.12))
+        .frame(width: rect.width, height: rect.height)
+        .position(x: rect.midX, y: rect.midY)
+
+      // Dashed border
+      Rectangle()
+        .stroke(color, style: StrokeStyle(lineWidth: 1.5, dash: [6, 3]))
+        .frame(width: rect.width, height: rect.height)
+        .position(x: rect.midX, y: rect.midY)
+
+      // Label badge
+      if !zone.label.isEmpty {
+        Text(zone.label)
+          .font(.system(size: 9, weight: .bold, design: .monospaced))
+          .foregroundColor(.white)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 2)
+          .background(color.opacity(0.85))
+          .cornerRadius(2)
+          .position(
+            x: rect.minX + 30,
+            y: max(10, rect.minY - 8)
+          )
+      }
+    }
+  }
+
+  /// Get color for a zone — uses hex color if provided, else golden-angle fallback.
+  private func colorForZone(zone: ZoneDefinition, index: Int) -> Color {
+    if let hex = zone.color, !hex.isEmpty {
+      return colorFromHex(hex)
+    }
+    let hue = Double((index * 137 + 60) % 360) / 360.0
+    return Color(hue: hue, saturation: 0.6, brightness: 0.85)
+  }
+
+  /// Parse "#RRGGBB" hex string to SwiftUI Color.
+  private func colorFromHex(_ hex: String) -> Color {
+    let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    guard cleaned.count == 6,
+      let r = UInt8(cleaned.prefix(2), radix: 16),
+      let g = UInt8(cleaned.dropFirst(2).prefix(2), radix: 16),
+      let b = UInt8(cleaned.suffix(2), radix: 16)
+    else {
+      return .green
+    }
+    return Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
   }
 }

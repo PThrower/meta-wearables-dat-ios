@@ -19,6 +19,7 @@ export type ConfigFieldSchema =
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; placeholder?: string }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
   | { kind: "geofence-map"; key: string; label: string }
+  | { kind: "zones"; key: string; label: string }
   | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
 
 // --- Structural & Activation Types ---
@@ -671,8 +672,9 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       { kind: "range", key: "detThresh", label: "Detection threshold", min: 0, max: 1, step: 0.05 },
       { kind: "checkbox", key: "useByte", label: "ByteTrack two-pass (low-conf recovery)" },
       { kind: "number", key: "forecastSteps", label: "Forecast Steps (0=disabled, predicts N frames ahead)", min: 0, max: 30, step: 1 },
+      { kind: "zones", key: "zones", label: "Zone Definitions" },
     ],
-    defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3, deltaT: 3, inertia: 0.2, detThresh: 0.5, useByte: false, forecastSteps: 0 },
+    defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3, deltaT: 3, inertia: 0.2, detThresh: 0.5, useByte: false, forecastSteps: 0, zones: [] },
     defaultLabel: "OC-SORT Tracker",
     runtime: ["mobile"],
   },

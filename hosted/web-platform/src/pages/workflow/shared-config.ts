@@ -81,11 +81,410 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
     case "geofence-map": {
       return renderGeofenceMapField(field, node, prefix);
     }
+    case "zones": {
+      return renderZonesField(field, node, prefix);
+    }
     case "section": {
       const inner = field.fields.map(f => renderConfigField(f, node, prefix)).join("");
       return `<div class="${prefix}-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"><label style="font-weight: 600; margin-bottom: 6px; display: block;">${esc(field.label)}</label>${inner}</div>`;
     }
   }
+}
+
+/* ── Zone Editor (modal with drag-to-draw canvas) ── */
+
+interface ZoneItem {
+  id: string;
+  label: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color?: string;
+}
+
+const ZONE_COLORS = ["#10b981", "#3b82f6", "#f97316", "#a855f7", "#ef4444", "#06b6d4", "#eab308", "#ec4899"];
+const ZONE_MODAL_ID = "wf-zone-modal";
+
+function renderZonesField(field: ConfigFieldSchema & { kind: "zones" }, node: WorkflowNodeDef, prefix: string): string {
+  const zones = parseZones(node.config[field.key]);
+  const count = zones.length;
+  const hiddenVal = JSON.stringify(zones);
+  return `<div class="${prefix}-field wf-zone-section" data-zone-section>
+    <input type="hidden" class="${prefix}-input" data-field="config.zones" value="${esc(hiddenVal)}" />
+    <div class="wf-gf-trigger-row">
+      <span class="wf-gf-count">${count} zone${count !== 1 ? "s" : ""}</span>
+      <button class="wf-gf-open-btn wf-zone-open-btn" type="button">Open Editor</button>
+    </div>
+  </div>`;
+}
+
+function parseZones(val: unknown): ZoneItem[] {
+  if (Array.isArray(val)) return val.map(normalizeZone);
+  if (typeof val === "string") {
+    try { return JSON.parse(val).map(normalizeZone); } catch { return []; }
+  }
+  return [];
+}
+
+function normalizeZone(z: any): ZoneItem {
+  return {
+    id: z.id ?? crypto.randomUUID(),
+    label: String(z.label ?? ""),
+    x1: Number(z.x1) || 0,
+    y1: Number(z.y1) || 0,
+    x2: Number(z.x2) || 0,
+    y2: Number(z.y2) || 0,
+    color: z.color ?? undefined,
+  };
+}
+
+function renderZoneModal(): string {
+  return `<div id="${ZONE_MODAL_ID}" class="wf-gf-modal-overlay" style="display:none;">
+    <div class="wf-gf-modal">
+      <aside class="wf-gf-sidebar">
+        <div class="wf-gf-sidebar-header">
+          <h1><span class="wf-gf-dot" style="background:#10b981;"></span> Zone Editor</h1>
+          <p>Drag on the canvas to draw rectangular zones.</p>
+        </div>
+        <div class="wf-gf-sidebar-section">
+          <div class="wf-gf-section-title">Zones (<span id="wf-zone-card-count">0</span>)</div>
+          <div id="wf-zone-cards-list" class="wf-gf-cards-list"></div>
+        </div>
+        <div class="wf-gf-sidebar-section wf-gf-sidebar-footer">
+          <div class="wf-gf-btn-row">
+            <button class="wf-gf-btn wf-gf-btn-accent" id="wf-zone-clear-btn">Clear All</button>
+          </div>
+          <button class="wf-gf-btn wf-gf-btn-done" id="wf-zone-done-btn">Done</button>
+        </div>
+      </aside>
+      <div class="wf-gf-map-area" style="display:flex;align-items:center;justify-content:center;background:#111;">
+        <div id="wf-zone-canvas-wrap" style="position:relative;width:100%;max-width:640px;aspect-ratio:16/9;background:#1a1a2e;border-radius:8px;overflow:hidden;cursor:crosshair;">
+          <canvas id="wf-zone-canvas" style="width:100%;height:100%;display:block;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderZoneCard(zone: ZoneItem, index: number): string {
+  const color = zone.color ?? ZONE_COLORS[index % ZONE_COLORS.length];
+  return `<div class="wf-gf-card" data-zone-id="${zone.id}" style="border-left: 3px solid ${color}">
+    <div class="wf-gf-card-header">
+      <div class="wf-gf-card-pin" style="background: ${color}20; color: ${color};">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+      </div>
+      <input type="text" class="wf-gf-card-label" data-zone-field="label" value="${esc(zone.label)}" placeholder="Zone label" />
+      <button class="wf-gf-card-delete wf-zone-card-delete" title="Remove zone">&times;</button>
+    </div>
+    <div class="wf-gf-card-row" style="font-size:11px;font-family:monospace;color:#8b8fa3;">
+      (${zone.x1.toFixed(2)}, ${zone.y1.toFixed(2)}) → (${zone.x2.toFixed(2)}, ${zone.y2.toFixed(2)})
+    </div>
+  </div>`;
+}
+
+function ensureZoneModal(): HTMLElement {
+  let modal = document.getElementById(ZONE_MODAL_ID);
+  if (!modal) {
+    document.body.insertAdjacentHTML("beforeend", renderZoneModal());
+    modal = document.getElementById(ZONE_MODAL_ID)!;
+  }
+  return modal;
+}
+
+function drawZonesOnCanvas(canvas: HTMLCanvasElement, zones: ZoneItem[]): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  // Grid lines for reference
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    ctx.beginPath(); ctx.moveTo(w * i / 4, 0); ctx.lineTo(w * i / 4, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, h * i / 4); ctx.lineTo(w, h * i / 4); ctx.stroke();
+  }
+  zones.forEach((zone, i) => {
+    const color = zone.color ?? ZONE_COLORS[i % ZONE_COLORS.length];
+    const rx = zone.x1 * w;
+    const ry = zone.y1 * h;
+    const rw = (zone.x2 - zone.x1) * w;
+    const rh = (zone.y2 - zone.y1) * h;
+    ctx.fillStyle = color + "20";
+    ctx.fillRect(rx, ry, rw, rh);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+    // Label
+    if (zone.label) {
+      ctx.font = "bold 12px monospace";
+      ctx.fillStyle = color;
+      ctx.fillText(zone.label, rx + 4, ry + 14);
+    }
+  });
+}
+
+export function wireZonesEditor(container: Element, callbacks: ConfigFieldCallbacks): void {
+  const section = container.querySelector("[data-zone-section]") as HTMLElement | null;
+  if (!section) return;
+  if (section.dataset.zoneWired === "true") return;
+  section.dataset.zoneWired = "true";
+
+  const hiddenInput = section.querySelector('[data-field="config.zones"]') as HTMLInputElement;
+
+  const updateCount = () => {
+    const zs = parseZones(hiddenInput.value);
+    const badge = section.querySelector(".wf-gf-count");
+    if (badge) badge.textContent = `${zs.length} zone${zs.length !== 1 ? "s" : ""}`;
+  };
+
+  const syncZoneConfig = () => {
+    const cards = document.querySelectorAll(`#${ZONE_MODAL_ID} .wf-gf-card[data-zone-id]`);
+    const zones: ZoneItem[] = [];
+    cards.forEach(card => {
+      const el = card as HTMLElement;
+      const id = el.dataset.zoneId ?? crypto.randomUUID();
+      const label = (el.querySelector('[data-zone-field="label"]') as HTMLInputElement)?.value ?? "";
+      // Read coords from data attributes (set during card creation)
+      zones.push({
+        id,
+        label,
+        x1: parseFloat(el.dataset.zoneX1 ?? "0"),
+        y1: parseFloat(el.dataset.zoneY1 ?? "0"),
+        x2: parseFloat(el.dataset.zoneX2 ?? "0"),
+        y2: parseFloat(el.dataset.zoneY2 ?? "0"),
+      });
+    });
+    hiddenInput.value = JSON.stringify(zones);
+    const badge = section.querySelector(".wf-gf-count");
+    if (badge) badge.textContent = `${zones.length} zone${zones.length !== 1 ? "s" : ""}`;
+
+    const wf = callbacks.getWorkflow();
+    const selId = callbacks.getSelectedNodeId();
+    if (wf && selId) {
+      const n = wf.nodes.find(n => n.id === selId);
+      if (n) {
+        n.config.zones = zones;
+        callbacks.setDirty();
+        callbacks.autoSave();
+      }
+    }
+  };
+
+  const redrawCanvas = () => {
+    const canvas = document.getElementById("wf-zone-canvas") as HTMLCanvasElement;
+    if (!canvas) return;
+    const wrap = document.getElementById("wf-zone-canvas-wrap");
+    if (wrap) {
+      canvas.width = wrap.clientWidth * window.devicePixelRatio;
+      canvas.height = wrap.clientHeight * window.devicePixelRatio;
+    }
+    const zs = parseZones(hiddenInput.value);
+    drawZonesOnCanvas(canvas, zs);
+  };
+
+  const refreshCards = () => {
+    const zones = parseZones(hiddenInput.value);
+    const cardsList = document.getElementById("wf-zone-cards-list")!;
+    if (zones.length === 0) {
+      cardsList.innerHTML = '<span class="wf-gf-empty-msg">Drag on the canvas to draw zones...</span>';
+    } else {
+      cardsList.innerHTML = zones.map((z, i) => renderZoneCard(z, i)).join("");
+    }
+    const countEl = document.getElementById("wf-zone-card-count");
+    if (countEl) countEl.textContent = String(zones.length);
+    // Wire card events
+    cardsList.querySelectorAll(".wf-gf-card[data-zone-id]").forEach(card => {
+      const el = card as HTMLElement;
+      const zoneId = el.dataset.zoneId!;
+      // Delete
+      el.querySelector(".wf-zone-card-delete")?.addEventListener("click", () => {
+        const current = parseZones(hiddenInput.value).filter(z => z.id !== zoneId);
+        hiddenInput.value = JSON.stringify(current);
+        syncZoneConfig();
+        refreshCards();
+        redrawCanvas();
+        updateCount();
+      });
+      // Label change
+      el.querySelector('[data-zone-field="label"]')?.addEventListener("change", () => {
+        const current = parseZones(hiddenInput.value);
+        const match = current.find(z => z.id === zoneId);
+        if (match) {
+          match.label = (el.querySelector('[data-zone-field="label"]') as HTMLInputElement)?.value ?? "";
+          hiddenInput.value = JSON.stringify(current);
+        }
+        syncZoneConfig();
+        redrawCanvas();
+      });
+    });
+  };
+
+  const openBtn = section.querySelector(".wf-zone-open-btn");
+  if (!openBtn) return;
+
+  let dragState: { startX: number; startY: number; dragging: boolean } | null = null;
+
+  openBtn.addEventListener("click", () => {
+    const modal = ensureZoneModal();
+    modal.style.display = "flex";
+    refreshCards();
+    requestAnimationFrame(() => {
+      redrawCanvas();
+    });
+
+    // Clear All
+    const clearBtn = document.getElementById("wf-zone-clear-btn");
+    if (clearBtn && !clearBtn.dataset.wired) {
+      clearBtn.dataset.wired = "true";
+      clearBtn.addEventListener("click", () => {
+        hiddenInput.value = "[]";
+        syncZoneConfig();
+        refreshCards();
+        redrawCanvas();
+        updateCount();
+      });
+    }
+
+    // Done
+    const doneBtn = document.getElementById("wf-zone-done-btn");
+    if (doneBtn && !doneBtn.dataset.wired) {
+      doneBtn.dataset.wired = "true";
+      doneBtn.addEventListener("click", () => {
+        modal.style.display = "none";
+      });
+    }
+
+    // Canvas drag-to-draw
+    const canvasWrap = document.getElementById("wf-zone-canvas-wrap")!;
+    if (!canvasWrap.dataset.wired) {
+      canvasWrap.dataset.wired = "true";
+      const canvas = document.getElementById("wf-zone-canvas") as HTMLCanvasElement;
+
+      canvasWrap.addEventListener("mousedown", (e: MouseEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width;
+        const y = (e.clientY - rect.top) / rect.height;
+        dragState = { startX: x, startY: y, dragging: true };
+      });
+
+      canvasWrap.addEventListener("mousemove", (e: MouseEvent) => {
+        if (!dragState?.dragging) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        // Live preview
+        const currentZones = parseZones(hiddenInput.value);
+        const previewZone: ZoneItem = {
+          id: "__preview__",
+          label: "",
+          x1: Math.min(dragState.startX, x),
+          y1: Math.min(dragState.startY, y),
+          x2: Math.max(dragState.startX, x),
+          y2: Math.max(dragState.startY, y),
+        };
+        drawZonesOnCanvas(canvas, [...currentZones, previewZone]);
+      });
+
+      canvasWrap.addEventListener("mouseup", (e: MouseEvent) => {
+        if (!dragState?.dragging) return;
+        dragState.dragging = false;
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        const x1 = Math.min(dragState.startX, x);
+        const y1 = Math.min(dragState.startY, y);
+        const x2 = Math.max(dragState.startX, x);
+        const y2 = Math.max(dragState.startY, y);
+        // Minimum size threshold (5% of canvas)
+        if (Math.abs(x2 - x1) < 0.05 || Math.abs(y2 - y1) < 0.05) {
+          redrawCanvas();
+          return;
+        }
+        const newZone: ZoneItem = {
+          id: crypto.randomUUID(),
+          label: `Zone ${(parseZones(hiddenInput.value).length + 1)}`,
+          x1: Math.round(x1 * 100) / 100,
+          y1: Math.round(y1 * 100) / 100,
+          x2: Math.round(x2 * 100) / 100,
+          y2: Math.round(y2 * 100) / 100,
+        };
+        const current = parseZones(hiddenInput.value);
+        current.push(newZone);
+        hiddenInput.value = JSON.stringify(current);
+        syncZoneConfig();
+        refreshCards();
+        redrawCanvas();
+        updateCount();
+        dragState = null;
+      });
+
+      // Touch support
+      canvasWrap.addEventListener("touchstart", (e: TouchEvent) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = (touch.clientX - rect.left) / rect.width;
+        const y = (touch.clientY - rect.top) / rect.height;
+        dragState = { startX: x, startY: y, dragging: true };
+      }, { passive: false });
+
+      canvasWrap.addEventListener("touchmove", (e: TouchEvent) => {
+        if (!dragState?.dragging) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height));
+        const currentZones = parseZones(hiddenInput.value);
+        const previewZone: ZoneItem = {
+          id: "__preview__",
+          label: "",
+          x1: Math.min(dragState.startX, x),
+          y1: Math.min(dragState.startY, y),
+          x2: Math.max(dragState.startX, x),
+          y2: Math.max(dragState.startY, y),
+        };
+        drawZonesOnCanvas(canvas, [...currentZones, previewZone]);
+      }, { passive: false });
+
+      canvasWrap.addEventListener("touchend", (e: TouchEvent) => {
+        if (!dragState?.dragging) return;
+        dragState.dragging = false;
+        const touch = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+        const y = Math.max(0, Math.min(1, (touch.clientY - rect.top) / rect.height));
+        const x1 = Math.min(dragState.startX, x);
+        const y1 = Math.min(dragState.startY, y);
+        const x2 = Math.max(dragState.startX, x);
+        const y2 = Math.max(dragState.startY, y);
+        if (Math.abs(x2 - x1) < 0.05 || Math.abs(y2 - y1) < 0.05) {
+          redrawCanvas();
+          return;
+        }
+        const newZone: ZoneItem = {
+          id: crypto.randomUUID(),
+          label: `Zone ${(parseZones(hiddenInput.value).length + 1)}`,
+          x1: Math.round(x1 * 100) / 100,
+          y1: Math.round(y1 * 100) / 100,
+          x2: Math.round(x2 * 100) / 100,
+          y2: Math.round(y2 * 100) / 100,
+        };
+        const current = parseZones(hiddenInput.value);
+        current.push(newZone);
+        hiddenInput.value = JSON.stringify(current);
+        syncZoneConfig();
+        refreshCards();
+        redrawCanvas();
+        updateCount();
+        dragState = null;
+      });
+    }
+  });
 }
 
 /* ── Geofence Map (modal with Leaflet) ── */
@@ -899,6 +1298,8 @@ export function wireConfigFieldInputs(container: Element, callbacks: ConfigField
         // Geofences are handled by the map component — skip default textarea parsing
         if (key === "geofences") {
           try { n.config[key] = JSON.parse(el.value); } catch { n.config[key] = []; }
+        } else if (key === "zones") {
+          try { n.config[key] = JSON.parse(el.value); } catch { n.config[key] = []; }
         } else if (el.type === "range") n.config[key] = parseFloat(el.value);
         else if (el.type === "checkbox") n.config[key] = el.checked;
         else if (el.type === "number") n.config[key] = parseFloat(el.value);
@@ -914,6 +1315,9 @@ export function wireConfigFieldInputs(container: Element, callbacks: ConfigField
 
   // Wire geofence map (if present)
   wireGeofenceMap(container, callbacks);
+
+  // Wire zones editor (if present)
+  wireZonesEditor(container, callbacks);
 }
 
 /* ── Flow trigger event wiring ── */

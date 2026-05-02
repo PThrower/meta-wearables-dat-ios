@@ -49,7 +49,9 @@ struct StreamView: View {
             visionDetections: viewModel.visionDetections,
             sceneLabel: viewModel.visionSceneLabel,
             transcription: viewModel.overlayTranscription,
-            trackedItems: viewModel.trackingTracks
+            trackedItems: viewModel.trackingTracks,
+            yoloDetections: viewModel.yoloDetections,
+            zones: viewModel.activeZones
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }
