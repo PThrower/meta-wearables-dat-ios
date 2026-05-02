@@ -25,7 +25,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink" | "gating";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "palantir" | "passthrough" | "gating";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "palantir" | "passthrough" | "gating" | "yolo";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -95,7 +95,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "yolo-detect", "yolo-segment", "yolo-pose", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -1322,6 +1322,87 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     defaultConfig: { stackUrl: "", ontologyApiName: "", actionTypeId: "", parameterTemplates: "{}", executeMode: "execute" },
     defaultLabel: "Palantir Action",
     runtime: ["server"],
+  },
+
+  // --- YOLO CoreML nodes (on-device Neural Engine inference) ---
+
+  {
+    type: "yolo-detect",
+    label: "YOLO Detect",
+    subtitle: "${modelId} | conf: ${confidence} | ${targetFPS}fps",
+    color: { fill: "#1a2e0d", header: "#65a30d", stroke: "#65a30d" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", "yolo-detect", "yolo-segment", "yolo-pose", "<sink>", "<trigger>"],
+    role: "processor",
+    activationMode: "yolo",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "select", key: "modelId", label: "Model", options: [
+        { value: "yolo11n", label: "YOLO11n (fast)" },
+        { value: "yolo11s", label: "YOLO11s (balanced)" },
+        { value: "yolo11m", label: "YOLO11m (accurate)" },
+      ]},
+      { kind: "range", key: "confidence", label: "Confidence", min: 0.05, max: 0.95, step: 0.05 },
+      { kind: "range", key: "iouThreshold", label: "NMS IoU", min: 0.1, max: 0.9, step: 0.05 },
+      { kind: "number", key: "targetFPS", label: "Target FPS", placeholder: "10" },
+      { kind: "number", key: "maxDetections", label: "Max Detections", placeholder: "100" },
+      { kind: "range", key: "smoothingAlpha", label: "Smoothing", min: 0.1, max: 1.0, step: 0.1 },
+    ],
+    defaultConfig: { modelId: "yolo11n", confidence: 0.25, iouThreshold: 0.45, targetFPS: 10, maxDetections: 100, inputSize: 640, smoothingAlpha: 0.3 },
+    defaultLabel: "YOLO Detect",
+    runtime: ["mobile"],
+  },
+  {
+    type: "yolo-segment",
+    label: "YOLO Segment",
+    subtitle: "${modelId} | masks | conf: ${confidence}",
+    color: { fill: "#1a2e0d", header: "#65a30d", stroke: "#65a30d" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", "yolo-detect", "yolo-segment", "yolo-pose", "<sink>", "<trigger>"],
+    role: "processor",
+    activationMode: "yolo",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "select", key: "modelId", label: "Model", options: [
+        { value: "yolo11n-seg", label: "YOLO11n-seg (fast)" },
+        { value: "yolo11s-seg", label: "YOLO11s-seg (balanced)" },
+        { value: "yolo11m-seg", label: "YOLO11m-seg (accurate)" },
+      ]},
+      { kind: "range", key: "confidence", label: "Confidence", min: 0.05, max: 0.95, step: 0.05 },
+      { kind: "range", key: "iouThreshold", label: "NMS IoU", min: 0.1, max: 0.9, step: 0.05 },
+      { kind: "number", key: "targetFPS", label: "Target FPS", placeholder: "10" },
+      { kind: "number", key: "maxDetections", label: "Max Detections", placeholder: "100" },
+      { kind: "range", key: "smoothingAlpha", label: "Smoothing", min: 0.1, max: 1.0, step: 0.1 },
+    ],
+    defaultConfig: { modelId: "yolo11n-seg", confidence: 0.25, iouThreshold: 0.45, targetFPS: 10, maxDetections: 100, inputSize: 640, smoothingAlpha: 0.3 },
+    defaultLabel: "YOLO Segment",
+    runtime: ["mobile"],
+  },
+  {
+    type: "yolo-pose",
+    label: "YOLO Pose",
+    subtitle: "${modelId} | 17 keypoints | conf: ${confidence}",
+    color: { fill: "#1a2e0d", header: "#65a30d", stroke: "#65a30d" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", "yolo-detect", "yolo-segment", "yolo-pose", "<sink>", "<trigger>"],
+    role: "processor",
+    activationMode: "yolo",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "select", key: "modelId", label: "Model", options: [
+        { value: "yolo11n-pose", label: "YOLO11n-pose (fast)" },
+        { value: "yolo11s-pose", label: "YOLO11s-pose (balanced)" },
+        { value: "yolo11m-pose", label: "YOLO11m-pose (accurate)" },
+      ]},
+      { kind: "range", key: "confidence", label: "Confidence", min: 0.05, max: 0.95, step: 0.05 },
+      { kind: "range", key: "iouThreshold", label: "NMS IoU", min: 0.1, max: 0.9, step: 0.05 },
+      { kind: "number", key: "targetFPS", label: "Target FPS", placeholder: "10" },
+      { kind: "number", key: "maxDetections", label: "Max Detections", placeholder: "100" },
+      { kind: "range", key: "smoothingAlpha", label: "Smoothing", min: 0.1, max: 1.0, step: 0.1 },
+    ],
+    defaultConfig: { modelId: "yolo11n-pose", confidence: 0.25, iouThreshold: 0.45, targetFPS: 10, maxDetections: 100, inputSize: 640, smoothingAlpha: 0.3 },
+    defaultLabel: "YOLO Pose",
+    runtime: ["mobile"],
   },
 ];
 

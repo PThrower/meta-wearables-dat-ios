@@ -4,7 +4,7 @@ import { resolveSourceInput } from "./app-registry.js";
 type WsLike = { send: (data: string) => void; readyState: number };
 
 /**
- * Dispatch workflow config messages (speech, vision, enhance, sensor, tracking, measure)
+ * Dispatch workflow config messages (speech, vision, enhance, sensor, tracking, measure, yolo)
  * to the publisher WebSocket. Called both on activation and on publisher reconnect.
  */
 export function dispatchWorkflowConfig(
@@ -21,6 +21,7 @@ export function dispatchWorkflowConfig(
   const sensorIdx: number[] = [];
   const trackingIdx: number[] = [];
   const measureIdx: number[] = [];
+  const yoloIdx: number[] = [];
 
   for (let i = 0; i < nodes.length; i++) {
     const def = NODE_DEF_MAP.get(nodes[i].type);
@@ -30,6 +31,7 @@ export function dispatchWorkflowConfig(
     if (def?.activationMode === "sensor")    { sensorIdx.push(i);   continue; }
     if (def?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
     if (def?.activationMode === "measure")   { measureIdx.push(i);  continue; }
+    if (def?.activationMode === "yolo")      { yoloIdx.push(i);     continue; }
   }
 
   // Speech config (mobile-stt, vad)
@@ -237,5 +239,29 @@ export function dispatchWorkflowConfig(
       }));
     }
     console.log(`[relay] Replayed measure config (${measureIdx.length} nodes) session=${sid}`);
+  }
+
+  // YOLO CoreML config (on-device detection/segmentation/pose)
+  if (yoloIdx.length > 0) {
+    for (const i of yoloIdx) {
+      const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
+      const yoloTask = nodes[i].type === "yolo-segment" ? "segment"
+        : nodes[i].type === "yolo-pose" ? "pose"
+        : "detect";
+      ws.send(JSON.stringify({
+        type: "yolo_stage_config",
+        enabled: true,
+        task: yoloTask,
+        modelId: (cfg.modelId as string) ?? "yolo11n",
+        modelUrl: cfg.modelUrl as string | undefined,
+        confidence: (cfg.confidence as number) ?? 0.25,
+        iouThreshold: (cfg.iouThreshold as number) ?? 0.45,
+        targetFPS: (cfg.targetFPS as number) ?? 10,
+        maxDetections: (cfg.maxDetections as number) ?? 100,
+        inputSize: (cfg.inputSize as number) ?? 640,
+        smoothingAlpha: (cfg.smoothingAlpha as number) ?? 0.3,
+      }));
+    }
+    console.log(`[relay] Replayed YOLO config (${yoloIdx.length} nodes) session=${sid}`);
   }
 }

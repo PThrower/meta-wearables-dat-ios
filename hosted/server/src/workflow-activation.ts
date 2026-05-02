@@ -343,6 +343,7 @@ export async function handleWorkflowActivation(
   const speechIdx: number[] = [];
   const trackingIdx: number[] = [];
   const measureIdx: number[] = [];
+  const yoloIdx: number[] = [];
   const jepaIdx: number[] = [];
   const palantirIdx: number[] = [];
   const aiIdx: number[] = [];
@@ -356,6 +357,7 @@ export async function handleWorkflowActivation(
     if (pDef?.activationMode === "speech")    { speechIdx.push(i);   continue; }
     if (pDef?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
     if (pDef?.activationMode === "measure")   { measureIdx.push(i);  continue; }
+    if (pDef?.activationMode === "yolo")      { yoloIdx.push(i);     continue; }
     if (pDef?.activationMode === "jepa")      { jepaIdx.push(i);     continue; }
     if (pDef?.activationMode === "palantir")  { palantirIdx.push(i); continue; }
     aiIdx.push(i);
@@ -713,6 +715,36 @@ export async function handleWorkflowActivation(
         console.error(`[relay] Palantir activation failed: ${appsToActivate[palantirIdx[r]].id}`, (palantirResults[r] as PromiseRejectedResult).reason);
       }
     }
+  }
+
+  // 10. Fire-and-forget: send YOLO CoreML config to iOS
+  if (yoloIdx.length > 0) {
+    for (const i of yoloIdx) {
+      const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
+      if (!rawNode) continue;
+      const rawConfig = (rawNode.config ?? {}) as Record<string, unknown>;
+      const yoloTask = rawNode.type === "yolo-segment" ? "segment"
+        : rawNode.type === "yolo-pose" ? "pose"
+        : "detect";
+      const yoloConfig = {
+        type: "yolo_stage_config" as const,
+        enabled: true,
+        task: yoloTask,
+        modelId: (rawConfig.modelId as string) ?? "yolo11n",
+        modelUrl: rawConfig.modelUrl as string | undefined,
+        confidence: (rawConfig.confidence as number) ?? 0.25,
+        iouThreshold: (rawConfig.iouThreshold as number) ?? 0.45,
+        targetFPS: (rawConfig.targetFPS as number) ?? 10,
+        maxDetections: (rawConfig.maxDetections as number) ?? 100,
+        inputSize: (rawConfig.inputSize as number) ?? 640,
+        smoothingAlpha: (rawConfig.smoothingAlpha as number) ?? 0.3,
+      };
+      if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
+        session.publisher.ws.send(JSON.stringify(yoloConfig));
+      }
+      activatedAppIds.push(appsToActivate[i].id);
+    }
+    console.log(`[relay] Sent YOLO config for ${yoloIdx.length} nodes session=${sid}`);
   }
 
   const cachedFrame = registry.getLastFrame(body.sessionId);
