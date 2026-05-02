@@ -1927,6 +1927,15 @@ body {
 #sidebar.collapsed .sidebar-title {
   display: none;
 }
+#sidebar.collapsed .sidebar-header {
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 8px;
+  gap: 6px;
+}
+#sidebar.collapsed .sidebar-toggle {
+  margin-left: 0;
+}
 .sidebar-toggle {
   margin-left: auto;
   background: none;
