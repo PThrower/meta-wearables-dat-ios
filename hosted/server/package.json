@@ -18,6 +18,7 @@
     "@aws-sdk/client-s3": "^3.1024.0",
     "@aws-sdk/s3-request-presigner": "^3.1024.0",
     "@ebowwa/object-store": "^0.2.0",
+    "@ebowwa/palantir": "^0.1.1",
     "@ebowwa/relay-protocol": "file:../packages/relay-protocol",
     "@google/genai": "^1.0.0",
     "drizzle-orm": "^0.45.2",

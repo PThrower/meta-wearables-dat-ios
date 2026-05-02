@@ -177,6 +177,14 @@ const PALETTE_CATEGORIES: PaletteCategory[] = [
       { label: "Location", match: d => d.type.startsWith("sensor-location") },
     ] },
   { label: "Triggers",     accent: "#eab308", match: d => d.role === "trigger" || d.type === "gesture-source" },
+  { label: "Palantir",     accent: "#6366f1", match: d => d.activationMode === "palantir",
+    subcategories: [
+      { label: "Ontology", match: d => d.type === "palantir-ontology" },
+      { label: "AIP Agent", match: d => d.type === "palantir-aip" },
+      { label: "Dataset", match: d => d.type === "palantir-dataset" },
+      { label: "LLM Proxy", match: d => d.type === "palantir-llm" },
+      { label: "Action", match: d => d.type === "palantir-action" },
+    ] },
   { label: "Outputs",      accent: "#f97316", match: d => d.role === "sink" || d.role === "transform",
     subcategories: [
       { label: "Visual", match: d => d.type === "overlays" },

@@ -55,6 +55,13 @@ export const NODE_DESCRIPTIONS: Record<string, string> = {
   "timer-trigger": "Periodic activation at a fixed interval",
   "conditional": "Conditional activation based on field comparison",
 
+  // Palantir Foundry
+  "palantir-ontology": "Query Palantir Foundry Ontology — search, get, list, or aggregate objects",
+  "palantir-aip": "Interact with Palantir AIP Agents for AI-augmented workflows",
+  "palantir-dataset": "Upload detection data as files to Palantir Foundry datasets",
+  "palantir-llm": "LLM proxy through Palantir Foundry — OpenAI, Anthropic, xAI, Google",
+  "palantir-action": "Execute Palantir Ontology actions triggered by detections",
+
   // Outputs
   "local-tts": "On-device text-to-speech synthesis",
   "tones": "Play alert tones and notification sounds",

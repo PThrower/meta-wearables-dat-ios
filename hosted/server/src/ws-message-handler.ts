@@ -2,6 +2,7 @@ import type { SessionRegistry } from "./session-registry.js";
 import type { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import type { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import type { ReIDOrchestrator } from "./reid-orchestrator.js";
+import type { PalantirOrchestrator } from "./palantir-orchestrator.js";
 import type { AppRegistry } from "./app-registry.js";
 import type { AudioTapBus } from "./audio-tap.js";
 import type { ControlEventBus } from "./control-event-bus.js";
@@ -32,6 +33,7 @@ export interface WsMessageDeps {
   orchestrator: GuidanceOrchestrator;
   jepaOrchestrator: JEPAOrchestrator;
   reidOrchestrator: ReIDOrchestrator;
+  palantirOrchestrator: PalantirOrchestrator;
   appRegistry: AppRegistry;
   detectionThrottle: DetectionThrottle;
   audioTapBus: AudioTapBus;
@@ -97,7 +99,7 @@ export async function handleWsMessage(
 ): Promise<void> {
   const { role, sessionId } = ws.data;
   const {
-    registry, orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry,
+    registry, orchestrator, jepaOrchestrator, reidOrchestrator, palantirOrchestrator, appRegistry,
     detectionThrottle, audioTapBus, controlEventBus,
     getH264Decoder, stopH264Decoder, sendCachedFrameToAI,
     broadcastToViewers: broadcast, buildSessionInfo: buildInfo,
@@ -388,6 +390,10 @@ export async function handleWsMessage(
               if (throttled) {
                 orchestrator.sendTrigger(sessionId, `[Vision: ${throttled}]`);
               }
+              // Fan out to Palantir nodes (non-blocking)
+              if (palantirOrchestrator.isActive(sessionId)) {
+                palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+              }
             }
           }
           broadcast(session, cmd);
@@ -420,6 +426,10 @@ export async function handleWsMessage(
               if (throttled) {
                 orchestrator.sendTrigger(sessionId, `[Sensor: ${throttled}]`);
               }
+              // Fan out to Palantir nodes (non-blocking)
+              if (palantirOrchestrator.isActive(sessionId)) {
+                palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+              }
             }
           }
           broadcast(session, cmd);
@@ -429,6 +439,10 @@ export async function handleWsMessage(
             if (text && cmd.isFinal) {
               const summary = `Transcription: "${text}"`;
               orchestrator.sendTrigger(sessionId, `[STT: ${summary}]`);
+              // Fan out to Palantir nodes (non-blocking)
+              if (palantirOrchestrator.isActive(sessionId)) {
+                palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+              }
             }
             if (cmd.error) {
               console.warn(`[relay] STT error from publisher: ${cmd.error} session=${sessionId}`);
@@ -469,6 +483,10 @@ export async function handleWsMessage(
             if (throttled) {
               orchestrator.sendTrigger(sessionId, `[Tracking: ${throttled}]`);
             }
+            // Fan out to Palantir nodes (non-blocking)
+            if (palantirOrchestrator.isActive(sessionId)) {
+              palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+            }
           }
           broadcast(session, cmd);
         } else if (cmd.type === "reid_crops" && Array.isArray(cmd.crops)) {
@@ -494,6 +512,10 @@ export async function handleWsMessage(
             const throttled = detectionThrottle.check(sessionId, "measure", summary);
             if (throttled) {
               orchestrator.sendTrigger(sessionId, `[Measure: ${throttled}]`);
+            }
+            // Fan out to Palantir nodes (non-blocking)
+            if (palantirOrchestrator.isActive(sessionId)) {
+              palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
             }
           }
           broadcast(session, cmd);

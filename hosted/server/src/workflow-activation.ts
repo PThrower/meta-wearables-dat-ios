@@ -14,6 +14,7 @@ import { buildMobileWorkflowConfig, pushPassiveTTSChains } from "./workflow-util
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { ReIDOrchestrator } from "./reid-orchestrator.js";
+import { PalantirOrchestrator } from "./palantir-orchestrator.js";
 import { SessionRegistry } from "./session-registry.js";
 import * as q from "./db/queries.js";
 import { dbWriter } from "./db/db-writer.js";
@@ -46,6 +47,7 @@ export interface ActivationDeps {
   orchestrator: GuidanceOrchestrator;
   jepaOrchestrator: JEPAOrchestrator;
   reidOrchestrator: ReIDOrchestrator;
+  palantirOrchestrator: PalantirOrchestrator;
   appRegistry: AppRegistry;
   registry: SessionRegistry;
   pendingWakeActivations: Map<string, { workflowId: string; requestedAt: number }>;
@@ -58,7 +60,7 @@ export async function handleWorkflowActivation(
   wfId: string,
   body: { sessionId?: string; deviceId?: string; override?: boolean; reason?: string; wakeActivation?: boolean },
 ): Promise<Response> {
-  const { orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI } = deps;
+  const { orchestrator, jepaOrchestrator, reidOrchestrator, palantirOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI } = deps;
 
   const wf = q.getWorkflow(wfId);
   if (!wf) return Response.json({ error: "Workflow not found" }, { status: 404 });
@@ -342,6 +344,7 @@ export async function handleWorkflowActivation(
   const trackingIdx: number[] = [];
   const measureIdx: number[] = [];
   const jepaIdx: number[] = [];
+  const palantirIdx: number[] = [];
   const aiIdx: number[] = [];
 
   for (let i = 0; i < appsToActivate.length; i++) {
@@ -354,6 +357,7 @@ export async function handleWorkflowActivation(
     if (pDef?.activationMode === "tracking")  { trackingIdx.push(i); continue; }
     if (pDef?.activationMode === "measure")   { measureIdx.push(i);  continue; }
     if (pDef?.activationMode === "jepa")      { jepaIdx.push(i);     continue; }
+    if (pDef?.activationMode === "palantir")  { palantirIdx.push(i); continue; }
     aiIdx.push(i);
   }
 
@@ -686,6 +690,29 @@ export async function handleWorkflowActivation(
       activatedAppIds.push(appsToActivate[i].id);
     }
     console.log(`[relay] Sent measure config for ${measureIdx.length} nodes session=${sid}`);
+  }
+
+  // 9. Activate all Palantir nodes in parallel
+  if (palantirIdx.length > 0) {
+    console.log(`[relay] Activating ${palantirIdx.length} Palantir node(s) in parallel session=${sid}`);
+    const palantirResults = await Promise.allSettled(
+      palantirIdx.map(i => {
+        const app = appsToActivate[i];
+        const rawNode = rawNodeByAppId.get(app.id);
+        const rawConfig = (rawNode?.config ?? {}) as Record<string, unknown>;
+        activatedAppIds.push(app.id);
+        return palantirOrchestrator.activate(sid, app.id, {
+          nodeType: rawNode?.type ?? "palantir-ontology",
+          stackUrl: rawConfig.stackUrl as string ?? "",
+          ...rawConfig,
+        });
+      })
+    );
+    for (let r = 0; r < palantirResults.length; r++) {
+      if (palantirResults[r].status === "rejected") {
+        console.error(`[relay] Palantir activation failed: ${appsToActivate[palantirIdx[r]].id}`, (palantirResults[r] as PromiseRejectedResult).reason);
+      }
+    }
   }
 
   const cachedFrame = registry.getLastFrame(body.sessionId);

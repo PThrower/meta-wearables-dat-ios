@@ -41,7 +41,8 @@ export type GuidanceEventType =
   | "guidance.jepa.embedding"
   | "guidance.jepa.prediction"
   | "guidance.jepa.anomaly"
-  | "guidance.sensor";
+  | "guidance.sensor"
+  | "palantir_result";
 
 export interface BoundingBox {
   y1: number;
@@ -655,7 +656,7 @@ export class GuidanceOrchestrator {
   /** Check all flow triggers for a session after an event */
   checkFlowTriggers(
     sessionId: string,
-    eventType: "flow_complete" | "output" | "timer" | "jepa",
+    eventType: "flow_complete" | "output" | "timer" | "jepa" | "palantir",
     payload: { flowId?: string; event?: GuidanceEvent },
   ): void {
     const triggers = this.flowTriggers.get(sessionId);

@@ -55,6 +55,7 @@ import type { FlowTrigger, WorkflowSettings } from "./app-types.js";
 import { GuidanceOrchestrator } from "./guidance-orchestrator.js";
 import { JEPAOrchestrator } from "./jepa-orchestrator.js";
 import { ReIDOrchestrator } from "./reid-orchestrator.js";
+import { PalantirOrchestrator } from "./palantir-orchestrator.js";
 import { NODE_DEFINITIONS, validateStructure } from "./node-definitions.js";
 import { H264ToJpegDecoder } from "./h264-decoder.js";
 // Auth disabled — all endpoints are open access
@@ -203,6 +204,7 @@ const detectionThrottle = new DetectionThrottle(2000);
 registry.setOnSessionDestroy((id: string) => {
   orchestrator.cleanup(id);
   jepaOrchestrator.deactivate(id);
+  palantirOrchestrator.deactivateAll(id);
   detectionThrottle.clear(id);
 });
 
@@ -288,6 +290,27 @@ const jepaOrchestrator = new JEPAOrchestrator();
 // --- ReID Orchestrator setup ---
 
 const reidOrchestrator = new ReIDOrchestrator();
+
+// --- Palantir Orchestrator setup ---
+
+const palantirOrchestrator = new PalantirOrchestrator();
+
+// Palantir events fan out to viewer WebSockets
+palantirOrchestrator.setEventFanoutFn((sessionId: string, event) => {
+  const subs = orchestrator.getSubscriberSet(sessionId);
+  if (!subs) return;
+  const msg = { type: "guidance_event", event };
+  for (const cb of subs) {
+    try { cb(msg); } catch { /* subscriber error, skip */ }
+  }
+});
+
+// Palantir events persist to R2 guidance.jsonl
+palantirOrchestrator.setFlowTriggerFn((sessionId: string, event) => {
+  const session = registry.get(sessionId);
+  session?.recorder?.appendGuidanceEvent(event);
+  orchestrator.checkFlowTriggers(sessionId, "palantir", { event });
+});
 
 // JEPA events fan out to viewer WebSockets (same subscriber list as AI guidance)
 jepaOrchestrator.setEventFanoutFn((sessionId: string, event) => {
@@ -997,7 +1020,7 @@ const server = Bun.serve<WsData>({
         const wfId = wfActivateMatch[1];
         const body = await req.json() as { sessionId?: string; deviceId?: string; override?: boolean; reason?: string; wakeActivation?: boolean };
         return await handleWorkflowActivation(
-          { orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI },
+          { orchestrator, jepaOrchestrator, reidOrchestrator, palantirOrchestrator, appRegistry, registry, pendingWakeActivations, getH264Decoder, sendCachedFrameToAI },
           wfId,
           body,
         );
@@ -1303,7 +1326,7 @@ const server = Bun.serve<WsData>({
     },
     async message(ws, message) {
       const wsMessageDeps: WsMessageDeps = {
-        registry, orchestrator, jepaOrchestrator, reidOrchestrator, appRegistry,
+        registry, orchestrator, jepaOrchestrator, reidOrchestrator, palantirOrchestrator, appRegistry,
         detectionThrottle, audioTapBus, controlEventBus,
         getH264Decoder, stopH264Decoder, sendCachedFrameToAI,
         broadcastToViewers, buildSessionInfo,

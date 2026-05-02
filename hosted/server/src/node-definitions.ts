@@ -25,7 +25,7 @@ export type ConfigFieldSchema =
 
 export type StructuralRole = "source" | "reference" | "processor" | "trigger" | "transform" | "sink" | "gating";
 
-export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "passthrough" | "gating";
+export type ActivationMode = "ai" | "jepa" | "stt" | "vision" | "enhance" | "sensor" | "speech" | "tracking" | "measure" | "palantir" | "passthrough" | "gating";
 
 export type RuntimeTarget = "mobile" | "server";
 
@@ -95,7 +95,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "tracking-ocsort", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -1194,6 +1194,133 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: {},
     defaultLabel: "Debug Log",
+    runtime: ["server"],
+  },
+
+  // --- Palantir Foundry nodes (server-side processor) ---
+
+  {
+    type: "palantir-ontology",
+    label: "Palantir Ontology",
+    subtitle: "${operation} ${ontologyApiName}",
+    color: { fill: "#0f172a", header: "#6366f1", stroke: "#6366f1" },
+    allowedTargets: ["palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "debug-sink", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "palantir",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "stackUrl", label: "Stack URL", placeholder: "https://your-stack.palantirfoundry.com" },
+      { kind: "text", key: "ontologyApiName", label: "Ontology API Name", placeholder: "Employee" },
+      { kind: "text", key: "objectTypeId", label: "Object Type ID", placeholder: "employee-id-123" },
+      { kind: "select", key: "operation", label: "Operation", options: [
+        { value: "search", label: "Search objects" },
+        { value: "get", label: "Get by ID" },
+        { value: "list", label: "List objects" },
+        { value: "aggregate", label: "Aggregate" },
+      ]},
+      { kind: "textarea", key: "whereTemplate", label: "Where Template", rows: 3, placeholder: '{"type":"eq","field":"name","value":"${triggerText}"}' },
+      { kind: "text", key: "selectFields", label: "Select Fields (comma-separated)", placeholder: "name,email,department" },
+    ],
+    defaultConfig: { stackUrl: "", ontologyApiName: "", objectTypeId: "", operation: "search", whereTemplate: "", selectFields: "" },
+    defaultLabel: "Palantir Ontology",
+    runtime: ["server"],
+  },
+  {
+    type: "palantir-aip",
+    label: "Palantir AIP Agent",
+    subtitle: "${agentRid} | ${sessionMode}",
+    color: { fill: "#0f172a", header: "#6366f1", stroke: "#6366f1" },
+    allowedTargets: ["palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "debug-sink", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "palantir",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "stackUrl", label: "Stack URL", placeholder: "https://your-stack.palantirfoundry.com" },
+      { kind: "text", key: "agentRid", label: "Agent RID", placeholder: "ri.aip-agent..." },
+      { kind: "select", key: "sessionMode", label: "Session Mode", options: [
+        { value: "blocking", label: "Blocking (wait for response)" },
+        { value: "streaming", label: "Streaming (incremental)" },
+      ]},
+    ],
+    defaultConfig: { stackUrl: "", agentRid: "", sessionMode: "blocking" },
+    defaultLabel: "Palantir AIP Agent",
+    runtime: ["server"],
+  },
+  {
+    type: "palantir-dataset",
+    label: "Palantir Dataset",
+    subtitle: "${datasetRid} | ${format}",
+    color: { fill: "#0f172a", header: "#6366f1", stroke: "#6366f1" },
+    allowedTargets: ["palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "debug-sink", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "palantir",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "stackUrl", label: "Stack URL", placeholder: "https://your-stack.palantirfoundry.com" },
+      { kind: "text", key: "datasetRid", label: "Dataset RID", placeholder: "ri.dataset.main..." },
+      { kind: "text", key: "branchId", label: "Branch ID", placeholder: "master" },
+      { kind: "select", key: "format", label: "File Format", options: [
+        { value: "json", label: "JSON" },
+        { value: "csv", label: "CSV" },
+      ]},
+      { kind: "text", key: "filePathTemplate", label: "File Path Template", placeholder: "detections/${timestamp}.json" },
+    ],
+    defaultConfig: { stackUrl: "", datasetRid: "", branchId: "master", format: "json", filePathTemplate: "" },
+    defaultLabel: "Palantir Dataset",
+    runtime: ["server"],
+  },
+  {
+    type: "palantir-llm",
+    label: "Palantir LLM",
+    subtitle: "${provider} | ${modelId}",
+    color: { fill: "#0f172a", header: "#6366f1", stroke: "#6366f1" },
+    allowedTargets: ["palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "debug-sink", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "palantir",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "stackUrl", label: "Stack URL", placeholder: "https://your-stack.palantirfoundry.com" },
+      { kind: "text", key: "modelId", label: "Model ID", placeholder: "openai-gpt-4o" },
+      { kind: "select", key: "provider", label: "Provider", options: [
+        { value: "openai", label: "OpenAI" },
+        { value: "anthropic", label: "Anthropic" },
+        { value: "xai", label: "xAI" },
+        { value: "google", label: "Google" },
+      ]},
+      { kind: "range", key: "temperature", label: "Temperature", min: 0, max: 2, step: 0.1 },
+      { kind: "number", key: "maxTokens", label: "Max Tokens", min: 1, max: 32000, step: 256 },
+      { kind: "textarea", key: "systemPrompt", label: "System Prompt", rows: 3, placeholder: "You are a helpful assistant analyzing detection data." },
+    ],
+    defaultConfig: { stackUrl: "", modelId: "", provider: "openai", temperature: 0.7, maxTokens: 1024, systemPrompt: "" },
+    defaultLabel: "Palantir LLM",
+    runtime: ["server"],
+  },
+  {
+    type: "palantir-action",
+    label: "Palantir Action",
+    subtitle: "${actionTypeId} | ${executeMode}",
+    color: { fill: "#0f172a", header: "#6366f1", stroke: "#6366f1" },
+    allowedTargets: ["palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "debug-sink", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: "palantir",
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "text", key: "stackUrl", label: "Stack URL", placeholder: "https://your-stack.palantirfoundry.com" },
+      { kind: "text", key: "ontologyApiName", label: "Ontology API Name", placeholder: "Employee" },
+      { kind: "text", key: "actionTypeId", label: "Action Type ID", placeholder: "update-status" },
+      { kind: "textarea", key: "parameterTemplates", label: "Parameter Templates (JSON)", rows: 4, placeholder: '{"status": "${triggerText}", "updatedBy": "auto-detect"}' },
+      { kind: "select", key: "executeMode", label: "Execute Mode", options: [
+        { value: "validate", label: "Validate only (dry run)" },
+        { value: "execute", label: "Execute" },
+      ]},
+    ],
+    defaultConfig: { stackUrl: "", ontologyApiName: "", actionTypeId: "", parameterTemplates: "{}", executeMode: "execute" },
+    defaultLabel: "Palantir Action",
     runtime: ["server"],
   },
 ];
