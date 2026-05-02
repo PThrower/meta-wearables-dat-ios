@@ -178,6 +178,11 @@ export class PalantirOrchestrator {
 
   /** Route trigger text to all active Palantir nodes for a session */
   async fanoutTrigger(sessionId: string, triggerText: string): Promise<void> {
+    return this.fanoutStructuredTrigger(sessionId, triggerText, {});
+  }
+
+  /** Route trigger with structured data to all active Palantir nodes */
+  async fanoutStructuredTrigger(sessionId: string, triggerText: string, structuredData: Record<string, unknown>): Promise<void> {
     const nodes = this.sessionNodes.get(sessionId);
     if (!nodes || nodes.size === 0) return;
 
@@ -187,7 +192,7 @@ export class PalantirOrchestrator {
     };
 
     const results = await Promise.allSettled(
-      Array.from(nodes.values()).map(state => this.handleNode(state, sessionId, triggerText, vars))
+      Array.from(nodes.values()).map(state => this.handleNode(state, sessionId, triggerText, vars, structuredData))
     );
 
     for (let i = 0; i < results.length; i++) {
@@ -210,7 +215,7 @@ export class PalantirOrchestrator {
       timestamp: new Date().toISOString(),
     };
 
-    await this.handleNode(state, sessionId, triggerText, vars);
+    await this.handleNode(state, sessionId, triggerText, vars, {});
   }
 
   // --- Private handlers ---
@@ -220,13 +225,14 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     switch (state.nodeType) {
-      case "palantir-ontology": return this.handleOntology(state, sessionId, triggerText, vars);
-      case "palantir-aip":      return this.handleAip(state, sessionId, triggerText, vars);
-      case "palantir-dataset":  return this.handleDataset(state, sessionId, triggerText, vars);
-      case "palantir-llm":      return this.handleLlm(state, sessionId, triggerText, vars);
-      case "palantir-action":   return this.handleAction(state, sessionId, triggerText, vars);
+      case "palantir-ontology": return this.handleOntology(state, sessionId, triggerText, vars, structuredData);
+      case "palantir-aip":      return this.handleAip(state, sessionId, triggerText, vars, structuredData);
+      case "palantir-dataset":  return this.handleDataset(state, sessionId, triggerText, vars, structuredData);
+      case "palantir-llm":      return this.handleLlm(state, sessionId, triggerText, vars, structuredData);
+      case "palantir-action":   return this.handleAction(state, sessionId, triggerText, vars, structuredData);
       default:
         console.warn(`[palantir] Unknown node type: ${state.nodeType}`);
     }
@@ -257,11 +263,14 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     const { ontologies } = state;
     const c = state.config;
     const ontologyApiName = c.ontologyApiName as string;
     const objectTypeId = c.objectTypeId as string;
+    const transitionObjectTypeId = (c.transitionObjectTypeId as string) || objectTypeId;
+    const zoneObjectTypeId = (c.zoneObjectTypeId as string) || objectTypeId;
     const operation = c.operation as string;
     const selectFields = (c.selectFields as string)?.split(",").map(s => s.trim()).filter(Boolean);
 
@@ -269,6 +278,105 @@ export class PalantirOrchestrator {
       let result: unknown;
 
       switch (operation) {
+        case "tracking_sync": {
+          // Sync tracking data to ontology objects
+          // objectTypeId       -> TrackedPerson (create/update)
+          // transitionObjectTypeId -> ZoneTransition (create)
+          // zoneObjectTypeId       -> MonitoringZone (update)
+          const tracks = structuredData.tracks as Array<Record<string, unknown>> ?? [];
+          const registry = structuredData.registry as Record<string, unknown> ?? {};
+          const zones = structuredData.zones as Array<Record<string, unknown>> ?? [];
+          const transitions = (registry as any)?.recentTransitions as Array<Record<string, unknown>> ?? [];
+          const zoneCounts = (registry as any)?.zoneCounts as Record<string, number> ?? {};
+          const zoneDwellTimes = (registry as any)?.zoneDwellTimes as Record<string, Record<string, number>> ?? {};
+
+          const results: unknown[] = [];
+
+          // --- TrackedPerson: create/update ---
+          for (const track of tracks) {
+            if (track.state !== "confirmed") continue;
+            const personId = `track-${track.trackId}`;
+            try {
+              const existing = await ontologies.search(ontologyApiName, objectTypeId, {
+                where: { personId: { exactMatch: personId } },
+                pageSize: 1,
+              });
+              const items = (existing as any)?.data ?? [];
+              if (items.length > 0) {
+                await ontologies.updateObject(ontologyApiName, objectTypeId, personId, {
+                  properties: {
+                    confidence: track.confidence,
+                    speed: track.speed ?? 0,
+                    heading: track.heading ?? 0,
+                    zoneId: track.zoneId ?? "",
+                    dwellTimeSeconds: track.dwellTimeSeconds ?? 0,
+                    lastSeenTimestamp: vars.timestamp,
+                  },
+                });
+              } else {
+                await ontologies.createObject(ontologyApiName, objectTypeId, {
+                  properties: {
+                    personId,
+                    classLabel: track.classLabel ?? "person",
+                    confidence: track.confidence,
+                    state: track.state,
+                    speed: track.speed ?? 0,
+                    heading: track.heading ?? 0,
+                    zoneId: track.zoneId ?? "",
+                    dwellTimeSeconds: track.dwellTimeSeconds ?? 0,
+                    firstSeenTimestamp: vars.timestamp,
+                    lastSeenTimestamp: vars.timestamp,
+                  },
+                });
+              }
+              results.push({ action: "upsert_person", personId });
+            } catch (e) {
+              console.warn(`[palantir] tracking_sync person upsert error for ${personId}: ${(e as Error).message}`);
+            }
+          }
+
+          // --- ZoneTransition: create ---
+          for (const transition of transitions.slice(-5)) {
+            try {
+              const transitionId = `${transition.trackId}-${transition.fromZone}-${transition.toZone}-${Date.now()}`;
+              await ontologies.createObject(ontologyApiName, transitionObjectTypeId, {
+                properties: {
+                  transitionId,
+                  personId: `track-${transition.trackId}`,
+                  fromZone: transition.fromZone ?? "",
+                  toZone: transition.toZone ?? "",
+                  predicted: transition.predicted ?? false,
+                  timestamp: vars.timestamp,
+                  speedAtTransition: transition.speed ?? 0,
+                },
+              });
+              results.push({ action: "transition", transitionId });
+            } catch { /* skip */ }
+          }
+
+          // --- MonitoringZone: update occupancy ---
+          for (const [zoneId, occupancyCount] of Object.entries(zoneCounts)) {
+            try {
+              await ontologies.updateObject(ontologyApiName, zoneObjectTypeId, zoneId, {
+                properties: {
+                  occupancyCount,
+                  totalEntries: zoneDwellTimes[zoneId] ? Object.keys(zoneDwellTimes[zoneId]).length : 0,
+                  lastUpdated: vars.timestamp,
+                },
+              });
+              results.push({ action: "update_zone", zoneId });
+            } catch { /* skip */ }
+          }
+
+          this.emitEvent(sessionId, "palantir-ontology", {
+            operation: "tracking_sync",
+            syncedTracks: results.length,
+            zoneCounts,
+            zoneDwellTimes,
+          });
+          console.log(`[palantir] tracking_sync: ${results.length} ops session=${sessionId}`);
+          break;
+        }
         case "search": {
           const whereTemplate = c.whereTemplate as string;
           let where: Record<string, unknown> | undefined;
@@ -335,6 +443,7 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     const { aip } = state;
     const c = state.config;
@@ -356,11 +465,49 @@ export class PalantirOrchestrator {
 
       const sessionRid = state.aipSessionRid!;
 
+      // Build rich prompt from structured tracking data when available
+      let prompt = triggerText;
+      const tracks = structuredData.tracks as Array<Record<string, unknown>> | undefined;
+      if (tracks && Array.isArray(tracks)) {
+        const registry = structuredData.registry as Record<string, unknown> ?? {};
+        const zoneCounts = (registry as any)?.zoneCounts as Record<string, number> ?? {};
+        const zoneDwellTimes = (registry as any)?.zoneDwellTimes as Record<string, Record<string, number>> ?? {};
+        const zoneTraffic = (registry as any)?.zoneTraffic as Record<string, any> ?? {};
+        const zoneSpeeds = (registry as any)?.zoneSpeeds as Record<string, any> ?? {};
+        const predictedBreaches = structuredData.predictedZoneBreaches as Array<Record<string, unknown>> ?? [];
+        const confirmedCount = tracks.filter(t => t.state === "confirmed").length;
+
+        const lines = [
+          `[Visual Intelligence Report - ${vars.timestamp}]`,
+          `Active tracks: ${tracks.length} (${confirmedCount} confirmed)`,
+        ];
+        if (Object.keys(zoneCounts).length > 0) {
+          lines.push(`Zone occupancy: ${JSON.stringify(zoneCounts)}`);
+        }
+        if (Object.keys(zoneDwellTimes).length > 0) {
+          lines.push(`Dwell times: ${JSON.stringify(zoneDwellTimes)}`);
+        }
+        if (Object.keys(zoneTraffic).length > 0) {
+          lines.push(`Zone traffic: ${JSON.stringify(zoneTraffic)}`);
+        }
+        if (Object.keys(zoneSpeeds).length > 0) {
+          lines.push(`Speed stats: ${JSON.stringify(zoneSpeeds)}`);
+        }
+        if (predictedBreaches.length > 0) {
+          lines.push(`PREDICTED BREACHES: ${JSON.stringify(predictedBreaches.map(b => ({
+            trackId: b.trackId,
+            fromZone: b.fromZone,
+            toZone: b.toZone,
+          })))}`);
+        }
+        prompt = lines.join("\n");
+      }
+
       if (sessionMode === "streaming") {
         // Collect streaming chunks into a single result
         const chunks: string[] = [];
         for await (const chunk of aip.streamingContinue(agentRid, sessionRid, {
-          userMessage: triggerText,
+          userMessage: prompt,
         })) {
           if (chunk.text) chunks.push(chunk.text);
         }
@@ -369,7 +516,7 @@ export class PalantirOrchestrator {
       } else {
         // Blocking
         const response = await aip.blockingContinue(agentRid, sessionRid, {
-          userMessage: triggerText,
+          userMessage: prompt,
         });
         this.emitEvent(sessionId, "palantir-aip", response);
       }
@@ -390,6 +537,7 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     const { datasets } = state;
     const c = state.config;
@@ -415,13 +563,12 @@ export class PalantirOrchestrator {
         ? interpolateTemplate(filePathTemplate, vars)
         : `detections/${vars.timestamp}.${format}`;
 
-      // Upload detection data as file content
-      const content = JSON.stringify({
-        trigger: triggerText,
-        timestamp: vars.timestamp,
-        sessionId,
-        nodeType: state.nodeType,
-      });
+      // Upload detection data as file content — prefer structured data when available
+      const content = JSON.stringify(
+        Object.keys(structuredData).length > 0
+          ? { structured: structuredData, timestamp: vars.timestamp, sessionId }
+          : { trigger: triggerText, timestamp: vars.timestamp, sessionId, nodeType: state.nodeType }
+      );
 
       await datasets.uploadFile(datasetRid, tx.rid, filePath, content);
       await datasets.commitTransaction(datasetRid, tx.rid);
@@ -448,6 +595,7 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     const { aip } = state;
     const c = state.config;
@@ -504,6 +652,7 @@ export class PalantirOrchestrator {
     sessionId: string,
     triggerText: string,
     vars: Record<string, string>,
+    structuredData: Record<string, unknown> = {},
   ): Promise<void> {
     const { ontologies } = state;
     const c = state.config;

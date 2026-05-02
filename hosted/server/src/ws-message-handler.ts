@@ -497,9 +497,9 @@ export async function handleWsMessage(
             if (throttled) {
               orchestrator.sendTrigger(sessionId, `[Tracking: ${throttled}]`);
             }
-            // Fan out to Palantir nodes (non-blocking)
+            // Fan out to Palantir nodes (non-blocking, pass structured tracking data)
             if (palantirOrchestrator.isActive(sessionId)) {
-              palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+              palantirOrchestrator.fanoutStructuredTrigger(sessionId, summary, cmd as Record<string, unknown>).catch(() => {});
             }
           }
           broadcast(session, cmd);

@@ -18,7 +18,8 @@ export interface GuidanceEvent {
     | "guidance.acknowledgment"
     | "guidance.transcript"
     | "guidance.transcription"
-    | "guidance.bbox";
+    | "guidance.bbox"
+    | "palantir_result";
   content: string;
   confidence: number;
   source: string;
@@ -185,6 +186,7 @@ export const EVENT_COLORS: Record<GuidanceEvent["type"], string> = {
   "guidance.transcript": "rgba(255,255,255,0.15)",
   "guidance.transcription": "#4ade80",
   "guidance.bbox": "#a78bfa",
+  "palantir_result": "#6366f1",
 };
 
 export const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
@@ -196,6 +198,7 @@ export const EVENT_LABELS: Record<GuidanceEvent["type"], string> = {
   "guidance.transcript": "",
   "guidance.transcription": "STT",
   "guidance.bbox": "BBOX",
+  "palantir_result": "PALANTIR",
 };
 
 export class GuidancePanel {
