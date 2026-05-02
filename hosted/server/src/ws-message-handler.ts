@@ -49,6 +49,20 @@ export interface WsMessageDeps {
   serverStartTime: number;
 }
 
+/** Send enabled:false for ALL pipeline stage types to the publisher. */
+function sendAllStageDisables(session: { publisher?: { ws?: WsLike } | null }): void {
+  const ws = session.publisher?.ws;
+  if (!ws || ws.readyState !== 1 /* OPEN */) return;
+  const disable = (type: string) => ws.send(JSON.stringify({ type, enabled: false }));
+  disable("vision_stage_config");
+  disable("enhance_stage_config");
+  disable("sensor_stage_config");
+  disable("speech_stage_config");
+  disable("tracking_stage_config");
+  disable("measure_stage_config");
+  disable("yolo_stage_config");
+}
+
 /** Build session_info payload for viewer info strip */
 export function buildSessionInfo(session: {
   metadata: any; viewers: Map<any, any>; recorder: any;
@@ -536,12 +550,7 @@ export async function handleWsMessage(
               session.appPipeline = null;
               dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
               dbWriter.flushNow();
-              if (session.publisher?.ws?.readyState === 1 /* OPEN */) {
-                session.publisher.ws.send(JSON.stringify({ type: "vision_stage_config", enabled: false }));
-                session.publisher.ws.send(JSON.stringify({ type: "enhance_stage_config", enabled: false }));
-                session.publisher.ws.send(JSON.stringify({ type: "sensor_stage_config", enabled: false }));
-                session.publisher.ws.send(JSON.stringify({ type: "speech_stage_config", enabled: false }));
-              }
+              sendAllStageDisables(session);
               broadcast(session, { type: "app_status", appId: null, status: "inactive" });
             }
           }
@@ -769,6 +778,7 @@ export async function handleWsMessage(
           }
         } else if (cmd.type === "deactivate_app") {
           const prevApp = session.activeAppId;
+          const prevWorkflowId = session.activeWorkflowId;
           session.activeAppId = null;
           session.activeWorkflowId = null;
           session.appPipeline = null;
@@ -777,7 +787,16 @@ export async function handleWsMessage(
             dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
             dbWriter.flushNow();
           }
+          sendAllStageDisables(session);
           ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
+          broadcast(session, { type: "app_status", appId: null, status: "inactive" });
+          // Also notify publisher directly so iOS app_status handler fires
+          if (session.publisher?.ws?.readyState === 1) {
+            session.publisher.ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
+          }
+          if (prevWorkflowId) {
+            orchestrator.handleWorkflowControl(sessionId, "stop_workflow", prevWorkflowId, undefined, "viewer").catch(() => {});
+          }
           orchestrator.deactivateApp(sessionId).catch(() => {});
         } else if (cmd.type === "trigger_gesture" && cmd.gesture) {
           controlEventBus.publish({
@@ -821,6 +840,7 @@ export async function handleWsMessage(
               session.appPipeline = null;
               dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
               dbWriter.flushNow();
+              sendAllStageDisables(session);
               broadcast(session, { type: "app_status", appId: null, status: "inactive" });
             }
           }

@@ -332,6 +332,23 @@ export async function handleWorkflowActivation(
   if ((nodes as any[]).length > 1) {
     orchestrator.activateWorkflow(body.sessionId, wfId, wf.name, nodeEntries);
   }
+  // --- Clean slate: disable ALL pipeline stages before dispatching new config ---
+  // This ensures leftover stages from a previous workflow (e.g. tracking when the
+  // new workflow has none) don't keep running.
+  {
+    const pubWs = session.publisher?.ws;
+    if (pubWs && pubWs.readyState === 1 /* OPEN */) {
+      const disable = (type: string) => pubWs.send(JSON.stringify({ type, enabled: false }));
+      disable("vision_stage_config");
+      disable("enhance_stage_config");
+      disable("sensor_stage_config");
+      disable("speech_stage_config");
+      disable("tracking_stage_config");
+      disable("measure_stage_config");
+      disable("yolo_stage_config");
+    }
+  }
+
   // --- Parallel activation dispatch ---
   // Categorize processable nodes by dispatch type.
   // Independent nodes activate concurrently; dependsOn handles ordering

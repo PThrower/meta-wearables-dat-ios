@@ -1177,7 +1177,8 @@ class StreamSessionViewModel: ObservableObject {
           params: dict["params"] as? [String: Double] ?? [:]
         )
       } ?? [],
-      costFunction: config["costFunction"] as? String
+      costFunction: config["costFunction"] as? String,
+      forecastSteps: config["forecastSteps"] as? Int ?? 0
     )
 
     let stage = ObjectTrackingStage(config: trackingConfig)
@@ -1290,6 +1291,10 @@ class StreamSessionViewModel: ObservableObject {
           } else if status == "inactive" || status == "error" {
             self?.activeAppId = nil
             await self?.audioPlaybackStage.stop()
+            // Safety net: stop all pipeline stages on deactivation.
+            // The server should also send individual *_stage_config enabled:false
+            // messages, but this handles edge cases (missed WS, server restart).
+            await self?.stopAllPipelineStages()
           }
         }
       }
@@ -1698,6 +1703,64 @@ class StreamSessionViewModel: ObservableObject {
 
     // Start sensor relay (FRSE frames at 1Hz)
     await sensorRelayStage.start()
+  }
+
+  /// Stop all pipeline stages but keep the relay connection alive.
+  /// Used when deactivating a workflow — the server will send new configs if reactivating.
+  private func stopAllPipelineStages() async {
+    // Vision
+    if let existing = visionStage {
+      await existing.stop()
+      pipeline.unregister(stageId: existing.stageId)
+      visionStage = nil
+      visionDetections = []
+      visionSceneLabel = nil
+    }
+    // Enhance
+    pipeline.transformStage = nil
+    enhanceStage = nil
+    // Sensor
+    if let audio = audioClassificationStage {
+      await audio.stop()
+      audioClassificationStage = nil
+    }
+    if let loc = locationStage {
+      await loc.stop()
+      locationStage = nil
+    }
+    // Speech
+    if let stt = speechRecognitionStage {
+      await stt.stop()
+      speechRecognitionStage = nil
+    }
+    if let vad = voiceActivityStage {
+      await vad.stop()
+      voiceActivityStage = nil
+    }
+    overlayTranscription = nil
+    // Tracking
+    if let track = trackingStage {
+      await track.stop()
+      pipeline.unregister(stageId: track.stageId)
+      trackingStage = nil
+    }
+    trackingTracks = []
+    // Measure
+    if let m = measureStage {
+      await m.stop()
+      pipeline.unregister(stageId: m.stageId)
+      measureStage = nil
+    }
+    toolMeasureResult = nil
+    // YOLO
+    if let yolo = yoloStage {
+      await yolo.stop()
+      pipeline.unregister(stageId: yolo.stageId)
+      yoloStage = nil
+    }
+    yoloDetections = []
+    boundingBoxes = []
+    NSLog("[StreamSession] All pipeline stages stopped (relay still active)")
   }
 
   func stopRelay() async {
