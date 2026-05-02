@@ -170,6 +170,12 @@ const PALETTE_CATEGORIES: PaletteCategory[] = [
   { label: "Gating",       accent: "#06b6d4", match: d => d.role === "gating" || d.type === "cost-iou" },
   { label: "Measurement",  accent: "#a78bfa", match: d => d.activationMode === "measure" },
   { label: "Enhance",      accent: "#84cc16", match: d => d.activationMode === "enhance" },
+  { label: "YOLO",         accent: "#65a30d", match: d => d.activationMode === "yolo",
+    subcategories: [
+      { label: "Detection",    match: d => d.type === "yolo-detect" },
+      { label: "Segmentation", match: d => d.type === "yolo-segment" },
+      { label: "Pose",         match: d => d.type === "yolo-pose" },
+    ] },
   { label: "Audio",        accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
   { label: "Sensors",      accent: "#06b6d4", match: d => d.activationMode === "sensor",
     subcategories: [
