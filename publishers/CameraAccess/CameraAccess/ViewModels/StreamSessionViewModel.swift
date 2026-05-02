@@ -184,6 +184,8 @@ class StreamSessionViewModel: ObservableObject {
   private var trackingStage: ObjectTrackingStage?
   private var trackingConfig: TrackingStageConfig?
   private var measureStage: ToolMeasurementStage?
+  private var yoloStage: YOLOStage?
+  @Published var yoloDetections: [YOLODetection] = []
 
   // Preview system
   #if DEBUG
@@ -904,6 +906,81 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] VisionStage registered: \(detectionTypes.map { $0.rawValue }) confidence=\(confidence) fps=\(targetFPS)")
   }
 
+  // MARK: - YOLO Stage
+
+  /// Configure YOLO CoreML on-device inference stage from server-sent config.
+  private func configureYOLOStage(config: [String: Any]) async {
+    // Unregister existing YOLO stage if any
+    if let existing = yoloStage {
+      await existing.stop()
+      pipeline.unregister(stageId: existing.stageId)
+      yoloStage = nil
+      yoloDetections = []
+    }
+
+    let taskStr = config["task"] as? String ?? "detect"
+    let task = YOLOTask(rawValue: taskStr) ?? .detect
+    let modelId = config["modelId"] as? String ?? "yolo11n"
+    let modelUrl = config["modelUrl"] as? String
+    let classLabels = config["classLabels"] as? [String] ?? COCOClassLabels
+    let confidence = config["confidence"] as? Double ?? 0.25
+    let iouThreshold = config["iouThreshold"] as? Double ?? 0.45
+    let targetFPS = config["targetFPS"] as? UInt ?? 10
+    let maxDetections = config["maxDetections"] as? Int ?? 100
+    let inputSize = config["inputSize"] as? Int ?? 640
+    let smoothingAlpha = config["smoothingAlpha"] as? Double ?? 0.3
+
+    let yoloConfig = YOLOStageConfig(
+      task: task,
+      modelId: modelId,
+      modelUrl: modelUrl,
+      classLabels: classLabels,
+      confidence: confidence,
+      iouThreshold: iouThreshold,
+      targetFPS: targetFPS,
+      maxDetections: maxDetections,
+      inputSize: inputSize,
+      smoothingAlpha: smoothingAlpha
+    )
+
+    let stage = YOLOStage(config: yoloConfig)
+
+    // Wire result callback
+    await stage.setOnResult { [weak self] (result: YOLOFrameResult) in
+      await MainActor.run {
+        self?.yoloDetections = result.detections
+      }
+      // Relay detection JSON to server
+      if !result.isEmpty {
+        await self?.relayStage.sendJson(result.jsonDict())
+      }
+      // Feed YOLO detections into tracking stage if active
+      if let trackingStage = await self?.trackingStage {
+        let trackDets: [TrackDetection] = result.detections.compactMap { det in
+          return TrackDetection(
+            bbox: det.bbox,
+            confidence: det.confidence,
+            classLabel: det.classLabel,
+            histogram: nil
+          )
+        }
+        if !trackDets.isEmpty {
+          await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
+        }
+      }
+    }
+
+    #if DEBUG
+    await stage.setPreviewBus(previewBus)
+    #endif
+
+    pipeline.register(stage)
+    await stage.start()
+    yoloStage = stage
+
+    NSLog("[StreamSession] YOLOStage registered: model=\(modelId) task=\(task.rawValue) confidence=\(confidence) fps=\(targetFPS)")
+  }
+
   // MARK: - Enhance Stage
 
   /// Configure the frame enhancement transform chain from server-sent config.
@@ -1428,6 +1505,26 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
 
+      // YOLO stage config from server — register on-device YOLO CoreML inference
+      if msgType == "yolo_stage_config" {
+        let enabled = msg["enabled"] as? Bool ?? true
+        if !enabled {
+          Task { @MainActor [weak self] in
+            guard let self, let existing = yoloStage else { return }
+            await existing.stop()
+            pipeline.unregister(stageId: existing.stageId)
+            yoloStage = nil
+            yoloDetections = []
+            NSLog("[StreamSession] YOLOStage disabled by server")
+          }
+        } else {
+          Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.configureYOLOStage(config: msg)
+          }
+        }
+      }
+
       // Audio gain control from viewer
       if msgType == "set_audio_gain",
          let codecType = msg["codecType"] as? Int,
@@ -1639,6 +1736,13 @@ class StreamSessionViewModel: ObservableObject {
       measureStage = nil
     }
     toolMeasureResult = nil
+    // Stop YOLO stage
+    if let yolo = yoloStage {
+      await yolo.stop()
+      pipeline.unregister(stageId: yolo.stageId)
+      yoloStage = nil
+    }
+    yoloDetections = []
     if let vadStage = voiceActivityStage {
       await vadStage.stop()
       voiceActivityStage = nil

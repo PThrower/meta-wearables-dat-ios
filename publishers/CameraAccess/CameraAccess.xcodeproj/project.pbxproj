@@ -95,6 +95,11 @@
 		TOLTYPBLD01 /* ToolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOLTYPFLE01 /* ToolTypes.swift */; };
 		HMGSOLBLD01 /* HomographySolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = HMGSOLFLE01 /* HomographySolver.swift */; };
 		TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOLMSRFLE01 /* ToolMeasurementStage.swift */; };
+		YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */; };
+		YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */; };
+		YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF7D6C464283423908 /* YOLODecoder.swift */; };
+		YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */; };
+		YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -220,6 +225,11 @@
 		TOLTYPFLE01 /* ToolTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolTypes.swift; sourceTree = "<group>"; };
 		HMGSOLFLE01 /* HomographySolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomographySolver.swift; sourceTree = "<group>"; };
 		TOLMSRFLE01 /* ToolMeasurementStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolMeasurementStage.swift; sourceTree = "<group>"; };
+		YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOTypes.swift; sourceTree = "<group>"; };
+		YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOModelManager.swift; sourceTree = "<group>"; };
+		YOLFREF7D6C464283423908 /* YOLODecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLODecoder.swift; sourceTree = "<group>"; };
+		YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOStage.swift; sourceTree = "<group>"; };
+		YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOOverlayRenderer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -326,6 +336,7 @@
 				TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */,
 				ED96E78FFA3F17CBBE7BA3E3 /* AppPickerSheet.swift */,
 				NDPRVFLE001 /* NodePreviewView.swift */,
+				YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -422,6 +433,9 @@
 				HSTEXTFLE01 /* HistogramExtractor.swift */,
 				TOLTYPFLE01 /* ToolTypes.swift */,
 				HMGSOLFLE01 /* HomographySolver.swift */,
+				YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */,
+				YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */,
+				YOLFREF7D6C464283423908 /* YOLODecoder.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -448,6 +462,7 @@
 				9BD61129446E4180AC89CD95 /* FrameTransformStage.swift */,
 				OBJTRKFLE01 /* ObjectTrackingStage.swift */,
 				TOLMSRFLE01 /* ToolMeasurementStage.swift */,
+				YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */,
 			);
 			path = Stages;
 			sourceTree = "<group>";
@@ -707,6 +722,11 @@
 				TOLTYPBLD01 /* ToolTypes.swift in Sources */,
 				HMGSOLBLD01 /* HomographySolver.swift in Sources */,
 				TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */,
+				YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */,
+				YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */,
+				YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */,
+				YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */,
+				YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

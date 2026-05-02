@@ -168,7 +168,7 @@ const PALETTE_CATEGORIES: PaletteCategory[] = [
     ] },
   { label: "Tracking",     accent: "#10b981", match: d => d.activationMode === "tracking" },
   { label: "Gating",       accent: "#06b6d4", match: d => d.role === "gating" || d.type === "cost-iou" },
-  { label: "Measurement",  accent: "#a78bfa", match: d => d.activationMode === "measure" || d.type === "tool-suggest" },
+  { label: "Measurement",  accent: "#a78bfa", match: d => d.activationMode === "measure" },
   { label: "Enhance",      accent: "#84cc16", match: d => d.activationMode === "enhance" },
   { label: "Audio",        accent: "#06b6d4", match: d => d.activationMode === "speech" || d.activationMode === "stt" },
   { label: "Sensors",      accent: "#06b6d4", match: d => d.activationMode === "sensor",

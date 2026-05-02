@@ -42,8 +42,11 @@ struct BoundingBoxOverlayView: View {
   /// Paper: arXiv:2203.14360 — visual tracking output with per-ID rendering.
   var trackedItems: [Track] = []
 
+  /// YOLO CoreML on-device detections (bounding boxes, masks, keypoints).
+  var yoloDetections: [YOLODetection] = []
+
   var body: some View {
-    let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || sceneLabel != nil)
+    let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || !yoloDetections.isEmpty || sceneLabel != nil)
     let hasTranscription = transcription != nil
     if hasBoxes || hasTranscription {
       GeometryReader { geometry in
@@ -182,6 +185,45 @@ struct BoundingBoxOverlayView: View {
                 x: rect.minX + 40,
                 y: max(10, rect.minY - 8)
               )
+          }
+
+          // YOLO CoreML on-device detections — per-class golden-angle colors
+          ForEach(Array(yoloDetections.enumerated()), id: \.offset) { _, detection in
+            let color = yoloClassColor(for: detection.classIndex)
+            let rect = CGRect(
+              x: detection.bbox.x1 * geometry.size.width,
+              y: detection.bbox.y1 * geometry.size.height,
+              width: detection.bbox.width * geometry.size.width,
+              height: detection.bbox.height * geometry.size.height
+            )
+
+            // Bounding box (solid, thicker for YOLO)
+            Rectangle()
+              .stroke(color, lineWidth: 2)
+              .frame(width: rect.width, height: rect.height)
+              .position(x: rect.midX, y: rect.midY)
+
+            // Class label badge
+            Text("\(detection.classLabel) \(Int(detection.confidence * 100))%")
+              .font(.system(size: 8, weight: .bold, design: .monospaced))
+              .foregroundColor(.black)
+              .padding(.horizontal, 3)
+              .padding(.vertical, 1)
+              .background(color)
+              .position(
+                x: min(rect.minX + 35, geometry.size.width - 30),
+                y: max(8, rect.minY - 6)
+              )
+
+            // Pose keypoints (17 COCO skeleton)
+            if let keypoints = detection.keypoints {
+              yoloPoseOverlay(
+                keypoints: keypoints,
+                geometryWidth: geometry.size.width,
+                geometryHeight: geometry.size.height,
+                color: color
+              )
+            }
           }
 
           // Scene classification label (top-right corner)
