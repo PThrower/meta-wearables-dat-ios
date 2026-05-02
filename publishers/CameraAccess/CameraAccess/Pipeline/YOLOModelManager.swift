@@ -27,10 +27,24 @@ actor YOLOModelManager {
 
     // MARK: - Public
 
+    /// Known YOLO11 CoreML model download URLs (Ultralytics GitHub releases).
+    /// Used as fallback when server sends empty/missing modelUrl.
+    private static let knownModelUrls: [String: String] = [
+        "yolo11n": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n.mlpackage.zip",
+        "yolo11s": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s.mlpackage.zip",
+        "yolo11m": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m.mlpackage.zip",
+        "yolo11n-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n-seg.mlpackage.zip",
+        "yolo11s-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s-seg.mlpackage.zip",
+        "yolo11m-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m-seg.mlpackage.zip",
+        "yolo11n-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n-pose.mlpackage.zip",
+        "yolo11s-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s-pose.mlpackage.zip",
+        "yolo11m-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m-pose.mlpackage.zip",
+    ]
+
     /// Load a compiled MLModel, downloading or compiling as needed.
     /// - Parameters:
     ///   - id: Model identifier (e.g. "yolo11n", "yolo11s-seg")
-    ///   - serverUrl: Optional server URL to download from. Nil = use bundled model.
+    ///   - serverUrl: Optional server URL to download from. Nil/empty = use known or bundled model.
     /// - Returns: Compiled MLModel ready for inference.
     func loadModel(id: String, serverUrl: String? = nil) async throws -> MLModel {
         // Return cached model if available
@@ -50,9 +64,12 @@ actor YOLOModelManager {
             return model
         }
 
-        // If server URL provided, download and compile
-        if let serverUrl {
-            let model = try await downloadAndCompile(id: id, serverUrl: serverUrl, compiledUrl: compiledUrl)
+        // Resolve download URL: server-provided > known defaults
+        let resolvedUrl = serverUrl?.isEmpty == false ? serverUrl : Self.knownModelUrls[id]
+
+        // If URL available, download and compile
+        if let resolvedUrl {
+            let model = try await downloadAndCompile(id: id, serverUrl: resolvedUrl, compiledUrl: compiledUrl)
             loadedModels[id] = model
             return model
         }
