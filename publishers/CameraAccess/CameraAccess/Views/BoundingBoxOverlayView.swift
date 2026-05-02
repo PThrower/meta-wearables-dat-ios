@@ -48,6 +48,10 @@ struct BoundingBoxOverlayView: View {
   /// Zone definitions for rendering on the camera feed (background layer).
   var zones: [ZoneDefinition] = []
 
+  /// Enriched zone analytics from RegistrySnapshot for overlay rendering.
+  /// When non-nil, renders dwell time, traffic counts, and speed on zone labels.
+  var zoneAnalytics: RegistrySnapshot? = nil
+
   var body: some View {
     let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || !yoloDetections.isEmpty || sceneLabel != nil)
     let hasTranscription = transcription != nil
@@ -186,7 +190,10 @@ struct BoundingBoxOverlayView: View {
 
             // Track label: #ID classLabel confidence%
             // Ref: Ultralytics — show track ID and class with confidence
-            Text(track.displayLabel)
+            let trackLabel = track.speed > 0.001
+              ? "\(track.displayLabel) \(String(format: "%.2f", track.speed))px/f"
+              : track.displayLabel
+            Text(trackLabel)
               .font(.system(size: 9, weight: .bold, design: .monospaced))
               .foregroundColor(.white)
               .padding(.horizontal, 4)
@@ -342,6 +349,7 @@ struct BoundingBoxOverlayView: View {
   // MARK: - Zone Overlay
 
   /// Render zones as semi-transparent colored rectangles with dashed borders.
+  /// When zoneAnalytics is provided, also renders dwell time, occupancy count, and speed.
   /// Extracted from body to reduce SwiftUI type-checker complexity.
   @ViewBuilder
   private func zoneOverlay(zones: [ZoneDefinition], size: CGSize) -> some View {
@@ -366,9 +374,11 @@ struct BoundingBoxOverlayView: View {
         .frame(width: rect.width, height: rect.height)
         .position(x: rect.midX, y: rect.midY)
 
-      // Label badge
+      // Zone label badge
       if !zone.label.isEmpty {
-        Text(zone.label)
+        // Build enriched label with analytics
+        let labelText = zoneLabelWithAnalytics(zone: zone)
+        Text(labelText)
           .font(.system(size: 9, weight: .bold, design: .monospaced))
           .foregroundColor(.white)
           .padding(.horizontal, 4)
@@ -376,10 +386,62 @@ struct BoundingBoxOverlayView: View {
           .background(color.opacity(0.85))
           .cornerRadius(2)
           .position(
-            x: rect.minX + 30,
+            x: rect.minX + max(40, CGFloat(labelText.count * 3)),
             y: max(10, rect.minY - 8)
           )
       }
+
+      // Zone traffic badge (bottom-left of zone)
+      if let analytics = zoneAnalytics, let traffic = analytics.zoneTraffic[zone.label] {
+        if traffic.entries > 0 || traffic.exits > 0 {
+          Text("\(traffic.entries)in \(traffic.exits)out")
+            .font(.system(size: 7, weight: .medium, design: .monospaced))
+            .foregroundColor(.white)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(Color.black.opacity(0.6))
+            .cornerRadius(2)
+            .position(
+              x: rect.minX + 25,
+              y: max(14, rect.minY - 8 + 12)
+            )
+        }
+      }
+    }
+  }
+
+  /// Build zone label string with dwell time and occupancy when analytics are available.
+  private func zoneLabelWithAnalytics(zone: ZoneDefinition) -> String {
+    var parts = [zone.label]
+    if let analytics = zoneAnalytics {
+      // Occupancy count
+      if let count = analytics.zoneCounts[zone.label], count > 0 {
+        parts.append("(\(count))")
+      }
+      // Dwell time (total cumulative seconds, formatted)
+      if let dwell = analytics.zoneDwellTimes[zone.label], dwell > 0 {
+        parts.append(formatDuration(dwell))
+      }
+      // Average speed
+      if let speed = analytics.zoneSpeeds[zone.label], speed.trackCount > 0 {
+        parts.append("\(String(format: "%.2f", speed.avgSpeed))px/f")
+      }
+    }
+    return parts.joined(separator: " ")
+  }
+
+  /// Format seconds into compact human-readable string.
+  private func formatDuration(_ seconds: Double) -> String {
+    if seconds < 60 {
+      return String(format: "%.0fs", seconds)
+    } else if seconds < 3600 {
+      let m = Int(seconds) / 60
+      let s = Int(seconds) % 60
+      return "\(m)m\(s)s"
+    } else {
+      let h = Int(seconds) / 3600
+      let m = (Int(seconds) % 3600) / 60
+      return "\(h)h\(m)m"
     }
   }
 

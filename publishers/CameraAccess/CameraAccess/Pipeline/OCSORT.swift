@@ -662,6 +662,14 @@ struct OCSORT: Sendable {
     /// Match pairs from last update() call: [(trackIdx, detIdx)].
     /// Used by injectEmbeddings() to map detection indices to matched tracks.
     private(set) var lastMatchPairs: [(Int, Int)] = []
+    /// Dead track archive for post-death ID reconciliation.
+    /// Bounded to max 50 entries, FIFO eviction.
+    private var deadTrackArchive: [DeadTrackRecord] = []
+    /// Track IDs reassigned during the most recent update() call via reconciliation.
+    /// Maps newTrackId → deadTrackId for zone history restoration.
+    private(set) var reconciliationMap: [Int: Int] = [:]
+    /// Maximum dead archive size (FIFO eviction beyond this).
+    private static let maxArchiveSize = 50
 
     // Paper: key parameters from OCSort.__init__
     let detThresh: Double       // 0.5 — detection confidence threshold
@@ -677,6 +685,12 @@ struct OCSORT: Sendable {
 
     // Trajectory forecasting
     let forecastSteps: Int      // 0 — disabled by default
+
+    // Tracklet reconciliation
+    let reconciliationEnabled: Bool       // false — disabled by default
+    let reconciliationMaxGap: Int         // 60 frames (~2s at 30fps)
+    let reconciliationThreshold: Double   // 0.4 — appearance distance threshold
+    let reconciliationSpatialWeight: Double // 0.3 — spatial vs appearance weight
 
     // Gating pipeline
     let gatingPipeline: GatingPipeline
@@ -695,7 +709,11 @@ struct OCSORT: Sendable {
         useByte: Bool = false,
         forecastSteps: Int = 0,
         gates: [GateConfig] = [],
-        costFunctionType: String? = nil
+        costFunctionType: String? = nil,
+        reconciliationEnabled: Bool = false,
+        reconciliationMaxGap: Int = 60,
+        reconciliationThreshold: Double = 0.4,
+        reconciliationSpatialWeight: Double = 0.3
     ) {
         self.detThresh = detThresh
         self.maxAge = maxAge
@@ -706,6 +724,10 @@ struct OCSORT: Sendable {
         self.maxTracks = maxTracks
         self.useByte = useByte
         self.forecastSteps = forecastSteps
+        self.reconciliationEnabled = reconciliationEnabled
+        self.reconciliationMaxGap = reconciliationMaxGap
+        self.reconciliationThreshold = reconciliationThreshold
+        self.reconciliationSpatialWeight = reconciliationSpatialWeight
 
         // Build gating pipeline from workflow gate chain.
         // If no gates provided, use default IoU gating at iouThreshold.
@@ -954,6 +976,9 @@ struct OCSORT: Sendable {
 
         // Step 7: Create new tracks for remaining unmatched high-confidence detections
         // Paper: unmatched detections above detThresh become new tentative tracks
+        // Track indices of newly created tracks (for reconciliation pass)
+        var newTrackIndices: [Int] = []
+        let tracksCountBefore = tracks.count
         if maxTracks == 0 || tracks.count < maxTracks {
             for detIdx in unmatchedDetsAfterOCR {
                 let newTrack = InternalTrack(
@@ -962,18 +987,49 @@ struct OCSORT: Sendable {
                     deltaT: deltaT
                 )
                 tracks.append(newTrack)
+                newTrackIndices.append(tracks.count - 1)
                 nextId += 1
             }
+        }
+
+        // Step 7.5: Tracklet Reconciliation
+        // Match newly created tracks against dead archive to reassign original IDs.
+        // Runs only when reconciliationEnabled = true (zero overhead when disabled).
+        reconciliationMap = [:]
+        if reconciliationEnabled && !newTrackIndices.isEmpty && !deadTrackArchive.isEmpty {
+            reconcile(newTrackIndices: newTrackIndices, detections: highConfDets, currentFrame: frameCount, timestamp: timestamp)
+        }
+        // Prune archive entries older than reconciliationMaxGap
+        if reconciliationEnabled {
+            let maxGap = reconciliationMaxGap
+            let currentFrame = frameCount
+            var prunedArchive = deadTrackArchive.filter { currentFrame - $0.deathFrame <= maxGap }
+            swap(&prunedArchive, &deadTrackArchive)
         }
 
         // Step 8: Collect output and delete dead tracks
         // Paper: "remove dead tracklet" where timeSinceUpdate > maxAge
         var results: [Track] = []
+        var deadRecords: [DeadTrackRecord] = []
         var i = tracks.count - 1
         while i >= 0 {
             let trk = tracks[i]
 
             if trk.timeSinceUpdate > maxAge {
+                // Harvest dead track into local buffer before deletion
+                if reconciliationEnabled {
+                    let record = DeadTrackRecord(
+                        trackId: trk.id,
+                        classLabel: trk.classLabel,
+                        lastObservation: trk.lastObservation ?? [],
+                        lastKfState: trk.kalman.state,
+                        appearanceGallery: trk.appearanceGallery,
+                        deathFrame: frameCount,
+                        deathTimestamp: timestamp,
+                        deathTrail: trk.trail
+                    )
+                    deadRecords.append(record)
+                }
                 tracks.remove(at: i)
                 i -= 1
                 continue
@@ -1009,11 +1065,20 @@ struct OCSORT: Sendable {
                     lastSeenTimestamp: timestamp,
                     trail: trk.trail,
                     velocity: (vx: kf.state[4], vy: kf.state[5], vs: kf.state[6]),
-                    forecast: forecast
+                    forecast: forecast,
+                    reconciledFromId: reconciliationMap[trk.id]
                 )
                 results.append(track)
             }
             i -= 1
+        }
+
+        // Batch-append harvested dead records to archive (avoids overlapping access)
+        if !deadRecords.isEmpty {
+            deadTrackArchive.append(contentsOf: deadRecords)
+            if deadTrackArchive.count > Self.maxArchiveSize {
+                deadTrackArchive.removeFirst(deadTrackArchive.count - Self.maxArchiveSize)
+            }
         }
 
         return results.reversed() // Maintain ID order
@@ -1025,6 +1090,8 @@ struct OCSORT: Sendable {
         nextId = 1
         frameCount = 0
         lastMatchPairs = []
+        deadTrackArchive.removeAll()
+        reconciliationMap = [:]
     }
 
     /// Track IDs that are alive but currently unmatched (lost/occluded).
@@ -1049,6 +1116,210 @@ struct OCSORT: Sendable {
             trk.appearanceGallery?.addEmbedding(embed)
             tracks[trkIdx] = trk
         }
+    }
+
+    // MARK: - Tracklet Reconciliation
+
+    /// Match newly created tracks against dead archive to reassign original IDs.
+    /// Ref: arXiv:2206.14651 — ReID gallery matching for post-death ID persistence
+    ///
+    /// Algorithm:
+    ///   1. Filter archive by spatio-temporal constraints (max gap, class match)
+    ///   2. Build cost matrix: appearance cost + spatial cost (weighted)
+    ///   3. Hungarian match new tracks to archived dead tracks
+    ///   4. Reassign matched new tracks to dead track's original ID
+    ///   5. Apply ORU from archived last observation to correct KF state
+    private mutating func reconcile(
+        newTrackIndices: [Int],
+        detections: [TrackDetection],
+        currentFrame: Int,
+        timestamp: Double
+    ) {
+        // Filter candidates by frame gap and class label
+        let candidates = deadTrackArchive.filter { record in
+            let frameGap = currentFrame - record.deathFrame
+            guard frameGap <= reconciliationMaxGap else { return false }
+            // Match class label if new track has one
+            // Check against the detection that spawned each new track
+            return true // Class filter applied below per-pair
+        }
+
+        guard !candidates.isEmpty else { return }
+
+        let numNew = newTrackIndices.count
+        let numCand = candidates.count
+        let inf = Double.greatestFiniteMagnitude
+
+        // Build cost matrix [numNew x numCand]
+        var costMatrix = [[Double]](
+            repeating: [Double](repeating: inf, count: numCand),
+            count: numNew
+        )
+
+        var validPair = [[Bool]](
+            repeating: [Bool](repeating: false, count: numCand),
+            count: numNew
+        )
+
+        for n in 0..<numNew {
+            let trkIdx = newTrackIndices[n]
+            let newTrack = tracks[trkIdx]
+            let newBbox = newTrack.lastObservation ?? []
+            let newCx = newBbox.count >= 4 ? (newBbox[0] + newBbox[2]) / 2 : 0
+            let newCy = newBbox.count >= 4 ? (newBbox[1] + newBbox[3]) / 2 : 0
+
+            for c in 0..<numCand {
+                let record = candidates[c]
+
+                // Class label must match
+                guard record.classLabel == newTrack.classLabel else { continue }
+                // Must have last observation for spatial cost
+                guard record.lastObservation.count >= 4 else { continue }
+
+                // Appearance cost: cosine distance (embeddings) or Bhattacharyya (histograms)
+                let appearanceCost: Double
+                if let gallery = record.appearanceGallery {
+                    if let embed = newTrack.appearanceGallery?.embeddings.first,
+                       !gallery.embeddings.isEmpty,
+                       let minDist = gallery.minCosineDistance(to: embed) {
+                        appearanceCost = minDist
+                    } else if let hist = newTrack.appearanceGallery?.histograms.first,
+                              let galleryHist = gallery.lastHistogram,
+                              !gallery.histograms.isEmpty {
+                        // Bhattacharyya distance: reuse logic from BhattacharyyaGate
+                        var bc = 0.0
+                        for i in hist.indices where i < galleryHist.count {
+                            bc += sqrt(hist[i] * galleryHist[i])
+                        }
+                        appearanceCost = -log(max(bc, 1e-12))
+                    } else {
+                        appearanceCost = 1.0 // No appearance data — fallback
+                    }
+                } else {
+                    appearanceCost = 1.0
+                }
+
+                // Spatial cost: center distance / diagonal normalization
+                let lastCx = (record.lastObservation[0] + record.lastObservation[2]) / 2
+                let lastCy = (record.lastObservation[1] + record.lastObservation[3]) / 2
+                let dx = newCx - lastCx
+                let dy = newCy - lastCy
+                let dist = sqrt(dx * dx + dy * dy)
+                // Normalize by sqrt(2) — max possible distance in [0,1] normalized coords
+                let spatialCost = dist / sqrt(2.0)
+
+                // Weighted combination
+                let cost = reconciliationSpatialWeight * spatialCost +
+                           (1.0 - reconciliationSpatialWeight) * appearanceCost
+
+                // Reject if above threshold
+                guard cost <= reconciliationThreshold else { continue }
+
+                costMatrix[n][c] = cost
+                validPair[n][c] = true
+            }
+        }
+
+        // Count valid pairs
+        let validCount = validPair.flatMap { $0 }.filter { $0 }.count
+        guard validCount > 0 else { return }
+
+        // Hungarian matching on cost matrix
+        // Use -cost because hungarianAssignment minimizes (negative = maximize IoU pattern)
+        // Actually our costs are already distances to minimize, so negate for maximization
+        let hungarianCost = costMatrix.map { row in row.map { $0 == inf ? inf : -$0 } }
+        let assignments = hungarianAssignment(
+            costMatrix: hungarianCost,
+            gateThreshold: -reconciliationThreshold
+        )
+
+        // Collect matched archive indices for removal
+        var matchedArchiveIndices = Set<Int>()
+
+        for assignment in assignments {
+            guard assignment.row < numNew && assignment.col < numCand else { continue }
+            guard validPair[assignment.row][assignment.col] else { continue }
+            let cost = costMatrix[assignment.row][assignment.col]
+            guard cost <= reconciliationThreshold else { continue }
+
+            let trkIdx = newTrackIndices[assignment.row]
+            let record = candidates[assignment.col]
+
+            // Reassign track ID to dead track's original ID
+            let deadId = record.trackId
+            var trk = tracks[trkIdx]
+
+            // Get current detection data
+            let detBbox = trk.lastObservation ?? []
+            let detConf = trk.confidence
+            let frameGap = currentFrame - record.deathFrame
+
+            // Rebuild track with dead track's ID, initializing KF from archived last observation
+            // so ORU can bridge the gap correctly.
+            trk = InternalTrack(
+                id: deadId,
+                detection: TrackDetection(
+                    bbox: NormalizedBoundingBox(
+                        x1: record.lastObservation.count >= 4 ? record.lastObservation[0] : 0,
+                        y1: record.lastObservation.count >= 4 ? record.lastObservation[1] : 0,
+                        x2: record.lastObservation.count >= 4 ? record.lastObservation[2] : 0,
+                        y2: record.lastObservation.count >= 4 ? record.lastObservation[3] : 0
+                    ),
+                    confidence: detConf,
+                    classLabel: trk.classLabel,
+                    histogram: nil,
+                    embedding: nil
+                ),
+                deltaT: trk.deltaT
+            )
+
+            // Restore appearance gallery from archive
+            if let archived = record.appearanceGallery {
+                trk.appearanceGallery = archived
+            }
+
+            // Restore trail from archive, append current center
+            trk.trail = record.deathTrail
+            let cx = detBbox.count >= 4 ? (detBbox[0] + detBbox[2]) / 2 : 0
+            let cy = detBbox.count >= 4 ? (detBbox[1] + detBbox[3]) / 2 : 0
+            trk.trail.append((x: cx, y: cy))
+            if trk.trail.count > 30 { trk.trail.removeFirst() }
+
+            trk.hits = 1
+            trk.hitStreak = 1
+            trk.hasBeenObserved = true
+            // Set timeSinceUpdate to frame gap so applyORU recognizes the gap
+            trk.timeSinceUpdate = max(frameGap, 1)
+            // Advance age to account for the gap
+            trk.age = frameGap
+
+            // Store the new observation for ORU
+            trk.lastObservation = detBbox.count >= 4 ? detBbox : record.lastObservation
+            trk.observations[trk.age] = detBbox.count >= 4
+                ? [detBbox[0], detBbox[1], detBbox[2], detBbox[3], detConf]
+                : record.lastObservation + [detConf]
+
+            // Apply ORU to bridge the gap between death and reappearance
+            applyORU(&trk, newObservation: [
+                detBbox.count >= 4 ? detBbox[0] : 0,
+                detBbox.count >= 4 ? detBbox[1] : 0,
+                detBbox.count >= 4 ? detBbox[2] : 0,
+                detBbox.count >= 4 ? detBbox[3] : 0,
+                detConf
+            ])
+
+            tracks[trkIdx] = trk
+
+            // Record the reconciliation mapping for zone history restoration
+            reconciliationMap[deadId] = deadId
+
+            matchedArchiveIndices.insert(assignment.col)
+        }
+
+        // Remove matched archive entries
+        // Match by trackId since candidates may have different indices than archive
+        let matchedTrackIds = Set(matchedArchiveIndices.map { candidates[$0].trackId })
+        deadTrackArchive.removeAll { matchedTrackIds.contains($0.trackId) }
     }
 
     // MARK: - Track Update with ORU

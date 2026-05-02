@@ -83,12 +83,29 @@ struct TrackingStageConfig: Codable, Sendable {
     /// - Smooth overlay rendering during detection gaps
     let forecastSteps: Int
 
+    // MARK: Tracklet Reconciliation
+    // Ref: arXiv:2206.14651 — ReID gallery matching for post-death ID persistence
+    // Ref: arXiv:2302.11813 — adaptive appearance EMA
+
+    /// Enable dead-track archive and post-death ID reassignment. Default false.
+    let reconciliationEnabled: Bool
+    /// Maximum frame gap between death and reappearance for reconciliation (default 60).
+    let reconciliationMaxGap: Int
+    /// Appearance distance threshold for matching (default 0.4).
+    /// Lower = stricter matching. Pairs above threshold are rejected.
+    let reconciliationThreshold: Double
+    /// Weight for spatial cost vs appearance cost (default 0.3).
+    /// 0 = all appearance, 1 = all spatial distance.
+    let reconciliationSpatialWeight: Double
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
         case smoothingAlpha, zones
         case deltaT, inertia, detThresh, useByte
         case gates, costFunction, forecastSteps
+        case reconciliationEnabled, reconciliationMaxGap
+        case reconciliationThreshold, reconciliationSpatialWeight
     }
 
     init(
@@ -107,7 +124,11 @@ struct TrackingStageConfig: Codable, Sendable {
         useByte: Bool = false,
         gates: [GateConfig] = [],
         costFunction: String? = nil,
-        forecastSteps: Int = 0
+        forecastSteps: Int = 0,
+        reconciliationEnabled: Bool = false,
+        reconciliationMaxGap: Int = 60,
+        reconciliationThreshold: Double = 0.4,
+        reconciliationSpatialWeight: Double = 0.3
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -125,6 +146,10 @@ struct TrackingStageConfig: Codable, Sendable {
         self.gates = gates
         self.costFunction = costFunction
         self.forecastSteps = forecastSteps
+        self.reconciliationEnabled = reconciliationEnabled
+        self.reconciliationMaxGap = reconciliationMaxGap
+        self.reconciliationThreshold = reconciliationThreshold
+        self.reconciliationSpatialWeight = reconciliationSpatialWeight
     }
 
     init(from decoder: Decoder) throws {
@@ -145,7 +170,33 @@ struct TrackingStageConfig: Codable, Sendable {
         self.gates = try c.decodeIfPresent([GateConfig].self, forKey: .gates) ?? []
         self.costFunction = try c.decodeIfPresent(String.self, forKey: .costFunction)
         self.forecastSteps = try c.decodeIfPresent(Int.self, forKey: .forecastSteps) ?? 0
+        self.reconciliationEnabled = try c.decodeIfPresent(Bool.self, forKey: .reconciliationEnabled) ?? false
+        self.reconciliationMaxGap = try c.decodeIfPresent(Int.self, forKey: .reconciliationMaxGap) ?? 60
+        self.reconciliationThreshold = try c.decodeIfPresent(Double.self, forKey: .reconciliationThreshold) ?? 0.4
+        self.reconciliationSpatialWeight = try c.decodeIfPresent(Double.self, forKey: .reconciliationSpatialWeight) ?? 0.3
     }
+}
+
+// MARK: - Dead Track Archive
+
+/// Archived dead track data for post-death ID reconciliation.
+/// Harvested before track deletion, matched against new tracks on reappearance.
+/// Ref: arXiv:2206.14651 — gallery-based ReID for tracklet linking
+struct DeadTrackRecord: Sendable {
+    let trackId: Int
+    let classLabel: String
+    /// Last observation bbox [x1, y1, x2, y2].
+    let lastObservation: [Double]
+    /// 7-state KF vector at death for motion-based proximity matching.
+    let lastKfState: [Double]
+    /// Appearance gallery (histograms + embeddings) harvested at death.
+    let appearanceGallery: AppearanceGallery?
+    /// Frame counter at time of death.
+    let deathFrame: Int
+    /// Timestamp at time of death.
+    let deathTimestamp: Double
+    /// Trajectory trail at death for visualization continuity.
+    let deathTrail: [(x: Double, y: Double)]
 }
 
 // MARK: - Trajectory Forecast
@@ -245,6 +296,9 @@ struct Track: Sendable {
     /// Trajectory forecast: predicted positions N frames ahead from KF state.
     /// Empty when forecasting is disabled (forecastSteps = 0).
     let forecast: [PredictedPosition]
+    /// Original track ID this was reconciled from, or nil if new.
+    /// Set when a dead track is matched to a new track via appearance/spatial cost.
+    let reconciledFromId: Int?
 
     /// Magnitude of center velocity in normalized coords/frame.
     var speed: Double {
@@ -300,6 +354,9 @@ struct TrackedItem: Sendable {
     let zoneHistory: [ZoneTransition]
     let firstSeenTimestamp: Double
     let lastSeenTimestamp: Double
+    /// Cumulative dwell time per zone (zone label -> seconds).
+    /// Updated each frame: if item is in a zone, accumulates (now - lastSeenTimestamp) for that zone.
+    let zoneDwellTimes: [String: Double]
 }
 
 /// Zone transition event for an item.
@@ -334,12 +391,54 @@ struct ZoneTransition: Codable, Sendable {
 
 // MARK: - Frame Result
 
-/// Snapshot of zone occupancy counts.
+/// Speed statistics for tracks in a zone.
+struct ZoneSpeedSummary: Sendable {
+    let avgSpeed: Double
+    let maxSpeed: Double
+    let minSpeed: Double
+    let trackCount: Int
+
+    func jsonDict() -> [String: Any] {
+        return [
+            "avgSpeed": avgSpeed,
+            "maxSpeed": maxSpeed,
+            "minSpeed": minSpeed,
+            "trackCount": trackCount,
+        ]
+    }
+}
+
+/// Directional traffic counts for zone transitions.
+struct ZoneTrafficEntry: Sendable {
+    let entries: Int
+    let exits: Int
+    /// Breakdown of where objects went after exiting (destinationZone -> count).
+    let exitDestinations: [String: Int]
+
+    func jsonDict() -> [String: Any] {
+        var dict: [String: Any] = [
+            "entries": entries,
+            "exits": exits,
+        ]
+        if !exitDestinations.isEmpty {
+            dict["exitDestinations"] = exitDestinations
+        }
+        return dict
+    }
+}
+
+/// Snapshot of zone occupancy counts + enriched analytics.
 struct RegistrySnapshot: Sendable {
     let zoneCounts: [String: Int]
     let recentTransitions: [ZoneTransition]
     let totalActive: Int
     let totalConfirmed: Int
+    /// Cumulative dwell times per zone (seconds). Sum of all items' dwell times.
+    let zoneDwellTimes: [String: Double]
+    /// Directional traffic counts per zone (entries, exits, exit destinations).
+    let zoneTraffic: [String: ZoneTrafficEntry]
+    /// Speed statistics per zone (avg/max/min of current tracks).
+    let zoneSpeeds: [String: ZoneSpeedSummary]
 
     func jsonDict() -> [String: Any] {
         var dict: [String: Any] = [
@@ -347,6 +446,7 @@ struct RegistrySnapshot: Sendable {
             "totalConfirmed": totalConfirmed,
         ]
         dict["zoneCounts"] = zoneCounts
+        dict["zoneDwellTimes"] = zoneDwellTimes
         dict["recentTransitions"] = recentTransitions.map { t in
             return [
                 "trackId": t.trackId,
@@ -357,6 +457,8 @@ struct RegistrySnapshot: Sendable {
                 "predicted": t.predicted,
             ] as [String: Any]
         }
+        dict["zoneTraffic"] = zoneTraffic.mapValues { $0.jsonDict() }
+        dict["zoneSpeeds"] = zoneSpeeds.mapValues { $0.jsonDict() }
         return dict
     }
 }
@@ -411,6 +513,9 @@ struct TrackingFrameResult: Sendable {
                 ]
                 if let heading = t.heading {
                     trackDict["heading"] = heading
+                }
+                if let reconciledFromId = t.reconciledFromId {
+                    trackDict["reconciledFromId"] = reconciledFromId
                 }
                 return trackDict
             },

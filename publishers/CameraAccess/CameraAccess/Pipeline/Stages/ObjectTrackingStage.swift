@@ -48,7 +48,11 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             useByte: config.useByte,
             forecastSteps: config.forecastSteps,
             gates: config.gates,
-            costFunctionType: config.costFunction
+            costFunctionType: config.costFunction,
+            reconciliationEnabled: config.reconciliationEnabled,
+            reconciliationMaxGap: config.reconciliationMaxGap,
+            reconciliationThreshold: config.reconciliationThreshold,
+            reconciliationSpatialWeight: config.reconciliationSpatialWeight
         )
         self.registry = ItemRegistry()
         self.smoother = ConfidenceSmoother()
@@ -75,7 +79,11 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             useByte: newConfig.useByte,
             forecastSteps: newConfig.forecastSteps,
             gates: newConfig.gates,
-            costFunctionType: newConfig.costFunction
+            costFunctionType: newConfig.costFunction,
+            reconciliationEnabled: newConfig.reconciliationEnabled,
+            reconciliationMaxGap: newConfig.reconciliationMaxGap,
+            reconciliationThreshold: newConfig.reconciliationThreshold,
+            reconciliationSpatialWeight: newConfig.reconciliationSpatialWeight
         )
         self.registry.setZones(newConfig.zones)
         self.smoother.reset()
@@ -150,6 +158,15 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
         // OC-SORT update — runs ORU, OCM, OCR internally
         let tracks = tracker.update(detections: smoothed, timestamp: timestamp)
+
+        // Restore reconciled track zone histories from deadItems cache.
+        // When a dead track is matched to a new track, restore its TrackedItem
+        // so zone history continuity is preserved across the occlusion gap.
+        if !tracker.reconciliationMap.isEmpty {
+            for (_, deadId) in tracker.reconciliationMap {
+                registry.restoreItem(trackId: deadId)
+            }
+        }
 
         // ItemRegistry update — zone accounting
         // Pass lost track IDs to preserve zone history during temporary occlusion

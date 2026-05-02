@@ -119,6 +119,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
   @Published var trackingTracks: [Track] = []
+  /// Latest registry snapshot with zone analytics (dwell times, traffic, speeds).
+  @Published var trackingSnapshot: RegistrySnapshot? = nil
 
   /// Zone definitions from the active tracking config (for overlay rendering).
   var activeZones: [ZoneDefinition] {
@@ -1149,6 +1151,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
       trackingConfig = nil
       trackingTracks = []
+      trackingSnapshot = nil
     }
 
     let trackingConfig = TrackingStageConfig(
@@ -1199,6 +1202,7 @@ class StreamSessionViewModel: ObservableObject {
     await stage.setOnResult { [weak self] result in
       await MainActor.run {
         self?.trackingTracks = result.tracks
+        self?.trackingSnapshot = result.registry
       }
       // Relay tracking result JSON to server
       await self?.relayStage.sendJson(result.jsonDict())
@@ -1469,6 +1473,7 @@ class StreamSessionViewModel: ObservableObject {
             pipeline.unregister(stageId: existing.stageId)
             trackingStage = nil
             trackingTracks = []
+      trackingSnapshot = nil
             NSLog("[StreamSession] ObjectTrackingStage disabled by server")
           }
         } else {

@@ -51,7 +51,8 @@ struct StreamView: View {
             transcription: viewModel.overlayTranscription,
             trackedItems: viewModel.trackingTracks,
             yoloDetections: viewModel.yoloDetections,
-            zones: viewModel.activeZones
+            zones: viewModel.activeZones,
+            zoneAnalytics: viewModel.trackingSnapshot
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }
