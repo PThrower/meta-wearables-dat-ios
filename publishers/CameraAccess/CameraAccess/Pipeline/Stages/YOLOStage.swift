@@ -120,9 +120,9 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
             self.mlModel = model
 
             // Create VNCoreMLModel for Vision framework integration
-            let visionModel = try VNCoreMLModel(for: model.model)
+            let visionModel = try VNCoreMLModel(for: model)
             let request = VNCoreMLRequest(model: visionModel)
-            request.imageCropAndScaleOption = .scaleFill
+            request.imageCropAndScaleOption = .centerCrop
             self.visionRequest = request
 
             // Detect output format

@@ -30,10 +30,11 @@ enum YOLODecoder {
     ) -> [YOLODetection] {
         guard let observations = results as? [VNRecognizedObjectObservation] else { return [] }
 
-        return observations.compactMap { obs in
-            guard let bestLabel = obs.labels.first, bestLabel.confidence >= confidence else { return nil }
+        var detections: [YOLODetection] = []
+        for obs in observations {
+            guard let bestLabel = obs.labels.first, bestLabel.confidence >= confidence else { continue }
 
-            let classIndex = bestLabel.identifier.flatMap { Int($0) } ?? 0
+            let classIndex = Int(bestLabel.identifier) ?? 0
             let label = classIndex < classLabels.count ? classLabels[classIndex] : "class_\(classIndex)"
 
             // Vision uses bottom-left origin, convert to top-left (0,0 = top-left)
@@ -45,14 +46,15 @@ enum YOLODecoder {
                 y2: 1.0 - bb.origin.y
             )
 
-            return YOLODetection(
+            detections.append(YOLODetection(
                 bbox: bbox,
                 confidence: Double(bestLabel.confidence),
                 classIndex: classIndex,
                 classLabel: label,
                 task: task
-            )
+            ))
         }
+        return detections
     }
 
     // MARK: - Format B: Traditional [1, 4+nc, num_anchors]
@@ -308,26 +310,21 @@ enum YOLODecoder {
 
     // MARK: - Output Format Detection
 
-    /// Detect which YOLO output format the model uses based on output tensor shapes.
+    /// Detect which YOLO output format the model uses based on model description.
     static func detectOutputFormat(model: MLModel) -> YOLOOutputFormat {
-        guard let description = try? model.prediction(from: MLFeatureProvider()) else {
-            return .traditional
-        }
-        let outputNames = description.featureNames
+        let desc = model.modelDescription
+        let outputs = desc.outputDescriptionsByName
 
-        // Vision NMS output: returns VNRecognizedObjectObservation (handled by Vision)
-        // We detect this at runtime by checking VNObservation types
-
-        // End-to-end: single output [1, max_det, 6]
-        if let name = outputNames.first {
-            if let value = try? description.featureValue(for: name),
-               let array = value.multiArrayValue {
-                if array.shape.count == 3 && array.shape[2].intValue == 6 {
+        for (_, outputDesc) in outputs {
+            if let shape = outputDesc.multiArrayConstraint?.shape {
+                // End-to-end: [1, max_det, 6]
+                if shape.count == 3 && shape[2].intValue == 6 {
                     return .endToEnd
                 }
             }
         }
 
+        // Default to traditional — Vision NMS is detected at runtime from VNObservation types
         return .traditional
     }
 
