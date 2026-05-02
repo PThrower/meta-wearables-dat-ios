@@ -118,6 +118,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var visionSceneLabel: String?
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
+  @Published var yoloModelState: YOLOModelState = .idle
   @Published var trackingTracks: [Track] = []
   /// Latest registry snapshot with zone analytics (dwell times, traffic, speeds).
   @Published var trackingSnapshot: RegistrySnapshot? = nil
@@ -923,6 +924,7 @@ class StreamSessionViewModel: ObservableObject {
       pipeline.unregister(stageId: existing.stageId)
       yoloStage = nil
       yoloDetections = []
+      yoloModelState = .idle
     }
 
     let taskStr = config["task"] as? String ?? "detect"
@@ -951,6 +953,13 @@ class StreamSessionViewModel: ObservableObject {
     )
 
     let stage = YOLOStage(config: yoloConfig)
+
+    // Wire model state callback
+    await stage.setOnModelState { [weak self] (state: YOLOModelState) in
+      await MainActor.run {
+        self?.yoloModelState = state
+      }
+    }
 
     // Wire result callback
     await stage.setOnResult { [weak self] (result: YOLOFrameResult) in

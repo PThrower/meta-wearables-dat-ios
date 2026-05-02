@@ -17,6 +17,38 @@ enum YOLOTask: String, Sendable, Codable, CaseIterable {
     case pose
 }
 
+// MARK: - Model Loading State
+
+enum YOLOModelState: Sendable, Equatable {
+    case idle
+    case downloading(modelId: String, progress: Double)   // 0.0 - 1.0
+    case compiling(modelId: String)
+    case ready(modelId: String)
+    case failed(modelId: String, error: String)
+
+    var isLoading: Bool {
+        switch self {
+        case .downloading, .compiling: return true
+        default: return false
+        }
+    }
+
+    var isFailed: Bool {
+        if case .failed = self { return true }
+        return false
+    }
+
+    var label: String {
+        switch self {
+        case .idle: return ""
+        case .downloading(let id, let p): return "Downloading \(id)... \(Int(p * 100))%"
+        case .compiling(let id): return "Compiling \(id)..."
+        case .ready(let id): return "\(id) ready"
+        case .failed(let id, let err): return "\(id) failed: \(err)"
+        }
+    }
+}
+
 // MARK: - Single Detection
 
 struct YOLODetection: Sendable, Identifiable {

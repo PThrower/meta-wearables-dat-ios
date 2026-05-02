@@ -86,6 +86,12 @@ struct StreamView: View {
       // Settings button at top-right
       VStack {
         HStack {
+          // YOLO model state badge
+          if viewModel.yoloModelState.isLoading || (viewModel.yoloModelState.isFailed) {
+            YOLOStateBadge(state: viewModel.yoloModelState)
+              .padding(.leading, 8)
+              .padding(.top, 4)
+          }
           Spacer()
           #if DEBUG
           Button {
@@ -345,5 +351,47 @@ struct ControlsView: View {
     .sheet(isPresented: $showAppPicker) {
       AppPickerSheet(viewModel: viewModel)
     }
+  }
+}
+
+// MARK: - YOLO Model State Badge
+
+struct YOLOStateBadge: View {
+  let state: YOLOModelState
+
+  var body: some View {
+    HStack(spacing: 6) {
+      switch state {
+      case .downloading(_, let progress):
+        ProgressView(value: progress)
+          .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+          .frame(width: 14, height: 14)
+        Text(state.label)
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundColor(.cyan)
+      case .compiling:
+        ProgressView()
+          .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
+          .frame(width: 14, height: 14)
+          .scaleEffect(0.7)
+        Text(state.label)
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundColor(.yellow)
+      case .failed(_, let error):
+        Image(systemName: "exclamationmark.triangle.fill")
+          .font(.system(size: 11))
+          .foregroundColor(.red)
+        Text(error)
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundColor(.red)
+          .lineLimit(1)
+      default:
+        EmptyView()
+      }
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 5)
+    .background(.ultraThinMaterial)
+    .clipShape(Capsule())
   }
 }

@@ -49,6 +49,9 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     // Callback for relaying results
     private var onResult: (@Sendable (YOLOFrameResult) async -> Void)?
 
+    // Callback for model state updates
+    private var onModelState: (@Sendable (YOLOModelState) async -> Void)?
+
     init(config: YOLOStageConfig = .default) {
         self.yoloConfig = config
         self.config = FrameStageConfig(targetFPS: config.targetFPS, isEnabled: true)
@@ -60,6 +63,10 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
 
     func setOnResult(_ handler: @escaping @Sendable (YOLOFrameResult) async -> Void) {
         self.onResult = handler
+    }
+
+    func setOnModelState(_ handler: @escaping @Sendable (YOLOModelState) async -> Void) {
+        self.onModelState = handler
     }
 
     func updateConfig(_ newConfig: YOLOStageConfig) async {
@@ -111,11 +118,26 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     // MARK: - Model Loading
 
     private func loadModel() async {
+        let modelId = yoloConfig.modelId
+        await onModelState?(.downloading(modelId: modelId, progress: 0))
+
         do {
+            // Observe download progress
+            let progressStream = await modelManager.downloadProgress(id: modelId)
+            let progressTask = Task {
+                for await progress in progressStream {
+                    await onModelState?(.downloading(modelId: modelId, progress: progress))
+                }
+            }
+
             let model = try await modelManager.loadModel(
-                id: yoloConfig.modelId,
+                id: modelId,
                 serverUrl: yoloConfig.modelUrl
             )
+            progressTask.cancel()
+
+            await onModelState?(.compiling(modelId: modelId))
+
             self.mlModel = model
 
             // Create VNCoreMLModel for Vision framework integration
@@ -125,11 +147,12 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
             self.visionRequest = request
 
             // Detect output format
-            // Try to determine by checking model metadata
             self.outputFormat = detectFormat(from: model)
 
-            NSLog("[YOLOStage] Model loaded: \(yoloConfig.modelId), format=\(outputFormat)")
+            await onModelState?(.ready(modelId: modelId))
+            NSLog("[YOLOStage] Model loaded: \(modelId), format=\(outputFormat)")
         } catch {
+            await onModelState?(.failed(modelId: modelId, error: error.localizedDescription))
             NSLog("[YOLOStage] Model load failed: \(error)")
         }
     }
