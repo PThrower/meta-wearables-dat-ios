@@ -17,6 +17,18 @@ const SPARKLINE_WIDTH = 280;
 const SPARKLINE_HEIGHT = 24;
 const SIDEBAR_STORAGE_KEY = "cmd-sidebar-collapsed";
 const WORKFLOW_NAME_TTL_MS = 60_000;
+const HEARTBEAT_ALIVE_MS = 3_000;
+const HEARTBEAT_STALE_MS = 10_000;
+
+interface SessionTelCache {
+  fps: number;
+  latencyMs: number;
+  detRate: number;
+  stages: string[];
+  aiLatencyMs: number;
+  aiStatus: string;
+  lastHeartbeat: number;
+}
 
 let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -25,6 +37,10 @@ const _workflowNames = new Map<string, string>();
 let _workflowsRefreshedAt = 0;
 let _sidebarCollapsed = false;
 let _activeWorkflowFilter: string | null = null;
+let _lastSessions: SessionInfo[] = [];
+let _aiLogWs: WebSocket | null = null;
+let _sidebarRafPending = false;
+const _sessionTelemetry = new Map<string, SessionTelCache>();
 
 export const page: PageModule = {
   init(container) {
@@ -34,6 +50,7 @@ export const page: PageModule = {
     refreshWorkflowNames();
     poll();
     startPolling();
+    openAiLogWs();
     document.addEventListener("visibilitychange", onVisibilityChange);
   },
 
@@ -42,6 +59,9 @@ export const page: PageModule = {
     document.removeEventListener("visibilitychange", onVisibilityChange);
     for (const card of _cards.values()) card.destroy();
     _cards.clear();
+    closeAiLogWs();
+    _sessionTelemetry.clear();
+    _lastSessions = [];
     _activeWorkflowFilter = null;
     _container = null;
   },
@@ -158,6 +178,7 @@ async function poll(): Promise<void> {
     _activeWorkflowFilter = null;
   }
 
+  _lastSessions = sessions;
   renderGrid(sessions);
   updateTopPills(sessions);
   renderSidebar(sessions);
@@ -209,10 +230,12 @@ function renderSidebar(sessions: SessionInfo[]): void {
   const list = _container?.querySelector("#cmd-workflows");
   if (!list) return;
 
-  const groups = new Map<string, number>();
+  const groups = new Map<string, string[]>();
   for (const s of sessions) {
     if (s.activeWorkflowId) {
-      groups.set(s.activeWorkflowId, (groups.get(s.activeWorkflowId) ?? 0) + 1);
+      const arr = groups.get(s.activeWorkflowId) ?? [];
+      arr.push(s.sessionId);
+      groups.set(s.activeWorkflowId, arr);
     }
   }
 
@@ -221,13 +244,69 @@ function renderSidebar(sessions: SessionInfo[]): void {
     return;
   }
 
-  list.innerHTML = Array.from(groups.entries()).map(([wfId, n]) => {
+  const now = Date.now();
+  list.innerHTML = Array.from(groups.entries()).map(([wfId, sids]) => {
+    const n = sids.length;
     const name = _workflowNames.get(wfId) ?? truncateId(wfId);
     const isActive = _activeWorkflowFilter === wfId;
+
+    const telItems = sids.map(sid => _sessionTelemetry.get(sid)).filter((t): t is SessionTelCache => !!t);
+    const hasTel = telItems.length > 0;
+    const lastHB = hasTel ? Math.max(...telItems.map(t => t.lastHeartbeat)) : 0;
+
+    let dotClass: string;
+    let dotPulse = "";
+    if (!hasTel || lastHB === 0) {
+      dotClass = "hb-dead";
+    } else if (now - lastHB < HEARTBEAT_ALIVE_MS) {
+      dotClass = "hb-live";
+      dotPulse = " pulsing";
+    } else if (now - lastHB < HEARTBEAT_STALE_MS) {
+      dotClass = "hb-stale";
+    } else {
+      dotClass = "hb-dead";
+    }
+
+    let metricsHtml = "";
+    let stagesHtml = "";
+    if (hasTel) {
+      const fpsVals = telItems.filter(t => t.fps > 0);
+      const avgFps = fpsVals.length ? fpsVals.reduce((s, t) => s + t.fps, 0) / fpsVals.length : 0;
+      const latVals = telItems.filter(t => t.latencyMs > 0);
+      const avgLat = latVals.length ? latVals.reduce((s, t) => s + t.latencyMs, 0) / latVals.length : 0;
+      const totalDet = telItems.reduce((s, t) => s + t.detRate, 0);
+      const aiLatVals = telItems.filter(t => t.aiLatencyMs > 0);
+      const avgAiLat = aiLatVals.length ? aiLatVals.reduce((s, t) => s + t.aiLatencyMs, 0) / aiLatVals.length : 0;
+      const aiStatusStr = telItems.some(t => t.aiStatus === "error") ? "error"
+        : telItems.some(t => t.aiStatus === "active") ? "active" : "idle";
+
+      const fpsStr = avgFps > 0 ? avgFps.toFixed(1) : "—";
+      const latStr = avgLat > 0 ? `${Math.round(avgLat)}ms` : "—";
+      const detStr = totalDet > 0 ? `${totalDet}/s` : "—";
+      const aiLatStr = avgAiLat > 0 ? `${Math.round(avgAiLat)}ms` : "—";
+
+      metricsHtml = `<div class="cmd-wf-metrics">
+        <div class="cmd-wf-metric"><span class="k">FPS</span><span class="v">${esc(fpsStr)}</span></div>
+        <div class="cmd-wf-metric"><span class="k">DET</span><span class="v">${esc(detStr)}</span></div>
+        <div class="cmd-wf-metric"><span class="k">LAT</span><span class="v">${esc(latStr)}</span></div>
+        <div class="cmd-wf-metric"><span class="k">AI</span><span class="v">${esc(aiLatStr)}</span></div>
+        <span class="cmd-wf-status-badge ${aiStatusStr}">${aiStatusStr.toUpperCase()}</span>
+      </div>`;
+
+      const allStages = Array.from(new Set(telItems.flatMap(t => t.stages)));
+      if (allStages.length > 0) {
+        const abbr = allStages.map(s => s.replace(/^[^-]+-/, "")).join(" · ");
+        stagesHtml = `<div class="cmd-wf-stages">${esc(abbr)}</div>`;
+      }
+    }
+
     return `<div class="cmd-workflow-row activity-item${isActive ? " is-active" : ""}" data-workflow-id="${esc(wfId)}">
-      <span class="activity-dot live"></span>
-      <span class="activity-text">${esc(name)}</span>
-      <span class="activity-time">${n} ${n === 1 ? "device" : "devices"}</span>
+      <div class="cmd-wf-header">
+        <span class="activity-dot ${dotClass}${dotPulse}"></span>
+        <span class="activity-text">${esc(name)}</span>
+        <span class="activity-time">${n} ${n === 1 ? "device" : "devices"}</span>
+      </div>
+      ${metricsHtml}${stagesHtml}
     </div>`;
   }).join("");
 
@@ -249,6 +328,58 @@ async function refreshWorkflowNames(): Promise<void> {
     const wfs = await fetchWorkflows();
     for (const w of wfs) _workflowNames.set(w.id, w.name);
   } catch {}
+}
+
+// ── Telemetry store + AI log WS ───────────────────────────────────────────
+
+function ensureTelCache(sessionId: string): SessionTelCache {
+  let t = _sessionTelemetry.get(sessionId);
+  if (!t) {
+    t = { fps: 0, latencyMs: 0, detRate: 0, stages: [], aiLatencyMs: 0, aiStatus: "idle", lastHeartbeat: 0 };
+    _sessionTelemetry.set(sessionId, t);
+  }
+  return t;
+}
+
+function scheduleRenderSidebar(): void {
+  if (_sidebarRafPending) return;
+  _sidebarRafPending = true;
+  requestAnimationFrame(() => {
+    _sidebarRafPending = false;
+    renderSidebar(_lastSessions);
+  });
+}
+
+function openAiLogWs(): void {
+  if (_aiLogWs) return;
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${proto}//${location.host}/telemetry/ai/log?session=all`;
+  try {
+    _aiLogWs = new WebSocket(url);
+    _aiLogWs.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data as string) as Record<string, unknown>;
+        const sid = msg.sessionId as string | undefined;
+        if (!sid) return;
+        const tel = ensureTelCache(sid);
+        if (msg.type === "ai_telemetry") {
+          const td = msg.telemetry as Record<string, unknown> | undefined;
+          if (typeof td?.avgLatencyMs === "number") tel.aiLatencyMs = td.avgLatencyMs as number;
+        } else if (msg.type === "ai_status") {
+          const s = String(msg.status ?? "");
+          tel.aiStatus = s === "active" || s === "error" ? s : "idle";
+        }
+        tel.lastHeartbeat = Date.now();
+        scheduleRenderSidebar();
+      } catch {}
+    };
+    _aiLogWs.onerror = () => { _aiLogWs = null; };
+    _aiLogWs.onclose = () => { _aiLogWs = null; };
+  } catch {}
+}
+
+function closeAiLogWs(): void {
+  if (_aiLogWs) { try { _aiLogWs.close(); } catch {} _aiLogWs = null; }
 }
 
 // ── StreamCard ─────────────────────────────────────────────────────────────
@@ -376,6 +507,7 @@ class StreamCard {
     this.setMetric("det", "—");
     this.setMetric("lat", "—");
     this.updateSpark();
+    _sessionTelemetry.delete(this.session.sessionId);
   }
 
   private showSignalLost(reconnecting: boolean): void {
@@ -421,14 +553,51 @@ class StreamCard {
     if (this.fpsBuffer.length > FPS_BUFFER_SIZE) this.fpsBuffer.shift();
     this.setMetric("fps", String(fps));
     this.updateSpark();
+    const t = ensureTelCache(this.session.sessionId);
+    t.fps = fps;
+    t.lastHeartbeat = Date.now();
   }
 
   private onLatency(ms: number): void {
     this.setMetric("lat", `${ms}ms`);
+    ensureTelCache(this.session.sessionId).latencyMs = ms;
   }
 
   private handleJson(msg: Record<string, unknown>): void {
+    const sid = this.session.sessionId;
+    const tel = ensureTelCache(sid);
+    if (msg.type === "stage_telemetry") {
+      const stgs = msg.stages as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(stgs)) tel.stages = stgs.map(s => String(s.nodeType ?? s.stageId ?? "")).filter(Boolean);
+      tel.lastHeartbeat = Date.now();
+      scheduleRenderSidebar();
+      return;
+    }
+    if (msg.type === "publisher_telemetry") {
+      const frame = msg.frame as Record<string, unknown> | undefined;
+      if (typeof frame?.fps === "number") tel.fps = frame.fps as number;
+      const rl = msg.relayLatency as Record<string, unknown> | undefined;
+      if (typeof rl?.ms === "number" && (rl.ms as number) > 0) tel.latencyMs = rl.ms as number;
+      tel.lastHeartbeat = Date.now();
+      scheduleRenderSidebar();
+      return;
+    }
+    if (msg.type === "ai_telemetry") {
+      const td = msg.telemetry as Record<string, unknown> | undefined;
+      if (typeof td?.avgLatencyMs === "number") tel.aiLatencyMs = td.avgLatencyMs as number;
+      tel.lastHeartbeat = Date.now();
+      scheduleRenderSidebar();
+      return;
+    }
+    if (msg.type === "ai_status") {
+      const s = String(msg.status ?? "");
+      tel.aiStatus = s === "active" || s === "error" ? s : "idle";
+      tel.lastHeartbeat = Date.now();
+      scheduleRenderSidebar();
+      return;
+    }
     if (msg.type !== "guidance_event") return;
+    tel.lastHeartbeat = Date.now();
     const payload = msg.payload as Record<string, unknown> | undefined;
     const bboxes = (payload?.bbox ?? payload?.boundingBoxes) as unknown[] | undefined;
     const count = Array.isArray(bboxes) ? bboxes.length : 1;
@@ -439,7 +608,10 @@ class StreamCard {
   private decayDetections(): void {
     const cutoff = Date.now() - 1000;
     this.detectionWindow = this.detectionWindow.filter(t => t >= cutoff);
-    if (this.player) this.setMetric("det", String(this.detectionWindow.length));
+    const rate = this.detectionWindow.length;
+    if (this.player) this.setMetric("det", String(rate));
+    const t = _sessionTelemetry.get(this.session.sessionId);
+    if (t) t.detRate = rate;
   }
 
   private setMetric(name: string, val: string): void {
@@ -456,6 +628,7 @@ class StreamCard {
     this.destroyed = true;
     if (this.decayInterval) { clearInterval(this.decayInterval); this.decayInterval = null; }
     if (this.player) { try { this.player.destroy(); } catch {} this.player = null; }
+    _sessionTelemetry.delete(this.session.sessionId);
     this.el.remove();
   }
 }
