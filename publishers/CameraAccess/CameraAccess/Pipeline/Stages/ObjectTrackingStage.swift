@@ -18,6 +18,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     private var tracker: OCSORT
     private var registry: ItemRegistry
     private var smoother: ConfidenceSmoother
+    private var heatMapBuffer: HeatMapBuffer?
 
     // Tracking config
     // Ref: arXiv:2203.14360 Sec 4.2 — OCM parameters (deltaT, inertia, detThresh)
@@ -78,6 +79,19 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
     func updateConfig(_ newConfig: TrackingStageConfig) {
         self.trackingConfig = newConfig
+        // Heat map buffer: create when enabled, nil when disabled (zero overhead)
+        if newConfig.heatmapEnabled {
+            self.heatMapBuffer = HeatMapBuffer(config: HeatMapConfig(
+                enabled: true,
+                resolution: newConfig.heatmapResolution,
+                decayRate: newConfig.heatmapDecayRate,
+                gaussianRadius: newConfig.heatmapGaussianRadius,
+                opacity: newConfig.heatmapOpacity,
+                mode: HeatMapMode(rawValue: newConfig.heatmapMode) ?? .detection
+            ))
+        } else {
+            self.heatMapBuffer = nil
+        }
         self.tracker = OCSORT(
             detThresh: newConfig.detThresh,
             maxAge: newConfig.maxAge,
@@ -112,6 +126,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         tracker.reset()
         registry.reset()
         smoother.reset()
+        heatMapBuffer = nil
         NSLog("[ObjectTrackingStage] Stopped")
     }
 
@@ -173,6 +188,17 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
         // OC-SORT update — runs ORU, OCM, OCR internally
         let tracks = tracker.update(detections: smoothed, timestamp: timestamp)
 
+        // Heat map accumulation — splat each track center into the grid
+        if var hbuf = heatMapBuffer {
+            for track in tracks {
+                let cx = (track.bbox.x1 + track.bbox.x2) / 2
+                let cy = (track.bbox.y1 + track.bbox.y2) / 2
+                hbuf.splat(x: cx, y: cy, weight: 1.0)
+            }
+            hbuf.decay()
+            heatMapBuffer = hbuf
+        }
+
         // Restore reconciled track zone histories from deadItems cache.
         // When a dead track is matched to a new track, restore its TrackedItem
         // so zone history continuity is preserved across the occlusion gap.
@@ -223,7 +249,8 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
             registry: snapshot,
             inferenceTimeMs: inferenceTimeMs,
             timestamp: timestamp,
-            predictedZoneBreaches: predictedBreaches
+            predictedZoneBreaches: predictedBreaches,
+            heatMap: heatMapBuffer?.snapshot
         )
 
         // Dual output

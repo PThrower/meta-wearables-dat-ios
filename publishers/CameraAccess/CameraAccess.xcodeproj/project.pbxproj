@@ -95,8 +95,10 @@
 		TOLTYPBLD01 /* ToolTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOLTYPFLE01 /* ToolTypes.swift */; };
 		HMGSOLBLD01 /* HomographySolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = HMGSOLFLE01 /* HomographySolver.swift */; };
 		TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOLMSRFLE01 /* ToolMeasurementStage.swift */; };
+		HTMAPBLD01 /* HeatMapBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = HTMAPFLE01 /* HeatMapBuffer.swift */; };
 		YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */; };
 		YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */; };
+		EMBBLD58A2C1F4D39B7E0126 /* EmbeddingExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = EMBFRE4A7B3E28C15D6F9082 /* EmbeddingExtractor.swift */; };
 		28A995D0A825464CB3ACDE88 /* StageMetricsCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */; };
 		421D29A50E9A4E7699BC18C4 /* StageMetricsTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */; };
 		YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF7D6C464283423908 /* YOLODecoder.swift */; };
@@ -227,8 +229,10 @@
 		TOLTYPFLE01 /* ToolTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolTypes.swift; sourceTree = "<group>"; };
 		HMGSOLFLE01 /* HomographySolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomographySolver.swift; sourceTree = "<group>"; };
 		TOLMSRFLE01 /* ToolMeasurementStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolMeasurementStage.swift; sourceTree = "<group>"; };
+		HTMAPFLE01 /* HeatMapBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatMapBuffer.swift; sourceTree = "<group>"; };
 		YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOTypes.swift; sourceTree = "<group>"; };
 		YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOModelManager.swift; sourceTree = "<group>"; };
+		EMBFRE4A7B3E28C15D6F9082 /* EmbeddingExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmbeddingExtractor.swift; sourceTree = "<group>"; };
 		2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageMetricsCollector.swift; sourceTree = "<group>"; };
 		5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageMetricsTypes.swift; sourceTree = "<group>"; };
 		YOLFREF7D6C464283423908 /* YOLODecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLODecoder.swift; sourceTree = "<group>"; };
@@ -439,9 +443,11 @@
 				HMGSOLFLE01 /* HomographySolver.swift */,
 				YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */,
 				YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */,
+				EMBFRE4A7B3E28C15D6F9082 /* EmbeddingExtractor.swift */,
 				2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */,
 				5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */,
 				YOLFREF7D6C464283423908 /* YOLODecoder.swift */,
+				HTMAPFLE01 /* HeatMapBuffer.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -728,8 +734,10 @@
 				TOLTYPBLD01 /* ToolTypes.swift in Sources */,
 				HMGSOLBLD01 /* HomographySolver.swift in Sources */,
 				TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */,
+				HTMAPBLD01 /* HeatMapBuffer.swift in Sources */,
 				YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */,
 				YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */,
+				EMBBLD58A2C1F4D39B7E0126 /* EmbeddingExtractor.swift in Sources */,
 				28A995D0A825464CB3ACDE88 /* StageMetricsCollector.swift in Sources */,
 				421D29A50E9A4E7699BC18C4 /* StageMetricsTypes.swift in Sources */,
 				YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */,

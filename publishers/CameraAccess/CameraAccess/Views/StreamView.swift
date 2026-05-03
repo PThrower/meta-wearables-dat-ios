@@ -52,7 +52,8 @@ struct StreamView: View {
             trackedItems: viewModel.trackingTracks,
             yoloDetections: viewModel.yoloDetections,
             zones: viewModel.activeZones,
-            zoneAnalytics: viewModel.trackingSnapshot
+            zoneAnalytics: viewModel.trackingSnapshot,
+            heatMap: viewModel.heatMap
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }

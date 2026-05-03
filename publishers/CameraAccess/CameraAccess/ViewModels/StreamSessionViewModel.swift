@@ -124,6 +124,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var trackingTracks: [Track] = []
   /// Latest registry snapshot with zone analytics (dwell times, traffic, speeds).
   @Published var trackingSnapshot: RegistrySnapshot? = nil
+  /// Heat map grid snapshot from tracking stage (nil when disabled).
+  @Published var heatMap: HeatMapSnapshot? = nil
 
   /// Zone definitions from the active tracking config (for overlay rendering).
   var activeZones: [ZoneDefinition] {
@@ -1179,6 +1181,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingConfig = nil
       trackingTracks = []
       trackingSnapshot = nil
+      heatMap = nil
     }
 
     let trackingConfig = TrackingStageConfig(
@@ -1213,7 +1216,13 @@ class StreamSessionViewModel: ObservableObject {
         )
       } ?? [],
       costFunction: config["costFunction"] as? String,
-      forecastSteps: config["forecastSteps"] as? Int ?? 0
+      forecastSteps: config["forecastSteps"] as? Int ?? 0,
+      heatmapEnabled: config["heatmapEnabled"] as? Bool ?? false,
+      heatmapResolution: config["heatmapResolution"] as? Int ?? 40,
+      heatmapDecayRate: config["heatmapDecayRate"] as? Double ?? 0.97,
+      heatmapGaussianRadius: config["heatmapGaussianRadius"] as? Int ?? 1,
+      heatmapOpacity: config["heatmapOpacity"] as? Double ?? 0.4,
+      heatmapMode: config["heatmapMode"] as? String ?? "detection"
     )
 
     let stage = ObjectTrackingStage(config: trackingConfig)
@@ -1247,6 +1256,7 @@ class StreamSessionViewModel: ObservableObject {
       await MainActor.run {
         self?.trackingTracks = result.tracks
         self?.trackingSnapshot = result.registry
+        self?.heatMap = result.heatMap
       }
       // Relay tracking result JSON to server
       await self?.relayStage.sendJson(result.jsonDict())
@@ -1562,6 +1572,7 @@ class StreamSessionViewModel: ObservableObject {
             trackingStage = nil
             trackingTracks = []
       trackingSnapshot = nil
+      heatMap = nil
             NSLog("[StreamSession] ObjectTrackingStage disabled by server")
           }
         } else {
@@ -1855,6 +1866,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
     }
     trackingTracks = []
+    heatMap = nil
     // Measure
     if let m = measureStage {
       await m.stop()
@@ -1901,6 +1913,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
     }
     trackingTracks = []
+    heatMap = nil
 
     // Stop tool measurement stage
     if let mStage = measureStage {

@@ -158,45 +158,25 @@ actor YOLOModelManager {
 
         let continuation = progressContinuations[id]
 
-        // Stream download directly to disk (avoids buffering entire ZIP in RAM)
-        NSLog("[YOLOModel] Streaming download to \(downloadedFile.lastPathComponent)...")
-        let (asyncBytes, response) = try await URLSession.shared.bytes(from: url)
+        // Download to temp file via URLSession (streams to disk natively, no RAM buffering)
+        NSLog("[YOLOModel] Downloading \(id)...")
+        let (tempLocalUrl, response) = try await URLSession.shared.download(from: url)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw YOLOModelError.downloadFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
         }
 
-        let totalBytes = response.expectedContentLength
-        var receivedBytes: Int64 = 0
-
-        // Open file handle for streaming writes
-        FileManager.default.createFile(atPath: downloadedFile.path, contents: nil)
-        let fileHandle = try FileHandle(forWritingTo: downloadedFile)
-        defer { try? fileHandle.close() }
-
-        // Read magic bytes from first chunk to detect ZIP
-        var headerChecked = false
-        var isZip = false
-
-        for try await byte in asyncBytes {
-            try fileHandle.write(contentsOf: Data([byte]))
-            receivedBytes += 1
-
-            // Check magic bytes from first 4 bytes
-            if !headerChecked && receivedBytes == 4 {
-                try fileHandle.seek(toOffset: 0)
-                let header = try fileHandle.read(upToCount: 4) ?? Data()
-                isZip = header.count >= 4 && header[0] == 0x50 && header[1] == 0x4B
-                headerChecked = true
-                try fileHandle.seek(toOffset: UInt64(receivedBytes))
-            }
-
-            // Yield progress every 64KB to avoid flooding
-            if totalBytes > 0 && receivedBytes % 65536 == 0 {
-                continuation?.yield(Double(receivedBytes) / Double(totalBytes))
-            }
+        // Move downloaded temp file to our expected path
+        if FileManager.default.fileExists(atPath: downloadedFile.path) {
+            try FileManager.default.removeItem(at: downloadedFile)
         }
+        try FileManager.default.moveItem(at: tempLocalUrl, to: downloadedFile)
         continuation?.yield(1.0)
-        NSLog("[YOLOModel] Downloaded \(receivedBytes) bytes, isZip=\(isZip)")
+
+        // Check magic bytes to detect ZIP
+        let headerData = try Data(contentsOf: downloadedFile, options: [.alwaysMapped]).prefix(4)
+        let isZip = headerData.count >= 2 && headerData[0] == 0x50 && headerData[1] == 0x4B
+        let fileSize = try FileManager.default.attributesOfItem(atPath: downloadedFile.path)[.size] as? Int64 ?? 0
+        NSLog("[YOLOModel] Downloaded \(fileSize) bytes, isZip=\(isZip)")
 
         let extractedDir = tempDir.appendingPathComponent("extracted")
         try FileManager.default.createDirectory(at: extractedDir, withIntermediateDirectories: true)
