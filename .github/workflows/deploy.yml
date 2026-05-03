@@ -102,6 +102,14 @@ jobs:
               grep -q '^DEEPGRAM_API_KEY=' .env && sed -i "s|^DEEPGRAM_API_KEY=.*|DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}|" .env || echo "DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}" >> .env
               echo "DEEPGRAM_API_KEY injected"
             fi
+            if [ -n "${{ secrets.PALANTIR_TOKEN }}" ]; then
+              grep -q '^PALANTIR_TOKEN=' .env && sed -i "s|^PALANTIR_TOKEN=.*|PALANTIR_TOKEN=${{ secrets.PALANTIR_TOKEN }}|" .env || echo "PALANTIR_TOKEN=${{ secrets.PALANTIR_TOKEN }}" >> .env
+              echo "PALANTIR_TOKEN injected"
+            fi
+            if [ -n "${{ secrets.PALANTIR_STACK_URL }}" ]; then
+              grep -q '^PALANTIR_STACK_URL=' .env && sed -i "s|^PALANTIR_STACK_URL=.*|PALANTIR_STACK_URL=${{ secrets.PALANTIR_STACK_URL }}|" .env || echo "PALANTIR_STACK_URL=${{ secrets.PALANTIR_STACK_URL }}" >> .env
+              echo "PALANTIR_STACK_URL injected"
+            fi
 
             echo ">>> Syncing infra configs"
             cp /root/relay-server/hosted/infra/caringmind-relay.service /etc/systemd/system/
