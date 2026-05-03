@@ -15,6 +15,7 @@
 
 import {
   createServiceClient,
+  createTokenClient,
   OntologiesNamespace,
   AipNamespace,
   DatasetsNamespace,
@@ -94,10 +95,19 @@ export class PalantirOrchestrator {
     const cached = this.clientCache.get(stackUrl);
     if (cached) return cached;
 
+    // Prefer bearer token (hackathon: pre-obtained token in env)
+    const token = process.env.PALANTIR_TOKEN;
+    if (token) {
+      const client = createTokenClient(stackUrl, token);
+      this.clientCache.set(stackUrl, client);
+      return client;
+    }
+
+    // Fallback to client credentials
     const clientId = process.env.PALANTIR_CLIENT_ID;
     const clientSecret = process.env.PALANTIR_CLIENT_SECRET;
     if (!clientId || !clientSecret) {
-      console.warn("[palantir] Missing PALANTIR_CLIENT_ID or PALANTIR_CLIENT_SECRET env vars");
+      console.warn("[palantir] Missing PALANTIR_TOKEN or PALANTIR_CLIENT_ID/SECRET env vars");
       return null;
     }
 
@@ -279,100 +289,110 @@ export class PalantirOrchestrator {
 
       switch (operation) {
         case "tracking_sync": {
-          // Sync tracking data to ontology objects
-          // objectTypeId       -> TrackedPerson (create/update)
-          // transitionObjectTypeId -> ZoneTransition (create)
-          // zoneObjectTypeId       -> MonitoringZone (update)
+          // Sync tracking data to NatSec Hackathon ontology objects
+          // objectTypeId          -> ExamplePlatform (tracked persons)
+          // transitionObjectTypeId -> ExampleCaskGpsPosition (zone transitions as GPS positions)
+          // zoneObjectTypeId       -> ExampleGeoFeatures (monitoring zones)
           const tracks = structuredData.tracks as Array<Record<string, unknown>> ?? [];
           const registry = structuredData.registry as Record<string, unknown> ?? {};
-          const zones = structuredData.zones as Array<Record<string, unknown>> ?? [];
           const transitions = (registry as any)?.recentTransitions as Array<Record<string, unknown>> ?? [];
           const zoneCounts = (registry as any)?.zoneCounts as Record<string, number> ?? {};
-          const zoneDwellTimes = (registry as any)?.zoneDwellTimes as Record<string, Record<string, number>> ?? {};
 
           const results: unknown[] = [];
 
-          // --- TrackedPerson: create/update ---
+          // --- ExamplePlatform: upsert tracked persons as platforms ---
           for (const track of tracks) {
             if (track.state !== "confirmed") continue;
-            const personId = `track-${track.trackId}`;
+            const platformId = `track-${track.trackId}`;
+            const bbox = track.bbox as { x1: number; y1: number; x2: number; y2: number } | undefined;
+            // Map bbox center to lat/lon placeholder (0,0 for camera-space)
+            const lat = bbox ? (bbox.y1 + bbox.y2) / 2 : 0;
+            const lon = bbox ? (bbox.x1 + bbox.x2) / 2 : 0;
             try {
               const existing = await ontologies.search(ontologyApiName, objectTypeId, {
-                where: { personId: { exactMatch: personId } },
+                where: { platformId: { exactMatch: platformId } },
                 pageSize: 1,
               });
               const items = (existing as any)?.data ?? [];
               if (items.length > 0) {
-                await ontologies.updateObject(ontologyApiName, objectTypeId, personId, {
+                await ontologies.updateObject(ontologyApiName, objectTypeId, platformId, {
                   properties: {
-                    confidence: track.confidence,
-                    speed: track.speed ?? 0,
-                    heading: track.heading ?? 0,
-                    zoneId: track.zoneId ?? "",
-                    dwellTimeSeconds: track.dwellTimeSeconds ?? 0,
-                    lastSeenTimestamp: vars.timestamp,
+                    callsign: `${track.classLabel ?? "person"}-${track.trackId}`,
+                    lat,
+                    lon,
+                    altM: 0,
                   },
                 });
               } else {
                 await ontologies.createObject(ontologyApiName, objectTypeId, {
                   properties: {
-                    personId,
-                    classLabel: track.classLabel ?? "person",
-                    confidence: track.confidence,
-                    state: track.state,
-                    speed: track.speed ?? 0,
-                    heading: track.heading ?? 0,
-                    zoneId: track.zoneId ?? "",
-                    dwellTimeSeconds: track.dwellTimeSeconds ?? 0,
-                    firstSeenTimestamp: vars.timestamp,
-                    lastSeenTimestamp: vars.timestamp,
+                    platformId,
+                    callsign: `${track.classLabel ?? "person"}-${track.trackId}`,
+                    platformType: (track.classLabel as string) ?? "person",
+                    lat,
+                    lon,
+                    altM: 0,
                   },
                 });
               }
-              results.push({ action: "upsert_person", personId });
+              results.push({ action: "upsert_platform", platformId });
             } catch (e) {
-              console.warn(`[palantir] tracking_sync person upsert error for ${personId}: ${(e as Error).message}`);
+              console.warn(`[palantir] tracking_sync platform error for ${platformId}: ${(e as Error).message}`);
             }
           }
 
-          // --- ZoneTransition: create ---
+          // --- ExampleCaskGpsPosition: create zone transitions as GPS positions ---
           for (const transition of transitions.slice(-5)) {
             try {
-              const transitionId = `${transition.trackId}-${transition.fromZone}-${transition.toZone}-${Date.now()}`;
+              const positionId = `trk-${transition.trackId}-${Date.now()}`;
               await ontologies.createObject(ontologyApiName, transitionObjectTypeId, {
                 properties: {
-                  transitionId,
-                  personId: `track-${transition.trackId}`,
-                  fromZone: transition.fromZone ?? "",
-                  toZone: transition.toZone ?? "",
-                  predicted: transition.predicted ?? false,
+                  positionId,
+                  deviceId: `glasses-${sessionId}`,
+                  name: `${transition.trackId}: ${transition.fromZone ?? "?"}->${transition.toZone ?? "?"}`,
+                  latitude: 0,
+                  longitude: 0,
+                  altitudeM: 0,
+                  speedKnots: (transition.speed as number) ?? 0,
+                  courseDeg: 0,
+                  fixQuality: "tracked",
+                  numSatellites: 0,
                   timestamp: vars.timestamp,
-                  speedAtTransition: transition.speed ?? 0,
                 },
               });
-              results.push({ action: "transition", transitionId });
+              results.push({ action: "transition", positionId });
             } catch { /* skip */ }
           }
 
-          // --- MonitoringZone: update occupancy ---
+          // --- ExampleGeoFeatures: update zone occupancy ---
           for (const [zoneId, occupancyCount] of Object.entries(zoneCounts)) {
+            const featureId = `zone-${zoneId}`;
             try {
-              await ontologies.updateObject(ontologyApiName, zoneObjectTypeId, zoneId, {
+              await ontologies.updateObject(ontologyApiName, zoneObjectTypeId, featureId, {
                 properties: {
-                  occupancyCount,
-                  totalEntries: zoneDwellTimes[zoneId] ? Object.keys(zoneDwellTimes[zoneId]).length : 0,
-                  lastUpdated: vars.timestamp,
+                  name: `${zoneId} (${occupancyCount} occupants)`,
                 },
               });
               results.push({ action: "update_zone", zoneId });
-            } catch { /* skip */ }
+            } catch {
+              // Zone may not exist yet — try creating it
+              try {
+                await ontologies.createObject(ontologyApiName, zoneObjectTypeId, {
+                  properties: {
+                    featureId,
+                    name: `${zoneId} (${occupancyCount} occupants)`,
+                    featureType: "monitoring_zone",
+                  },
+                });
+                results.push({ action: "create_zone", zoneId });
+              } catch { /* skip */ }
+            }
           }
 
           this.emitEvent(sessionId, "palantir-ontology", {
             operation: "tracking_sync",
             syncedTracks: results.length,
             zoneCounts,
-            zoneDwellTimes,
           });
           console.log(`[palantir] tracking_sync: ${results.length} ops session=${sessionId}`);
           break;
