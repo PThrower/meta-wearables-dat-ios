@@ -9,7 +9,7 @@
  * Memory-safe on 4GB devices:
  *   - FileHandle streaming ZIP extraction (never loads full ZIP into RAM)
  *   - Streaming inflate to file (never accumulates decompressed data in RAM)
- *   - LRU model cache (max 2 models in memory at once)
+ *   - LRU model cache (max 1 model in memory at once)
  *   - Early temp cleanup (ZIP deleted after extraction, before compilation)
  *
  * zlib accessed via Swiftzlib module map (Swiftzlib/module.modulemap).
@@ -65,8 +65,13 @@ actor YOLOModelManager {
     }
 
     /// Minimum free memory (bytes) required before loading a model.
-    /// YOLO models can use 50-200MB of Neural Engine memory at inference time.
-    private static let minFreeMemoryForLoad: Int64 = 200 * 1024 * 1024  // 200MB
+    /// 4GB devices (iPhone 13 mini, SE 3) have a 2098MB per-process Jetsam limit.
+    /// H264 streaming encoder alone uses ~600MB. Need enough headroom for model load spike.
+    private static let minFreeMemoryForLoad: Int64 = 400 * 1024 * 1024  // 400MB
+
+    /// Maximum phys_footprint (MB) before model load is refused.
+    /// Tracks actual resident memory including compressed pages.
+    private static let maxFootprintForLoad: Double = 1500.0
 
     /// Load a compiled MLModel, downloading or compiling as needed.
     /// - Parameters:
@@ -76,9 +81,14 @@ actor YOLOModelManager {
     func loadModel(id: String, serverUrl: String? = nil) async throws -> ModelLoadResult {
         // Memory pressure check — refuse to load if device is near Jetsam limit
         let freeMemory = Int64(os_proc_available_memory())
-        NSLog("[YOLOModel] Available memory: \(freeMemory / (1024*1024))MB")
+        let footprintMB = Self.physFootprintMB()
+        NSLog("[YOLOModel] Available memory: \(freeMemory / (1024*1024))MB, footprint: \(String(format: "%.0f", footprintMB))MB")
         if freeMemory > 0 && freeMemory < Self.minFreeMemoryForLoad {
             NSLog("[YOLOModel] MEMORY WARNING: only \(freeMemory / (1024*1024))MB free, refusing to load model '\(id)'")
+            throw YOLOModelError.insufficientMemory(freeMB: freeMemory / (1024*1024))
+        }
+        if footprintMB > Self.maxFootprintForLoad {
+            NSLog("[YOLOModel] MEMORY WARNING: footprint \(String(format: "%.0f", footprintMB))MB exceeds limit \(String(format: "%.0f", Self.maxFootprintForLoad))MB, refusing to load model '\(id)'")
             throw YOLOModelError.insufficientMemory(freeMB: freeMemory / (1024*1024))
         }
 
@@ -222,9 +232,20 @@ actor YOLOModelManager {
     // MARK: - Private
 
     private func loadCompiledModel(at url: URL) async throws -> MLModel {
+        let beforeMB = Self.physFootprintMB()
+        NSLog("[YOLOModel] Loading compiled model, footprint before: \(String(format: "%.0f", beforeMB))MB")
+
         let config = MLModelConfiguration()
-        config.computeUnits = .all  // Prefer Neural Engine
-        return try MLModel(contentsOf: url, configuration: config)
+        // Use .cpuAndGPU instead of .all to avoid Neural Engine memory spike.
+        // On 4GB devices (2GB per-process limit), ANE allocation during MLModel(contentsOf:)
+        // can push phys_footprint past the Jetsam limit by 200-400MB.
+        // CPU+GPU inference is ~10-20ms slower per frame but keeps the app alive.
+        config.computeUnits = .cpuAndGPU
+        let model = try MLModel(contentsOf: url, configuration: config)
+
+        let afterMB = Self.physFootprintMB()
+        NSLog("[YOLOModel] Model loaded, footprint after: \(String(format: "%.0f", afterMB))MB (delta: +\(String(format: "%.0f", afterMB - beforeMB))MB)")
+        return model
     }
 
     private func downloadAndCompile(id: String, serverUrl: String, compiledUrl: URL) async throws -> ModelLoadResult {
@@ -628,6 +649,24 @@ actor YOLOModelManager {
         }
 
         NSLog("[YOLOModel] streaming inflate: done total_out=\(stream.total_out)")
+    }
+
+    // MARK: - Memory Helpers
+
+    /// Get current process physical footprint in MB.
+    /// Uses task_info(TASK_VM_INFO) phys_footprint — includes resident, compressed,
+    /// and IOAccelerated memory. More accurate than os_proc_available_memory() for
+    /// detecting Jetsam risk since it reflects what the kernel tracks for per-process-limit.
+    nonisolated static func physFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.phys_footprint) / 1_048_576.0
     }
 }
 

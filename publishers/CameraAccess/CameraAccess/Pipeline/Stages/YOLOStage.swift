@@ -163,7 +163,10 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
             }
 
             // Create VNCoreMLModel for Vision framework integration
+            let visionBeforeMB = YOLOModelManager.physFootprintMB()
             let visionModel = try VNCoreMLModel(for: model)
+            let visionAfterMB = YOLOModelManager.physFootprintMB()
+            NSLog("[YOLOStage] VNCoreMLModel created, footprint: \(String(format: "%.0f", visionAfterMB))MB (delta: +\(String(format: "%.0f", visionAfterMB - visionBeforeMB))MB)")
             let request = VNCoreMLRequest(model: visionModel)
             request.imageCropAndScaleOption = .centerCrop
             self.visionRequest = request
