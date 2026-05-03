@@ -5,3 +5,8 @@ relay.simulationapi.com {
 
 # BEGIN PREVIEWS (auto-managed by preview-manager.sh — do not edit)
 # END PREVIEWS
+
+development.simulationapi.com {
+    # Dev environment — feat/command-center branch, gateway on :3001
+    reverse_proxy localhost:3001
+}

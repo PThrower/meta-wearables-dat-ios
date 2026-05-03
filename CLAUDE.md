@@ -100,20 +100,31 @@ Key files:
 
 ### Hosted Server (`hosted/server/src/`)
 
-Single-file entry point: `server.ts`. Key subsystems:
+Single-file entry point: `server.ts` (WebSocket upgrade handler near the top; HTTP routes below). Key subsystems:
 
 - **Session registry** (`session-registry.ts`) — tracks active iOS sessions and viewer WebSockets
-- **Workflow activation** (`server.ts` ~line 1212) — receives workflow from web, resolves nodes, dispatches configs to iOS and AI services
+- **Workflow activation** (`workflow-activation.ts`, `handleWorkflowActivation`) — handles `POST /workflows/:id/activate`; categorizes nodes, sends iOS config, fires orchestrators. Do not put new activation logic back in `server.ts`.
+- **Workflow dispatch** (`workflow-dispatch.ts`) — WS message builders for iOS: `workflow_config`, `enhance_stage_config`, vision config
 - **Guidance orchestrator** (`guidance-orchestrator.ts`) — manages s2s-live/s2s-rest/s2s-e4b AI processors, handles `dependsOn` deferred activation
 - **JEPA orchestrator** (`jepa-orchestrator.ts`) — manages JEPA vision models
+- **ReID orchestrator** (`reid-orchestrator.ts`) — appearance embedding service
+- **Palantir orchestrator** (`palantir-orchestrator.ts`) — Palantir AIP/Ontology integration
 - **App registry** (`app-registry.ts`) — resolves workflow node types to `AppDefinition` objects
-- **Node definitions** (`node-definitions.ts`) — canonical node type list with `activationMode`, `allowedTargets`, config schemas
+- **Node definitions** (`node-definitions.ts`) — **sole source of truth** for all node types; `NODE_DEF_MAP` drives edge validation, pipeline resolution, and dispatch. Never duplicate node logic elsewhere.
+- **Database layer** (`db/schema.ts`, `db/queries.ts`, `db/db-writer.ts`) — Drizzle schema; all reads via `queries.ts`; all writes via `dbWriter` async queue (never write directly to DB)
 - **Session export** (`session-export.ts`) — MP4 export via ffmpeg (requires ffmpeg ≥ 6.0)
 - **Deepgram STT** (`deepgram-stt-service.ts`), **Gemini Live** (`gemini-live-service.ts`), **Gemma4** (`gemma4-service.ts`)
+- `config/apps.json` — app/primitive definitions; adding a node type requires a new entry here AND in `node-definitions.ts`
 
 ### Web Platform (`hosted/web-platform/src/`)
 
-Vite + TypeScript SPA. Key pages: workflow editor (`pages/workflow/`), live viewer, session gallery. The workflow editor reads node definitions from `pages/workflow/node-defs.ts` — this is the frontend mirror of the server's `node-definitions.ts` and must stay in sync.
+Vite + vanilla TypeScript SPA — **no React, no JSX**, all DOM manipulation is imperative TS (`document.createElement`, `.innerHTML`).
+
+Key structure: `main.ts` (auth + router bootstrap) → `router/routes.ts` (route table) → page modules. All API calls use `authFetch` from `auth/core.ts` — never use raw `fetch` for relay server endpoints.
+
+Key pages: workflow editor (`pages/workflow/`), live viewer (`live/`), session gallery. The live viewer is split into `index.ts`, `state.ts`, `message-handler.ts`, `mini-editor.ts`, and panel modules. The video player lives in `player/` (`relay-player.ts` via jmuxer, `frau-builder.ts`, `audio-worklet.ts`).
+
+The workflow editor reads node definitions from `pages/workflow/node-defs.ts` (`FALLBACK_PALETTE`) — this is the frontend fallback when `GET /api/node-definitions` is unavailable; the server's `node-definitions.ts` is authoritative. Config forms in the editor are generated from `configSchema` arrays — never hard-code field rendering for a specific node type. `TYPE_ALIASES` in `node-defs.ts` maps old type strings to current types — add entries when renaming a type, never delete old keys.
 
 ### Deployment
 
@@ -149,6 +160,18 @@ If a workflow requires glasses microphone (codecType 1), `startAudioSession()` m
 ### Node definitions: allowedTargets
 
 `allowedTargets` in both `node-definitions.ts` (server) and `node-defs.ts` (frontend) must include every concrete downstream type. Sentinels `<sink>`, `<trigger>`, `<source>` expand to role-matched types. Adding a new node type requires updating both files. See `pipeline-conventions.md` Rule 7–8.
+
+### Server: sessionId TypeScript narrowing
+
+`body.sessionId` is typed `string | undefined` and guarded by an early return. Assign `const sid = body.sessionId` before any `.map()` or async closure — TS narrowing from the guard does not carry into closure scope.
+
+### Server: DB writes go through db-writer
+
+All DB mutations must go through `dbWriter` (the async write queue in `db/db-writer.ts`). Never call Drizzle insert/update/delete directly from route handlers or orchestrators. Use `dbWriter.flush()` for latency-sensitive writes (e.g., APNs tokens).
+
+### Server: integration tests use real SQLite
+
+Tests in `hosted/server/test/` (`bun test`) hit a real SQLite database — do not mock the DB layer. See prior incident in pipeline-conventions.md.
 
 ### iOS mock testing
 
