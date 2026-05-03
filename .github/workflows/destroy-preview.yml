@@ -1,0 +1,49 @@
+name: Destroy Preview
+
+on:
+  delete: {}
+  pull_request_target:
+    types: [closed]
+
+jobs:
+  destroy-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'delete' || github.event.pull_request.merged == true
+
+    steps:
+      - name: Determine branch slug
+        id: slug
+        run: |
+          if [ "${{ github.event_name }}" = "delete" ]; then
+            BRANCH="${{ github.event.ref }}"
+          else
+            BRANCH="${{ github.head_ref }}"
+          fi
+          SLUG=$(echo "$BRANCH" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Skip production branches
+        if: |
+          steps.slug.outputs.branch == 'main' ||
+          steps.slug.outputs.branch == 'feat/stream-registry'
+        run: |
+          echo "Skipping — production branch"
+          exit 0
+
+      - name: Destroy preview via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: relay.simulationapi.com
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 3m
+          script: |
+            set -euo pipefail
+            echo ">>> Destroying preview ${{ steps.slug.outputs.slug }}"
+            /root/relay-server/hosted/infra/preview-manager.sh destroy "${{ steps.slug.outputs.slug }}" || {
+              echo "Preview not found — may have already been cleaned up"
+              exit 0
+            }
+            echo "Preview destroyed"

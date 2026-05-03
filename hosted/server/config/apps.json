@@ -1,0 +1,138 @@
+{
+  "primitives": [
+    {
+      "id": "s2s-gemini-live",
+      "inputs": [
+        { "format": "pcm-audio", "sampleRate": 16000 },
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "pcm-audio" },
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
+    },
+    {
+      "id": "s2s-gemma4-rest",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
+    },
+    {
+      "id": "s2s-gemma4-e4b-rest",
+      "inputs": [
+        { "format": "jpeg-image" },
+        { "format": "pcm-audio", "sampleRate": 16000 }
+      ],
+      "outputs": [
+        { "format": "text" },
+        { "format": "tool-call" }
+      ]
+    },
+    {
+      "id": "hand-pose",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "gesture-event" }
+      ]
+    },
+    {
+      "id": "jepa-vjepa2",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "jepa-embedding" },
+        { "format": "jepa-action" },
+        { "format": "jepa-anomaly" },
+        { "format": "jepa-prediction" }
+      ]
+    },
+    {
+      "id": "jepa-lewm",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "jepa-embedding" },
+        { "format": "jepa-anomaly" },
+        { "format": "jepa-prediction" }
+      ]
+    },
+    {
+      "id": "vision-body-pose",
+      "inputs": [
+        { "format": "jpeg-image" }
+      ],
+      "outputs": [
+        { "format": "body-pose-detection" }
+      ]
+    },
+    {
+      "id": "sensor-sound",
+      "inputs": [
+        { "format": "pcm-audio" }
+      ],
+      "outputs": [
+        { "format": "sound-classification" }
+      ]
+    },
+    {
+      "id": "sensor-location",
+      "inputs": [],
+      "outputs": [
+        { "format": "location-update" }
+      ]
+    }
+  ],
+  "apps": [
+    {
+      "id": "spanish-co-pilot",
+      "name": "Spanish Co-pilot",
+      "description": "Learn Spanish through conversation and visual context",
+      "icon": "text.bubble",
+      "binding": "s2s-gemini-live",
+      "systemPrompt": "You are a friendly Spanish language coach. The user is wearing smart glasses with a camera and microphone. You can see what they see and hear what they say.\n\nRules:\n- Speak naturally through audio — that's the primary channel to the user.\n- Your text output is your internal thinking, NOT shown to the user directly.\n- Only use emit_guidance_event when you have something important to log (vocabulary word, correction, safety alert, object identification).\n- Most conversation should be audio-only. Do NOT emit a guidance event for every response.\n- Keep spoken responses short and conversational.\n- Respond in a mix of Spanish and English appropriate for a beginner.\n- When the user points at objects, identify them in Spanish.\n- Correct pronunciation gently.",
+      "config": {
+        "model": "gemini-2.5-flash-native-audio-latest",
+        "voice": "Kore",
+        "visionFps": 0.5,
+        "gestures": ["thumbs_up", "thumbs_down", "open_palm", "pointing"]
+      }
+    },
+    {
+      "id": "visual-intelligence",
+      "name": "Visual Intelligence",
+      "description": "AI-powered visual analysis and guidance using Gemma 4",
+      "icon": "eye",
+      "binding": "s2s-gemma4-rest",
+      "systemPrompt": "You are a visual intelligence assistant for someone wearing smart glasses with a camera.\n\nYou have two tools. You MUST call BOTH tools in every response when objects are visible:\n1. annotate_scene — detect and localize objects with bounding boxes [y1, x1, y2, x2] in 1024x1024 normalized coordinates.\n2. emit_guidance_event — speak a brief description to the user via TTS. Use eventType \"identification\" for objects/text, \"alert\" for hazards, \"step\" for observations.\n\nRules:\n- ALWAYS call BOTH annotate_scene AND emit_guidance_event in the same response.\n- annotate_scene provides spatial data (bounding boxes). emit_guidance_event provides voice narration. They are complementary, not interchangeable.\n- Keep spoken content concise and actionable.\n- Prioritize safety: hazards, obstacles, and warnings always take precedence.\n- Read signs and text aloud when visible.",
+      "config": {
+        "model": "gemma-4-26b-a4b-it",
+        "visionFps": 0.2,
+        "temperature": 0.4,
+        "analysisIntervalSec": 5
+      }
+    },
+    {
+      "id": "voice-navigator",
+      "name": "Voice Navigator",
+      "description": "See what you see and hear what you say -- voice-driven visual assistant using Gemma 4 E4B",
+      "icon": "waveform.path",
+      "binding": "s2s-gemma4-e4b-rest",
+      "systemPrompt": "You are a voice-driven visual assistant for someone wearing smart glasses with a camera and microphone. You can see what they see and hear what they say.\n\nYou have two tools:\n1. annotate_scene — detect and localize objects with bounding boxes [y1, x1, y2, x2] in 1024x1024 normalized coordinates.\n2. emit_guidance_event — speak a description or answer to the user via TTS. Use eventType \"identification\" for objects, \"alert\" for hazards, \"step\" for directions/instructions, \"correction\" for fixes.\n\nRules:\n- Listen to the user's voice input. They may ask questions about what's around them or request help.\n- When objects are visible, call annotate_scene to provide spatial awareness.\n- Always respond to voice questions with emit_guidance_event.\n- Keep responses concise and actionable.\n- If the user asks about something visible, describe it AND annotate it.\n- Prioritize safety: hazards and warnings always take precedence.",
+      "config": {
+        "model": "gemma-4-e4b-it",
+        "visionFps": 0.5,
+        "temperature": 0.4,
+        "analysisIntervalSec": 5
+      }
+    }
+  ]
+}

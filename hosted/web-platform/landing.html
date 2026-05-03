@@ -1,0 +1,2503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CaringMind — The Intelligence Layer for Smart Glasses</title>
+  <meta name="description" content="Real-time AI guidance, unified fleet management, and enterprise integration. One platform for every pair of smart glasses.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F9E0;</text></svg>">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --accent: #7c3aed;
+      --accent-light: #a78bfa;
+      --blue: #3b82f6;
+      --cyan: #06b6d4;
+      --glass-blur: 40px;
+      --radius: 24px;
+      --radius-sm: 16px;
+    }
+
+    /* ---- DARK THEME (default) ---- */
+    [data-theme="dark"], :root {
+      --bg: #050507;
+      --bg-nav: rgba(5,5,7,0.7);
+      --bg-nav-scrolled: rgba(5,5,7,0.9);
+      --card: rgba(255,255,255,0.04);
+      --card-border: rgba(255,255,255,0.08);
+      --card-hover: rgba(255,255,255,0.07);
+      --text-primary: #f8fafc;
+      --text-secondary: rgba(248,250,252,0.6);
+      --text-tertiary: rgba(248,250,252,0.35);
+      --pain-color: #f87171;
+      --shadow-accent: rgba(124,58,237,0.25);
+      --shadow-accent-hover: rgba(124,58,237,0.35);
+      --badge-success-bg: rgba(34,197,94,0.12);
+      --badge-success-color: #4ade80;
+      --badge-warn-bg: rgba(245,158,11,0.12);
+      --badge-warn-color: #fbbf24;
+      --badge-future-bg: rgba(124,58,237,0.12);
+      --badge-future-color: var(--accent-light);
+      --input-bg: var(--card);
+      --three-scene-opacity: 1;
+    }
+
+    /* ---- LIGHT THEME ---- */
+    [data-theme="light"] {
+      --bg: #f8f9fb;
+      --bg-nav: rgba(248,249,251,0.8);
+      --bg-nav-scrolled: rgba(248,249,251,0.95);
+      --card: rgba(255,255,255,0.7);
+      --card-border: rgba(0,0,0,0.08);
+      --card-hover: rgba(255,255,255,0.9);
+      --text-primary: #0f172a;
+      --text-secondary: rgba(15,23,42,0.6);
+      --text-tertiary: rgba(15,23,42,0.4);
+      --pain-color: #dc2626;
+      --shadow-accent: rgba(124,58,237,0.15);
+      --shadow-accent-hover: rgba(124,58,237,0.25);
+      --badge-success-bg: rgba(22,163,74,0.1);
+      --badge-success-color: #16a34a;
+      --badge-warn-bg: rgba(217,119,6,0.1);
+      --badge-warn-color: #b45309;
+      --badge-future-bg: rgba(124,58,237,0.08);
+      --badge-future-color: #6d28d9;
+      --input-bg: rgba(255,255,255,0.8);
+      --three-scene-opacity: 0.25;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text-primary);
+      font-family: -apple-system, system-ui, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+      line-height: 1.5;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Three.js canvas */
+    #scene-canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Content layer */
+    .content {
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ---- NAV ---- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 100;
+      padding: 0 40px;
+      height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg-nav);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--card-border);
+    }
+    .nav-logo {
+      font-size: 15px; font-weight: 700; color: var(--text-primary);
+      letter-spacing: -0.3px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .nav-logo span { color: var(--accent-light); }
+    .nav-links { display: flex; gap: 32px; }
+    .nav-links a {
+      font-size: 13px; color: var(--text-secondary);
+      text-decoration: none; transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text-primary); }
+    .nav-cta {
+      font-size: 13px; font-weight: 600;
+      color: var(--accent-light);
+      text-decoration: none;
+      padding: 6px 16px;
+      border: 1px solid rgba(124,58,237,0.3);
+      border-radius: 8px;
+      transition: all 0.2s;
+    }
+    .nav-cta:hover {
+      background: rgba(124,58,237,0.15);
+      border-color: rgba(124,58,237,0.5);
+    }
+
+    /* ---- SECTIONS ---- */
+    section {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 120px 40px;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--accent-light);
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 700;
+      letter-spacing: -1px;
+      line-height: 1.1;
+      color: var(--text-primary);
+      margin-bottom: 20px;
+    }
+
+    .section-subtitle {
+      font-size: 18px;
+      color: var(--text-secondary);
+      max-width: 600px;
+      line-height: 1.6;
+    }
+
+    /* ---- HERO ---- */
+    #hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding-top: 56px;
+    }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 16px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 100px;
+      font-size: 13px; color: var(--text-secondary);
+      margin-bottom: 32px;
+    }
+    .hero-badge .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .hero-title {
+      font-size: clamp(40px, 7vw, 72px);
+      font-weight: 700;
+      letter-spacing: -2px;
+      line-height: 1.05;
+      color: var(--text-primary);
+      margin-bottom: 24px;
+      max-width: 900px;
+    }
+    .hero-title .gradient {
+      background: linear-gradient(135deg, var(--blue), var(--accent), var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-subtitle {
+      font-size: 20px;
+      color: var(--text-secondary);
+      max-width: 580px;
+      line-height: 1.6;
+      margin-bottom: 48px;
+    }
+
+    .hero-ctas { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 32px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 15px; font-weight: 600;
+      text-decoration: none;
+      border-radius: 14px;
+      border: none; cursor: pointer;
+      transition: all 0.25s;
+      box-shadow: 0 0 30px var(--shadow-accent);
+    }
+    .btn-primary:hover {
+      background: #6d28d9;
+      transform: translateY(-1px);
+      box-shadow: 0 0 40px var(--shadow-accent-hover);
+    }
+
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 32px;
+      background: var(--card);
+      color: var(--text-primary);
+      font-size: 15px; font-weight: 600;
+      text-decoration: none;
+      border-radius: 14px;
+      border: 1px solid var(--card-border);
+      cursor: pointer;
+      transition: all 0.25s;
+      backdrop-filter: blur(var(--glass-blur));
+      -webkit-backdrop-filter: blur(var(--glass-blur));
+    }
+    .btn-secondary:hover {
+      background: var(--card-hover);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    .hero-metrics {
+      display: flex; gap: 56px;
+      margin-top: 80px;
+    }
+    .hero-metric { text-align: center; }
+    .hero-metric .val {
+      font-size: 32px; font-weight: 700;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      background: linear-gradient(135deg, var(--blue), var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-metric .label {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+
+    /* ---- TRUST BAR ---- */
+    .trust-bar {
+      border-top: 1px solid var(--card-border);
+      border-bottom: 1px solid var(--card-border);
+      padding: 32px 40px;
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+    .trust-bar p {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 20px;
+    }
+    .trust-logos {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+      opacity: 0.4;
+    }
+    .trust-logos span {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 1px;
+    }
+
+    /* ---- HOW IT WORKS ---- */
+    .steps {
+      display: flex;
+      gap: 32px;
+      margin-top: 48px;
+      counter-reset: step;
+    }
+    .step {
+      flex: 1;
+      position: relative;
+      padding: 36px 28px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      transition: all 0.3s;
+    }
+    .step:hover {
+      background: var(--card-hover);
+      border-color: rgba(255,255,255,0.12);
+      transform: translateY(-2px);
+    }
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--blue));
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+    .step h3 {
+      font-size: 16px; font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    .step p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ---- PRODUCT SHOWCASE ---- */
+    .showcase {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 120px 40px;
+      position: relative;
+      z-index: 1;
+    }
+    .showcase-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 32px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 4px;
+      width: fit-content;
+    }
+    .showcase-tab {
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      background: none;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .showcase-tab:hover { color: var(--text-primary); }
+    .showcase-tab.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .showcase-frame {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      background: var(--card);
+      aspect-ratio: 16/9;
+    }
+    .showcase-panel {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+    .showcase-panel.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* -- Stream Viewer Mockup -- */
+    .mock-viewer {
+      width: 100%; height: 100%;
+      background: #0a0a0b;
+      display: flex;
+      flex-direction: column;
+    }
+    .mock-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px;
+    }
+    .mock-topbar-left { display: flex; align-items: center; gap: 12px; }
+    .mock-status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 8px rgba(34,197,94,0.5);
+    }
+    .mock-topbar-right { display: flex; align-items: center; gap: 16px; color: rgba(255,255,255,0.4); }
+    .mock-quality-selector {
+      display: flex; gap: 2px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .mock-quality-option {
+      padding: 3px 8px;
+      font-size: 10px;
+      border-radius: 4px;
+      color: rgba(255,255,255,0.4);
+    }
+    .mock-quality-option.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .mock-canvas {
+      flex: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0d0d0f;
+      overflow: hidden;
+    }
+    .mock-video-feed {
+      width: 100%; height: 100%;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    .mock-video-feed::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 30% 40%, rgba(124,58,237,0.15) 0%, transparent 50%),
+        radial-gradient(circle at 70% 60%, rgba(59,130,246,0.1) 0%, transparent 50%);
+    }
+    .mock-overlay-ai {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(10px);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 11px;
+      color: #fff;
+      z-index: 2;
+      border: 1px solid rgba(124,58,237,0.3);
+    }
+    .mock-ai-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .mock-ai-step:last-child { margin-bottom: 0; }
+    .mock-ai-check {
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+    }
+    .mock-ai-check.done { background: rgba(34,197,94,0.2); color: #4ade80; }
+    .mock-ai-check.active { background: rgba(124,58,237,0.3); color: var(--accent-light); animation: pulse-dot 1.5s infinite; }
+    .mock-ai-check.pending { background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.3); }
+    .mock-ai-label { color: rgba(255,255,255,0.8); }
+    .mock-ai-label.done { color: rgba(255,255,255,0.4); text-decoration: line-through; }
+    .mock-detection-box {
+      position: absolute;
+      border: 2px solid var(--accent-light);
+      border-radius: 6px;
+      z-index: 2;
+    }
+    .mock-detection-label {
+      position: absolute;
+      top: -22px;
+      left: -2px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 4px 4px 0 0;
+      letter-spacing: 0.5px;
+    }
+    .mock-bottombar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      font-size: 11px;
+      color: rgba(255,255,255,0.3);
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    .mock-ptt {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      color: rgba(255,255,255,0.5);
+      font-size: 10px;
+    }
+    .mock-ptt-circle {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+    }
+
+    /* -- Fleet Dashboard Mockup -- */
+    .mock-dashboard {
+      width: 100%; height: 100%;
+      background: #0a0a0b;
+      display: flex;
+    }
+    .mock-sidebar {
+      width: 200px;
+      border-right: 1px solid rgba(255,255,255,0.06);
+      padding: 16px 12px;
+      font-size: 12px;
+    }
+    .mock-sidebar-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .mock-sidebar-item.active {
+      background: rgba(124,58,237,0.15);
+      color: var(--accent-light);
+    }
+    .mock-main {
+      flex: 1;
+      padding: 16px;
+      overflow: hidden;
+    }
+    .mock-dash-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .mock-dash-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .mock-dash-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .mock-dash-btn {
+      padding: 5px 12px;
+      font-size: 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.5);
+    }
+    .mock-dash-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .mock-stat-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .mock-stat-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .mock-stat-label {
+      font-size: 10px;
+      color: rgba(255,255,255,0.3);
+      margin-bottom: 4px;
+    }
+    .mock-stat-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+    .mock-device-table {
+      width: 100%;
+      font-size: 11px;
+    }
+    .mock-table-header {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.3);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-size: 9px;
+    }
+    .mock-table-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      color: rgba(255,255,255,0.6);
+      align-items: center;
+    }
+    .mock-device-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    .mock-device-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+    }
+    .mock-device-dot.online { background: #22c55e; }
+    .mock-device-dot.idle { background: #f59e0b; }
+    .mock-device-dot.offline { background: rgba(255,255,255,0.15); }
+
+    /* -- Analytics Mockup -- */
+    .mock-analytics {
+      width: 100%; height: 100%;
+      background: #0a0a0b;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+    .mock-chart-area {
+      flex: 1;
+      position: relative;
+      margin-top: 16px;
+    }
+    .mock-chart-grid {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .mock-chart-line {
+      border-top: 1px solid rgba(255,255,255,0.04);
+      height: 0;
+    }
+    .mock-chart-bars {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-around;
+      padding: 0 20px;
+      height: 80%;
+    }
+    .mock-bar-group {
+      display: flex;
+      gap: 3px;
+      align-items: flex-end;
+    }
+    .mock-bar {
+      width: 14px;
+      border-radius: 3px 3px 0 0;
+    }
+
+    .showcase-caption {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 13px;
+      color: var(--text-tertiary);
+    }
+
+    @media (max-width: 768px) {
+      .showcase { padding: 80px 20px; }
+      .showcase-tabs { width: 100%; overflow-x: auto; }
+      .mock-sidebar { display: none; }
+      .mock-stat-row { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    /* ---- PRICING ---- */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+      align-items: start;
+    }
+    .price-card {
+      padding: 40px 32px;
+      position: relative;
+    }
+    .price-card.featured {
+      border-color: rgba(124,58,237,0.4);
+      background: rgba(124,58,237,0.06);
+    }
+    .price-card.featured::before {
+      content: 'Most Popular';
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 4px 16px;
+      border-radius: 100px;
+    }
+    .price-tier {
+      font-size: 13px;
+      color: var(--accent-light);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .price-amount {
+      font-size: 48px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .price-amount .currency { font-size: 24px; vertical-align: top; }
+    .price-amount .period { font-size: 16px; font-weight: 400; color: var(--text-tertiary); }
+    .price-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+    .price-features {
+      list-style: none;
+      margin-bottom: 32px;
+    }
+    .price-features li {
+      font-size: 14px;
+      color: var(--text-secondary);
+      padding: 6px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .price-features li::before {
+      content: '';
+      display: inline-block;
+      width: 18px; height: 18px;
+      flex-shrink: 0;
+      margin-top: 2px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8l3 3 6-6' stroke='%237c3aed' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+    }
+    .price-cta {
+      display: block;
+      text-align: center;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .price-cta.primary {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      box-shadow: 0 0 20px rgba(124,58,237,0.2);
+    }
+    .price-cta.primary:hover {
+      background: #6d28d9;
+      transform: translateY(-1px);
+    }
+    .price-cta.secondary {
+      background: transparent;
+      color: var(--text-primary);
+      border: 1px solid var(--card-border);
+    }
+    .price-cta.secondary:hover {
+      background: var(--card-hover);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    /* ---- TESTIMONIALS ---- */
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .testimonial-card {
+      padding: 32px;
+    }
+    .testimonial-quote {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+      margin-bottom: 24px;
+      font-style: italic;
+    }
+    .testimonial-quote::before { content: '\201C'; font-size: 24px; color: var(--accent-light); margin-right: 2px; }
+    .testimonial-quote::after { content: '\201D'; font-size: 24px; color: var(--accent-light); margin-left: 2px; }
+    .testimonial-author {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .testimonial-avatar {
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--blue));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 700; color: #fff;
+    }
+    .testimonial-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .testimonial-role {
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+
+    /* ---- FAQ ---- */
+    .faq-list {
+      max-width: 800px;
+      margin: 48px auto 0;
+    }
+    .faq-item {
+      border-bottom: 1px solid var(--card-border);
+    }
+    .faq-item:first-child { border-top: 1px solid var(--card-border); }
+    .faq-question {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 20px 0;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      font-size: 16px;
+      font-weight: 600;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 0.2s;
+    }
+    .faq-question:hover { color: var(--accent-light); }
+    .faq-question .faq-toggle {
+      font-size: 20px;
+      color: var(--text-tertiary);
+      transition: transform 0.3s;
+      flex-shrink: 0;
+      margin-left: 16px;
+    }
+    .faq-item.open .faq-toggle { transform: rotate(45deg); }
+    .faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, padding 0.3s ease;
+    }
+    .faq-item.open .faq-answer {
+      max-height: 300px;
+      padding-bottom: 20px;
+    }
+    .faq-answer p {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    /* ---- STICKY CTA BAR ---- */
+    .sticky-cta {
+      position: fixed;
+      bottom: -80px;
+      left: 0; right: 0;
+      z-index: 99;
+      background: var(--bg-nav-scrolled);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-top: 1px solid var(--card-border);
+      padding: 12px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: bottom 0.4s ease;
+    }
+    .sticky-cta.visible { bottom: 0; }
+    .sticky-cta-text {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+    .sticky-cta-text strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    /* ---- GLASS CARD ---- */
+    .glass {
+      background: var(--card);
+      backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(180%);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 32px;
+      transition: all 0.3s ease;
+    }
+    .glass:hover {
+      background: var(--card-hover);
+      border-color: rgba(255,255,255,0.12);
+      transform: translateY(-2px);
+    }
+
+    .glass-icon {
+      width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 14px;
+      font-size: 24px;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, rgba(124,58,237,0.15), rgba(59,130,246,0.1));
+      border: 1px solid rgba(124,58,237,0.15);
+    }
+
+    .glass h3 {
+      font-size: 18px; font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--text-primary);
+    }
+    .glass p {
+      font-size: 15px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* ---- GRID ---- */
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; }
+
+    /* ---- PROBLEM ---- */
+    #problem .section-title { color: var(--pain-color); }
+    .pain-stat {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent-light);
+      margin-top: 16px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+    }
+
+    /* ---- SOLUTION ---- */
+    .solution-flow {
+      display: flex; align-items: center; justify-content: center;
+      gap: 24px; margin-top: 48px; flex-wrap: wrap;
+    }
+    .flow-node {
+      display: flex; flex-direction: column; align-items: center; gap: 10px;
+      padding: 24px 32px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      text-align: center;
+    }
+    .flow-node .icon { font-size: 32px; }
+    .flow-node .name { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .flow-node .desc { font-size: 12px; color: var(--text-tertiary); }
+    .flow-arrow {
+      font-size: 20px;
+      color: var(--accent-light);
+      opacity: 0.5;
+    }
+
+    /* ---- USE CASES ---- */
+    .usecase-card {
+      position: relative;
+      overflow: hidden;
+    }
+    .usecase-card::before {
+      content: '';
+      position: absolute;
+      top: -50%; right: -50%;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      filter: blur(60px);
+      opacity: 0.08;
+      pointer-events: none;
+    }
+    .usecase-card:nth-child(1)::before { background: #3b82f6; }
+    .usecase-card:nth-child(2)::before { background: #7c3aed; }
+    .usecase-card:nth-child(3)::before { background: #f59e0b; }
+    .usecase-card:nth-child(4)::before { background: #06b6d4; }
+    .usecase-tag {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--accent-light);
+      margin-bottom: 12px;
+      font-weight: 600;
+    }
+    .usecase-stat {
+      display: flex; align-items: baseline; gap: 8px;
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--card-border);
+    }
+    .usecase-stat .number {
+      font-size: 28px; font-weight: 700;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      color: var(--text-primary);
+    }
+    .usecase-stat .unit {
+      font-size: 13px; color: var(--text-tertiary);
+    }
+
+    /* ---- FEATURES ---- */
+    .feature-grid { margin-top: 48px; }
+    .feature-card .glass-icon { font-size: 20px; }
+
+    /* ---- HARDWARE ---- */
+    .hw-tier {
+      margin-top: 32px;
+    }
+    .hw-tier-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-tertiary);
+      margin-bottom: 16px;
+      font-weight: 600;
+    }
+    .hw-grid {
+      display: flex; flex-wrap: wrap; gap: 16px;
+    }
+    .hw-card {
+      display: flex; align-items: center; gap: 16px;
+      padding: 20px 28px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-sm);
+      transition: all 0.2s;
+      flex: 1 1 320px;
+      max-width: 420px;
+    }
+    .hw-card:hover {
+      background: var(--card-hover);
+      border-color: rgba(255,255,255,0.12);
+      transform: translateY(-1px);
+    }
+    .hw-card .hw-img {
+      width: 72px; height: 72px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.04);
+      flex-shrink: 0;
+      object-fit: cover;
+      overflow: hidden;
+    }
+    .hw-card .hw-img img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      border-radius: 12px;
+    }
+    .hw-card .hw-info { flex: 1; min-width: 0; }
+    .hw-card .hw-name {
+      font-size: 14px; font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+    }
+    .hw-card .hw-spec {
+      font-size: 12px; color: var(--text-tertiary);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hw-card .hw-badge {
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      flex-shrink: 0;
+    }
+    .hw-badge.available {
+      background: var(--badge-success-bg);
+      color: var(--badge-success-color);
+    }
+    .hw-badge.evaluation {
+      background: var(--badge-warn-bg);
+      color: var(--badge-warn-color);
+    }
+    .hw-badge.future {
+      background: var(--badge-future-bg);
+      color: var(--badge-future-color);
+    }
+
+    /* ---- METRICS ---- */
+    #metrics { text-align: center; }
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .metric-card {
+      padding: 40px 24px;
+      text-align: center;
+    }
+    .metric-card .metric-value {
+      font-size: 56px;
+      font-weight: 700;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      background: linear-gradient(135deg, var(--blue), var(--accent-light));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1;
+    }
+    .metric-card .metric-label {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-top: 12px;
+    }
+    .metric-card .metric-desc {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      margin-top: 6px;
+    }
+
+    /* ---- CTA ---- */
+    #cta {
+      text-align: center;
+      padding-bottom: 80px;
+    }
+    .cta-glow {
+      position: relative;
+      display: inline-block;
+    }
+    .cta-glow::before {
+      content: '';
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 300px; height: 300px;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(circle, rgba(124,58,237,0.15), transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    /* ---- FOOTER ---- */
+    footer {
+      position: relative;
+      z-index: 1;
+      padding: 32px 40px;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-tertiary);
+    }
+    footer a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    footer a:hover { color: var(--text-primary); }
+    .footer-links { display: flex; gap: 24px; }
+
+    /* ---- SCROLL ANIMATIONS ---- */
+    .animate-in {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+    .animate-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .animate-in[data-delay="1"] { transition-delay: 0.1s; }
+    .animate-in[data-delay="2"] { transition-delay: 0.2s; }
+    .animate-in[data-delay="3"] { transition-delay: 0.3s; }
+    .animate-in[data-delay="4"] { transition-delay: 0.4s; }
+
+    /* ---- RESPONSIVE ---- */
+    @media (max-width: 1024px) {
+      .grid-3 { grid-template-columns: repeat(2, 1fr); }
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+      .pricing-grid { grid-template-columns: 1fr; max-width: 420px; margin-left: auto; margin-right: auto; }
+      .steps { flex-direction: column; }
+      .testimonials-grid { grid-template-columns: 1fr; max-width: 500px; margin-left: auto; margin-right: auto; }
+    }
+    @media (max-width: 768px) {
+      nav { padding: 0 16px; }
+      .nav-links { display: none; }
+      .nav-cta { font-size: 12px; padding: 5px 12px; }
+      section { padding: 80px 20px; }
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+      .hero-metrics { gap: 24px; flex-wrap: wrap; justify-content: center; }
+      .hero-metric .val { font-size: 24px; }
+      .solution-flow { flex-direction: column; }
+      .flow-arrow { transform: rotate(90deg); }
+      footer { flex-direction: column; gap: 16px; text-align: center; }
+      .trust-logos { gap: 20px; }
+      .sticky-cta { padding: 12px 16px; }
+      .sticky-cta-text span { display: none; }
+
+      /* -- Showcase mobile -- */
+      .showcase { padding: 60px 16px; }
+      .showcase-frame { aspect-ratio: 4/3; border-radius: 16px; }
+      .mock-topbar { padding: 8px 12px; font-size: 10px; }
+      .mock-topbar-left span:nth-child(3) { display: none; }
+      .mock-quality-selector { display: none; }
+      .mock-overlay-ai { padding: 8px 10px; font-size: 10px; max-width: 55%; }
+      .mock-detection-box { display: none; }
+      .mock-bottombar { padding: 6px 12px; font-size: 10px; }
+      .mock-bottombar span:last-child { display: none; }
+      .mock-ptt span { display: none; }
+
+      /* -- Dashboard mobile -- */
+      .mock-stat-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+      .mock-stat-value { font-size: 16px; }
+      .mock-table-header,
+      .mock-table-row { grid-template-columns: 2fr 1fr 1fr; }
+      .mock-table-header span:nth-child(4),
+      .mock-table-header span:nth-child(5),
+      .mock-table-row span:nth-child(4),
+      .mock-table-row span:nth-child(5) { display: none; }
+
+      /* -- Analytics mobile -- */
+      .mock-bar { width: 10px; }
+
+      /* -- Hardware mobile -- */
+      .hw-card { padding: 16px 20px; flex: 1 1 100%; max-width: 100%; }
+      .hw-card .hw-img { width: 56px; height: 56px; }
+      .hw-card .hw-spec { white-space: normal; overflow: visible; text-overflow: unset; }
+
+      /* -- Pricing mobile -- */
+      .price-card { padding: 32px 24px; }
+
+      /* -- FAQ mobile -- */
+      .faq-question { font-size: 15px; padding: 16px 0; }
+
+      /* -- CTA form mobile -- */
+      #demo-form { flex-direction: column; }
+      #demo-email { width: 100%; }
+
+      /* -- Testimonials mobile -- */
+      .testimonial-card { padding: 24px; }
+    }
+    @media (max-width: 480px) {
+      .hero-metrics { flex-direction: column; gap: 20px; }
+      .metrics-grid { grid-template-columns: 1fr; }
+      .hero-ctas { flex-direction: column; width: 100%; }
+      .btn-primary, .btn-secondary { width: 100%; justify-content: center; }
+      .section-title { font-size: 28px; letter-spacing: -0.5px; }
+      .hero-title { font-size: 32px; letter-spacing: -1px; }
+      .hero-subtitle { font-size: 17px; }
+      .mock-stat-row { grid-template-columns: 1fr 1fr; }
+      .mock-overlay-ai { position: relative; top: auto; left: auto; margin: 8px; max-width: 100%; }
+      .mock-chart-bars { padding: 0 8px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Three.js Background -->
+  <canvas id="scene-canvas"></canvas>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Navigation -->
+    <nav>
+      <div class="nav-logo">Caring<span>Mind</span></div>
+      <div class="nav-links">
+        <a href="#solution">Platform</a>
+        <a href="#usecases">Use Cases</a>
+        <a href="#features">Features</a>
+        <a href="#hardware">Hardware</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+      <a href="#cta" class="nav-cta">Request Demo</a>
+      <button id="theme-toggle" title="Toggle theme" style="background:none;border:none;cursor:pointer;padding:4px;color:var(--text-secondary);transition:color 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-secondary)'">
+        <svg id="theme-icon-dark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg id="theme-icon-light" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </nav>
+
+    <!-- Hero -->
+    <section id="hero">
+      <div class="hero-badge animate-in">
+        <span class="dot"></span>
+        Now accepting pilot partners
+      </div>
+      <h1 class="hero-title animate-in" data-delay="1">
+        The <span class="gradient">Intelligence Layer</span><br>for Smart Glasses
+      </h1>
+      <p class="hero-subtitle animate-in" data-delay="2">
+        We don't sell glasses. We sell the AI brain that makes any smart glasses enterprise-ready. One platform, every pair.
+      </p>
+      <div class="hero-ctas animate-in" data-delay="3">
+        <a href="#cta" class="btn-primary">
+          Request a Demo
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a href="#solution" class="btn-secondary">See How It Works</a>
+      </div>
+      <div class="hero-metrics animate-in" data-delay="4">
+        <div class="hero-metric">
+          <div class="val">&lt;500ms</div>
+          <div class="label">Latency</div>
+        </div>
+        <div class="hero-metric">
+          <div class="val">30fps</div>
+          <div class="label">Streaming</div>
+        </div>
+        <div class="hero-metric">
+          <div class="val">E2E</div>
+          <div class="label">Encrypted</div>
+        </div>
+        <div class="hero-metric">
+          <div class="val">Zero</div>
+          <div class="label">Frame Loss</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Trust Bar -->
+    <div class="trust-bar">
+      <p class="animate-in">Built for teams that wear</p>
+      <div class="trust-logos animate-in" data-delay="1">
+        <span>META</span>
+        <span>INMO</span>
+        <span>MENTRA</span>
+        <span>LENSMOO</span>
+        <span>HEYYYAN</span>
+      </div>
+    </div>
+
+    <!-- Problem -->
+    <section id="problem">
+      <div class="section-label animate-in">The Problem</div>
+      <h2 class="section-title animate-in" data-delay="1">The hardware is solved.<br>The software isn't.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        7 million smart glasses sold in 2025. Prices dropped to $299. But workers still fly blind &mdash; no AI guidance, no fleet management, no enterprise integration. The hardware is ready. The intelligence layer is missing.
+      </p>
+      <div class="grid-4" style="margin-top:48px;">
+        <div class="glass animate-in" data-delay="1">
+          <div class="glass-icon">&#x26A0;</div>
+          <h3>Human Error</h3>
+          <p>Critical mistakes in manual assembly and inspection processes go undetected until it's too late.</p>
+          <div class="pain-stat">$52K avg per incident</div>
+        </div>
+        <div class="glass animate-in" data-delay="2">
+          <div class="glass-icon">&#x23F3;</div>
+          <h3>Slow Onboarding</h3>
+          <p>Workers spend weeks in classroom training before they're productive on the floor.</p>
+          <div class="pain-stat">6-8 weeks to competency</div>
+        </div>
+        <div class="glass animate-in" data-delay="3">
+          <div class="glass-icon">&#x1F500;</div>
+          <h3>Device Fragmentation</h3>
+          <p>Every glasses model has its own SDK, its own API, its own management headache.</p>
+          <div class="pain-stat">3+ platforms to maintain</div>
+        </div>
+        <div class="glass animate-in" data-delay="4">
+          <div class="glass-icon">&#x1F512;</div>
+          <h3>Disconnected Systems</h3>
+          <p>CRM, logistics, and field data live in separate silos. No unified visibility.</p>
+          <div class="pain-stat">40% manual data entry</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Solution -->
+    <section id="solution">
+      <div class="section-label animate-in">The Solution</div>
+      <h2 class="section-title animate-in" data-delay="1">One platform.<br>Every pair.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        CaringMind is the brain and nervous system for your smart glasses fleet. Glasses capture the field. The platform delivers intelligence.
+      </p>
+      <div class="solution-flow animate-in" data-delay="3">
+        <div class="flow-node">
+          <div class="icon">&#x1F453;</div>
+          <div class="name">Smart Glasses</div>
+          <div class="desc">Any model, any brand</div>
+        </div>
+        <div class="flow-arrow">&#x279C;</div>
+        <div class="flow-node" style="border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.06);">
+          <div class="icon">&#x1F9E0;</div>
+          <div class="name">CaringMind Platform</div>
+          <div class="desc">AI + Fleet + Integration</div>
+        </div>
+        <div class="flow-arrow">&#x279C;</div>
+        <div class="flow-node">
+          <div class="icon">&#x1F3E2;</div>
+          <div class="name">Enterprise Systems</div>
+          <div class="desc">CRM, ERP, Logistics</div>
+        </div>
+      </div>
+      <div class="grid-3" style="margin-top:48px;">
+        <div class="glass animate-in" data-delay="1">
+          <h3>Hardware-Agnostic</h3>
+          <p>One standardized API across all supported glasses models. Swap hardware without rewriting integrations.</p>
+        </div>
+        <div class="glass animate-in" data-delay="2">
+          <h3>AI Copilot</h3>
+          <p>Computer vision and NLP deliver step-by-step task guidance and real-time quality assurance. The AI suggests, the worker decides.</p>
+        </div>
+        <div class="glass animate-in" data-delay="3">
+          <h3>Real-Time by Default</h3>
+          <p>Sub-500ms bi-directional streaming with zero frame loss. Video, audio, and telemetry in one encrypted tunnel.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="howitworks">
+      <div class="section-label animate-in">How It Works</div>
+      <h2 class="section-title animate-in" data-delay="1">Live in days,<br>not months.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        Three steps from zero to AI-guided workers. No custom hardware. No firmware development. No 12-month integration.
+      </p>
+      <div class="steps">
+        <div class="step animate-in" data-delay="1">
+          <h3>Deploy Glasses</h3>
+          <p>Your workers put on any supported smart glasses. Meta, INMO, Mentra -- they all work. Use what you already own or buy for $299.</p>
+        </div>
+        <div class="step animate-in" data-delay="2">
+          <h3>Connect to CaringMind</h3>
+          <p>One scan pairs the glasses to the platform. Streaming, AI guidance, and fleet management activate instantly. Sub-500ms latency.</p>
+        </div>
+        <div class="step animate-in" data-delay="3">
+          <h3>Measure ROI</h3>
+          <p>Real-time dashboards show error rates, training velocity, and worker adoption. Most pilots prove payback in 8-12 months.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Product Showcase -->
+    <div class="showcase" id="showcase">
+      <div style="max-width:1200px;margin:0 auto;">
+        <div class="section-label animate-in">See It In Action</div>
+        <h2 class="section-title animate-in" data-delay="1">The platform,<br>visualized.</h2>
+        <p class="section-subtitle animate-in" data-delay="2">
+          Real-time streaming, fleet management, and analytics -- from one unified interface.
+        </p>
+        <div class="showcase-tabs animate-in" data-delay="3">
+          <button class="showcase-tab active" data-panel="stream">Live Stream</button>
+          <button class="showcase-tab" data-panel="fleet">Fleet Dashboard</button>
+          <button class="showcase-tab" data-panel="analytics">Analytics</button>
+        </div>
+      </div>
+      <div class="showcase-frame animate-in" data-delay="4" style="max-width:1200px;margin:0 auto;">
+        <!-- Stream Viewer -->
+        <div class="showcase-panel active" id="panel-stream">
+          <div class="mock-viewer">
+            <div class="mock-topbar">
+              <div class="mock-topbar-left">
+                <div class="mock-status-dot"></div>
+                <span style="color:#fff;font-weight:600;">INMO Air 3S</span>
+                <span style="color:rgba(255,255,255,0.3);">Session #2847</span>
+              </div>
+              <div class="mock-topbar-right">
+                <span>00:12:47</span>
+                <div class="mock-quality-selector">
+                  <span class="mock-quality-option">360p</span>
+                  <span class="mock-quality-option">720p</span>
+                  <span class="mock-quality-option active">1080p</span>
+                </div>
+              </div>
+            </div>
+            <div class="mock-canvas">
+              <div class="mock-video-feed">
+                <!-- AI Overlay -->
+                <div class="mock-overlay-ai">
+                  <div style="font-weight:600;margin-bottom:8px;color:var(--accent-light);">Assembly Step 4/7</div>
+                  <div class="mock-ai-step">
+                    <div class="mock-ai-check done">&#x2713;</div>
+                    <span class="mock-ai-label done">Align bracket to mount</span>
+                  </div>
+                  <div class="mock-ai-step">
+                    <div class="mock-ai-check done">&#x2713;</div>
+                    <span class="mock-ai-label done">Insert M4 bolt x2</span>
+                  </div>
+                  <div class="mock-ai-step">
+                    <div class="mock-ai-check active">&#x25CF;</div>
+                    <span class="mock-ai-label">Torque to 12 Nm</span>
+                  </div>
+                  <div class="mock-ai-step">
+                    <div class="mock-ai-check pending">4</div>
+                    <span class="mock-ai-label">Route cable harness</span>
+                  </div>
+                  <div class="mock-ai-step">
+                    <div class="mock-ai-check pending">5</div>
+                    <span class="mock-ai-label">Connect Molex plug</span>
+                  </div>
+                </div>
+                <!-- Detection Box -->
+                <div class="mock-detection-box" style="top:35%;left:25%;width:30%;height:40%;">
+                  <div class="mock-detection-label">BOLT DETECTED</div>
+                </div>
+                <div class="mock-detection-box" style="top:30%;left:60%;width:20%;height:25%;border-color:#4ade80;">
+                  <div class="mock-detection-label" style="background:#16a34a;">ALIGNED</div>
+                </div>
+              </div>
+            </div>
+            <div class="mock-bottombar">
+              <div class="mock-ptt">
+                <div class="mock-ptt-circle"></div>
+                <span>Push to Talk</span>
+              </div>
+              <span>30fps &middot; 1080p &middot; 42ms latency</span>
+              <span>AES-256 &middot; TLS 1.3</span>
+            </div>
+          </div>
+        </div>
+        <!-- Fleet Dashboard -->
+        <div class="showcase-panel" id="panel-fleet">
+          <div class="mock-dashboard">
+            <div class="mock-sidebar">
+              <div class="mock-sidebar-item active">&#x25CF; Devices</div>
+              <div class="mock-sidebar-item">&#x25CB; Sessions</div>
+              <div class="mock-sidebar-item">&#x25CB; Workflows</div>
+              <div class="mock-sidebar-item">&#x25CB; Users</div>
+              <div class="mock-sidebar-item">&#x25CB; Integrations</div>
+              <div class="mock-sidebar-item">&#x25CB; Settings</div>
+            </div>
+            <div class="mock-main">
+              <div class="mock-dash-header">
+                <div class="mock-dash-title">Fleet Overview</div>
+                <div class="mock-dash-actions">
+                  <div class="mock-dash-btn">Export</div>
+                  <div class="mock-dash-btn primary">+ Add Device</div>
+                </div>
+              </div>
+              <div class="mock-stat-row">
+                <div class="mock-stat-card">
+                  <div class="mock-stat-label">Online</div>
+                  <div class="mock-stat-value" style="color:#4ade80;">24</div>
+                </div>
+                <div class="mock-stat-card">
+                  <div class="mock-stat-label">Idle</div>
+                  <div class="mock-stat-value" style="color:#fbbf24;">7</div>
+                </div>
+                <div class="mock-stat-card">
+                  <div class="mock-stat-label">Offline</div>
+                  <div class="mock-stat-value" style="color:rgba(255,255,255,0.3);">3</div>
+                </div>
+                <div class="mock-stat-card">
+                  <div class="mock-stat-label">Active Sessions</div>
+                  <div class="mock-stat-value">18</div>
+                </div>
+              </div>
+              <div class="mock-device-table">
+                <div class="mock-table-header">
+                  <span>Device</span>
+                  <span>Status</span>
+                  <span>Battery</span>
+                  <span>Session</span>
+                  <span>Last Seen</span>
+                </div>
+                <div class="mock-table-row">
+                  <span class="mock-device-name"><span class="mock-device-dot online"></span>INMO Air 3S #14</span>
+                  <span style="color:#4ade80;">Online</span>
+                  <span>87%</span>
+                  <span>#2847</span>
+                  <span>Now</span>
+                </div>
+                <div class="mock-table-row">
+                  <span class="mock-device-name"><span class="mock-device-dot online"></span>Meta Ray-Ban #03</span>
+                  <span style="color:#4ade80;">Online</span>
+                  <span>62%</span>
+                  <span>#2845</span>
+                  <span>Now</span>
+                </div>
+                <div class="mock-table-row">
+                  <span class="mock-device-name"><span class="mock-device-dot online"></span>INMO Air 3S #22</span>
+                  <span style="color:#4ade80;">Online</span>
+                  <span>94%</span>
+                  <span>#2843</span>
+                  <span>Now</span>
+                </div>
+                <div class="mock-table-row">
+                  <span class="mock-device-name"><span class="mock-device-dot idle"></span>Lensmoo W600 #07</span>
+                  <span style="color:#fbbf24;">Idle</span>
+                  <span>45%</span>
+                  <span>--</span>
+                  <span>2m ago</span>
+                </div>
+                <div class="mock-table-row">
+                  <span class="mock-device-name"><span class="mock-device-dot offline"></span>HeyCyan M01 #11</span>
+                  <span style="color:rgba(255,255,255,0.3);">Offline</span>
+                  <span>--</span>
+                  <span>--</span>
+                  <span>4h ago</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Analytics -->
+        <div class="showcase-panel" id="panel-analytics">
+          <div class="mock-analytics">
+            <div class="mock-dash-header">
+              <div class="mock-dash-title">Operational Analytics</div>
+              <div class="mock-dash-actions">
+                <div class="mock-dash-btn">7D</div>
+                <div class="mock-dash-btn" style="background:var(--accent);color:#fff;border-color:var(--accent);">30D</div>
+                <div class="mock-dash-btn">90D</div>
+              </div>
+            </div>
+            <div class="mock-stat-row">
+              <div class="mock-stat-card">
+                <div class="mock-stat-label">Error Rate</div>
+                <div class="mock-stat-value" style="color:#4ade80;">2.1%</div>
+              </div>
+              <div class="mock-stat-card">
+                <div class="mock-stat-label">Avg Session</div>
+                <div class="mock-stat-value">47m</div>
+              </div>
+              <div class="mock-stat-card">
+                <div class="mock-stat-label">QA Pass Rate</div>
+                <div class="mock-stat-value" style="color:#4ade80;">97.8%</div>
+              </div>
+              <div class="mock-stat-card">
+                <div class="mock-stat-label">Adoption</div>
+                <div class="mock-stat-value" style="color:var(--accent-light);">85%</div>
+              </div>
+            </div>
+            <div class="mock-chart-area">
+              <div class="mock-chart-grid">
+                <div class="mock-chart-line"></div>
+                <div class="mock-chart-line"></div>
+                <div class="mock-chart-line"></div>
+                <div class="mock-chart-line"></div>
+                <div class="mock-chart-line"></div>
+                <div class="mock-chart-line"></div>
+              </div>
+              <div class="mock-chart-bars">
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:40%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:55%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:35%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:60%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:45%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:70%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:30%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:65%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:50%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:80%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:25%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:75%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:20%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:85%;background:var(--accent);"></div>
+                </div>
+                <div class="mock-bar-group">
+                  <div class="mock-bar" style="height:15%;background:rgba(124,58,237,0.3);"></div>
+                  <div class="mock-bar" style="height:90%;background:var(--accent);"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="showcase-caption animate-in" data-delay="5" style="max-width:1200px;margin:24px auto 0;padding:0 40px;">
+        CSS-rendered mockup &middot; Actual UI may vary &middot; <a href="/gallery" style="color:var(--accent-light);text-decoration:none;">View live screenshots &rarr;</a>
+      </p>
+    </div>
+
+    <!-- Use Cases -->
+    <section id="usecases">
+      <div class="section-label animate-in">Use Cases</div>
+      <h2 class="section-title animate-in" data-delay="1">Built for the front line.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        From factory floors to family homes. Anywhere hands-free intelligence changes outcomes.
+      </p>
+      <div class="grid-2" style="margin-top:48px;">
+        <div class="glass usecase-card animate-in" data-delay="1">
+          <div class="usecase-tag">Manufacturing &amp; Assembly</div>
+          <h3>Step-by-step AI guidance on the factory floor</h3>
+          <p>Workers receive real-time visual overlays and voice instructions for complex assembly procedures. The AI watches every step and flags deviations before they become defects.</p>
+          <div class="usecase-stat">
+            <span class="number">30%</span>
+            <span class="unit">fewer critical errors in pilot</span>
+          </div>
+        </div>
+        <div class="glass usecase-card animate-in" data-delay="2">
+          <div class="usecase-tag">Field Operations &amp; Logistics</div>
+          <h3>Unified fleet management across every site</h3>
+          <p>Operations managers push configurations, firmware updates, and workflows to a heterogeneous fleet from one dashboard. Site visit logs sync automatically to Salesforce.</p>
+          <div class="usecase-stat">
+            <span class="number">85%</span>
+            <span class="unit">worker adoption in first week</span>
+          </div>
+        </div>
+        <div class="glass usecase-card animate-in" data-delay="3">
+          <div class="usecase-tag">Construction &amp; Safety</div>
+          <h3>Blueprints, inspections, and hazard detection hands-free</h3>
+          <p>Workers follow layered digital schematics while the AI monitors for safety violations. Quality inspections are verified against spec in real-time with photo documentation.</p>
+          <div class="usecase-stat">
+            <span class="number">20%</span>
+            <span class="unit">faster training on new procedures</span>
+          </div>
+        </div>
+        <div class="glass usecase-card animate-in" data-delay="4">
+          <div class="usecase-tag">Childcare &amp; Family Safety</div>
+          <h3>AI-powered hazard detection when it matters most</h3>
+          <p>Providers receive instant alerts when children approach hazards. Parents can check in via live point-of-view streaming. Emergency contacts and dosage information available via voice command.</p>
+          <div class="usecase-stat">
+            <span class="number">&lt;200ms</span>
+            <span class="unit">hazard alert response time</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features">
+      <div class="section-label animate-in">Platform Capabilities</div>
+      <h2 class="section-title animate-in" data-delay="1">What's under the hood.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        Five core capabilities that work together as a unified system.
+      </p>
+      <div class="grid-3 feature-grid">
+        <div class="glass feature-card animate-in" data-delay="1">
+          <div class="glass-icon">&#x1F441;</div>
+          <h3>AI-Powered Guidance</h3>
+          <p>Real-time computer vision analyzes video feeds from the glasses. Workers receive contextual visual overlays and voice prompts guiding them through each step.</p>
+        </div>
+        <div class="glass feature-card animate-in" data-delay="2">
+          <div class="glass-icon">&#x1F517;</div>
+          <h3>Hardware Abstraction</h3>
+          <p>A standardized API layer means you develop once and deploy across INMO, Lensmoo, HeyCyan, Meta, and future hardware. Zero hardware-specific integration work.</p>
+        </div>
+        <div class="glass feature-card animate-in" data-delay="3">
+          <div class="glass-icon">&#x1F504;</div>
+          <h3>Enterprise Integration</h3>
+          <p>Bi-directional sync with Salesforce, HubSpot, and logistics platforms. Site visits, inspection data, and task completion flow automatically into your systems of record.</p>
+        </div>
+        <div class="glass feature-card animate-in" data-delay="1">
+          <div class="glass-icon">&#x1F399;</div>
+          <h3>Voice-First Interface</h3>
+          <p>Optimized for hands-free operation. Workers query documentation, navigate steps, and trigger actions using natural language. No touch required.</p>
+        </div>
+        <div class="glass feature-card animate-in" data-delay="2">
+          <div class="glass-icon">&#x2705;</div>
+          <h3>Quality Assurance</h3>
+          <p>The AI performs real-time QA checks against defined workflows. Instant alerts on deviations mean corrections happen before the step is complete, not after a failed audit.</p>
+        </div>
+        <div class="glass feature-card animate-in" data-delay="3">
+          <div class="glass-icon">&#x1F4CA;</div>
+          <h3>Operational Analytics</h3>
+          <p>Track adoption rates, error trends, training velocity, and device health across your entire fleet. Data-driven insights, not guesswork.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hardware -->
+    <section id="hardware">
+      <div class="section-label animate-in">Compatibility</div>
+      <h2 class="section-title animate-in" data-delay="1">Works with what you wear.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        Hardware-agnostic by design. One API across all supported devices.
+      </p>
+
+      <div class="hw-tier animate-in" data-delay="3">
+        <div class="hw-tier-label">Available Now</div>
+        <div class="hw-grid">
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://about.fb.com/wp-content/uploads/2023/09/04_Looks_1-carousel.jpg" alt="Meta Smart Glasses" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">Meta Smart Glasses</div>
+              <div class="hw-spec">Ray-Ban, Oakley &amp; more &middot; Live streaming &middot; Bi-directional audio</div>
+            </div>
+            <span class="hw-badge available">Live</span>
+          </div>
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://www.inmoxr.com/cdn/shop/files/AIR3-main-1.jpg?v=1766728843" alt="INMO Air 3S" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">INMO Air 3S</div>
+              <div class="hw-spec">AndroidXR &middot; Live streaming &middot; Bi-directional audio</div>
+            </div>
+            <span class="hw-badge available">Live</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hw-tier animate-in" data-delay="4">
+        <div class="hw-tier-label">Under Evaluation</div>
+        <div class="hw-grid">
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://img.diylooks.com/upload/store/product_l/SYA002931901A.jpg" alt="Lensmoo W600" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">Lensmoo W600</div>
+              <div class="hw-spec">HD video streaming &middot; Bi-directional audio</div>
+            </div>
+            <span class="hw-badge evaluation">Eval</span>
+          </div>
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://oriwhiz.com/cdn/shop/files/SYA002947301A_1_5ea1eeea-277b-49b5-a743-3efd3303c5b4.jpg?v=1761362601&width=600" alt="HeyCyan M01" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">HeyCyan M01 / W610 / W611</div>
+              <div class="hw-spec">8 MP camera &middot; Live streaming &middot; Multi-model lineup</div>
+            </div>
+            <span class="hw-badge evaluation">Eval</span>
+          </div>
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://mentraglass.com/assets/product_photos/frame2.png" alt="Mentra Live" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">Mentra Live</div>
+              <div class="hw-spec">HD 1080p &middot; 119&deg; FOV &middot; Live streaming</div>
+            </div>
+            <span class="hw-badge evaluation">Eval</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hw-tier animate-in" data-delay="1">
+        <div class="hw-tier-label">Future Support</div>
+        <div class="hw-grid">
+          <div class="hw-card">
+            <div class="hw-img"><img src="https://www.apple.com/v/apple-vision-pro/j/images/overview/hero/hero__cvgr5aj1ttsi_large.jpg" alt="Apple Vision Pro" loading="lazy"></div>
+            <div class="hw-info">
+              <div class="hw-name">Apple Vision Pro</div>
+              <div class="hw-spec">Spatial computing &middot; Immersive workflows</div>
+            </div>
+            <span class="hw-badge future">Planned</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Metrics -->
+    <section id="metrics">
+      <div class="section-label animate-in">Results</div>
+      <h2 class="section-title animate-in" data-delay="1">Outcomes from the field.</h2>
+      <p class="section-subtitle animate-in" data-delay="2" style="margin:0 auto;">
+        Measured during pilot deployments across manufacturing and logistics environments.
+      </p>
+      <div class="metrics-grid">
+        <div class="glass metric-card animate-in" data-delay="1">
+          <div class="metric-value" data-target="30" data-suffix="%">0%</div>
+          <div class="metric-label">Error Reduction</div>
+          <div class="metric-desc">Fewer critical human errors in first quarter</div>
+        </div>
+        <div class="glass metric-card animate-in" data-delay="2">
+          <div class="metric-value" data-target="20" data-suffix="%">0%</div>
+          <div class="metric-label">Faster Training</div>
+          <div class="metric-desc">Reduced time-to-competency on key procedures</div>
+        </div>
+        <div class="glass metric-card animate-in" data-delay="3">
+          <div class="metric-value" data-target="500" data-prefix="&lt;" data-suffix="ms">0ms</div>
+          <div class="metric-label">Response Latency</div>
+          <div class="metric-desc">Bi-directional data tunnel, encrypted</div>
+        </div>
+        <div class="glass metric-card animate-in" data-delay="4">
+          <div class="metric-value" data-target="85" data-suffix="%">0%</div>
+          <div class="metric-label">Worker Adoption</div>
+          <div class="metric-desc">Daily active usage of AI guidance features</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing">
+      <div class="section-label animate-in">Pricing</div>
+      <h2 class="section-title animate-in" data-delay="1">Pay per worker.<br>Scale per site.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        No hardware costs. No per-device fees. One platform subscription covers AI guidance, fleet management, and analytics.
+      </p>
+      <div class="pricing-grid">
+        <div class="glass price-card animate-in" data-delay="1">
+          <div class="price-tier">Pilot Kit</div>
+          <div class="price-amount"><span class="currency">$</span>5K-15K</div>
+          <div class="price-desc">5-20 devices, 60-90 days. Includes ROI measurement, dedicated support, and full platform access.</div>
+          <ul class="price-features">
+            <li>Up to 20 devices</li>
+            <li>AI guidance + quality checks</li>
+            <li>Fleet management dashboard</li>
+            <li>Dedicated pilot manager</li>
+            <li>ROI report at completion</li>
+          </ul>
+          <a href="#cta" class="price-cta secondary">Start a Pilot</a>
+        </div>
+        <div class="glass price-card featured animate-in" data-delay="2">
+          <div class="price-tier">Per Worker</div>
+          <div class="price-amount"><span class="currency">$</span>99<span class="period">/month</span></div>
+          <div class="price-desc">Full platform per worker. AI guidance, real-time QA, fleet management, analytics, and integrations.</div>
+          <ul class="price-features">
+            <li>AI-powered task guidance</li>
+            <li>Real-time quality assurance</li>
+            <li>Fleet management + device health</li>
+            <li>Operational analytics</li>
+            <li>Salesforce &amp; HubSpot sync</li>
+            <li>Unlimited sessions</li>
+          </ul>
+          <a href="#cta" class="price-cta primary">Get Started</a>
+        </div>
+        <div class="glass price-card animate-in" data-delay="3">
+          <div class="price-tier">Enterprise</div>
+          <div class="price-amount">Custom</div>
+          <div class="price-desc">Multi-site deployments, custom AI models, dedicated CSM, SLA guarantees, and priority support.</div>
+          <ul class="price-features">
+            <li>Everything in Per Worker</li>
+            <li>Custom AI model training</li>
+            <li>Multi-site fleet management</li>
+            <li>Dedicated success manager</li>
+            <li>99.9% uptime SLA</li>
+            <li>On-premise deployment option</li>
+          </ul>
+          <a href="#cta" class="price-cta secondary">Contact Sales</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Testimonials -->
+    <section id="testimonials">
+      <div class="section-label animate-in">From the Field</div>
+      <h2 class="section-title animate-in" data-delay="1">Workers actually<br>want to use it.</h2>
+      <p class="section-subtitle animate-in" data-delay="2">
+        85% daily active usage in pilots. When the AI is helpful -- not a screen to stare at -- adoption follows.
+      </p>
+      <div class="testimonials-grid">
+        <div class="glass testimonial-card animate-in" data-delay="1">
+          <div class="testimonial-quote">We went from 6-week classroom onboarding to 5 weeks with AI-guided hands-on training. Workers prefer it because they learn by doing, not watching slides.</div>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">M</div>
+            <div>
+              <div class="testimonial-name">Manufacturing VP</div>
+              <div class="testimonial-role">Automotive parts supplier, 200 workers</div>
+            </div>
+          </div>
+        </div>
+        <div class="glass testimonial-card animate-in" data-delay="2">
+          <div class="testimonial-quote">The real-time error detection caught a misaligned component before it left the station. One catch like that pays for an entire month of the platform.</div>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">S</div>
+            <div>
+              <div class="testimonial-name">Site Operations Lead</div>
+              <div class="testimonial-role">Electronics assembly, 3 facilities</div>
+            </div>
+          </div>
+        </div>
+        <div class="glass testimonial-card animate-in" data-delay="3">
+          <div class="testimonial-quote">We manage Meta, INMO, and Mentra glasses across 4 sites from one dashboard. Before CaringMind, each brand needed its own tool and its own person to manage it.</div>
+          <div class="testimonial-author">
+            <div class="testimonial-avatar">R</div>
+            <div>
+              <div class="testimonial-name">Field Operations Director</div>
+              <div class="testimonial-role">Industrial logistics, multi-site</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq">
+      <div class="section-label animate-in">FAQ</div>
+      <h2 class="section-title animate-in" data-delay="1">Common questions.</h2>
+      <div class="faq-list">
+        <div class="faq-item animate-in" data-delay="1">
+          <button class="faq-question">
+            Our workers won't wear glasses.
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>They already wear safety glasses. Smart glasses at 43 grams are lighter than most safety frames. In our pilots, 85% of workers used them daily within the first week because the AI guidance is genuinely helpful, not another screen to manage.</p></div>
+        </div>
+        <div class="faq-item animate-in" data-delay="2">
+          <button class="faq-question">
+            We tried Google Glass / HoloLens and it failed.
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>Those failed because they cost $1,500-3,500, had awkward displays, and no enterprise software ecosystem. Today's glasses are $299, look normal, and CaringMind provides the enterprise intelligence layer those platforms never had.</p></div>
+        </div>
+        <div class="faq-item animate-in" data-delay="3">
+          <button class="faq-question">
+            What about Meta's privacy concerns?
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>CaringMind runs on your infrastructure. Video streams are end-to-end encrypted with TLS 1.3 and AES-256 at rest. Data stays in your region. We never train models on your data. Your compliance team will have full audit access.</p></div>
+        </div>
+        <div class="faq-item animate-in" data-delay="4">
+          <button class="faq-question">
+            What if we switch glasses vendors?
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>That's the point. CaringMind is hardware-agnostic. Switch from Meta to INMO to Mentra without changing your workflows, integrations, or training materials. Zero migration cost.</p></div>
+        </div>
+        <div class="faq-item animate-in" data-delay="1">
+          <button class="faq-question">
+            How is this different from RealWear or PTC?
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>RealWear sells $3,150 proprietary hardware. PTC ties you to a specific device ecosystem. CaringMind works with any glasses, includes real-time AI guidance, and integrates natively with Salesforce and HubSpot. One platform, every pair, at a fraction of the cost.</p></div>
+        </div>
+        <div class="faq-item animate-in" data-delay="2">
+          <button class="faq-question">
+            How fast can we deploy?
+            <span class="faq-toggle">+</span>
+          </button>
+          <div class="faq-answer"><p>Pilot deployment takes days, not months. Workers pair glasses by scanning a code. The platform activates streaming, AI guidance, and fleet management instantly. Most pilots are fully operational within the first week.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section id="cta">
+      <div class="section-label animate-in">Get Started</div>
+      <h2 class="section-title animate-in" data-delay="1">
+        Ready to make your<br>glasses enterprise-ready?
+      </h2>
+      <p class="section-subtitle animate-in" data-delay="2" style="margin:0 auto 48px;">
+        Join the pilot program. We'll deploy on your hardware, integrate with your systems, and measure ROI together. 8-12 month payback based on error reduction alone.
+      </p>
+      <div class="cta-glow animate-in" data-delay="3">
+        <div class="cta-form">
+          <form id="demo-form" style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+            <input type="email" id="demo-email" placeholder="Work email" required style="
+              padding: 14px 20px;
+              background: var(--input-bg);
+              border: 1px solid var(--card-border);
+              border-radius: 14px;
+              color: var(--text-primary);
+              font-size: 15px;
+              font-family: inherit;
+              width: 280px;
+              outline: none;
+              transition: border-color 0.2s;
+            " onfocus="this.style.borderColor='rgba(124,58,237,0.5)'" onblur="this.style.borderColor='var(--card-border)'">
+            <button type="submit" class="btn-primary">
+              Book a Demo
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </form>
+          <p style="font-size:12px;color:var(--text-tertiary);margin-top:16px;text-align:center;">
+            No credit card required. 60-day pilot. Deploy on your existing hardware.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <span>&copy; 2026 CaringMind. All rights reserved.</span>
+      <div class="footer-links">
+        <a href="#hero">Top</a>
+        <a href="#features">Features</a>
+        <a href="#hardware">Hardware</a>
+        <a href="/gallery">Gallery</a>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Sticky CTA Bar -->
+  <div class="sticky-cta" id="sticky-cta">
+    <div class="sticky-cta-text">
+      <strong>CaringMind</strong> <span>-- The intelligence layer for smart glasses</span>
+    </div>
+    <a href="#cta" class="btn-primary" style="padding:10px 24px;font-size:13px;">Book a Demo</a>
+  </div>
+
+  <!-- Three.js Scene -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    const canvas = document.getElementById('scene-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.z = 6;
+
+    // -- Central icosahedron (AI intelligence) --
+    const icoGeo = new THREE.IcosahedronGeometry(1.8, 1);
+    const icoMat = new THREE.MeshBasicMaterial({
+      color: 0x7c3aed,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.15
+    });
+    const ico = new THREE.Mesh(icoGeo, icoMat);
+    scene.add(ico);
+
+    // -- Inner icosahedron --
+    const innerIcoGeo = new THREE.IcosahedronGeometry(1.2, 2);
+    const innerIcoMat = new THREE.MeshBasicMaterial({
+      color: 0x3b82f6,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.08
+    });
+    const innerIco = new THREE.Mesh(innerIcoGeo, innerIcoMat);
+    scene.add(innerIco);
+
+    // -- Orbiting rings (glasses frames) --
+    const ringGeo = new THREE.TorusGeometry(2.5, 0.015, 16, 128);
+
+    const ring1Mat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.25 });
+    const ring1 = new THREE.Mesh(ringGeo, ring1Mat);
+    ring1.rotation.x = Math.PI / 2.5;
+    scene.add(ring1);
+
+    const ring2 = new THREE.Mesh(ringGeo, ring1Mat.clone());
+    ring2.rotation.x = -Math.PI / 3.5;
+    ring2.rotation.y = Math.PI / 4;
+    ring2.material.color.setHex(0x3b82f6);
+    ring2.material.opacity = 0.2;
+    scene.add(ring2);
+
+    // -- Glowing lens spheres --
+    const lensGeo = new THREE.SphereGeometry(0.15, 16, 16);
+    const lensMat = new THREE.MeshBasicMaterial({ color: 0x7c3aed, transparent: true, opacity: 0.6 });
+    const lens1 = new THREE.Mesh(lensGeo, lensMat);
+    const lens2 = new THREE.Mesh(lensGeo, lensMat.clone());
+    lens2.material.color.setHex(0x3b82f6);
+    scene.add(lens1);
+    scene.add(lens2);
+
+    // -- Particle field --
+    const isMobile = window.innerWidth < 768;
+    const particleCount = isMobile ? 800 : 2500;
+    const positions = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    for (let i = 0; i < particleCount; i++) {
+      const r = 8 + Math.random() * 12;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+      positions[i * 3 + 2] = r * Math.cos(phi);
+      sizes[i] = Math.random() * 2 + 0.5;
+    }
+    const particleGeo = new THREE.BufferGeometry();
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    particleGeo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+    const particleMat = new THREE.PointsMaterial({
+      color: 0xa78bfa,
+      size: 0.03,
+      transparent: true,
+      opacity: 0.5,
+      sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
+
+    // -- Data stream particles (flowing from center) --
+    const streamCount = isMobile ? 100 : 400;
+    const streamPositions = new Float32Array(streamCount * 3);
+    const streamVelocities = [];
+    for (let i = 0; i < streamCount; i++) {
+      resetStreamParticle(i);
+    }
+    const streamGeo = new THREE.BufferGeometry();
+    streamGeo.setAttribute('position', new THREE.BufferAttribute(streamPositions, 3));
+    const streamMat = new THREE.PointsMaterial({
+      color: 0x06b6d4,
+      size: 0.04,
+      transparent: true,
+      opacity: 0.6,
+      sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const streamParticles = new THREE.Points(streamGeo, streamMat);
+    scene.add(streamParticles);
+
+    function resetStreamParticle(i) {
+      streamPositions[i * 3] = (Math.random() - 0.5) * 0.5;
+      streamPositions[i * 3 + 1] = (Math.random() - 0.5) * 0.5;
+      streamPositions[i * 3 + 2] = (Math.random() - 0.5) * 0.5;
+      const speed = 0.01 + Math.random() * 0.02;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      streamVelocities[i] = {
+        x: speed * Math.sin(phi) * Math.cos(theta),
+        y: speed * Math.sin(phi) * Math.sin(theta),
+        z: speed * Math.cos(phi)
+      };
+    }
+
+    // -- Mouse tracking --
+    let mouseX = 0, mouseY = 0;
+    let targetMouseX = 0, targetMouseY = 0;
+    document.addEventListener('mousemove', (e) => {
+      targetMouseX = (e.clientX / window.innerWidth - 0.5) * 2;
+      targetMouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+    });
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) {
+        targetMouseX = (e.touches[0].clientX / window.innerWidth - 0.5) * 2;
+        targetMouseY = (e.touches[0].clientY / window.innerHeight - 0.5) * 2;
+      }
+    }, { passive: true });
+
+    // -- Scroll tracking --
+    let scrollProgress = 0;
+    window.addEventListener('scroll', () => {
+      const maxScroll = document.body.scrollHeight - window.innerHeight;
+      scrollProgress = maxScroll > 0 ? window.scrollY / maxScroll : 0;
+    }, { passive: true });
+
+    // -- Resize --
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // -- Animation --
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const t = clock.getElapsedTime();
+
+      // Smooth mouse
+      mouseX += (targetMouseX - mouseX) * 0.03;
+      mouseY += (targetMouseY - mouseY) * 0.03;
+
+      // Icosahedron rotation + mouse parallax
+      ico.rotation.x = t * 0.1 + mouseY * 0.3;
+      ico.rotation.y = t * 0.15 + mouseX * 0.3;
+      ico.position.y = Math.sin(t * 0.5) * 0.2;
+
+      innerIco.rotation.x = -t * 0.08;
+      innerIco.rotation.y = -t * 0.12;
+      innerIco.position.y = ico.position.y;
+
+      // Rings orbit
+      ring1.rotation.z = t * 0.15;
+      ring2.rotation.z = -t * 0.1;
+
+      // Lens spheres orbit on rings
+      const l1Angle = t * 0.3;
+      const l2Angle = t * 0.3 + Math.PI;
+      const ringR = 2.5;
+      lens1.position.set(
+        Math.cos(l1Angle) * ringR,
+        Math.sin(l1Angle) * ringR * Math.cos(ring1.rotation.x) + ico.position.y,
+        Math.sin(l1Angle) * ringR * Math.sin(ring1.rotation.x)
+      );
+      lens2.position.set(
+        Math.cos(l2Angle) * ringR * Math.cos(ring2.rotation.y),
+        Math.sin(l2Angle) * ringR * Math.cos(ring2.rotation.x) + ico.position.y,
+        Math.sin(l2Angle) * ringR * Math.sin(ring2.rotation.x) * Math.cos(ring2.rotation.y)
+      );
+
+      // Particle drift
+      particles.rotation.y = t * 0.02;
+      particles.rotation.x = t * 0.005;
+
+      // Stream particles
+      const streamPos = streamGeo.attributes.position.array;
+      for (let i = 0; i < streamCount; i++) {
+        streamPos[i * 3] += streamVelocities[i].x;
+        streamPos[i * 3 + 1] += streamVelocities[i].y;
+        streamPos[i * 3 + 2] += streamVelocities[i].z;
+        const dist = Math.sqrt(
+          streamPos[i * 3] ** 2 +
+          streamPos[i * 3 + 1] ** 2 +
+          streamPos[i * 3 + 2] ** 2
+        );
+        if (dist > 8) resetStreamParticle(i);
+      }
+      streamGeo.attributes.position.needsUpdate = true;
+
+      // Scroll-based camera zoom
+      camera.position.z = 6 + scrollProgress * 3;
+      camera.position.y = -scrollProgress * 1.5;
+
+      // Fade scene as user scrolls
+      const fadeStart = 0.3;
+      const fadeEnd = 0.6;
+      const opacity = scrollProgress < fadeStart ? 1 :
+        scrollProgress > fadeEnd ? 0.15 :
+        1 - ((scrollProgress - fadeStart) / (fadeEnd - fadeStart)) * 0.85;
+      // Theme-based scene opacity (dim in light mode)
+      const themeBase = document.documentElement.getAttribute('data-theme') === 'light' ? 0.25 : 1;
+
+      icoMat.opacity = 0.15 * opacity * themeBase;
+      innerIcoMat.opacity = 0.08 * opacity * themeBase;
+      ring1Mat.opacity = 0.25 * opacity * themeBase;
+      ring2.material.opacity = 0.2 * opacity * themeBase;
+      lensMat.opacity = 0.6 * opacity * themeBase;
+      lens2.material.opacity = 0.6 * opacity * themeBase;
+      particleMat.opacity = 0.5 * opacity * themeBase;
+      streamMat.opacity = 0.6 * opacity * themeBase;
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+  </script>
+
+  <!-- Scroll Animations & Counter -->
+  <script>
+    // Intersection Observer for fade-in animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
+
+    // Counter animation for metrics
+    let metricsCounted = false;
+    const metricsObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && !metricsCounted) {
+          metricsCounted = true;
+          document.querySelectorAll('.metric-value').forEach(el => {
+            const target = parseInt(el.dataset.target);
+            const suffix = el.dataset.suffix || '';
+            const prefix = el.dataset.prefix || '';
+            const duration = 2000;
+            const start = performance.now();
+
+            function update(now) {
+              const elapsed = now - start;
+              const progress = Math.min(elapsed / duration, 1);
+              const eased = 1 - Math.pow(1 - progress, 3);
+              const current = Math.round(target * eased);
+              el.textContent = prefix + current + suffix;
+              if (progress < 1) requestAnimationFrame(update);
+            }
+            requestAnimationFrame(update);
+          });
+        }
+      });
+    }, { threshold: 0.3 });
+
+    const metricsSection = document.getElementById('metrics');
+    if (metricsSection) metricsObserver.observe(metricsSection);
+
+    // Theme toggle
+    const themeToggle = document.getElementById('theme-toggle');
+    const iconDark = document.getElementById('theme-icon-dark');
+    const iconLight = document.getElementById('theme-icon-light');
+    const saved = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+    updateThemeIcons(saved);
+
+    themeToggle.addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcons(next);
+    });
+
+    function updateThemeIcons(theme) {
+      iconDark.style.display = theme === 'dark' ? 'block' : 'none';
+      iconLight.style.display = theme === 'light' ? 'block' : 'none';
+    }
+
+    // Smooth nav background on scroll
+    const nav = document.querySelector('nav');
+    window.addEventListener('scroll', () => {
+      if (window.scrollY > 50) {
+        nav.style.borderBottomColor = 'var(--card-border)';
+        nav.style.background = 'var(--bg-nav-scrolled)';
+      } else {
+        nav.style.borderBottomColor = 'var(--card-border)';
+        nav.style.background = 'var(--bg-nav)';
+      }
+    }, { passive: true });
+
+    // Sticky CTA bar -- show after scrolling past hero
+    const stickyCta = document.getElementById('sticky-cta');
+    const heroSection = document.getElementById('hero');
+    window.addEventListener('scroll', () => {
+      const heroBottom = heroSection.offsetTop + heroSection.offsetHeight;
+      if (window.scrollY > heroBottom) {
+        stickyCta.classList.add('visible');
+      } else {
+        stickyCta.classList.remove('visible');
+      }
+    }, { passive: true });
+
+    // Showcase tab switching
+    document.querySelectorAll('.showcase-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.showcase-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.showcase-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+      });
+    });
+
+    // FAQ accordion
+    document.querySelectorAll('.faq-question').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = btn.parentElement;
+        const wasOpen = item.classList.contains('open');
+        document.querySelectorAll('.faq-item.open').forEach(i => i.classList.remove('open'));
+        if (!wasOpen) item.classList.add('open');
+      });
+    });
+
+    // Demo form handler
+    document.getElementById('demo-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('demo-email').value;
+      const form = e.target;
+      form.innerHTML = '<p style="font-size:16px;color:var(--accent-light);font-weight:600;text-align:center;padding:14px 0;">We\'ll be in touch within 24 hours.</p>';
+    });
+  </script>
+
+</body>
+</html>

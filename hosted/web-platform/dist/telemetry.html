@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Telemetry — CaringMind</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Mono', 'Menlo', monospace;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 20px;
+      border-bottom: 1px solid #1a1a1a;
+      background: #111;
+    }
+    .header h1 { font-size: 14px; font-weight: 600; color: #fff; }
+    .header-right { display: flex; gap: 12px; align-items: center; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.connected { background: #4ade80; }
+    .status-dot.disconnected { background: #f87171; }
+    .status-dot.connecting { background: #facc15; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .conn-label { font-size: 11px; color: #888; }
+
+    /* Session filter */
+    .session-filter {
+      padding: 10px 20px;
+      border-bottom: 1px solid #1a1a1a;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #0f0f0f;
+    }
+    .session-filter label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .session-filter select {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #ccc;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    /* Stats grid */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 1px;
+      background: #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .stat-cell {
+      background: #111;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stat-label {
+      font-size: 9px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* Per-session cards */
+    .sessions-section { padding: 16px 20px; }
+    .sessions-section h2 { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .session-card {
+      background: #111;
+      border: 1px solid #1a1a1a;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 8px;
+    }
+    .session-card-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .session-id { font-size: 12px; color: #4ade80; font-weight: 600; }
+    .session-status {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .session-status.idle { background: rgba(255,255,255,0.06); color: #888; }
+    .session-status.activating { background: rgba(250,204,21,0.15); color: #facc15; }
+    .session-status.active { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .session-status.error { background: rgba(248,113,113,0.15); color: #f87171; }
+    .session-status.rate_limited { background: rgba(251,146,60,0.15); color: #fb923c; }
+    .session-app { font-size: 11px; color: #888; }
+    .session-stats-row {
+      display: flex;
+      gap: 16px;
+    }
+    .session-stat {
+      font-size: 11px;
+      color: #666;
+    }
+    .session-stat span { color: #ccc; font-weight: 600; }
+
+    /* Event log */
+    .log-section {
+      border-top: 1px solid #1a1a1a;
+      display: flex;
+      flex-direction: column;
+      height: 50vh;
+    }
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 20px;
+      background: #111;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .log-header h2 { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; }
+    .log-count { font-size: 10px; color: #444; }
+    .log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 20px;
+      font-size: 12px;
+    }
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid #111;
+      display: flex;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .log-time { color: #444; font-size: 10px; white-space: nowrap; min-width: 70px; }
+    .log-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 2px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .log-badge.step { background: rgba(96,165,250,0.2); color: #60a5fa; }
+    .log-badge.alert { background: rgba(251,146,60,0.2); color: #fb923c; }
+    .log-badge.correction { background: rgba(250,204,21,0.2); color: #facc15; }
+    .log-badge.identification { background: rgba(74,222,128,0.2); color: #4ade80; }
+    .log-badge.acknowledgment { background: rgba(255,255,255,0.05); color: #888; }
+    .log-badge.transcript { background: transparent; color: #444; }
+    .log-content { color: #aaa; flex: 1; }
+    .log-content.transcript { color: #555; font-style: italic; }
+    .log-session { color: #444; font-size: 9px; white-space: nowrap; }
+
+    .empty-state { color: #444; font-size: 12px; padding: 20px; text-align: center; }
+
+    a { color: #4ade80; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .back-link { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:12px">
+      <a href="/" class="back-link">&larr; Back</a>
+      <h1>AI Telemetry</h1>
+    </div>
+    <div class="header-right">
+      <span class="status-dot connecting" id="connDot"></span>
+      <span class="conn-label" id="connLabel">Connecting...</span>
+    </div>
+  </div>
+
+  <!-- Session filter -->
+  <div class="session-filter">
+    <label>Session</label>
+    <select id="sessionSelect">
+      <option value="">All sessions</option>
+    </select>
+  </div>
+
+  <!-- Aggregate stats -->
+  <div class="stats-grid" id="statsGrid">
+    <div class="stat-cell"><div class="stat-value" id="statSessions">0</div><div class="stat-label">Sessions</div></div>
+    <div class="stat-cell"><div class="stat-value" id="statActive">0</div><div class="stat-label">Active</div></div>
+    <div class="stat-cell"><div class="stat-value" id="statTriggers">0</div><div class="stat-label">Triggers</div></div>
+    <div class="stat-cell"><div class="stat-value" id="statEvents">0</div><div class="stat-label">Events</div></div>
+    <div class="stat-cell"><div class="stat-value" id="statAvgLatency">--</div><div class="stat-label">Avg ms</div></div>
+  </div>
+
+  <!-- Per-session cards -->
+  <div class="sessions-section" id="sessionsSection">
+    <h2>Sessions</h2>
+    <div id="sessionCards"><div class="empty-state">No AI sessions</div></div>
+  </div>
+
+  <!-- Live event log -->
+  <div class="log-section">
+    <div class="log-header">
+      <h2>Live Log</h2>
+      <span class="log-count" id="logCount">0 events</span>
+    </div>
+    <div class="log-body" id="logBody">
+      <div class="empty-state" id="logEmpty">Waiting for events...</div>
+    </div>
+  </div>
+
+  <script>
+    const STATUS_COLORS = { idle: '#555', activating: '#facc15', active: '#4ade80', error: '#f87171', rate_limited: '#fb923c' };
+    const EVENT_BADGES = {
+      'guidance.step': { label: 'STEP', cls: 'step' },
+      'guidance.alert': { label: 'ALERT', cls: 'alert' },
+      'guidance.correction': { label: 'CORR', cls: 'correction' },
+      'guidance.identification': { label: 'ID', cls: 'identification' },
+      'guidance.acknowledgment': { label: 'ACK', cls: 'acknowledgment' },
+      'guidance.transcript': { label: '', cls: 'transcript' },
+    };
+
+    const state = {
+      sessions: {},       // sessionId -> { status, telemetry, eventCount }
+      logEntries: [],     // { time, type, content, sessionId }
+      ws: null,
+      selectedSession: '',
+    };
+
+    const MAX_LOG = 200;
+
+    // --- DOM refs ---
+    const $ = (id) => document.getElementById(id);
+    const connDot = $('connDot');
+    const connLabel = $('connLabel');
+    const sessionSelect = $('sessionSelect');
+    const statsGrid = $('statsGrid');
+    const sessionCards = $('sessionCards');
+    const logBody = $('logBody');
+    const logCount = $('logCount');
+    const logEmpty = $('logEmpty');
+
+    // --- Initial fetch ---
+    async function fetchTelemetry() {
+      try {
+        const url = state.selectedSession ? `/telemetry/ai?session=${state.selectedSession}` : '/telemetry/ai';
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.sessions) {
+          // Aggregate response
+          state.sessions = data.sessions;
+        } else {
+          // Per-session response
+          state.sessions = { [data.sessionId]: { status: data.status, telemetry: data.telemetry, eventCount: data.eventHistory.length } };
+          // Pre-populate log
+          for (const evt of data.eventHistory) {
+            addLogEntry(evt, data.sessionId);
+          }
+        }
+
+        render();
+      } catch (err) {
+        console.warn('[telemetry] fetch failed:', err);
+      }
+    }
+
+    // --- WebSocket ---
+    function connectWS() {
+      const params = state.selectedSession ? `?session=${state.selectedSession}` : '';
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${proto}//${location.host}/telemetry/ai/log${params}`;
+
+      setConnState('connecting');
+      const ws = new WebSocket(wsUrl);
+      state.ws = ws;
+
+      ws.addEventListener('open', () => setConnState('connected'));
+      ws.addEventListener('close', () => {
+        setConnState('disconnected');
+        setTimeout(connectWS, 3000);
+      });
+      ws.addEventListener('error', () => setConnState('disconnected'));
+
+      ws.addEventListener('message', (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'ai_status') {
+            const sid = msg.sessionId || state.selectedSession;
+            if (!state.sessions[sid]) state.sessions[sid] = {};
+            state.sessions[sid].status = msg.status;
+            renderStats();
+            renderSessions();
+          } else if (msg.type === 'ai_telemetry') {
+            const sid = msg.sessionId || state.selectedSession;
+            if (!state.sessions[sid]) state.sessions[sid] = {};
+            state.sessions[sid].telemetry = msg.telemetry;
+            renderStats();
+            renderSessions();
+          } else if (msg.type === 'guidance_event') {
+            const sid = msg.sessionId || state.selectedSession;
+            addLogEntry(msg.event, sid);
+            if (state.sessions[sid]) {
+              state.sessions[sid].eventCount = (state.sessions[sid].eventCount || 0) + 1;
+            }
+            renderSessions();
+          }
+        } catch {}
+      });
+    }
+
+    function setConnState(s) {
+      connDot.className = `status-dot ${s}`;
+      connLabel.textContent = s === 'connected' ? 'Live' : s === 'connecting' ? 'Connecting...' : 'Disconnected';
+    }
+
+    function addLogEntry(event, sessionId) {
+      state.logEntries.push({
+        time: new Date(event.timestampMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        type: event.type,
+        content: event.content,
+        sessionId: sessionId,
+      });
+      if (state.logEntries.length > MAX_LOG) state.logEntries = state.logEntries.slice(-MAX_LOG);
+    }
+
+    // --- Rendering ---
+    function render() {
+      renderStats();
+      renderSessions();
+      renderLog();
+      updateSessionSelect();
+    }
+
+    function renderStats() {
+      let activeCount = 0;
+      let totalTriggers = 0;
+      let totalEvents = 0;
+      let latencySum = 0;
+      let latencyCount = 0;
+
+      for (const [, s] of Object.entries(state.sessions)) {
+        if (s.status?.status === 'active') activeCount++;
+        if (s.telemetry) {
+          totalTriggers += s.telemetry.triggers || 0;
+          totalEvents += s.telemetry.guidanceEvents || 0;
+          if (s.telemetry.avgLatencyMs > 0) {
+            latencySum += s.telemetry.avgLatencyMs;
+            latencyCount++;
+          }
+        }
+      }
+
+      $('statSessions').textContent = Object.keys(state.sessions).length;
+      $('statActive').textContent = activeCount;
+      $('statTriggers').textContent = totalTriggers;
+      $('statEvents').textContent = totalEvents;
+      $('statAvgLatency').textContent = latencyCount > 0 ? Math.round(latencySum / latencyCount) : '--';
+    }
+
+    function renderSessions() {
+      const entries = Object.entries(state.sessions);
+      if (entries.length === 0) {
+        sessionCards.innerHTML = '<div class="empty-state">No AI sessions</div>';
+        return;
+      }
+
+      sessionCards.innerHTML = entries.map(([id, s]) => {
+        const status = s.status?.status || 'idle';
+        const appId = s.status?.appId || '--';
+        const t = s.telemetry || {};
+        const uptime = formatUptime(t.uptimeMs);
+
+        return `<div class="session-card">
+          <div class="session-card-header">
+            <span class="session-id">${id.slice(0, 8)}</span>
+            <span class="session-status ${status}">${status}</span>
+            <span class="session-app">${appId}</span>
+          </div>
+          <div class="session-stats-row">
+            <span class="session-stat">Triggers: <span>${t.triggers || 0}</span></span>
+            <span class="session-stat">Events: <span>${t.guidanceEvents || 0}</span></span>
+            <span class="session-stat">Avg: <span>${t.avgLatencyMs ? Math.round(t.avgLatencyMs) + 'ms' : '--'}</span></span>
+            <span class="session-stat">Last: <span>${t.lastLatencyMs != null ? Math.round(t.lastLatencyMs) + 'ms' : '--'}</span></span>
+            <span class="session-stat">Queue: <span>${t.queueDepth || 0}</span></span>
+            <span class="session-stat">Uptime: <span>${uptime}</span></span>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderLog() {
+      if (state.logEntries.length === 0) {
+        logBody.innerHTML = '<div class="empty-state" id="logEmpty">Waiting for events...</div>';
+        logCount.textContent = '0 events';
+        return;
+      }
+
+      logCount.textContent = `${state.logEntries.length} events`;
+      logBody.innerHTML = state.logEntries.map(entry => {
+        const badge = EVENT_BADGES[entry.type] || { label: '???', cls: 'step' };
+        const contentCls = entry.type === 'guidance.transcript' ? 'log-content transcript' : 'log-content';
+
+        if (entry.type === 'guidance.transcript') {
+          return `<div class="log-entry">
+            <span class="log-time">${entry.time}</span>
+            <span class="${contentCls}">${esc(entry.content)}</span>
+          </div>`;
+        }
+
+        const sessionTag = !state.selectedSession && entry.sessionId
+          ? `<span class="log-session">${entry.sessionId.slice(0, 6)}</span>`
+          : '';
+
+        return `<div class="log-entry">
+          <span class="log-time">${entry.time}</span>
+          <span class="log-badge ${badge.cls}">${badge.label}</span>
+          <span class="${contentCls}">${esc(entry.content)}</span>
+          ${sessionTag}
+        </div>`;
+      }).join('');
+
+      logBody.scrollTop = logBody.scrollHeight;
+    }
+
+    function updateSessionSelect() {
+      const ids = Object.keys(state.sessions);
+      const current = sessionSelect.value;
+      sessionSelect.innerHTML = '<option value="">All sessions</option>' +
+        ids.map(id => `<option value="${id}" ${current === id ? 'selected' : ''}>${id.slice(0, 8)}</option>`).join('');
+    }
+
+    // --- Event handlers ---
+    sessionSelect.addEventListener('change', () => {
+      state.selectedSession = sessionSelect.value;
+      state.logEntries = [];
+      // Close and reconnect WS with new filter
+      if (state.ws) state.ws.close();
+      fetchTelemetry();
+      connectWS();
+    });
+
+    // --- Utilities ---
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+
+    function formatUptime(ms) {
+      if (!ms || ms <= 0) return '--';
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return `${s}s`;
+      const m = Math.floor(s / 60);
+      if (m < 60) return `${m}m ${s % 60}s`;
+      const h = Math.floor(m / 60);
+      return `${h}h ${m % 60}m`;
+    }
+
+    // --- Boot ---
+    fetchTelemetry();
+    connectWS();
+    // Refresh stats every 10s
+    setInterval(fetchTelemetry, 10000);
+  </script>
+</body>
+</html>

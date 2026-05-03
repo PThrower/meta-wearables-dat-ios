@@ -1,0 +1,12 @@
+{
+  "name": "frame-relay-wasm",
+  "description": "WASM frame relay logic for CaringMind glasses streaming",
+  "version": "0.1.0",
+  "files": [
+    "frame_relay_wasm_bg.wasm",
+    "frame_relay_wasm.js",
+    "frame_relay_wasm.d.ts"
+  ],
+  "main": "frame_relay_wasm.js",
+  "types": "frame_relay_wasm.d.ts"
+}

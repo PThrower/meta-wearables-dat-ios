@@ -1,0 +1,198 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [feat/stream-registry]
+    paths:
+      - 'hosted/**'
+      - '.github/workflows/deploy.yml'
+
+concurrency:
+  group: vps-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: relay.simulationapi.com
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+
+            cd /root/relay-server
+
+            # --- Deploy lock: prevent concurrent deploys from stomping each other ---
+            LOCKFILE=/tmp/relay-deploy.lock
+            LOCK_TIMEOUT=300  # 5 minutes
+            if ! flock -w $LOCK_TIMEOUT 200; then
+              echo "FAIL: another deploy is running (waited ${LOCK_TIMEOUT}s)"
+              exit 1
+            fi 200>"$LOCKFILE"
+            echo ">>> Deploy lock acquired"
+
+            echo ">>> Pulling latest"
+            cd /root/relay-server
+            git fetch origin feat/stream-registry
+            git reset --hard origin/feat/stream-registry
+            git clean -fd hosted/server/pkg/ hosted/web-platform/dist/ 2>/dev/null || true
+
+            echo ">>> Updating version env vars"
+            NEW_COMMIT=$(git rev-parse --short HEAD)
+            NEW_VERSION="$(date +%Y%m%d-%H%M)"
+            sed -i "s/^GIT_COMMIT=.*/GIT_COMMIT=$NEW_COMMIT/" hosted/server/.env
+            sed -i "s/^BUILD_VERSION=.*/BUILD_VERSION=$NEW_VERSION/" hosted/server/.env
+            echo "GIT_COMMIT=$NEW_COMMIT BUILD_VERSION=$NEW_VERSION"
+
+            echo ">>> Installing build tools (idempotent)"
+            apt-get install -y build-essential &>/dev/null || true
+
+            echo ">>> Installing Rust toolchain (idempotent)"
+            if ! command -v rustc &>/dev/null; then
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+              source "$HOME/.cargo/env"
+            fi
+            if ! command -v wasm-pack &>/dev/null; then
+              curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+            fi
+            source "$HOME/.cargo/env"
+
+            echo ">>> Building WASM frame relay"
+            cd /root/relay-server/hosted/packages/frame-relay-wasm
+            wasm-pack build --target nodejs --out-dir ../../server/pkg
+            echo "WASM rebuilt"
+
+            echo ">>> Building relay-protocol if needed"
+            cd /root/relay-server/hosted/packages/relay-protocol
+            if [ ! -d dist ] || [ "$(find src -newer dist -type f 2>/dev/null | wc -l)" -gt 0 ]; then
+              /root/.bun/bin/bun install
+              /root/.bun/bin/bun x tsc
+              echo "relay-protocol rebuilt"
+            fi
+
+            echo ">>> Building web platform"
+            cd /root/relay-server/hosted/web-platform
+            /root/.bun/bin/bun install
+            /root/.bun/bin/bun x vite build
+            echo "web-platform rebuilt"
+
+            echo ">>> Installing server deps"
+            cd /root/relay-server/hosted/server
+            /root/.bun/bin/bun install
+
+            echo ">>> Installing gateway deps"
+            cd /root/relay-server/hosted/gateway
+            /root/.bun/bin/bun install
+
+            echo ">>> Injecting secrets into relay .env"
+            cd /root/relay-server/hosted/server
+            if [ -n "${{ secrets.APNS_KEY_ID }}" ]; then
+              grep -q '^APNS_KEY_ID=' .env && sed -i "s|^APNS_KEY_ID=.*|APNS_KEY_ID=${{ secrets.APNS_KEY_ID }}|" .env || echo "APNS_KEY_ID=${{ secrets.APNS_KEY_ID }}" >> .env
+              echo "APNS_KEY_ID injected"
+            fi
+            if [ -n "${{ secrets.APNS_TEAM_ID }}" ]; then
+              grep -q '^APNS_TEAM_ID=' .env && sed -i "s|^APNS_TEAM_ID=.*|APNS_TEAM_ID=${{ secrets.APNS_TEAM_ID }}|" .env || echo "APNS_TEAM_ID=${{ secrets.APNS_TEAM_ID }}" >> .env
+              echo "APNS_TEAM_ID injected"
+            fi
+            if [ -n "${{ secrets.APNS_BUNDLE_ID }}" ]; then
+              grep -q '^APNS_BUNDLE_ID=' .env && sed -i "s|^APNS_BUNDLE_ID=.*|APNS_BUNDLE_ID=${{ secrets.APNS_BUNDLE_ID }}|" .env || echo "APNS_BUNDLE_ID=${{ secrets.APNS_BUNDLE_ID }}" >> .env
+              echo "APNS_BUNDLE_ID injected"
+            fi
+            if [ -n "${{ secrets.APNS_KEY_B64 }}" ]; then
+              grep -q '^APNS_KEY_B64=' .env && sed -i "s|^APNS_KEY_B64=.*|APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}|" .env || echo "APNS_KEY_B64=${{ secrets.APNS_KEY_B64 }}" >> .env
+              echo "APNS_KEY_B64 injected"
+            fi
+            # APNS_PRODUCTION: always set (sandbox for dev builds, production for App Store)
+            grep -q '^APNS_PRODUCTION=' .env && sed -i 's|^APNS_PRODUCTION=.*|APNS_PRODUCTION=false|' .env || echo "APNS_PRODUCTION=false" >> .env
+            if [ -n "${{ secrets.DEEPGRAM_API_KEY }}" ]; then
+              grep -q '^DEEPGRAM_API_KEY=' .env && sed -i "s|^DEEPGRAM_API_KEY=.*|DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}|" .env || echo "DEEPGRAM_API_KEY=${{ secrets.DEEPGRAM_API_KEY }}" >> .env
+              echo "DEEPGRAM_API_KEY injected"
+            fi
+            if [ -n "${{ secrets.PALANTIR_TOKEN }}" ]; then
+              grep -q '^PALANTIR_TOKEN=' .env && sed -i "s|^PALANTIR_TOKEN=.*|PALANTIR_TOKEN=${{ secrets.PALANTIR_TOKEN }}|" .env || echo "PALANTIR_TOKEN=${{ secrets.PALANTIR_TOKEN }}" >> .env
+              echo "PALANTIR_TOKEN injected"
+            fi
+            if [ -n "${{ secrets.PALANTIR_STACK_URL }}" ]; then
+              grep -q '^PALANTIR_STACK_URL=' .env && sed -i "s|^PALANTIR_STACK_URL=.*|PALANTIR_STACK_URL=${{ secrets.PALANTIR_STACK_URL }}|" .env || echo "PALANTIR_STACK_URL=${{ secrets.PALANTIR_STACK_URL }}" >> .env
+              echo "PALANTIR_STACK_URL injected"
+            fi
+
+            echo ">>> Syncing infra configs"
+            cp /root/relay-server/hosted/infra/caringmind-relay.service /etc/systemd/system/
+            cp /root/relay-server/hosted/infra/caringmind-gateway.service /etc/systemd/system/
+            systemctl daemon-reload
+
+            echo ">>> Checking Caddy config"
+            if ! diff -q /root/relay-server/hosted/infra/Caddyfile /etc/caddy/Caddyfile >/dev/null 2>&1; then
+              echo "Caddyfile changed — restarting Caddy"
+              cp /root/relay-server/hosted/infra/Caddyfile /etc/caddy/
+              systemctl restart caddy
+              sleep 3
+            else
+              echo "Caddyfile unchanged — skipping Caddy restart"
+            fi
+
+            echo ">>> Stopping relay service and freeing port"
+            systemctl stop caringmind-relay.service || true
+            fuser -k 8080/tcp 2>/dev/null || true
+            sleep 2
+            # Verify port is free
+            if fuser 8080/tcp 2>/dev/null; then
+              echo "WARN: port 8080 still in use, force killing"
+              fuser -k -9 8080/tcp 2>/dev/null || true
+              sleep 2
+            fi
+
+            echo ">>> Starting relay service"
+            systemctl start caringmind-relay.service
+
+            echo ">>> Waiting for relay startup"
+            sleep 3
+
+            echo ">>> Restarting gateway service"
+            systemctl restart caringmind-gateway.service
+
+            echo ">>> Waiting for gateway startup"
+            sleep 2
+
+            echo ">>> Health check (relay)"
+            for i in 1 2 3 4 5; do
+              RELAY_HEALTH=$(curl -sf http://localhost:8080/health 2>/dev/null) && break
+              if [ "$i" = "5" ]; then
+                echo "FAIL: relay health check failed after 5 attempts"
+                journalctl -u caringmind-relay.service -n 20 --no-pager
+                exit 1
+              fi
+              echo "attempt $i: relay not ready, retrying in 2s..."
+              sleep 2
+            done
+            echo "Relay: $RELAY_HEALTH"
+            WASM_LOADED=$(echo "$RELAY_HEALTH" | grep -o '"wasmLoaded":[a-z]*' | head -1)
+            echo "WASM status: $WASM_LOADED"
+
+            echo ">>> Health check (gateway)"
+            for i in 1 2 3 4 5; do
+              STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/health)
+              if [ "$STATUS" = "200" ]; then
+                echo "Gateway OK after attempt $i"
+                break
+              fi
+              if [ "$i" = "5" ]; then
+                echo "FAIL: gateway health check returned $STATUS after 5 attempts"
+                systemctl status caringmind-gateway.service --no-pager
+                exit 1
+              fi
+              echo "attempt $i: got $STATUS, retrying in 2s..."
+              sleep 2
+            done
+
+            echo ">>> Deploy complete"
+            systemctl status caringmind-relay.service --no-pager
+            systemctl status caringmind-gateway.service --no-pager

@@ -72,3 +72,4 @@ do {
 - [iOS API Reference](https://wearables.developer.meta.com/docs/reference/ios_swift/dat/0.5)
 - [Developer Documentation](https://wearables.developer.meta.com/docs/develop/)
 - [GitHub Repository](https://github.com/facebook/meta-wearables-dat-ios)
+- See also: `dat-audio-hfp.md` for Bluetooth audio profiles (A2DP/HFP), mic routing, and AVAudioSession setup

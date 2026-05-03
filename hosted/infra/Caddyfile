@@ -1,0 +1,12 @@
+relay.simulationapi.com {
+    # All traffic goes through the gateway (HTTP + WebSocket proxy)
+    reverse_proxy localhost:3000
+}
+
+# BEGIN PREVIEWS (auto-managed by preview-manager.sh — do not edit)
+# END PREVIEWS
+
+development.simulationapi.com {
+    # Dev environment — feat/command-center branch, gateway on :3001
+    reverse_proxy localhost:3001
+}

@@ -1,0 +1,76 @@
+name: Deploy Preview
+
+on:
+  push:
+    branches:
+      - 'feat/**'
+      - 'fix/**'
+      - 'chore/**'
+      - 'dev'
+    paths:
+      - 'hosted/**'
+      - '.github/workflows/deploy-preview.yml'
+
+concurrency:
+  group: preview-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-preview:
+    if: github.ref_name != 'feat/stream-registry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Compute preview slug
+        id: slug
+        run: |
+          # Convert branch name to subdomain-safe slug
+          SLUG=$(echo "${{ github.ref_name }}" | tr '/' '-' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]//g')
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+          echo "domain=${SLUG}.dev.simulationapi.com" >> "$GITHUB_OUTPUT"
+          echo "branch=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy preview via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: relay.simulationapi.com
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 12m
+          script: |
+            set -euo pipefail
+
+            # Ensure preview-manager is available
+            if [ ! -f /root/relay-server/hosted/infra/preview-manager.sh ]; then
+              echo ">>> Installing preview-manager.sh"
+              cd /root/relay-server
+              git fetch origin feat/stream-registry
+              git checkout feat/stream-registry -- hosted/infra/preview-manager.sh
+              chmod +x hosted/infra/preview-manager.sh
+            fi
+
+            # Ensure cargo env is available
+            source "$HOME/.cargo/env" 2>/dev/null || true
+
+            echo ">>> Spawning preview for ${{ steps.slug.outputs.branch }}"
+            /root/relay-server/hosted/infra/preview-manager.sh spawn "${{ steps.slug.outputs.branch }}"
+
+      - name: Verify preview
+        run: |
+          echo "Preview should be live at: https://${{ steps.slug.outputs.domain }}"
+          # Give Caddy a moment to provision TLS
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ steps.slug.outputs.domain }}" || echo "000")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" = "000" ]; then
+            echo "WARN: Could not reach preview — TLS may still be provisioning"
+          fi
+
+      - name: Report
+        run: |
+          echo "============================================"
+          echo "Preview deployed!"
+          echo "  Branch: ${{ steps.slug.outputs.branch }}"
+          echo "  URL:    https://${{ steps.slug.outputs.domain }}"
+          echo "============================================"

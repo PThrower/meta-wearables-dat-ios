@@ -1,0 +1,113 @@
+/**
+ * health.ts — Health check logic
+ *
+ * - computeHealth(): pure sync, zero I/O
+ * - probeHostedServices(): async, probes gateway + web platform + object store in parallel
+ */
+
+import type { ObjectStore } from "@ebowwa/object-store";
+import type { HealthResponse, HostedSection, ServiceProbe } from "./health-types.js";
+
+// --- Re-export types for convenience ---
+export type { HealthResponse, HostedSection, ServiceProbe };
+
+// --- Sync health ---
+
+export interface HealthParams {
+  serverStartTime: number;
+  wasmLoaded: boolean;
+}
+
+export function computeHealth(params: HealthParams): HealthResponse {
+  return {
+    ok: true,
+    uptimeMs: Date.now() - params.serverStartTime,
+    wasmLoaded: params.wasmLoaded,
+    timestamp: new Date().toISOString(),
+    gitCommit: process.env.GIT_COMMIT?.slice(0, 7) ?? "unknown",
+    buildVersion: process.env.BUILD_VERSION ?? "dev",
+  };
+}
+
+// --- Async hosted probes ---
+
+export interface ProbeParams {
+  store: ObjectStore;
+  serverStartTime: number;
+  wasmLoaded: boolean;
+}
+
+const GATEWAY_URL = process.env.GATEWAY_HEALTH_URL || "http://127.0.0.1:3000/api/config";
+const GATEWAY_TIMEOUT_MS = 3000;
+
+async function probeWebPlatform(): Promise<ServiceProbe> {
+  const start = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), GATEWAY_TIMEOUT_MS);
+    const resp = await fetch(`http://127.0.0.1:3000/`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return { ok: false, latencyMs: Date.now() - start, error: `HTTP ${resp.status}` };
+    const body = await resp.text();
+    const hasSPA = body.includes("<!DOCTYPE") || body.includes("<html");
+    return { ok: hasSPA, latencyMs: Date.now() - start, error: hasSPA ? undefined : "response not HTML" };
+  } catch (err: any) {
+    return { ok: false, latencyMs: null, error: err?.code ?? err?.message ?? String(err) };
+  }
+}
+
+async function probeGateway(): Promise<ServiceProbe> {
+  const start = Date.now();
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), GATEWAY_TIMEOUT_MS);
+    const resp = await fetch(GATEWAY_URL, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return { ok: false, latencyMs: Date.now() - start, error: `HTTP ${resp.status}` };
+    return { ok: true, latencyMs: Date.now() - start };
+  } catch (err: any) {
+    return { ok: false, latencyMs: null, error: err?.code ?? err?.message ?? String(err) };
+  }
+}
+
+async function probeObjectStore(store: ObjectStore): Promise<ServiceProbe> {
+  // Canary: put → get → delete a tiny key
+  const canaryKey = "__health_canary__";
+  const canaryValue = Buffer.from(`ok:${Date.now()}`);
+  const start = Date.now();
+
+  try {
+    await store.put(canaryKey, canaryValue);
+    const retrieved = await store.get(canaryKey);
+    await store.delete(canaryKey);
+
+    const ok = retrieved != null;
+    return {
+      ok,
+      latencyMs: Date.now() - start,
+      error: ok ? undefined : "canary value mismatch",
+    };
+  } catch (err: any) {
+    // Best-effort cleanup
+    try { await store.delete(canaryKey); } catch {}
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      error: err?.message ?? String(err),
+    };
+  }
+}
+
+export async function probeHostedServices(params: ProbeParams): Promise<HostedSection> {
+  const [gateway, webPlatform, objectStore] = await Promise.all([
+    probeGateway(),
+    probeWebPlatform(),
+    probeObjectStore(params.store),
+  ]);
+
+  return {
+    gateway,
+    webPlatform,
+    objectStore,
+  };
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=CaringMind Frame Relay Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/relay-server/hosted/server
+EnvironmentFile=/root/relay-server/hosted/server/.env
+Environment=BUN_INSTALL=/root/.bun
+Environment=PATH=/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RELAY_NO_AUTH=1
+Environment=RELAY_TRUST_HEADERS=1
+ExecStart=/root/.bun/bin/bun run src/server.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/caringmind-relay.log
+StandardError=append:/var/log/caringmind-relay.log
+
+[Install]
+WantedBy=multi-user.target
