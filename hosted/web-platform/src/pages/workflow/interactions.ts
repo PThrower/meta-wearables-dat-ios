@@ -267,6 +267,17 @@ function startNodeDrag(startX: number, startY: number, nodeId: string): void {
 
 // --- Edge drag ---
 
+/** Brief red flash on a node to indicate an edge was rejected. */
+function flashNodeRejection(nodeId: string, svg: SVGElement): void {
+  const g = svg.querySelector(`[data-id="${nodeId}"]`);
+  if (!g) return;
+  const rect = g.querySelector(".wf-node-bg") as SVGElement | null;
+  if (!rect) return;
+  const orig = rect.getAttribute("fill");
+  rect.setAttribute("fill", "#7f1d1d");
+  setTimeout(() => rect.setAttribute("fill", orig ?? "#1a1a2e"), 400);
+}
+
 function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement): void {
   const workflow = getWorkflow();
   const source = workflow?.nodes.find(n => n.id === sourceNodeId);
@@ -332,12 +343,20 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
       const allowedBySinkRole = sourceDef && targetDef && targetDef.role === "sink" && sourceDef.allowedTargets.includes("<sink>");
       const allowedByTriggerRole = sourceDef && targetDef && targetDef.role === "trigger" && sourceDef.allowedTargets.includes("<trigger>");
       const allowedBySourceRole = sourceDef && targetDef && targetDef.role === "source" && sourceDef.allowedTargets.includes("<source>");
-      if (!allowedDirect && !allowedBySinkRole && !allowedByTriggerRole && !allowedBySourceRole) { _edgeState = null; return; }
+      if (!allowedDirect && !allowedBySinkRole && !allowedByTriggerRole && !allowedBySourceRole) {
+        flashNodeRejection(target.id, svg);
+        _edgeState = null;
+        return;
+      }
 
       // Reverse check: subnode allowedSources
       const targetAllowedSources = targetDef?.allowedSources;
       if (targetAllowedSources && targetAllowedSources.length > 0) {
-        if (!targetAllowedSources.includes(sourceNode!.type)) { _edgeState = null; return; }
+        if (!targetAllowedSources.includes(sourceNode!.type)) {
+          flashNodeRejection(target.id, svg);
+          _edgeState = null;
+          return;
+        }
       }
 
       const exists = workflow.edges.some(e =>
