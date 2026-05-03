@@ -14,7 +14,6 @@
 // for choosing which Meta wearable device to stream from.
 //
 
-import MWDATCore
 import SwiftUI
 
 #if DEBUG
@@ -22,51 +21,23 @@ import MWDATMockDevice
 #endif
 
 struct MainAppView: View {
-  let wearables: WearablesInterface
-  @ObservedObject private var viewModel: WearablesViewModel
-  @ObservedObject private var telemetryService: TelemetryService
-  var pushNotificationService: PushNotificationService?
+  @EnvironmentObject private var wearablesVM: WearablesViewModel
+  var pushService: PushNotificationService
 
   #if DEBUG
-  @ObservedObject var mockDeviceViewModel: MockDeviceKitView.ViewModel
-
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, mockDeviceViewModel: MockDeviceKitView.ViewModel, pushNotificationService: PushNotificationService? = nil) {
-    self.wearables = wearables
-    self.viewModel = viewModel
-    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
-    self._mockDeviceViewModel = ObservedObject(wrappedValue: mockDeviceViewModel)
-    self.pushNotificationService = pushNotificationService
-  }
-  #else
-  init(wearables: WearablesInterface, viewModel: WearablesViewModel, telemetryService: TelemetryService, pushNotificationService: PushNotificationService? = nil) {
-    self.wearables = wearables
-    self.viewModel = viewModel
-    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
-    self.pushNotificationService = pushNotificationService
-  }
+  var mockDeviceViewModel: MockDeviceKitView.ViewModel
   #endif
 
   var body: some View {
-    if viewModel.registrationState == .registered || viewModel.hasMockDevice {
+    if wearablesVM.registrationState == .registered || wearablesVM.hasMockDevice {
       #if DEBUG
-      StreamSessionView(
-        wearables: wearables,
-        wearablesVM: viewModel,
-        telemetryService: telemetryService,
-        mockDeviceVM: mockDeviceViewModel,
-        pushNotificationService: pushNotificationService
-      )
+      StreamSessionView(pushService: pushService, mockDeviceViewModel: mockDeviceViewModel)
       #else
-      StreamSessionView(
-        wearables: wearables,
-        wearablesVM: viewModel,
-        telemetryService: telemetryService,
-        pushNotificationService: pushNotificationService
-      )
+      StreamSessionView(pushService: pushService)
       #endif
     } else {
       // User not registered - show registration/onboarding flow
-      HomeScreenView(viewModel: viewModel)
+      HomeScreenView(viewModel: wearablesVM)
     }
   }
 }

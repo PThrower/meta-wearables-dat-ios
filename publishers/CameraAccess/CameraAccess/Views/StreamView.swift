@@ -18,9 +18,8 @@ import MWDATCore
 import SwiftUI
 
 struct StreamView: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
-  @ObservedObject var telemetryService: TelemetryService
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var telemetryService: TelemetryService
   @State private var showErrorLog = false
   @State private var showSettings = false
   @Environment(\.scenePhase) private var scenePhase
@@ -35,7 +34,7 @@ struct StreamView: View {
         .edgesIgnoringSafeArea(.all)
 
       // Video backdrop
-      if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
+      if let videoFrame = coordinator.currentVideoFrame, coordinator.hasReceivedFirstFrame {
         GeometryReader { geometry in
           Image(uiImage: videoFrame)
             .resizable()
@@ -44,16 +43,16 @@ struct StreamView: View {
             .clipped()
           // Bounding box overlay from AI annotations
           BoundingBoxOverlayView(
-            boxes: viewModel.boundingBoxes,
-            showOverlay: viewModel.showBboxOverlay,
-            visionDetections: viewModel.visionDetections,
-            sceneLabel: viewModel.visionSceneLabel,
-            transcription: viewModel.overlayTranscription,
-            trackedItems: viewModel.trackingTracks,
-            yoloDetections: viewModel.yoloDetections,
-            zones: viewModel.activeZones,
-            zoneAnalytics: viewModel.trackingSnapshot,
-            heatMap: viewModel.heatMap
+            boxes: coordinator.pipeline.boundingBoxes,
+            showOverlay: coordinator.pipeline.showBboxOverlay,
+            visionDetections: coordinator.pipeline.visionDetections,
+            sceneLabel: coordinator.pipeline.visionSceneLabel,
+            transcription: coordinator.pipeline.overlayTranscription,
+            trackedItems: coordinator.pipeline.trackingTracks,
+            yoloDetections: coordinator.pipeline.yoloDetections,
+            zones: coordinator.pipeline.activeZones,
+            zoneAnalytics: coordinator.pipeline.trackingSnapshot,
+            heatMap: coordinator.pipeline.heatMap
           )
           .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -64,17 +63,17 @@ struct StreamView: View {
             .scaleEffect(1.5)
             .foregroundColor(.white)
 
-          if viewModel.isRetrying {
-            Text("RETRYING \(viewModel.retryCount)/3...")
+          if coordinator.isRetrying {
+            Text("RETRYING \(coordinator.retryCount)/3...")
               .font(.system(size: 12, weight: .bold, design: .monospaced))
               .foregroundColor(.yellow)
           } else {
-            Text(String(describing: viewModel.streamingStatus).uppercased())
+            Text(String(describing: coordinator.streamingStatus).uppercased())
               .font(.system(size: 12, weight: .medium, design: .monospaced))
               .foregroundColor(.white.opacity(0.6))
           }
 
-          if let lastError = viewModel.errorLog.last {
+          if let lastError = coordinator.errors.errorLog.last {
             Text(lastError)
               .font(.system(size: 10, design: .monospaced))
               .foregroundColor(.red.opacity(0.8))
@@ -88,8 +87,8 @@ struct StreamView: View {
       VStack {
         HStack {
           // YOLO model state badge — show when stage is configured
-          if viewModel.isYoloConfigured {
-            YOLOStateBadge(state: viewModel.yoloModelState)
+          if coordinator.pipeline.isYoloConfigured {
+            YOLOStateBadge(state: coordinator.pipeline.yoloModelState)
               .padding(.leading, 8)
               .padding(.top, 4)
           }
@@ -125,11 +124,11 @@ struct StreamView: View {
       }
 
       // Inline error banner at top
-      if !viewModel.errorMessage.isEmpty {
+      if !coordinator.errors.errorMessage.isEmpty {
         VStack {
           ErrorBanner(
-            message: viewModel.errorMessage,
-            errorCount: viewModel.errorLog.count,
+            message: coordinator.errors.errorMessage,
+            errorCount: coordinator.errors.errorLog.count,
             onTap: { showErrorLog.toggle() }
           )
           Spacer()
@@ -141,7 +140,7 @@ struct StreamView: View {
       // Bottom controls layer
       VStack {
         Spacer()
-        ControlsView(viewModel: viewModel)
+        ControlsView()
       }
       .padding(.all, 24)
 
@@ -150,7 +149,7 @@ struct StreamView: View {
       if showNodePreview {
         VStack {
           Spacer()
-          NodePreviewView(store: viewModel.previewStore)
+          NodePreviewView(store: coordinator.previewStore)
             .padding(.horizontal, 8)
             .padding(.bottom, 80)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -162,26 +161,29 @@ struct StreamView: View {
     .onDisappear {
       guard scenePhase != .background else { return }
       Task {
-        if viewModel.streamingStatus != .stopped {
-          await viewModel.stopSession()
+        if coordinator.streamingStatus != .stopped {
+          await coordinator.stopSession()
         }
       }
     }
     // Settings sheet
     .sheet(isPresented: $showSettings) {
-      SettingsView(mode: .liveStream, viewModel: viewModel, wearablesVM: wearablesVM, telemetryService: telemetryService)
+      SettingsView(mode: .liveStream)
     }
     // Error log sheet
     .sheet(isPresented: $showErrorLog) {
-      ErrorLogSheet(errorLog: viewModel.errorLog)
+      ErrorLogSheet(errorLog: coordinator.errors.errorLog)
     }
     // Show captured photos from DAT SDK in a preview sheet
-    .sheet(isPresented: $viewModel.showPhotoPreview) {
-      if let photo = viewModel.capturedPhoto {
+    .sheet(isPresented: Binding(
+      get: { coordinator.recording.showPhotoPreview },
+      set: { if !$0 { coordinator.recording.dismissPhotoPreview() } }
+    )) {
+      if let photo = coordinator.recording.capturedPhoto {
         PhotoPreviewView(
           photo: photo,
           onDismiss: {
-            viewModel.dismissPhotoPreview()
+            coordinator.recording.dismissPhotoPreview()
           }
         )
       }
@@ -274,7 +276,7 @@ struct ErrorLogSheet: View {
 
 // Extracted controls for clarity — mic/audio picker moved to live settings
 struct ControlsView: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
+  @Environment(StreamCoordinator.self) private var coordinator
   @State private var showAppPicker = false
   var body: some View {
     HStack(spacing: 8) {
@@ -284,73 +286,73 @@ struct ControlsView: View {
         text: nil
       ) {
         Task {
-          await viewModel.stopSession()
+          await coordinator.stopSession()
         }
       }
       .shadow(color: .red.opacity(0.4), radius: 6)
 
       // Record button
       CircleButton(
-        icon: viewModel.isRecording ? "stop.circle.fill" : "record.circle",
+        icon: coordinator.recording.isRecording ? "stop.circle.fill" : "record.circle",
         text: nil
       ) {
         Task {
-          if viewModel.isRecording {
-            await viewModel.stopRecording()
+          if coordinator.recording.isRecording {
+            await coordinator.recording.stopRecording()
           } else {
-            await viewModel.startRecording()
+            try? await coordinator.recording.startRecording()
           }
         }
       }
-      .foregroundColor(viewModel.isRecording ? .red : .white)
-      .shadow(color: viewModel.isRecording ? .red.opacity(0.5) : .clear, radius: viewModel.isRecording ? 8 : 0)
-      .animation(.easeInOut(duration: 0.2), value: viewModel.isRecording)
+      .foregroundColor(coordinator.recording.isRecording ? .red : .white)
+      .shadow(color: coordinator.recording.isRecording ? .red.opacity(0.5) : .clear, radius: coordinator.recording.isRecording ? 8 : 0)
+      .animation(.easeInOut(duration: 0.2), value: coordinator.recording.isRecording)
       .accessibilityIdentifier("record_button")
 
       // Relay button (starts/stops both video + audio relay)
       CircleButton(
-        icon: viewModel.relayMode == .active ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
+        icon: coordinator.relayMode == .active ? "antenna.radiowaves" : "dot.radiowaves.up.forward",
         text: nil
       ) {
         Task {
-          if viewModel.relayMode == .active {
-            await viewModel.stopRelay()
+          if coordinator.relayMode == .active {
+            await coordinator.stopRelay()
           } else {
-            await viewModel.startRelay()
+            await coordinator.startRelay()
           }
         }
       }
-      .foregroundColor(viewModel.relayMode == .active ? .green : viewModel.relayMode == .standby ? .orange : .white)
-      .shadow(color: viewModel.relayMode == .active ? .green.opacity(0.5) : .clear, radius: viewModel.relayMode == .active ? 8 : 0)
-      .animation(.easeInOut(duration: 0.2), value: viewModel.relayMode == .active)
+      .foregroundColor(coordinator.relayMode == .active ? .green : coordinator.relayMode == .standby ? .orange : .white)
+      .shadow(color: coordinator.relayMode == .active ? .green.opacity(0.5) : .clear, radius: coordinator.relayMode == .active ? 8 : 0)
+      .animation(.easeInOut(duration: 0.2), value: coordinator.relayMode == .active)
       .accessibilityIdentifier("relay_button")
 
       // Photo button
       CircleButton(icon: "camera.fill", text: nil) {
-        viewModel.capturePhoto()
+        coordinator.capturePhoto()
       }
       .accessibilityIdentifier("capture_photo_button")
 
       // AI app toggle — only when relaying
-      if viewModel.relayMode == .active {
+      if coordinator.relayMode == .active {
         CircleButton(
-          icon: viewModel.activeAppId != nil ? "brain.head.profile.fill" : "brain.head.profile",
+          icon: coordinator.activeAppId != nil ? "brain.head.profile.fill" : "brain.head.profile",
           text: nil
         ) {
-          if viewModel.activeAppId != nil {
-            viewModel.deactivateApp()
+          if coordinator.activeAppId != nil {
+            coordinator.deactivateApp()
           } else {
             showAppPicker = true
           }
         }
-        .foregroundColor(viewModel.activeAppId != nil ? .cyan : .white)
-        .shadow(color: viewModel.activeAppId != nil ? .cyan.opacity(0.5) : .clear, radius: viewModel.activeAppId != nil ? 8 : 0)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.activeAppId)
+        .foregroundColor(coordinator.activeAppId != nil ? .cyan : .white)
+        .shadow(color: coordinator.activeAppId != nil ? .cyan.opacity(0.5) : .clear, radius: coordinator.activeAppId != nil ? 8 : 0)
+        .animation(.easeInOut(duration: 0.2), value: coordinator.activeAppId)
         .accessibilityIdentifier("ai_app_toggle")
       }
     }
     .sheet(isPresented: $showAppPicker) {
-      AppPickerSheet(viewModel: viewModel)
+      AppPickerSheet()
     }
   }
 }

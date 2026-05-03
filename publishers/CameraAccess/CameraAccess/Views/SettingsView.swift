@@ -28,12 +28,13 @@ enum SettingsMode {
 
 struct SettingsView: View {
   let mode: SettingsMode
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
-  @ObservedObject var telemetryService: TelemetryService
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var wearablesVM: WearablesViewModel
+  @EnvironmentObject private var telemetryService: TelemetryService
   @Environment(\.dismiss) var dismiss
 
   var body: some View {
+    @Bindable var coordinator = coordinator
     NavigationView {
       ScrollView {
         VStack(spacing: 20) {
@@ -92,7 +93,10 @@ struct SettingsView: View {
         Text("Server URL")
           .font(.system(size: 11))
           .foregroundColor(.secondary)
-        TextField("wss://relay.example.com/publish", text: $viewModel.relayURL)
+        TextField("wss://relay.example.com/publish", text: Binding(
+          get: { coordinator.config.relayURL },
+          set: { coordinator.config.relayURL = $0 }
+        ))
           .font(.system(size: 13, design: .monospaced))
           .foregroundColor(.primary)
           .padding(10)
@@ -101,7 +105,7 @@ struct SettingsView: View {
           .autocapitalization(.none)
           .disableAutocorrection(true)
           .keyboardType(.URL)
-          .disabled(viewModel.relayMode == .active)
+          .disabled(coordinator.relayMode == .active)
       }
     }
   }
@@ -138,7 +142,7 @@ struct SettingsView: View {
 
             Spacer()
 
-            if viewModel.selectedDeviceId == deviceId || (viewModel.selectedDeviceId == nil && deviceId == wearablesVM.devices.first) {
+            if coordinator.selectedDeviceId == deviceId || (coordinator.selectedDeviceId == nil && deviceId == wearablesVM.devices.first) {
               Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.blue)
                 .font(.system(size: 14))
@@ -206,14 +210,14 @@ struct SettingsView: View {
 
   private var errorLogSection: some View {
     VStack(alignment: .leading, spacing: 8) {
-      sectionHeader("ERRORS (\(viewModel.errorLog.count))")
+      sectionHeader("ERRORS (\(coordinator.errors.errorLog.count))")
 
-      if viewModel.errorLog.isEmpty {
+      if coordinator.errors.errorLog.isEmpty {
         Text("No errors logged")
           .font(.system(size: 13))
           .foregroundColor(.secondary)
       } else {
-        ForEach(viewModel.errorLog.suffix(5).reversed(), id: \.self) { entry in
+        ForEach(coordinator.errors.errorLog.suffix(5).reversed(), id: \.self) { entry in
           Text(entry)
             .font(.system(size: 10, design: .monospaced))
             .foregroundColor(.red)
@@ -235,14 +239,14 @@ struct SettingsView: View {
       sectionHeader("DEBUG")
 
       row("Registration", String(describing: wearablesVM.registrationState))
-      row("Active Device", viewModel.hasActiveDevice ? "YES" : "NO")
-      row("Selected", viewModel.selectedDeviceId ?? "auto")
-      if viewModel.isRetrying {
-        row("Retry", "\(viewModel.retryCount)/3")
+      row("Active Device", coordinator.hasActiveDevice ? "YES" : "NO")
+      row("Selected", coordinator.selectedDeviceId ?? "auto")
+      if coordinator.isRetrying {
+        row("Retry", "\(coordinator.retryCount)/3")
       }
-      row("Relay", viewModel.relayMode == .active ? "ACTIVE" : viewModel.relayMode == .standby ? "STANDBY" : "OFF")
-      row("Recording", viewModel.isRecording ? "YES" : "NO")
-      row("Tap Connected", viewModel.isTapConnected ? "YES" : "NO")
+      row("Relay", coordinator.relayMode == .active ? "ACTIVE" : coordinator.relayMode == .standby ? "STANDBY" : "OFF")
+      row("Recording", coordinator.recording.isRecording ? "YES" : "NO")
+      row("Tap Connected", coordinator.isTapConnected ? "YES" : "NO")
     }
   }
   #endif
@@ -261,14 +265,14 @@ struct SettingsView: View {
 
         ForEach(StreamingResolution.allCases, id: \.self) { res in
           Button {
-            viewModel.selectedResolution = res
+            coordinator.config.selectedResolution = res
           } label: {
             Text(resLabel(res))
-              .font(.system(size: 12, weight: viewModel.selectedResolution == res ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedResolution == res ? .white : .secondary)
+              .font(.system(size: 12, weight: coordinator.config.selectedResolution == res ? .bold : .regular, design: .monospaced))
+              .foregroundColor(coordinator.config.selectedResolution == res ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedResolution == res ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .background(coordinator.config.selectedResolution == res ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
@@ -282,20 +286,20 @@ struct SettingsView: View {
 
         ForEach([UInt(24), 30, 60], id: \.self) { fps in
           Button {
-            viewModel.selectedFrameRate = fps
+            coordinator.config.selectedFrameRate = fps
           } label: {
             Text("\(fps) fps")
-              .font(.system(size: 12, weight: viewModel.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedFrameRate == fps ? .white : .secondary)
+              .font(.system(size: 12, weight: coordinator.config.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
+              .foregroundColor(coordinator.config.selectedFrameRate == fps ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedFrameRate == fps ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .background(coordinator.config.selectedFrameRate == fps ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
       }
 
-      Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} RAW codec")
+      Text("\(resLabel(coordinator.config.selectedResolution)) \u{00B7} \(coordinator.config.selectedFrameRate) fps \u{00B7} RAW codec")
         .font(.system(size: 10, design: .monospaced))
         .foregroundColor(.secondary)
     }
@@ -317,13 +321,16 @@ struct SettingsView: View {
             .foregroundColor(.secondary)
         }
         Spacer()
-        Toggle("", isOn: $viewModel.isTTSPlaybackEnabled)
+        Toggle("", isOn: Binding(
+          get: { coordinator.config.isTTSPlaybackEnabled },
+          set: { coordinator.config.isTTSPlaybackEnabled = $0 }
+        ))
           .labelsHidden()
           .tint(.blue)
-          .onChange(of: viewModel.isTTSPlaybackEnabled) { enabled in
+          .onChange(of: coordinator.config.isTTSPlaybackEnabled) { enabled in
             Task {
-              if enabled { await viewModel.startTTSPlayback() }
-              else { await viewModel.stopTTSPlayback() }
+              if enabled { await coordinator.startTTSPlayback() }
+              else { await coordinator.stopTTSPlayback() }
             }
           }
       }
@@ -347,23 +354,23 @@ struct SettingsView: View {
 
       ForEach(RelayVideoCodec.allCases, id: \.self) { codec in
         Button {
-          Task { await viewModel.switchCodec(codec) }
+          Task { await coordinator.switchCodec(codec) }
         } label: {
           HStack(spacing: 10) {
             Image(systemName: codec == .h264 ? "bolt.horizontal.icloud.fill" : "photo")
               .font(.system(size: 14))
-              .foregroundColor(viewModel.videoCodec == codec ? .blue : .secondary)
+              .foregroundColor(coordinator.config.videoCodec == codec ? .blue : .secondary)
               .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
               Text(codec.displayName)
-                .font(.system(size: 14, weight: viewModel.videoCodec == codec ? .medium : .regular))
-                .foregroundColor(viewModel.videoCodec == codec ? .primary : .secondary)
+                .font(.system(size: 14, weight: coordinator.config.videoCodec == codec ? .medium : .regular))
+                .foregroundColor(coordinator.config.videoCodec == codec ? .primary : .secondary)
             }
 
             Spacer()
 
-            if viewModel.videoCodec == codec {
+            if coordinator.config.videoCodec == codec {
               Image(systemName: "checkmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.blue)
@@ -371,7 +378,7 @@ struct SettingsView: View {
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 10)
-          .background(viewModel.videoCodec == codec ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
+          .background(coordinator.config.videoCodec == codec ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
           .cornerRadius(8)
         }
       }
@@ -395,21 +402,21 @@ struct SettingsView: View {
 
       ForEach(AudioInputMode.allCases) { mode in
         Button {
-          viewModel.audioInputMode = mode
+          coordinator.config.audioInputMode = mode
         } label: {
           HStack(spacing: 10) {
             Image(systemName: mode.systemImage)
               .font(.system(size: 14))
-              .foregroundColor(viewModel.audioInputMode == mode ? .blue : .secondary)
+              .foregroundColor(coordinator.config.audioInputMode == mode ? .blue : .secondary)
               .frame(width: 24)
 
             Text(mode.rawValue)
-              .font(.system(size: 14, weight: viewModel.audioInputMode == mode ? .medium : .regular))
-              .foregroundColor(viewModel.audioInputMode == mode ? .primary : .secondary)
+              .font(.system(size: 14, weight: coordinator.config.audioInputMode == mode ? .medium : .regular))
+              .foregroundColor(coordinator.config.audioInputMode == mode ? .primary : .secondary)
 
             Spacer()
 
-            if viewModel.audioInputMode == mode {
+            if coordinator.config.audioInputMode == mode {
               Image(systemName: "checkmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundColor(.blue)
@@ -417,7 +424,7 @@ struct SettingsView: View {
           }
           .padding(.horizontal, 12)
           .padding(.vertical, 10)
-          .background(viewModel.audioInputMode == mode ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
+          .background(coordinator.config.audioInputMode == mode ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
           .cornerRadius(8)
         }
       }
@@ -457,7 +464,7 @@ struct SettingsView: View {
 
       Button(role: .destructive) {
         Task {
-          await viewModel.stopSession()
+          await coordinator.stopSession()
           dismiss()
         }
       } label: {

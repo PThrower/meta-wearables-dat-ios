@@ -22,11 +22,11 @@ import MWDATMockDevice
 #endif
 
 struct NonStreamView: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
-  @ObservedObject var telemetryService: TelemetryService
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var wearablesVM: WearablesViewModel
+  @EnvironmentObject private var telemetryService: TelemetryService
   #if DEBUG
-  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
+  var mockDeviceViewModel: MockDeviceKitView.ViewModel
   #endif
   @State private var sheetHeight: CGFloat = 300
   @State private var showSettings = false
@@ -74,20 +74,13 @@ struct NonStreamView: View {
 
         // Device picker - always show (includes mock device controls in debug)
         #if DEBUG
-        DevicePickerSection(
-          viewModel: viewModel,
-          wearablesVM: wearablesVM,
-          mockDeviceVM: mockDeviceVM
-        )
-        .padding(.horizontal, 24)
-        .padding(.bottom, 8)
+        DevicePickerSection(mockDeviceViewModel: mockDeviceViewModel)
+          .padding(.horizontal, 24)
+          .padding(.bottom, 8)
         #else
-        DevicePickerSection(
-          viewModel: viewModel,
-          wearablesVM: wearablesVM
-        )
-        .padding(.horizontal, 24)
-        .padding(.bottom, 8)
+        DevicePickerSection()
+          .padding(.horizontal, 24)
+          .padding(.bottom, 8)
         #endif
 
         HStack(spacing: 8) {
@@ -102,10 +95,10 @@ struct NonStreamView: View {
             .foregroundColor(.secondary)
         }
         .padding(.bottom, 12)
-        .opacity(viewModel.hasActiveDevice ? 0 : 1)
+        .opacity(coordinator.hasActiveDevice ? 0 : 1)
 
         // Standby relay indicator
-        if viewModel.relayMode == .standby {
+        if coordinator.relayMode == .standby {
           HStack(spacing: 6) {
             Circle()
               .fill(Color.green)
@@ -120,17 +113,17 @@ struct NonStreamView: View {
         CustomButton(
           title: "Start streaming",
           style: .primary,
-          isDisabled: !viewModel.hasActiveDevice
+          isDisabled: !coordinator.hasActiveDevice
         ) {
           Task {
-            await viewModel.handleStartStreaming()
+            await coordinator.handleStartStreaming()
           }
         }
       }
       .padding(.all, 24)
     }
     .sheet(isPresented: $showSettings) {
-      SettingsView(mode: .preStream, viewModel: viewModel, wearablesVM: wearablesVM, telemetryService: telemetryService)
+      SettingsView(mode: .preStream)
     }
     .sheet(isPresented: $wearablesVM.showGettingStartedSheet) {
       if #available(iOS 16.0, *) {
@@ -147,10 +140,10 @@ struct NonStreamView: View {
 // MARK: - Device Picker
 
 struct DevicePickerSection: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var wearablesVM: WearablesViewModel
   #if DEBUG
-  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
+  var mockDeviceViewModel: MockDeviceKitView.ViewModel
   #endif
 
   var body: some View {
@@ -161,10 +154,10 @@ struct DevicePickerSection: View {
 
       ForEach(wearablesVM.devices, id: \.self) { deviceId in
         let info = wearablesVM.deviceInfos[deviceId]
-        let isSelected = viewModel.selectedDeviceId == deviceId
+        let isSelected = coordinator.selectedDeviceId == deviceId
 
         Button {
-          viewModel.selectDevice(deviceId)
+          coordinator.selectDevice(deviceId)
         } label: {
           HStack(spacing: 10) {
             Image(systemName: deviceIcon(for: info?.type))
@@ -199,10 +192,10 @@ struct DevicePickerSection: View {
 
       // Phone camera option
       Button {
-        if viewModel.isPhoneCameraMode {
-          viewModel.deselectPhoneCamera()
+        if coordinator.isPhoneCameraMode {
+          coordinator.deselectPhoneCamera()
         } else {
-          viewModel.selectPhoneCamera()
+          coordinator.selectPhoneCamera()
         }
       } label: {
         HStack(spacing: 10) {
@@ -225,20 +218,20 @@ struct DevicePickerSection: View {
 
           Spacer()
 
-          if viewModel.isPhoneCameraMode {
+          if coordinator.isPhoneCameraMode {
             Image(systemName: "checkmark.circle.fill")
               .foregroundColor(.blue)
           }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(viewModel.isPhoneCameraMode ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
+        .background(coordinator.isPhoneCameraMode ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(8)
       }
 
       // Auto-select option
       Button {
-        viewModel.selectDevice(nil)
+        coordinator.selectDevice(nil)
       } label: {
         HStack(spacing: 10) {
           Image(systemName: "wand.and.stars")
@@ -251,14 +244,14 @@ struct DevicePickerSection: View {
 
           Spacer()
 
-          if viewModel.selectedDeviceId == nil {
+          if coordinator.selectedDeviceId == nil {
             Image(systemName: "checkmark.circle.fill")
               .foregroundColor(.blue)
           }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(viewModel.selectedDeviceId == nil ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
+        .background(coordinator.selectedDeviceId == nil ? Color.blue.opacity(0.12) : Color(UIColor.secondarySystemGroupedBackground))
         .cornerRadius(8)
       }
 
@@ -277,9 +270,9 @@ struct DevicePickerSection: View {
 
         Spacer()
 
-        if mockDeviceVM.cardViewModels.isEmpty {
+        if mockDeviceViewModel.cardViewModels.isEmpty {
           Button {
-            mockDeviceVM.pairRaybanMeta()
+            mockDeviceViewModel.pairRaybanMeta()
           } label: {
             HStack(spacing: 4) {
               Image(systemName: "plus")
@@ -295,25 +288,25 @@ struct DevicePickerSection: View {
           }
         } else {
           Menu {
-            ForEach(Array(mockDeviceVM.cardViewModels.enumerated()), id: \.offset) { _, cardVM in
+            ForEach(Array(mockDeviceViewModel.cardViewModels.enumerated()), id: \.offset) { _, cardVM in
               Button {
-                mockDeviceVM.unpairDevice(cardVM.device)
+                mockDeviceViewModel.unpairDevice(cardVM.device)
               } label: {
                 Label("Unpair \(cardVM.deviceName)", systemImage: "xmark.circle")
               }
             }
 
-            if mockDeviceVM.cardViewModels.count < 3 {
+            if mockDeviceViewModel.cardViewModels.count < 3 {
               Divider()
               Button {
-                mockDeviceVM.pairRaybanMeta()
+                mockDeviceViewModel.pairRaybanMeta()
               } label: {
                 Label("Pair Another", systemImage: "plus.circle")
               }
             }
           } label: {
             HStack(spacing: 4) {
-              Text("\(mockDeviceVM.cardViewModels.count)")
+              Text("\(mockDeviceViewModel.cardViewModels.count)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
               Text("paired")
                 .font(.system(size: 11))
@@ -368,7 +361,7 @@ struct DevicePickerSection: View {
 // MARK: - Stream Config
 
 struct StreamConfigSection: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
+  @Environment(StreamCoordinator.self) private var coordinator
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -385,14 +378,14 @@ struct StreamConfigSection: View {
 
         ForEach(StreamingResolution.allCases, id: \.self) { res in
           Button {
-            viewModel.selectedResolution = res
+            coordinator.config.selectedResolution = res
           } label: {
             Text(resLabel(res))
-              .font(.system(size: 12, weight: viewModel.selectedResolution == res ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedResolution == res ? .white : .secondary)
+              .font(.system(size: 12, weight: coordinator.config.selectedResolution == res ? .bold : .regular, design: .monospaced))
+              .foregroundColor(coordinator.config.selectedResolution == res ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedResolution == res ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .background(coordinator.config.selectedResolution == res ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
@@ -407,14 +400,14 @@ struct StreamConfigSection: View {
 
         ForEach([UInt(24), 30, 60], id: \.self) { fps in
           Button {
-            viewModel.selectedFrameRate = fps
+            coordinator.config.selectedFrameRate = fps
           } label: {
             Text("\(fps) fps")
-              .font(.system(size: 12, weight: viewModel.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.selectedFrameRate == fps ? .white : .secondary)
+              .font(.system(size: 12, weight: coordinator.config.selectedFrameRate == fps ? .bold : .regular, design: .monospaced))
+              .foregroundColor(coordinator.config.selectedFrameRate == fps ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.selectedFrameRate == fps ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .background(coordinator.config.selectedFrameRate == fps ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
@@ -429,21 +422,21 @@ struct StreamConfigSection: View {
 
         ForEach(RelayVideoCodec.allCases, id: \.self) { codec in
           Button {
-            viewModel.videoCodec = codec
+            coordinator.config.videoCodec = codec
           } label: {
             Text(codec.displayName)
-              .font(.system(size: 12, weight: viewModel.videoCodec == codec ? .bold : .regular, design: .monospaced))
-              .foregroundColor(viewModel.videoCodec == codec ? .white : .secondary)
+              .font(.system(size: 12, weight: coordinator.config.videoCodec == codec ? .bold : .regular, design: .monospaced))
+              .foregroundColor(coordinator.config.videoCodec == codec ? .white : .secondary)
               .padding(.horizontal, 10)
               .padding(.vertical, 6)
-              .background(viewModel.videoCodec == codec ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
+              .background(coordinator.config.videoCodec == codec ? Color.blue : Color(UIColor.secondarySystemGroupedBackground))
               .cornerRadius(6)
           }
         }
       }
 
       // Current config summary
-      Text("\(resLabel(viewModel.selectedResolution)) \u{00B7} \(viewModel.selectedFrameRate) fps \u{00B7} \(viewModel.videoCodec.displayName)")
+      Text("\(resLabel(coordinator.config.selectedResolution)) \u{00B7} \(coordinator.config.selectedFrameRate) fps \u{00B7} \(coordinator.config.videoCodec.displayName)")
         .font(.system(size: 10, design: .monospaced))
         .foregroundColor(.secondary)
         .padding(.top, 2)

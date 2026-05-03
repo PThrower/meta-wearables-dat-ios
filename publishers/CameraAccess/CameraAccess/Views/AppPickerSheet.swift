@@ -8,14 +8,14 @@
 import SwiftUI
 
 struct AppPickerSheet: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
+  @Environment(StreamCoordinator.self) private var coordinator
   @Environment(\.dismiss) var dismiss
   @State private var fetched = false
 
   var body: some View {
     NavigationView {
       Group {
-        if viewModel.isLoadingApps {
+        if coordinator.isLoadingApps {
           VStack(spacing: 12) {
             ProgressView()
               .scaleEffect(1.2)
@@ -24,7 +24,7 @@ struct AppPickerSheet: View {
               .foregroundColor(.secondary)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = viewModel.appFetchError {
+        } else if let error = coordinator.appFetchError {
           VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle")
               .font(.system(size: 28))
@@ -35,14 +35,14 @@ struct AppPickerSheet: View {
               .multilineTextAlignment(.center)
               .padding(.horizontal, 24)
             Button("Retry") {
-              viewModel.availableApps = []
+              coordinator.availableApps = []
               fetched = false
               fetchIfNeeded()
             }
             .buttonStyle(.bordered)
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if viewModel.availableApps.isEmpty {
+        } else if coordinator.availableApps.isEmpty {
           VStack(spacing: 12) {
             Image(systemName: "app.badge")
               .font(.system(size: 28))
@@ -55,21 +55,21 @@ struct AppPickerSheet: View {
         } else {
           ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
-              ForEach(viewModel.availableApps) { app in
+              ForEach(coordinator.availableApps) { app in
                 Button {
-                  viewModel.activateApp(app.id)
+                  coordinator.activateApp(app.id)
                   dismiss()
                 } label: {
                   HStack(spacing: 10) {
                     Image(systemName: app.icon)
                       .font(.system(size: 14))
-                      .foregroundColor(viewModel.activeAppId == app.id ? .blue : .secondary)
+                      .foregroundColor(coordinator.activeAppId == app.id ? .blue : .secondary)
                       .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 2) {
                       Text(app.name)
-                        .font(.system(size: 14, weight: viewModel.activeAppId == app.id ? .medium : .regular))
-                        .foregroundColor(viewModel.activeAppId == app.id ? .primary : .secondary)
+                        .font(.system(size: 14, weight: coordinator.activeAppId == app.id ? .medium : .regular))
+                        .foregroundColor(coordinator.activeAppId == app.id ? .primary : .secondary)
                       Text(app.description)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
@@ -78,7 +78,7 @@ struct AppPickerSheet: View {
 
                     Spacer()
 
-                    if viewModel.activeAppId == app.id {
+                    if coordinator.activeAppId == app.id {
                       Image(systemName: "checkmark")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.blue)
@@ -86,7 +86,7 @@ struct AppPickerSheet: View {
                   }
                   .padding(.horizontal, 12)
                   .padding(.vertical, 10)
-                  .background(viewModel.activeAppId == app.id ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
+                  .background(coordinator.activeAppId == app.id ? Color.blue.opacity(0.08) : Color(UIColor.secondarySystemGroupedBackground))
                   .cornerRadius(8)
                 }
               }
@@ -110,6 +110,6 @@ struct AppPickerSheet: View {
   private func fetchIfNeeded() {
     guard !fetched else { return }
     fetched = true
-    Task { await viewModel.fetchApps() }
+    Task { await coordinator.fetchApps() }
   }
 }

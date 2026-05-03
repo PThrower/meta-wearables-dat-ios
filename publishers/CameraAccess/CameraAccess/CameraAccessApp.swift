@@ -196,27 +196,30 @@ struct CameraAccessApp: App {
     self.wearables = wearables
     NSLog("[CameraAccess] Wearables.shared obtained, registrationState=\(String(describing: wearables.registrationState))")
     self._wearablesViewModel = StateObject(wrappedValue: WearablesViewModel(wearables: wearables))
-    self._telemetryService = StateObject(wrappedValue: {
-      let service = TelemetryService()
-      service.attachToWearables(wearables)
-      NSLog("[CameraAccess] TelemetryService created and attached")
-      return service
-    }())
+    let ts = TelemetryService()
+    ts.attachToWearables(wearables)
+    self._telemetryService = StateObject(wrappedValue: ts)
+    self._coordinator = State(wrappedValue: StreamCoordinator(wearables: wearables, telemetryService: ts))
+    NSLog("[CameraAccess] StreamCoordinator created")
     NSLog("[CameraAccess] App init complete")
   }
 
+  #if DEBUG
+  private var mainContent: some View {
+    MainAppView(pushService: appDelegate.pushService, mockDeviceViewModel: debugMenuViewModel.mockDeviceKitViewModel)
+  }
+  #else
+  private var mainContent: some View {
+    MainAppView(pushService: appDelegate.pushService)
+  }
+  #endif
+
   var body: some Scene {
     WindowGroup {
-      // Main app view with access to the shared Wearables SDK instance
-      // The Wearables.shared singleton provides the core DAT API
-      #if DEBUG
-      MainAppView(
-          wearables: Wearables.shared,
-          viewModel: wearablesViewModel,
-          telemetryService: telemetryService,
-          mockDeviceViewModel: debugMenuViewModel.mockDeviceKitViewModel,
-          pushNotificationService: appDelegate.pushService
-        )
+      mainContent
+        .environment(coordinator)
+        .environmentObject(wearablesViewModel)
+        .environmentObject(telemetryService)
         .alert("Error", isPresented: $wearablesViewModel.showError) {
           Button("OK") {
             wearablesViewModel.dismissError()
@@ -224,23 +227,7 @@ struct CameraAccessApp: App {
         } message: {
           Text(wearablesViewModel.errorMessage)
         }
-      #else
-      MainAppView(
-          wearables: Wearables.shared,
-          viewModel: wearablesViewModel,
-          telemetryService: telemetryService,
-          pushNotificationService: appDelegate.pushService
-        )
-        .alert("Error", isPresented: $wearablesViewModel.showError) {
-          Button("OK") {
-            wearablesViewModel.dismissError()
-          }
-        } message: {
-          Text(wearablesViewModel.errorMessage)
-        }
-      #endif
 
-      // Registration view handles the flow for connecting to the glasses via Meta AI
       RegistrationView(viewModel: wearablesViewModel)
     }
   }

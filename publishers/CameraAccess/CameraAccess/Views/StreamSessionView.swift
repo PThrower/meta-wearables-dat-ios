@@ -19,81 +19,64 @@ import MWDATMockDevice
 #endif
 
 struct StreamSessionView: View {
-  let wearables: WearablesInterface
-  @ObservedObject private var wearablesViewModel: WearablesViewModel
-  @StateObject private var viewModel: StreamSessionViewModel
-  @ObservedObject private var telemetryService: TelemetryService
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var wearablesViewModel: WearablesViewModel
+  @EnvironmentObject private var telemetryService: TelemetryService
   @State private var orientation: UIInterfaceOrientation?
   @Environment(\.scenePhase) private var scenePhase
-  var pushNotificationService: PushNotificationService?
+  var pushService: PushNotificationService
 
   #if DEBUG
-  @ObservedObject var mockDeviceVM: MockDeviceKitView.ViewModel
-
-  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, mockDeviceVM: MockDeviceKitView.ViewModel, pushNotificationService: PushNotificationService? = nil) {
-    self.wearables = wearables
-    self.wearablesViewModel = wearablesVM
-    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
-    self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
-    self._mockDeviceVM = ObservedObject(wrappedValue: mockDeviceVM)
-    self.pushNotificationService = pushNotificationService
-  }
-  #else
-  init(wearables: WearablesInterface, wearablesVM: WearablesViewModel, telemetryService: TelemetryService, pushNotificationService: PushNotificationService? = nil) {
-    self.wearables = wearables
-    self.wearablesViewModel = wearablesVM
-    self._telemetryService = ObservedObject(wrappedValue: telemetryService)
-    self._viewModel = StateObject(wrappedValue: StreamSessionViewModel(wearables: wearables, telemetryService: telemetryService))
-    self.pushNotificationService = pushNotificationService
-  }
+  var mockDeviceViewModel: MockDeviceKitView.ViewModel
   #endif
 
   var body: some View {
     ZStack {
-      if viewModel.isStreaming {
+      if coordinator.isStreaming {
         // Full-screen video view with streaming controls
-        StreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService)
+        StreamView()
       } else {
         // Pre-streaming setup view with permissions and start button
         #if DEBUG
-        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService, mockDeviceVM: mockDeviceVM)
+        NonStreamView(mockDeviceViewModel: mockDeviceViewModel)
         #else
-        NonStreamView(viewModel: viewModel, wearablesVM: wearablesViewModel, telemetryService: telemetryService)
+        NonStreamView()
         #endif
       }
     }
-    .alert("Error", isPresented: $viewModel.showError) {
+    .alert("Error", isPresented: Binding(
+      get: { coordinator.errors.showError },
+      set: { if !$0 { coordinator.errors.dismissError() } }
+    )) {
       Button("OK") {
-        viewModel.dismissError()
+        coordinator.errors.dismissError()
       }
     } message: {
-      Text(viewModel.errorMessage)
+      Text(coordinator.errors.errorMessage)
     }
     .onAppear {
-      // Wire push notification wake callback to standby relay
-      if let pushService = pushNotificationService {
-        pushService.onWakeFromPush = { [weak viewModel] in
-          Task { @MainActor in
-            viewModel?.handleWakeFromPush()
-          }
-        }
-        // Cold-launch from notification tap: launchOptions set pendingWake in didFinishLaunching
-        if pushService.pendingWake {
-          NSLog("[StreamSessionView] Detected pendingWake on appear — triggering wake from push")
-          pushService.pendingWake = false
-          Task { await viewModel.handleWakeFromPush() }
-          return
+      // Wire push notification wake callback to coordinator
+      pushService.onWakeFromPush = {
+        Task { @MainActor in
+          coordinator.handleWakeFromPush()
         }
       }
-      if viewModel.isStreaming {
+      // Cold-launch from notification tap: launchOptions set pendingWake in didFinishLaunching
+      if pushService.pendingWake {
+        NSLog("[StreamSessionView] Detected pendingWake on appear — triggering wake from push")
+        pushService.pendingWake = false
+        Task { await coordinator.handleWakeFromPush() }
+        return
+      }
+      if coordinator.isStreaming {
         OrientationLock.shared.unlock()
       } else {
         OrientationLock.shared.lock(to: .portrait)
         // Connect to relay in standby mode so viewer can remotely start stream
-        Task { await viewModel.startStandbyRelay() }
+        Task { await coordinator.startStandbyRelay() }
       }
     }
-    .onChange(of: viewModel.isStreaming) { streaming in
+    .onChange(of: coordinator.isStreaming) { streaming in
       if streaming {
         OrientationLock.shared.unlock()
       } else {
@@ -103,9 +86,9 @@ struct StreamSessionView: View {
     .onChange(of: scenePhase) { newPhase in
       switch newPhase {
       case .background:
-        viewModel.handleEnterBackground()
+        coordinator.handleEnterBackground()
       case .active:
-        viewModel.handleEnterForeground()
+        coordinator.handleEnterForeground()
       default:
         break
       }
@@ -115,8 +98,8 @@ struct StreamSessionView: View {
 
 #if DEBUG
 struct DebugPanel: View {
-  @ObservedObject var viewModel: StreamSessionViewModel
-  @ObservedObject var wearablesVM: WearablesViewModel
+  @Environment(StreamCoordinator.self) private var coordinator
+  @EnvironmentObject private var wearablesVM: WearablesViewModel
   @State private var expanded = true
 
   var body: some View {
@@ -139,10 +122,10 @@ struct DebugPanel: View {
 
         row("Registration", String(describing: wearablesVM.registrationState))
         row("Devices", "\(wearablesVM.devices.count) found")
-        row("Active", viewModel.hasActiveDevice ? "YES" : "NO")
-        row("Selected", viewModel.selectedDeviceId ?? "auto")
-        if viewModel.isRetrying {
-          row("Retry", "\(viewModel.retryCount)/3")
+        row("Active", coordinator.hasActiveDevice ? "YES" : "NO")
+        row("Selected", coordinator.selectedDeviceId ?? "auto")
+        if coordinator.isRetrying {
+          row("Retry", "\(coordinator.retryCount)/3")
         }
 
         if !wearablesVM.deviceInfos.isEmpty {
@@ -161,12 +144,12 @@ struct DebugPanel: View {
           }
         }
 
-        if !viewModel.errorLog.isEmpty {
+        if !coordinator.errors.errorLog.isEmpty {
           Divider().background(.white.opacity(0.2))
-          Text("ERRORS (\(viewModel.errorLog.count))")
+          Text("ERRORS (\(coordinator.errors.errorLog.count))")
             .font(.system(size: 8, weight: .bold, design: .monospaced))
             .foregroundColor(.red)
-          ForEach(viewModel.errorLog.suffix(3).reversed(), id: \.self) { entry in
+          ForEach(coordinator.errors.errorLog.suffix(3).reversed(), id: \.self) { entry in
             Text(entry)
               .font(.system(size: 7, design: .monospaced))
               .foregroundColor(.red.opacity(0.9))
