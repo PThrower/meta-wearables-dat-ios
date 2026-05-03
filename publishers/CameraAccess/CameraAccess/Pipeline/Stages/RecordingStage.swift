@@ -27,12 +27,20 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
     private let previewSource = PreviewSource(stageId: "recording", label: "Recording")
     private var recordedFrameCount: UInt64 = 0
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "recording", nodeType: "camera-source")
+
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 30)) {
         self.config = config
     }
 
     func setPreviewBus(_ bus: PreviewBus) {
         self.previewBus = bus
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        metricsTracker.setMemoryMB(isRecording ? 5.0 : 0)
+        return metricsTracker.collect()
     }
 
     // MARK: - Recording Control
@@ -99,7 +107,11 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
     // MARK: - Frame Append
 
     private func appendFrame(_ packet: FramePacket) {
-        guard let writer = assetWriter else { return }
+        guard let writer = assetWriter else {
+            metricsTracker.recordDrop()
+            return
+        }
+        let cpuStart = metricsTracker.beginFrame()
 
         // Lazily create writer input from the first frame's format description
         if writerInput == nil {
@@ -140,9 +152,12 @@ actor RecordingStage: @preconcurrency FramePipelineStage {
         if let input = writerInput, input.isReadyForMoreMediaData {
             input.append(packet.sampleBuffer)
             recordedFrameCount += 1
+            metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: 0.1)
             if recordedFrameCount % 30 == 0 {
                 publishPreview()
             }
+        } else {
+            metricsTracker.recordDrop()
         }
     }
 

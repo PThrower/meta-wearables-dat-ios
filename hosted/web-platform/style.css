@@ -592,6 +592,13 @@ header {
   font-size: 13px; font-weight: 600; color: var(--text-primary);
   margin-top: 2px;
 }
+.telemetry-card-wide {
+  grid-column: 1 / -1;
+}
+.telemetry-card-wide .telemetry-card-value {
+  font-size: 11px; font-weight: 400;
+  word-break: break-all; line-height: 1.4;
+}
 
 /* Minimal top bar */
 .player-topbar {

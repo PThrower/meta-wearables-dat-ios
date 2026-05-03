@@ -119,6 +119,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var showBboxOverlay: Bool = true
   @Published var overlayTranscription: String? = nil
   @Published var yoloModelState: YOLOModelState = .idle
+  /// Whether a YOLO stage has been configured by the server (visible to views)
+  var isYoloConfigured: Bool { yoloStage != nil }
   @Published var trackingTracks: [Track] = []
   /// Latest registry snapshot with zone analytics (dwell times, traffic, speeds).
   @Published var trackingSnapshot: RegistrySnapshot? = nil
@@ -212,6 +214,8 @@ class StreamSessionViewModel: ObservableObject {
   private var routeChangeObserver: NSObjectProtocol?
   private var inboundAudioRestoreTask: Task<Void, Never>?
   private var telemetryPushTimer: Task<Void, Never>?
+  private var stageMetricsCollector: StageMetricsCollector?
+  private var stageMetricsTimer: Task<Void, Never>?
 
   // Phone camera mode
   private let phoneCamera = PhoneCameraCapture()
@@ -959,6 +963,15 @@ class StreamSessionViewModel: ObservableObject {
       await MainActor.run {
         self?.yoloModelState = state
       }
+      // Relay YOLO errors to server so they appear in the workflow editor
+      if case .failed(let modelId, let error) = state {
+        await self?.relayStage.sendJson([
+          "type": "publisher_error",
+          "error": "YOLO model '\(modelId)' failed: \(error)",
+          "stage": "yolo",
+          "modelId": modelId,
+        ])
+      }
     }
 
     // Wire result callback
@@ -1531,6 +1544,7 @@ class StreamSessionViewModel: ObservableObject {
 
       // YOLO stage config from server — register on-device YOLO CoreML inference
       if msgType == "yolo_stage_config" {
+        NSLog("[StreamSession] Received yolo_stage_config: \(msg)")
         let enabled = msg["enabled"] as? Bool ?? true
         if !enabled {
           Task { @MainActor [weak self] in
@@ -1722,6 +1736,17 @@ class StreamSessionViewModel: ObservableObject {
 
     // Start sensor relay (FRSE frames at 1Hz)
     await sensorRelayStage.start()
+
+    // Start stage metrics collector (1Hz push)
+    stageMetricsCollector = StageMetricsCollector(pipelineManager: pipeline)
+    stageMetricsTimer?.cancel()
+    stageMetricsTimer = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        guard let self else { return }
+        await self.pushStageMetrics()
+      }
+    }
   }
 
   /// Stop all pipeline stages but keep the relay connection alive.
@@ -1832,6 +1857,14 @@ class StreamSessionViewModel: ObservableObject {
 
     // Stop sensor relay (FRSE frames)
     await sensorRelayStage.stop()
+
+    // Stop stage metrics
+    stageMetricsTimer?.cancel()
+    stageMetricsTimer = nil
+    if let collector = stageMetricsCollector {
+      await collector.clearStandalones()
+    }
+    stageMetricsCollector = nil
 
     // Stop audio capture first (removes mic tap, does NOT deactivate audio session)
     await audioStage.stop()
@@ -1972,6 +2005,24 @@ class StreamSessionViewModel: ObservableObject {
     // Now Playing removed — iOS 18 blocks MediaRemote for third-party apps
     // (see NowPlayingTests, NowPlayingLowLevelTests for proof)
 
+    await relayStage.sendJson(payload)
+  }
+
+  // MARK: - Stage Metrics Push
+
+  private func pushStageMetrics() async {
+    guard relayMode == .active, let collector = stageMetricsCollector else { return }
+    // Register standalone stages on first call (they may be created later)
+    var payload = await collector.telemetryDict()
+    // Attach standalone stage metrics directly
+    var standaloneSnapshots: [[String: Any]] = payload["stages"] as? [[String: Any]] ?? []
+    if let audio = audioClassificationStage, let snap = await audio.collectMetrics() {
+      standaloneSnapshots.append(snap.toDict())
+    }
+    if let speech = speechRecognitionStage, let snap = await speech.collectMetrics() {
+      standaloneSnapshots.append(snap.toDict())
+    }
+    payload["stages"] = standaloneSnapshots
     await relayStage.sendJson(payload)
   }
 

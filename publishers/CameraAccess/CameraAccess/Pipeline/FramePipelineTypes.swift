@@ -68,6 +68,9 @@ protocol FramePipelineStage: AnyObject, Sendable {
 extension FramePipelineStage {
     func start() async {}
     func stop() async {}
+
+    /// Collect per-stage metrics for telemetry. Override in stages that track metrics.
+    func collectMetrics() -> StageMetricsSnapshot? { nil }
 }
 
 // MARK: - Shared CIContext

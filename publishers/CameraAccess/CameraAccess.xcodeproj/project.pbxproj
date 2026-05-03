@@ -97,6 +97,8 @@
 		TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = TOLMSRFLE01 /* ToolMeasurementStage.swift */; };
 		YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */; };
 		YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */; };
+		28A995D0A825464CB3ACDE88 /* StageMetricsCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */; };
+		421D29A50E9A4E7699BC18C4 /* StageMetricsTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */; };
 		YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF7D6C464283423908 /* YOLODecoder.swift */; };
 		YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */; };
 		YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */; };
@@ -227,6 +229,8 @@
 		TOLMSRFLE01 /* ToolMeasurementStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolMeasurementStage.swift; sourceTree = "<group>"; };
 		YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOTypes.swift; sourceTree = "<group>"; };
 		YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOModelManager.swift; sourceTree = "<group>"; };
+		2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageMetricsCollector.swift; sourceTree = "<group>"; };
+		5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StageMetricsTypes.swift; sourceTree = "<group>"; };
 		YOLFREF7D6C464283423908 /* YOLODecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLODecoder.swift; sourceTree = "<group>"; };
 		YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOStage.swift; sourceTree = "<group>"; };
 		YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOOverlayRenderer.swift; sourceTree = "<group>"; };
@@ -435,6 +439,8 @@
 				HMGSOLFLE01 /* HomographySolver.swift */,
 				YOLFREFF8554CFBAD35B808 /* YOLOTypes.swift */,
 				YOLFREFD16B432086EEAAC3 /* YOLOModelManager.swift */,
+				2A4118E0D9A3482D9B5C6BF2 /* StageMetricsCollector.swift */,
+				5DCD0F7217F744548A34A6C9 /* StageMetricsTypes.swift */,
 				YOLFREF7D6C464283423908 /* YOLODecoder.swift */,
 			);
 			path = Pipeline;
@@ -724,6 +730,8 @@
 				TOLMSRBLD01 /* ToolMeasurementStage.swift in Sources */,
 				YOLBLD195341799A0C6710 /* YOLOTypes.swift in Sources */,
 				YOLBLDC19F4BDDA892C37F /* YOLOModelManager.swift in Sources */,
+				28A995D0A825464CB3ACDE88 /* StageMetricsCollector.swift in Sources */,
+				421D29A50E9A4E7699BC18C4 /* StageMetricsTypes.swift in Sources */,
 				YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */,
 				YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */,
 				YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */,
@@ -781,6 +789,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = ebowwa.caringmind;
+				OTHER_LDFLAGS = "-lz";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "CameraAccess/CameraAccess-Bridging-Header.h";
@@ -809,6 +818,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = ebowwa.caringmind;
+				OTHER_LDFLAGS = "-lz";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OBJC_BRIDGING_HEADER = "CameraAccess/CameraAccess-Bridging-Header.h";

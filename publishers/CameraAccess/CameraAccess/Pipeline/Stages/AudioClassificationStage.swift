@@ -38,11 +38,19 @@ actor AudioClassificationStage {
     private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
     private var smoothingAlpha: Double = 0.3
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "sensor-sound", nodeType: "sensor-sound")
+
     // Callback for relaying results
     private var onResult: (@Sendable (SoundClassification) async -> Void)?
 
     func setOnResult(_ handler: @escaping @Sendable (SoundClassification) async -> Void) {
         self.onResult = handler
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        metricsTracker.setMemoryMB(isEnabled ? 10.0 : 0)
+        return metricsTracker.collect()
     }
 
     func configure(windowDuration: Double, overlapFactor: Double, confidence: Double, maxLabels: Int, targetLabels: [String]?, smoothingAlpha: Double = 0.3, source: AudioSource? = nil) {
@@ -163,7 +171,9 @@ actor AudioClassificationStage {
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime) {
         guard let analyzer else { return }
+        let cpuStart = metricsTracker.beginFrame()
         analyzer.analyze(buffer, atAudioFramePosition: time.sampleTime)
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: 1.0)
     }
 
     private func handleResults(_ results: [SNClassificationResult]) {

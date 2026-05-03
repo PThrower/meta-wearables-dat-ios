@@ -5,7 +5,7 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow, WorkflowSettings } from "../../core/api-client.js";
+import type { WorkflowNodeDef, ConfigFieldSchema, ConnectionCondition, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow, WorkflowSettings } from "../../core/api-client.js";
 import { DEFAULT_WORKFLOW_SETTINGS } from "../../core/api-client.js";
 import { buildDefaultFlowConfig } from "./flow-detection.js";
 import L from "leaflet";
@@ -42,8 +42,63 @@ export interface ConfigFieldCallbacks {
 
 /* ── Config field rendering ── */
 
+/** Graph context for connection-conditional config fields. */
+export interface GraphContext {
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>;
+  nodes: Array<{ id: string; type: string }>;
+}
+
+/** Evaluate a ConnectionCondition against the current graph context. */
+export function evaluateCondition(
+  condition: ConnectionCondition,
+  nodeId: string,
+  context: GraphContext,
+): boolean {
+  if ("upstream" in condition) {
+    const upstreamTypes = new Set<string>();
+    for (const e of context.edges) {
+      if (e.targetNodeId === nodeId) {
+        const src = context.nodes.find(n => n.id === e.sourceNodeId);
+        if (src) upstreamTypes.add(src.type);
+      }
+    }
+    return condition.upstream.some(t => upstreamTypes.has(t));
+  }
+  if ("downstream" in condition) {
+    const downstreamTypes = new Set<string>();
+    for (const e of context.edges) {
+      if (e.sourceNodeId === nodeId) {
+        const tgt = context.nodes.find(n => n.id === e.targetNodeId);
+        if (tgt) downstreamTypes.add(tgt.type);
+      }
+    }
+    return condition.downstream.some(t => downstreamTypes.has(t));
+  }
+  if ("notConnected" in condition) {
+    const upstreamTypes = new Set<string>();
+    for (const e of context.edges) {
+      if (e.targetNodeId === nodeId) {
+        const src = context.nodes.find(n => n.id === e.sourceNodeId);
+        if (src) upstreamTypes.add(src.type);
+      }
+    }
+    return condition.notConnected.every(t => !upstreamTypes.has(t));
+  }
+  if ("upstreamAll" in condition) {
+    const upstreamTypes = new Set<string>();
+    for (const e of context.edges) {
+      if (e.targetNodeId === nodeId) {
+        const src = context.nodes.find(n => n.id === e.sourceNodeId);
+        if (src) upstreamTypes.add(src.type);
+      }
+    }
+    return condition.upstreamAll.every(t => upstreamTypes.has(t));
+  }
+  return false;
+}
+
 /** Render a single config field based on its schema kind. */
-export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDef, prefix: string): string {
+export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDef, prefix: string, context?: GraphContext): string {
   switch (field.kind) {
     case "text": {
       const val = field.key === "label" ? node.label : String(node.config[field.key] ?? "");
@@ -85,8 +140,13 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
       return renderZonesField(field, node, prefix);
     }
     case "section": {
-      const inner = field.fields.map(f => renderConfigField(f, node, prefix)).join("");
+      const inner = field.fields.map(f => renderConfigField(f, node, prefix, context)).join("");
       return `<div class="${prefix}-field" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333;"><label style="font-weight: 600; margin-bottom: 6px; display: block;">${esc(field.label)}</label>${inner}</div>`;
+    }
+    case "conditional": {
+      if (!context) return field.fields.map(f => renderConfigField(f, node, prefix, context)).join("");
+      if (!evaluateCondition(field.condition, node.id, context)) return "";
+      return field.fields.map(f => renderConfigField(f, node, prefix, context)).join("");
     }
   }
 }

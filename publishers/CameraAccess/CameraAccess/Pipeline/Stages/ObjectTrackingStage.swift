@@ -30,6 +30,9 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
     // Frame-skip throttle state
     private var lastTrackTime: Double = 0
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "tracking", nodeType: "tracking-ocsort")
+
     // Stage state
     private var isRunning = false
 
@@ -64,6 +67,13 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
     func setPreviewBus(_ bus: PreviewBus) {
         self.previewBus = bus
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        // Track state proportional to active tracks
+        let memMB = Double(tracker.activeTrackCount) * 0.5 + 5.0
+        metricsTracker.setMemoryMB(memMB)
+        return metricsTracker.collect()
     }
 
     func updateConfig(_ newConfig: TrackingStageConfig) {
@@ -126,9 +136,13 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
         // Frame-skip: drop detections arriving faster than targetFPS
         let interval = 1.0 / max(trackingConfig.targetFPS, 1)
-        if timestamp - lastTrackTime < interval { return }
+        if timestamp - lastTrackTime < interval {
+            metricsTracker.recordDrop()
+            return
+        }
         lastTrackTime = timestamp
 
+        let cpuStart = metricsTracker.beginFrame()
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Confidence smoothing (spatial matching — same pattern as YOLOStage)
@@ -203,6 +217,7 @@ actor ObjectTrackingStage: @preconcurrency FramePipelineStage {
 
         // Build result
         let inferenceTimeMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceTimeMs)
         let result = TrackingFrameResult(
             tracks: tracks,
             registry: snapshot,

@@ -659,6 +659,9 @@ struct OCSORT: Sendable {
     private var tracks: [InternalTrack] = []
     private var nextId: Int = 1
     private var frameCount: Int = 0
+
+    /// Number of currently active tracks.
+    var activeTrackCount: Int { tracks.count }
     /// Match pairs from last update() call: [(trackIdx, detIdx)].
     /// Used by injectEmbeddings() to map detection indices to matched tracks.
     private(set) var lastMatchPairs: [(Int, Int)] = []

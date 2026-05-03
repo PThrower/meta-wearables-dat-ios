@@ -334,6 +334,12 @@ function startEdgeDrag(pe: PointerEvent, sourceNodeId: string, svg: SVGElement):
       const allowedBySourceRole = sourceDef && targetDef && targetDef.role === "source" && sourceDef.allowedTargets.includes("<source>");
       if (!allowedDirect && !allowedBySinkRole && !allowedByTriggerRole && !allowedBySourceRole) { _edgeState = null; return; }
 
+      // Reverse check: subnode allowedSources
+      const targetAllowedSources = targetDef?.allowedSources;
+      if (targetAllowedSources && targetAllowedSources.length > 0) {
+        if (!targetAllowedSources.includes(sourceNode!.type)) { _edgeState = null; return; }
+      }
+
       const exists = workflow.edges.some(e =>
         e.sourceNodeId === _edgeState!.sourceNodeId && e.targetNodeId === target.id
       );

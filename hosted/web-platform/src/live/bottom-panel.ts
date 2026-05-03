@@ -79,6 +79,8 @@ export class BottomPanel {
       { id: "t-cpu", label: "CPU" },
       { id: "t-memory", label: "Memory" },
       { id: "t-thermal", label: "Thermal" },
+      { id: "t-stage-process-mem", label: "Process Mem" },
+      { id: "t-stage-process-thermal", label: "Stage Thermal" },
     ];
 
     this.telemetryGrid.innerHTML = metrics.map((m) =>
@@ -87,6 +89,15 @@ export class BottomPanel {
         <div class="telemetry-card-value" id="tm-${m.id}">--</div>
       </div>`
     ).join("");
+
+    // Stage summary section (full-width below the grid)
+    const stageSummary = document.createElement("div");
+    stageSummary.className = "telemetry-card telemetry-card-wide";
+    stageSummary.innerHTML = `
+      <div class="telemetry-card-label">Stage Metrics</div>
+      <div class="telemetry-card-value" id="t-stage-summary">--</div>
+    `;
+    this.telemetryGrid.appendChild(stageSummary);
   }
 }
 

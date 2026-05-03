@@ -22,6 +22,9 @@ final class FrameTransformStage: @unchecked Sendable {
     private var config: EnhanceStageConfig
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "enhance", nodeType: "enhance-brightness")
+
     init(config: EnhanceStageConfig = .empty) {
         self.config = config
     }
@@ -30,13 +33,25 @@ final class FrameTransformStage: @unchecked Sendable {
 
     func updateConfig(_ newConfig: EnhanceStageConfig) {
         self.config = newConfig
+        // Update nodeType to reflect primary filter
+        if let primary = newConfig.filters.first {
+            metricsTracker = StageMetricsTracker(stageId: "enhance", nodeType: "enhance-\(primary.type.rawValue)")
+        }
         NSLog("[FrameTransform] Config updated: \(newConfig.filters.count) filters, enabled=\(newConfig.isEnabled)")
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        metricsTracker.setMemoryMB(1.0)
+        return metricsTracker.collect()
     }
 
     /// Apply the filter chain to a CVPixelBuffer. Returns the original if chain is empty/disabled.
     /// Each call allocates a fresh output buffer so downstream async stages don't race.
     func transform(_ pixelBuffer: CVPixelBuffer) -> CVPixelBuffer {
         guard isEnabled else { return pixelBuffer }
+
+        let cpuStart = metricsTracker.beginFrame()
+        let startTime = ContinuousClock.Instant.now
 
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
@@ -74,6 +89,11 @@ final class FrameTransformStage: @unchecked Sendable {
         // No CVPixelBufferLockBaseAddress needed — CIContext.render writes
         // directly to the IOSurface backing via GPU, lock only maps for CPU access.
         ciContext.render(ciImage, to: outBuffer, bounds: CGRect(origin: .zero, size: size), colorSpace: ciImage.colorSpace ?? CGColorSpaceCreateDeviceRGB())
+
+        let endTime = ContinuousClock.Instant.now
+        let duration = endTime - startTime
+        let ms = Double(duration.components.seconds) * 1000.0 + Double(duration.components.attoseconds) / 1e15
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: ms)
 
         return outBuffer
     }

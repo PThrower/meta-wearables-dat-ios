@@ -16,7 +16,7 @@ import {
   nanoid, getWorkflowId, getViewBox,
   loadPaletteCollapse, savePaletteCollapse, getPaletteCollapseState, setPaletteCollapseState,
 } from "./state.js";
-import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
+import { getNodeDef, getNodeDefs, loadNodeDefs, getSubnodes } from "./node-defs.js";
 import type { NodeDefinition } from "../../core/api-client.js";
 import { NODE_W, NODE_H } from "./constants.js";
 import { isAvailable, getReason, renderAvailBadge, availCls, lockedAttrs } from "./node-availability.js";
@@ -219,11 +219,20 @@ function buildPaletteItem(d: NodeDefinition, cat: PaletteCategory): string {
 /** Build palette sidebar HTML grouped by capability with accordion + search. */
 function buildPaletteHTML(): string {
   const all = getNodeDefs();
+  const workflow = getWorkflow();
+  const workflowTypes = new Set(workflow?.nodes.map(n => n.type) ?? []);
+
+  // Filter out subnodes whose parent is NOT in the workflow
+  const filtered = all.filter(d => {
+    if (!d.parentType) return true;
+    return workflowTypes.has(d.parentType);
+  });
+
   const assigned = new Set<string>();
   const collapseState = getPaletteCollapseState();
 
   const categoriesHTML = PALETTE_CATEGORIES.map(cat => {
-    const nodes = all.filter(d => !assigned.has(d.type) && cat.match(d));
+    const nodes = filtered.filter(d => !assigned.has(d.type) && cat.match(d));
     nodes.forEach(d => assigned.add(d.type));
     if (nodes.length === 0) return "";
 

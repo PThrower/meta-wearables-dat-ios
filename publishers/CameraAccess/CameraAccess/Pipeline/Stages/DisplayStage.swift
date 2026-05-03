@@ -20,6 +20,9 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
     /// Callback invoked on MainActor after UIImage conversion.
     private let onFrame: @MainActor @Sendable (UIImage) -> Void
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "display", nodeType: "camera-source")
+
     // Shared CIContext -- reused across frames for efficiency
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
 
@@ -38,6 +41,10 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
         self.previewBus = bus
     }
 
+    func collectMetrics() -> StageMetricsSnapshot? {
+        return metricsTracker.collect()
+    }
+
     nonisolated func processFrame(_ packet: FramePacket) async {
         await processFrameInternal(packet)
     }
@@ -46,9 +53,17 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
     // CGImage conversion runs on actor executor (no UIKit dependency).
     // UIImage(cgImage:) is @MainActor-isolated — correctly dispatched to Task { @MainActor in }.
     private func processFrameInternal(_ packet: FramePacket) {
+        let cpuStart = metricsTracker.beginFrame()
+        let startTime = ContinuousClock.Instant.now
+
         // UIImage creation dispatched to MainActor since UIImage() is main-isolated
         // in iOS 17+.
         guard let cgImage = makeCGImage(from: packet.sampleBuffer) else { return }
+        let endTime = ContinuousClock.Instant.now
+        let duration = endTime - startTime
+        let ms = Double(duration.components.seconds) * 1000.0 + Double(duration.components.attoseconds) / 1e15
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: ms)
+
         Task { @MainActor in
             let image = UIImage(cgImage: cgImage)
             onFrame(image)

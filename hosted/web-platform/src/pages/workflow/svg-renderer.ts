@@ -8,7 +8,8 @@ import { esc } from "../../core/api-client.js";
 import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/api-client.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
-import { getNodeDef } from "./node-defs.js";
+import { getNodeDef, evaluateCondition } from "./node-defs.js";
+import type { GraphContext } from "./shared-config.js";
 import { wireSVGEvents } from "./interactions.js";
 import { isTouchDevice } from "./interactions.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "./flow-detection.js";
@@ -54,6 +55,29 @@ export function resolveSubtitle(template: string, config: Record<string, unknown
     if (val === undefined || val === "") return "";
     return String(val).slice(0, 22);
   });
+}
+
+/** Resolve connection overrides for visual morphing in SVG rendering. */
+function resolveSVGOverrides(
+  def: NonNullable<ReturnType<typeof getNodeDef>>,
+  nodeId: string,
+  nodes: Array<{ id: string; type: string }>,
+  edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+): { subtitle?: string; color?: { fill: string; header: string; stroke: string } } {
+  if (!def.connectionOverrides?.length) return {};
+  const ctx: GraphContext = { nodes, edges };
+  let subtitle: string | undefined;
+  let color: { fill: string; header: string; stroke: string } | undefined;
+  for (const override of def.connectionOverrides) {
+    if (evaluateCondition(override.condition, nodeId, ctx)) {
+      if (override.subtitle) subtitle = override.subtitle;
+      if (override.color) color = override.color;
+    }
+  }
+  const result: { subtitle?: string; color?: { fill: string; header: string; stroke: string } } = {};
+  if (subtitle) result.subtitle = subtitle;
+  if (color) result.color = color;
+  return result;
 }
 
 /**
@@ -200,8 +224,10 @@ export function buildSVGFromData(
 
   const nodeSVGs = nodes.map(n => {
     const def = getNodeDef(n.type);
-    const c = def?.color ?? FALLBACK_COLOR;
-    const configSummary = def ? resolveSubtitle(def.subtitle, n.config) : "";
+    const overrides = def ? resolveSVGOverrides(def, n.id, nodes, edges) : {};
+    const c = overrides.color ?? def?.color ?? FALLBACK_COLOR;
+    const effectiveSubtitle = overrides.subtitle ?? def?.subtitle ?? "";
+    const configSummary = def ? resolveSubtitle(effectiveSubtitle, n.config) : "";
     const selected = selectedId === n.id;
     const stateStr = nodeStates?.get(n.id);
     const preview = previews?.get(n.id);

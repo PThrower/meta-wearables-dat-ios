@@ -7,7 +7,7 @@
  */
 
 import type { AppDefinition, WorkflowSettings, WorkflowNodeType, FlowExecutionConfig } from "./app-types.js";
-import { NODE_DEF_MAP, resolveNodeType, buildAllowedEdgeMap, validateStructure } from "./node-definitions.js";
+import { NODE_DEF_MAP, resolveNodeType, buildAllowedEdgeMap, buildAllowedSourcesMap, validateStructure, resolveEffectiveConfigSchema } from "./node-definitions.js";
 import { resolveWorkflowToPipeline, resolveSourceInput, AppRegistry } from "./app-registry.js";
 import { detectFlows } from "./flow-detection.js";
 import { buildMobileWorkflowConfig, pushPassiveTTSChains } from "./workflow-utils.js";
@@ -27,6 +27,7 @@ export function validateEdges(
   edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
 ): string | null {
   const ALLOWED_EDGE_MAP = buildAllowedEdgeMap();
+  const ALLOWED_SOURCES_MAP = buildAllowedSourcesMap();
   const nodeMap = new Map(nodes.map(n => [n.id, n.type]));
   const nodeIds = new Set(nodes.map(n => n.id));
 
@@ -38,6 +39,11 @@ export function validateEdges(
     const tgtType = resolveNodeType(nodeMap.get(e.targetNodeId)!);
     if (!ALLOWED_EDGE_MAP.get(srcType)?.has(tgtType)) {
       return `Invalid edge: ${srcType} -> ${tgtType}`;
+    }
+    // Reverse check: subnode allowedSources
+    const allowedSources = ALLOWED_SOURCES_MAP.get(tgtType);
+    if (allowedSources && !allowedSources.has(srcType)) {
+      return `Invalid edge: ${srcType} -> ${tgtType} (restricted by allowedSources)`;
     }
   }
   return null;
@@ -648,7 +654,21 @@ export async function handleWorkflowActivation(
         return true;
       });
 
-      const trackingConfig = {
+      // Use effective config schema to filter conditional fields (e.g. reconciliation)
+      const trackerDef = NODE_DEF_MAP.get(rawNode.type);
+      const effectiveSchema = trackerDef
+        ? resolveEffectiveConfigSchema(trackerDef, rawNode.id, nodes as any, edges as any)
+        : null;
+      // Extract reconciliation config only if the fields are in the effective schema
+      const effectiveKeys = new Set((effectiveSchema ?? trackerDef?.configSchema ?? []).map(f => f.kind !== "conditional" && f.kind !== "section" ? (f as any).key : null).filter(Boolean));
+      // Flatten conditional fields' keys too
+      for (const f of (effectiveSchema ?? [])) {
+        if (f.kind === "conditional") {
+          for (const inner of f.fields) { if ("key" in inner) effectiveKeys.add((inner as any).key); }
+        }
+      }
+
+      const trackingConfig: Record<string, unknown> = {
         type: "tracking_stage_config" as const,
         enabled: true,
         targetClasses: typeof rawConfig.targetClasses === "string" && rawConfig.targetClasses.length > 0
@@ -669,6 +689,13 @@ export async function handleWorkflowActivation(
         gates: pureGates,
         costFunction,
       };
+      // Only include reconciliation config when effective schema has those fields
+      if (effectiveKeys.has("reconciliationEnabled")) {
+        trackingConfig.reconciliationEnabled = (rawConfig.reconciliationEnabled as boolean) ?? false;
+        trackingConfig.reconciliationMaxGap = (rawConfig.reconciliationMaxGap as number) ?? 60;
+        trackingConfig.reconciliationThreshold = (rawConfig.reconciliationThreshold as number) ?? 0.4;
+        trackingConfig.reconciliationSpatialWeight = (rawConfig.reconciliationSpatialWeight as number) ?? 0.3;
+      }
       if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
         session.publisher.ws.send(JSON.stringify(trackingConfig));
       }

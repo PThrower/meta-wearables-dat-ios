@@ -10,8 +10,8 @@ import { getContainer, getWorkflow, getSelectedNodeId, setSelectedNodeId, setDir
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG } from "./svg-renderer.js";
 import { detectFlows } from "./flow-detection.js";
-import { renderConfigField, wireConfigFieldInputs, renderWorkflowSettingsHTML, wireSettingsFieldInputs, updateDeviceOptions } from "./shared-config.js";
-import type { ConfigFieldCallbacks, SettingsCallbacks } from "./shared-config.js";
+import { renderConfigField, wireConfigFieldInputs, renderWorkflowSettingsHTML, wireSettingsFieldInputs, updateDeviceOptions, evaluateCondition } from "./shared-config.js";
+import type { ConfigFieldCallbacks, SettingsCallbacks, GraphContext } from "./shared-config.js";
 import { getNodePreview, renderNodePreviewHTML } from "./editor-preview.js";
 import * as FlowPanel from "./flow-config-panel.js";
 
@@ -104,7 +104,17 @@ export function renderConfigPanel(): void {
       return;
     }
     const c = def.color;
-    const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node, "wf-config")).join("");
+    const graphContext: GraphContext = { edges: workflow.edges, nodes: workflow.nodes };
+    const fieldsHtml = def.configSchema.map(field => renderConfigField(field, node, "wf-config", graphContext)).join("");
+    // Resolve connection overrides for header display
+    let resolvedSubtitle = def.subtitle;
+    if (def.connectionOverrides?.length) {
+      for (const override of def.connectionOverrides) {
+        if (evaluateCondition(override.condition, node.id, graphContext)) {
+          if (override.subtitle) resolvedSubtitle = override.subtitle;
+        }
+      }
+    }
     const previewHtml = renderNodePreviewHTML(selectedId);
 
     panel.innerHTML = `

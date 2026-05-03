@@ -65,6 +65,9 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     private let previewSource = PreviewSource(stageId: "relay", label: "Relay")
     private var lastPreviewPublish: ContinuousClock.Instant?
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "relay", nodeType: "camera-source")
+
     // Connection state
     private var webSocketTask: URLSessionWebSocketTask?
     private var isConnected = false
@@ -265,6 +268,12 @@ actor RelayStage: @preconcurrency FramePipelineStage {
         await relayFrame(packet)
     }
 
+    func collectMetrics() -> StageMetricsSnapshot? {
+        // Encode buffer pool ~2MB
+        metricsTracker.setMemoryMB(2.0)
+        return metricsTracker.collect()
+    }
+
     func start() async {
         sequenceNumber = 0
         framesSent = 0
@@ -426,6 +435,8 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             return
         }
 
+        let cpuStart = metricsTracker.beginFrame()
+
         // Time-based frame pacing: enforce minimum interval between frames.
         // This produces evenly-spaced output regardless of encode duration variance.
         let now = ContinuousClock.Instant.now
@@ -437,6 +448,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
             if elapsedSeconds < minInterval {
                 framesDroppedByPacing += 1
                 framesDropped += 1
+                metricsTracker.recordDrop()
                 if framesDroppedByPacing % 500 == 1 {
                     NSLog("[RelayStage] Frame dropped (pacing): \(framesDroppedByPacing) total, effectiveFps=\(effectiveTargetFps), elapsed=\(String(format: "%.1f", elapsedSeconds * 1000))ms < \(String(format: "%.1f", minInterval * 1000))ms")
                 }
@@ -608,6 +620,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     /// For JPEG: adjusts adaptive quality (0.2-0.8).
     /// For H.264: only tracks encode time for FPS adaptation (bitrate is encoder-managed).
     private func updateEncodeTime(_ encodeMs: Double) {
+        metricsTracker.endFrame(cpuStart: 0, wallClockMs: encodeMs)
         let previous: Double
         if let ema = encodeTimeEmaMs {
             previous = ema

@@ -86,8 +86,8 @@ struct StreamView: View {
       // Settings button at top-right
       VStack {
         HStack {
-          // YOLO model state badge
-          if viewModel.yoloModelState.isLoading || (viewModel.yoloModelState.isFailed) {
+          // YOLO model state badge — show when stage is configured
+          if viewModel.isYoloConfigured {
             YOLOStateBadge(state: viewModel.yoloModelState)
               .padding(.leading, 8)
               .padding(.top, 4)
@@ -377,6 +377,20 @@ struct YOLOStateBadge: View {
         Text(state.label)
           .font(.system(size: 10, weight: .medium, design: .monospaced))
           .foregroundColor(.yellow)
+      case .ready(let modelId):
+        Image(systemName: "checkmark.circle.fill")
+          .font(.system(size: 11))
+          .foregroundColor(.green)
+        Text(modelId)
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundColor(.green)
+      case .idle:
+        Image(systemName: "brain.head.profile")
+          .font(.system(size: 11))
+          .foregroundColor(.white.opacity(0.6))
+        Text("YOLO idle")
+          .font(.system(size: 10, weight: .medium, design: .monospaced))
+          .foregroundColor(.white.opacity(0.6))
       case .failed(_, let error):
         Image(systemName: "exclamationmark.triangle.fill")
           .font(.system(size: 11))
@@ -385,8 +399,6 @@ struct YOLOStateBadge: View {
           .font(.system(size: 10, weight: .medium, design: .monospaced))
           .foregroundColor(.red)
           .lineLimit(1)
-      default:
-        EmptyView()
       }
     }
     .padding(.horizontal, 8)

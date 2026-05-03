@@ -35,6 +35,9 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     // Confidence smoothing (EMA per tracked detection)
     private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "yolo", nodeType: "yolo-detect")
+
     // FPS throttle
     private var lastProcessTime: ContinuousClock.Instant?
     private var frameInterval: Duration {
@@ -67,6 +70,12 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
 
     func setOnModelState(_ handler: @escaping @Sendable (YOLOModelState) async -> Void) {
         self.onModelState = handler
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        let memMB: Double = mlModel != nil ? 80.0 : 0
+        metricsTracker.setMemoryMB(memMB)
+        return metricsTracker.collect()
     }
 
     func updateConfig(_ newConfig: YOLOStageConfig) async {
@@ -185,12 +194,16 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
         let now = ContinuousClock.Instant.now
         if let last = lastProcessTime {
             let elapsed = now - last
-            guard elapsed >= frameInterval else { return }
+            guard elapsed >= frameInterval else {
+                metricsTracker.recordDrop()
+                return
+            }
         }
         lastProcessTime = now
 
         guard let pixelBuffer = pixelBuffer ?? CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
 
+        let cpuStart = metricsTracker.beginFrame()
         let startTime = ContinuousClock.Instant.now
 
         // Create VNImageRequestHandler per frame
@@ -247,6 +260,7 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
         let inferenceTime = endTime - startTime
         let inferenceMs = Double(inferenceTime.components.seconds) * 1000.0
             + Double(inferenceTime.components.attoseconds) / 1e15
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceMs)
 
         // Apply confidence smoothing (EMA, keyed by class+spatial)
         if yoloConfig.smoothingAlpha < 1.0 {

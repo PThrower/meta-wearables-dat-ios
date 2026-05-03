@@ -30,6 +30,9 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
     private var isRunning = false
     private var lastProcessTime: ContinuousClock.Instant = .now
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "measure", nodeType: "vision-tool-measure")
+
     init(config: ToolMeasureConfig = ToolMeasureConfig()) {
         self.config = FrameStageConfig(targetFPS: UInt(max(1, config.targetFPS)), isEnabled: true)
         self.measureConfig = config
@@ -41,6 +44,11 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
 
     func setPreviewBus(_ bus: PreviewBus) {
         self.previewBus = bus
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        metricsTracker.setMemoryMB(3.0)
+        return metricsTracker.collect()
     }
 
     func updateConfig(_ newConfig: ToolMeasureConfig) {
@@ -74,8 +82,12 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
         // FPS throttle
         let now = ContinuousClock.now
         let elapsed = now.duration(to: packet.timestamp).components.seconds
-        if Double(abs(elapsed)) < 1.0 / Double(max(1, measureConfig.targetFPS)) { return }
+        if Double(abs(elapsed)) < 1.0 / Double(max(1, measureConfig.targetFPS)) {
+            metricsTracker.recordDrop()
+            return
+        }
 
+        let cpuStart = metricsTracker.beginFrame()
         let startTime = CFAbsoluteTimeGetCurrent()
 
         do {
@@ -102,6 +114,7 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
 
     private func analyzeFrame(_ packet: FramePacket) throws -> ToolMeasureResult? {
         let startTime = CFAbsoluteTimeGetCurrent()
+        let cpuStart = metricsTracker.beginFrame()
         let pixelBuffer = packet.sampleBuffer.imageBuffer ?? CMSampleBufferGetImageBuffer(packet.sampleBuffer)
         guard let pixelBuffer else { return nil }
 
@@ -197,6 +210,7 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
         guard !suggestions.isEmpty else { return nil }
 
         let inferenceTimeMs = (CFAbsoluteTimeGetCurrent() - startTime) * 1000.0
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceTimeMs)
 
         return ToolMeasureResult(
             dimensions: dimensions,

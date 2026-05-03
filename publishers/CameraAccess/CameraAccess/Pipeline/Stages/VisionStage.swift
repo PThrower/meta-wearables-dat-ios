@@ -27,6 +27,9 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     // Vision configuration
     private var visionConfig: VisionStageConfig
 
+    // Per-stage metrics
+    private var metricsTracker: StageMetricsTracker
+
     // Confidence smoothing (EMA per tracked detection)
     private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
 
@@ -112,6 +115,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.visionConfig = config
         self.config = FrameStageConfig(targetFPS: config.targetFPS, isEnabled: true)
         self.requests = Self.buildRequests(config: config)
+        self.metricsTracker = StageMetricsTracker(stageId: "vision", nodeType: "vision-face-detect")
     }
 
     func setPreviewBus(_ bus: PreviewBus) {
@@ -127,6 +131,10 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.config = FrameStageConfig(targetFPS: newConfig.targetFPS, isEnabled: true)
         self.requests = Self.buildRequests(config: newConfig)
         confidenceSmoother.reset()
+        // Update metrics nodeType to reflect primary detection type
+        if let primary = newConfig.detectionTypes.first {
+            metricsTracker = StageMetricsTracker(stageId: "vision", nodeType: "vision-\(primary.rawValue)")
+        }
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
@@ -166,6 +174,13 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         NSLog("[VisionStage] Stopped")
     }
 
+    func collectMetrics() -> StageMetricsSnapshot? {
+        // CoreML model ~40-80MB depending on detection types
+        let memMB = Double(requests.count) * 15.0
+        metricsTracker.setMemoryMB(memMB)
+        return metricsTracker.collect()
+    }
+
     // MARK: - Private
 
     private func processFrameInternal(_ packet: FramePacket, snapshotBuffer: CVPixelBuffer?) {
@@ -173,13 +188,17 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         let now = ContinuousClock.Instant.now
         if let last = lastProcessTime {
             let elapsed = now - last
-            guard elapsed >= frameInterval else { return }
+            guard elapsed >= frameInterval else {
+                metricsTracker.recordDrop()
+                return
+            }
         }
         lastProcessTime = now
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
         guard !requests.isEmpty else { return }
 
+        let cpuStart = metricsTracker.beginFrame()
         let startTime = ContinuousClock.Instant.now
 
         // VNImageRequestHandler must be created per frame (Apple docs)
@@ -196,6 +215,8 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         let inferenceTime = endTime - startTime
         let inferenceMs = Double(inferenceTime.components.seconds) * 1000.0
             + Double(inferenceTime.components.attoseconds) / 1e15
+
+        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceMs)
 
         var detections: [VisionDetection] = []
         for (index, request) in requests.enumerated() {

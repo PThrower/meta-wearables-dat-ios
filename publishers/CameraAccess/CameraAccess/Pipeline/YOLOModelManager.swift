@@ -5,10 +5,12 @@
  * Models are cached as compiled .mlmodelc in Library/Caches/YOLOModels/.
  * Bundled .mlpackage models are compiled on first use.
  * Server-served models are downloaded, extracted, and compiled.
+ *
+ * zlib is accessed via the bridging header (CameraAccess-Bridging-Header.h)
+ * which includes <zlib.h>, giving us direct access to z_stream and inflate/deflate.
  */
 
 import CoreML
-import Compression
 import Foundation
 
 actor YOLOModelManager {
@@ -158,9 +160,17 @@ actor YOLOModelManager {
         // Check if downloaded file is a ZIP (by magic bytes)
         let header = data.prefix(4)
         let isZip = header.count >= 4 && header[0] == 0x50 && header[1] == 0x4B
+        NSLog("[YOLOModel] Downloaded \(data.count) bytes, isZip=\(isZip), header=\(header.map { String(format: "%02x", $0) }.joined())")
         if isZip {
             // Use built-in ZIP extraction via URL resource
+            NSLog("[YOLOModel] Extracting ZIP...")
             try self.extractZip(at: downloadedFile, to: extractedDir)
+            NSLog("[YOLOModel] ZIP extraction done, listing extracted contents...")
+            if let contents = try? FileManager.default.contentsOfDirectory(at: extractedDir, includingPropertiesForKeys: nil) {
+                for item in contents {
+                    NSLog("[YOLOModel]   extracted: \(item.lastPathComponent) isDir=\(item.hasDirectoryPath)")
+                }
+            }
         } else {
             // Assume it's a raw mlmodel or mlpackage — copy directly
             let dest = extractedDir.appendingPathComponent(downloadedFile.lastPathComponent)
@@ -169,7 +179,7 @@ actor YOLOModelManager {
 
         // Find .mlpackage or .mlmodelc in extracted contents
         if let mlmodelcUrl = findMLModelC(in: extractedDir) {
-            // Server sent pre-compiled model — copy directly to cache
+            NSLog("[YOLOModel] Found .mlmodelc at \(mlmodelcUrl.lastPathComponent)")
             if FileManager.default.fileExists(atPath: compiledUrl.path) {
                 try FileManager.default.removeItem(at: compiledUrl)
             }
@@ -177,7 +187,22 @@ actor YOLOModelManager {
             return try await loadCompiledModel(at: compiledUrl)
         }
 
-        guard let mlpackageUrl = findMLPackage(in: extractedDir) else {
+        // Check if extracted dir itself IS an .mlmodelc (flat structure: Manifest.json + Data/com.apple.CoreML/)
+        // Ultralytics ZIPs ship this way — no wrapping directory with .mlmodelc extension
+        let isFlatModelC = isExtractedMLModelC(in: extractedDir)
+        NSLog("[YOLOModel] isExtractedMLModelC=\(isFlatModelC)")
+        if isFlatModelC {
+            if FileManager.default.fileExists(atPath: compiledUrl.path) {
+                try FileManager.default.removeItem(at: compiledUrl)
+            }
+            try FileManager.default.copyItem(at: extractedDir, to: compiledUrl)
+            return try await loadCompiledModel(at: compiledUrl)
+        }
+
+        let mlpackageUrl = findMLPackage(in: extractedDir)
+        NSLog("[YOLOModel] findMLPackage result: \(mlpackageUrl?.lastPathComponent ?? "nil")")
+        guard let mlpackageUrl else {
+            NSLog("[YOLOModel] ERROR: No .mlmodelc, flat .mlmodelc, or .mlpackage found in extracted archive")
             throw YOLOModelError.invalidArchive
         }
 
@@ -220,6 +245,16 @@ actor YOLOModelManager {
             }
         }
         return nil
+    }
+
+    /// Check if a directory itself contains a flat .mlmodelc structure
+    /// (Manifest.json + Data/com.apple.CoreML/) without the .mlmodelc extension.
+    /// Ultralytics YOLO ZIPs ship in this format.
+    private func isExtractedMLModelC(in directory: URL) -> Bool {
+        let manifest = directory.appendingPathComponent("Manifest.json")
+        let coreMLDir = directory.appendingPathComponent("Data/com.apple.CoreML")
+        return FileManager.default.fileExists(atPath: manifest.path)
+            && FileManager.default.fileExists(atPath: coreMLDir.path)
     }
 
     /// Find .mlmodelc (pre-compiled) inside an extracted directory.
@@ -316,43 +351,67 @@ actor YOLOModelManager {
             }
         }
     }
-
-    /// Inflate deflated data using iOS Compression framework.
+    /// Inflate raw deflated data from ZIP entries.
+    /// ZIP method 8 stores raw deflate (no zlib header/trailer).
+    /// Uses zlib inflateInit2_ with -MAX_WBITS for raw deflate decompression.
     private static func inflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
-        let bufferSize = max(uncompressedSize, 4096)
-        var output = Data(capacity: bufferSize)
-        var offset = 0
+        let rawDeflate = Data(data)
+        NSLog("[YOLOModel] inflate: \(rawDeflate.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
+        let outputSize = max(uncompressedSize, 4096)
+        var outputBuffer = [UInt8](repeating: 0, count: outputSize)
 
-        // Process in chunks through libcompression
-        let chunkSize = 64 * 1024
-        var inputIndex = data.startIndex
+        // z_stream struct on arm64: 112 bytes
+        // Key offsets: next_in=0, avail_in=8, next_out=24, avail_out=32, total_out=40
+        let zStreamSize = 112
+        let zs = UnsafeMutableRawPointer.allocate(byteCount: zStreamSize, alignment: 8)
+        defer { zs.deallocate() }
+        memset(zs, 0, zStreamSize)
 
-        while inputIndex < data.endIndex {
-            let remaining = data.distance(from: inputIndex, to: data.endIndex)
-            let inputChunkSize = min(remaining, chunkSize)
-            let inputChunk = data[inputIndex ..< data.index(inputIndex, offsetBy: inputChunkSize)]
+        let Z_OK: Int32 = 0
+        let Z_STREAM_END: Int32 = 1
+        let Z_FINISH: Int32 = 4
 
-            var outputBuffer = [UInt8](repeating: 0, count: chunkSize)
+        var ret: Int32 = -1
+        var totalOut: UInt64 = 0
 
-            let decoded = inputChunk.withUnsafeBytes { inputPtr in
-                outputBuffer.withUnsafeMutableBytes { outputPtr in
-                    compression_decode_buffer(
-                        outputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                        outputPtr.count,
-                        inputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                        inputPtr.count,
-                        nil,
-                        COMPRESSION_ZLIB
-                    )
-                }
-            }
+        // Set input pointer
+        rawDeflate.withUnsafeBytes { inputPtr in
+            zs.storeBytes(of: inputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
+                          toByteOffset: 0, as: UnsafePointer<UInt8>.self)
+        }
+        zs.storeBytes(of: UInt32(rawDeflate.count), toByteOffset: 8, as: UInt32.self)
 
-            if decoded == 0 { break }
-            output.append(contentsOf: outputBuffer.prefix(decoded))
-            inputIndex = data.index(inputIndex, offsetBy: inputChunkSize)
+        // Set output pointer
+        outputBuffer.withUnsafeMutableBufferPointer { outPtr in
+            zs.storeBytes(of: outPtr.baseAddress!,
+                          toByteOffset: 24, as: UnsafeMutablePointer<UInt8>.self)
+        }
+        zs.storeBytes(of: UInt32(outputBuffer.count), toByteOffset: 32, as: UInt32.self)
+
+        // Get actual zlib version from the library itself
+        let verPtr = c_zlibVersion()
+        let verStr = String(cString: verPtr)
+        NSLog("[YOLOModel] inflate: zlib version=\(verStr)")
+
+        // Initialize for raw inflate: windowBits = -15
+        ret = c_inflateInit2(zs, -15, verPtr, Int32(zStreamSize))
+        NSLog("[YOLOModel] inflate: inflateInit2 ret=\(ret)")
+        guard ret == Z_OK else {
+            NSLog("[YOLOModel] inflate: inflateInit2 FAILED ret=\(ret)")
+            throw YOLOModelError.invalidArchive
         }
 
-        return output
+        ret = c_inflate(zs, Z_FINISH)
+        NSLog("[YOLOModel] inflate: inflate ret=\(ret) (expect \(Z_STREAM_END)=Z_STREAM_END)")
+        totalOut = zs.load(fromByteOffset: 40, as: UInt64.self)
+        NSLog("[YOLOModel] inflate: totalOut=\(totalOut)")
+        _ = c_inflateEnd(zs)
+
+        guard ret == Z_STREAM_END else {
+            NSLog("[YOLOModel] inflate: inflate FAILED ret=\(ret)")
+            throw YOLOModelError.invalidArchive
+        }
+        return Data(outputBuffer.prefix(Int(totalOut)))
     }
 }
 

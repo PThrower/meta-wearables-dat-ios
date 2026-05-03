@@ -583,6 +583,8 @@ export async function handleWsMessage(
             session.publisher.lowPowerMode = !!cmd.battery.lowPowerMode;
           }
           broadcast(session, { type: "publisher_telemetry", ...cmd });
+        } else if (cmd.type === "stage_telemetry") {
+          broadcast(session, { type: "stage_telemetry", ...cmd });
         } else if (cmd.type === "link_state_changed") {
           session.linkState = cmd.state as string || "unknown";
           broadcast(session, { type: "link_state_changed", state: session.linkState });

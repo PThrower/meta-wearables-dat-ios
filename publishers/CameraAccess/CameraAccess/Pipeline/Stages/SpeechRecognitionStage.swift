@@ -40,11 +40,19 @@ actor SpeechRecognitionStage {
     private var partialResults: Bool = true
     private var isEnabled = false
 
+    // Per-stage metrics
+    private var metricsTracker = StageMetricsTracker(stageId: "speech-stt", nodeType: "mobile-stt")
+
     // Callback for relaying results
     private var onResult: (@Sendable (TranscriptionResult) async -> Void)?
 
     func setOnResult(_ handler: @escaping @Sendable (TranscriptionResult) async -> Void) {
         self.onResult = handler
+    }
+
+    func collectMetrics() -> StageMetricsSnapshot? {
+        metricsTracker.setMemoryMB(isEnabled ? 15.0 : 0)
+        return metricsTracker.collect()
     }
 
     func configure(language: String, onDeviceOnly: Bool, partialResults: Bool) {
@@ -191,9 +199,12 @@ actor SpeechRecognitionStage {
     private func handleRecognitionResult(_ result: SFSpeechRecognitionResult?, error: Error?) {
         guard isEnabled else { return }
 
+        let cpuStart = metricsTracker.beginFrame()
+
         if let error {
             NSLog("[SpeechRecognition] Recognition error: \(error)")
             sendErrorResult(error.localizedDescription)
+            metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: 1.0)
             // Restart recognition on error (transient failures are common)
             if isEnabled {
                 Task { [weak self] in
@@ -238,6 +249,7 @@ actor SpeechRecognitionStage {
         )
 
         if let onResult {
+            metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: 5.0)
             Task { await onResult(transcriptionResult) }
         }
 

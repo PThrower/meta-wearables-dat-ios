@@ -544,17 +544,45 @@ export function fetchPrimitives(): Promise<Array<{ id: string; name: string; ico
 
 // --- Node Definitions (schema-driven workflow UI) ---
 
+export type ConnectionCondition =
+  | { upstream: string[] }
+  | { downstream: string[] }
+  | { notConnected: string[] }
+  | { upstreamAll: string[] };
+
 export type ConfigFieldSchema =
   | { kind: "text"; key: string; label: string; placeholder?: string }
   | { kind: "textarea"; key: string; label: string; rows?: number; placeholder?: string }
   | { kind: "select"; key: string; label: string; options: Array<{ value: string; label: string }> }
   | { kind: "range"; key: string; label: string; min: number; max: number; step: number; unit?: string }
   | { kind: "checkbox"; key: string; label: string }
-  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number }
+  | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; placeholder?: string }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
   | { kind: "geofence-map"; key: string; label: string }
   | { kind: "zones"; key: string; label: string }
-  | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
+  | { kind: "section"; label: string; fields: ConfigFieldSchema[] }
+  | { kind: "conditional"; condition: ConnectionCondition; fields: ConfigFieldSchema[] };
+
+export interface ConnectionOverride {
+  condition: ConnectionCondition;
+  label?: string;
+  subtitle?: string;
+  color?: { fill: string; header: string; stroke: string };
+  extraAllowedTargets?: string[];
+}
+
+export interface SubnodeDefinition {
+  type: string;
+  label: string;
+  subtitle: string;
+  color: { fill: string; header: string; stroke: string };
+  allowedTargets: string[];
+  allowedSources: string[];
+  configSchema: ConfigFieldSchema[];
+  defaultConfig: Record<string, unknown>;
+  defaultLabel: string;
+  runtime: ("mobile" | "server")[];
+}
 
 export interface NodeDefinition {
   type: string;
@@ -570,6 +598,10 @@ export interface NodeDefinition {
   defaultConfig: Record<string, unknown>;
   defaultLabel: string;
   runtime: ("mobile" | "server")[];
+  parentType?: string;
+  allowedSources?: string[];
+  subnodes?: SubnodeDefinition[];
+  connectionOverrides?: ConnectionOverride[];
 }
 
 export async function fetchNodeDefinitions(): Promise<NodeDefinition[]> {

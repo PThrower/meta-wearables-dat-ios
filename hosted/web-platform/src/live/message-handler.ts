@@ -132,6 +132,11 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
       handleTelemetry(msg as Record<string, unknown>);
     }
 
+    // Stage-level telemetry (per-stage CPU/memory metrics)
+    if (msg.type === "stage_telemetry") {
+      handleStageTelemetry(msg as Record<string, unknown>);
+    }
+
     // BT link state changed
     if (msg.type === "link_state_changed") {
       const el = document.getElementById("t-link-state");
@@ -395,6 +400,43 @@ function handleTelemetry(m: Record<string, unknown>): void {
         : "";
     }
   } else { set("t-activity", "--"); }
+}
+
+/** Handle stage_telemetry — update per-stage metrics in telemetry grid. */
+function handleStageTelemetry(m: Record<string, unknown>): void {
+  const stages = m.stages as Array<Record<string, unknown>> | undefined;
+  const process = m.process as Record<string, unknown> | undefined;
+
+  // Update process-level telemetry if present
+  if (process) {
+    const memMB = typeof process.memoryMB === "number" ? (process.memoryMB as number).toFixed(0) : "--";
+    setEl("t-stage-process-mem", memMB + "MB");
+    const thermal = typeof process.thermal === "string" ? process.thermal : "--";
+    setEl("t-stage-process-thermal", thermal);
+  }
+
+  // Build per-stage summary
+  if (!stages || stages.length === 0) {
+    setEl("t-stage-summary", "No active stages");
+    return;
+  }
+
+  const lines: string[] = [];
+  for (const s of stages) {
+    const id = String(s.stageId ?? "?");
+    const wallMs = typeof s.wallClockMs === "number" ? (s.wallClockMs as number).toFixed(1) : "--";
+    const cpuMs = typeof s.cpuMs === "number" ? (s.cpuMs as number).toFixed(1) : "--";
+    const memMB = typeof s.memMB === "number" ? (s.memMB as number).toFixed(1) : "--";
+    const frames = String(s.frames ?? 0);
+    const dropped = String(s.dropped ?? 0);
+    lines.push(`${id}: ${wallMs}ms wall, ${cpuMs}ms cpu, ${memMB}MB, ${frames}f/${dropped}d`);
+  }
+  setEl("t-stage-summary", lines.join(" | "));
+}
+
+function setEl(id: string, text: string): void {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
 }
 
 /** Append a transcription entry to the log panel. Auto-trims to 50 entries. */

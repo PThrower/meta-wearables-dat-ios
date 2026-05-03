@@ -165,4 +165,17 @@ final class FramePipelineManager {
         }
         NSLog("[Pipeline] All stages stopped (\(stages.count))")
     }
+
+    // MARK: - Metrics Access (for StageMetricsCollector)
+
+    /// Returns a snapshot of all registered stages for metrics collection.
+    /// Called from StageMetricsCollector actor — crosses to MainActor.
+    func getStagesForMetrics() -> [any FramePipelineStage] {
+        return stages
+    }
+
+    /// Collect metrics from the transform stage if present.
+    func getTransformMetrics() -> StageMetricsSnapshot? {
+        return transformStage?.collectMetrics()
+    }
 }

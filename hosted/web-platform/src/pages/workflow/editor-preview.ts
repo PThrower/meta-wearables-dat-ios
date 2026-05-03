@@ -299,6 +299,45 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     notifyListeners();
   }
 
+  // Stage-level telemetry — map per-stage metrics to node numerics by nodeType
+  if (msg.type === "stage_telemetry" && msg.stages) {
+    const stages = msg.stages as Array<{
+      stageId: string;
+      nodeType: string;
+      wallClockMs: number;
+      cpuMs: number;
+      memMB: number;
+      frames: number;
+      dropped: number;
+    }>;
+    for (const stage of stages) {
+      for (const [, preview] of nodePreviews) {
+        // Match by nodeType prefix (e.g. "vision-face-detect" matches "vision-*")
+        const typeMatches = preview.nodeType === stage.nodeType
+          || preview.nodeType.startsWith(stage.nodeType.split("-")[0] + "-");
+        // Also match by stageId for non-prefixed matches
+        const idMatches = preview.nodeType.includes(stage.stageId);
+        if (typeMatches || idMatches) {
+          preview.numerics.set("Process", { value: stage.wallClockMs, unit: "ms", time: now });
+          preview.numerics.set("CPU", { value: stage.cpuMs, unit: "ms", time: now });
+          if (stage.memMB > 0) {
+            preview.numerics.set("Mem", { value: stage.memMB, unit: "MB", time: now });
+          }
+          const totalFrames = stage.frames + stage.dropped;
+          if (totalFrames > 0) {
+            const fps = Math.round(stage.frames);
+            preview.numerics.set("FPS", { value: fps, unit: "fps", time: now });
+          }
+          if (stage.dropped > 0) {
+            preview.numerics.set("Dropped", { value: stage.dropped, unit: "", time: now });
+          }
+          preview.updated = now;
+        }
+      }
+    }
+    notifyListeners();
+  }
+
   // Sensor results — display on sensor-sound and sensor-location* nodes
   if (msg.type === "sensor_result") {
     for (const [, preview] of nodePreviews) {
