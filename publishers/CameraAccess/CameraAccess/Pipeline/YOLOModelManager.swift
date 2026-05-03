@@ -42,6 +42,7 @@ actor YOLOModelManager {
         "yolo11n-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n-pose.mlpackage.zip",
         "yolo11s-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s-pose.mlpackage.zip",
         "yolo11m-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m-pose.mlpackage.zip",
+        "YOLO11PokerInt8LUT": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/poker-model-v1.0/YOLO11PokerInt8LUT.mlpackage.zip",
     ]
 
     /// Load a compiled MLModel, downloading or compiling as needed.
@@ -88,6 +89,30 @@ actor YOLOModelManager {
         }
 
         throw YOLOModelError.modelNotFound(id: id)
+    }
+
+    /// Extract class labels from a compiled MLModel's metadata.
+    /// Ultralytics stores them as "{0: 'label', 1: 'label2', ...}" in creatorDefinedKey["names"].
+    /// Returns nil if no labels found (caller falls back to COCO defaults).
+    static func extractClassLabels(from model: MLModel) -> [String]? {
+        guard let creatorDict = model.modelDescription.metadata[.creatorDefinedKey] as? [String: Any],
+              let namesRaw = creatorDict["names"] as? String else {
+            return nil
+        }
+        // Parse "{0: '10C', 1: '10D', ...}" → sorted by index → [String]
+        var labels: [(Int, String)] = []
+        let pattern = #"(\d+)\s*:\s*['"]([^'"]+)['"]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(namesRaw.startIndex..., in: namesRaw)
+        for match in regex.matches(in: namesRaw, range: range) {
+            guard let idxRange = Range(match.range(at: 1), in: namesRaw),
+                  let labelRange = Range(match.range(at: 2), in: namesRaw),
+                  let idx = Int(namesRaw[idxRange]) else { continue }
+            labels.append((idx, String(namesRaw[labelRange])))
+        }
+        guard !labels.isEmpty else { return nil }
+        labels.sort { $0.0 < $1.0 }
+        return labels.map { $0.1 }
     }
 
     /// Get the compiled URL for a model if it exists in cache.

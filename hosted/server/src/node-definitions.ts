@@ -1354,6 +1354,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "yolo11n", label: "YOLO11n (fast)" },
         { value: "yolo11s", label: "YOLO11s (balanced)" },
         { value: "yolo11m", label: "YOLO11m (accurate)" },
+        { value: "YOLO11PokerInt8LUT", label: "Poker Cards (52 classes)" },
         { value: "custom", label: "Custom (URL below)" },
       ]},
       { kind: "text", key: "modelUrl", label: "Custom Model URL", placeholder: "https://github.com/.../releases/download/.../model.mlpackage.zip" },

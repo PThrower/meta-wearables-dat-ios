@@ -149,6 +149,24 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
 
             self.mlModel = model
 
+            // Extract class labels from model metadata (e.g. custom YOLO models)
+            // Falls back to config labels (COCO default) if model has none
+            if let modelLabels = YOLOModelManager.extractClassLabels(from: model) {
+                NSLog("[YOLOStage] Using \(modelLabels.count) class labels from model metadata")
+                self.yoloConfig = YOLOStageConfig(
+                    task: yoloConfig.task,
+                    modelId: yoloConfig.modelId,
+                    modelUrl: yoloConfig.modelUrl,
+                    classLabels: modelLabels,
+                    confidence: yoloConfig.confidence,
+                    iouThreshold: yoloConfig.iouThreshold,
+                    targetFPS: yoloConfig.targetFPS,
+                    maxDetections: yoloConfig.maxDetections,
+                    inputSize: yoloConfig.inputSize,
+                    smoothingAlpha: yoloConfig.smoothingAlpha
+                )
+            }
+
             // Create VNCoreMLModel for Vision framework integration
             let visionModel = try VNCoreMLModel(for: model)
             let request = VNCoreMLRequest(model: visionModel)
