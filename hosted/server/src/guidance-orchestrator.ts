@@ -1603,12 +1603,12 @@ export class GuidanceOrchestrator {
 
     // Push alerts to iOS publisher via server error callback
     if (this.serverErrorCb && event.type === "guidance.alert") {
-      const severity = (event as any).severity as string | undefined;
+      const severity = event.metadata?.severity;
       if (severity === "warning" || severity === "critical") {
         this.serverErrorCb(sessionId, {
           source: "guidance",
-          severity: severity as "warning" | "critical",
-          message: (event as any).message ?? "AI guidance alert",
+          severity,
+          message: event.content || "AI guidance alert",
           context: { appId: event.source },
         });
       }
