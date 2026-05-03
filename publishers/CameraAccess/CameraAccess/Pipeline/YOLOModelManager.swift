@@ -312,6 +312,10 @@ actor YOLOModelManager {
             try FileManager.default.copyItem(at: mlmodelcUrl, to: compiledUrl)
             // Early cleanup: delete extracted files after copy to cache
             try? FileManager.default.removeItem(at: extractedDir)
+            guard validateCompiledModel(at: compiledUrl) else {
+                try? FileManager.default.removeItem(at: compiledUrl)
+                throw YOLOModelError.invalidArchive
+            }
             let model = try await loadCompiledModel(at: compiledUrl)
             let diskSize = Self.directorySize(at: compiledUrl)
             return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
@@ -337,6 +341,10 @@ actor YOLOModelManager {
             }
             try FileManager.default.moveItem(at: compiled, to: compiledUrl)
             NSLog("[YOLOModel] Compiled to \(compiledUrl.lastPathComponent)")
+            guard validateCompiledModel(at: compiledUrl) else {
+                try? FileManager.default.removeItem(at: compiledUrl)
+                throw YOLOModelError.invalidArchive
+            }
             let model = try await loadCompiledModel(at: compiledUrl)
             let diskSize = Self.directorySize(at: compiledUrl)
             return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
@@ -359,6 +367,10 @@ actor YOLOModelManager {
         }
         try FileManager.default.moveItem(at: compiled, to: compiledUrl)
 
+        guard validateCompiledModel(at: compiledUrl) else {
+            try? FileManager.default.removeItem(at: compiledUrl)
+            throw YOLOModelError.invalidArchive
+        }
         let loadedModel = try await loadCompiledModel(at: compiledUrl)
         let diskSize = Self.directorySize(at: compiledUrl)
         return ModelLoadResult(model: loadedModel, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
@@ -392,6 +404,16 @@ actor YOLOModelManager {
             }
         }
         return nil
+    }
+
+    /// Returns true if a compiled .mlmodelc directory has the required Manifest.json and CoreML data.
+    /// Catches incomplete/corrupt cache before handing it to MLModel(contentsOf:) which would
+    /// throw a raw "The file 'Manifest.json' doesn't exist" CoreML error.
+    private func validateCompiledModel(at url: URL) -> Bool {
+        let manifest = url.appendingPathComponent("Manifest.json")
+        let coreML = url.appendingPathComponent("Data/com.apple.CoreML")
+        return FileManager.default.fileExists(atPath: manifest.path)
+            && FileManager.default.fileExists(atPath: coreML.path)
     }
 
     /// Check if a directory itself contains a flat .mlmodelc structure
@@ -690,7 +712,7 @@ enum YOLOModelError: LocalizedError {
         case .downloadFailed(let code):
             return "Model download failed (HTTP \(code))"
         case .invalidArchive:
-            return "Downloaded archive does not contain a valid .mlpackage"
+            return "YOLO model download failed or is corrupt — please try again"
         case .compilationFailed(let error):
             return "Model compilation failed: \(error.localizedDescription)"
         case .insufficientMemory(let freeMB):
