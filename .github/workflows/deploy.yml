@@ -7,6 +7,10 @@ on:
       - 'hosted/**'
       - '.github/workflows/deploy.yml'
 
+concurrency:
+  group: vps-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -24,6 +28,15 @@ jobs:
             set -euo pipefail
 
             cd /root/relay-server
+
+            # --- Deploy lock: prevent concurrent deploys from stomping each other ---
+            LOCKFILE=/tmp/relay-deploy.lock
+            LOCK_TIMEOUT=300  # 5 minutes
+            if ! flock -w $LOCK_TIMEOUT 200; then
+              echo "FAIL: another deploy is running (waited ${LOCK_TIMEOUT}s)"
+              exit 1
+            fi 200>"$LOCKFILE"
+            echo ">>> Deploy lock acquired"
 
             echo ">>> Pulling latest"
             cd /root/relay-server
