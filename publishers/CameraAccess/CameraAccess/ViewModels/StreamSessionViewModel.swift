@@ -844,7 +844,7 @@ class StreamSessionViewModel: ObservableObject {
     let stage = VisionStage(config: visionConfig)
 
     // Wire result callback to update overlay AND relay to server
-    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?, histograms: [(Int, [Double])]) in
+    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?, histograms: [(Int, [Double])], embeddings: [(Int, [Double])]) in
       await MainActor.run {
         // When tracking is active, suppress raw vision boxes —
         // the tracker will emit tracked items with persistent IDs instead.
@@ -867,21 +867,25 @@ class StreamSessionViewModel: ObservableObject {
       }
       // Feed detections into tracking stage if active
       if let trackingStage = await self?.trackingStage {
-        // Build histogram lookup from VisionStage extraction
+        // Build histogram + embedding lookups from VisionStage extraction
         let histMap = Dictionary(uniqueKeysWithValues: histograms)
+        let embedMap = Dictionary(uniqueKeysWithValues: embeddings)
+        let hasOnDeviceEmbedding = !embedMap.isEmpty
         let trackDets: [TrackDetection] = result.detections.enumerated().compactMap { (i, det) in
           guard let bbox = det.boundingBox else { return nil }
           return TrackDetection(
             bbox: bbox,
             confidence: det.confidence,
             classLabel: det.displayLabel,
-            histogram: histMap[i]
+            histogram: histMap[i],
+            embedding: embedMap[i]
           )
         }
         if !trackDets.isEmpty {
           await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
         }
-        // Send ReID crops when gate-reid is in tracking config
+        // Send ReID crops to server only when gate-reid is present AND on-device extraction is NOT active.
+        // When EmbeddingExtractor is wired, embeddings arrive directly in TrackDetection — no roundtrip needed.
         let hasReID: Bool
         if let self = self {
           hasReID = await self.trackingConfig?.gates.contains(where: { $0.gateType == "gate-reid" }) ?? false
@@ -891,6 +895,7 @@ class StreamSessionViewModel: ObservableObject {
         if let self,
            await self.trackingStage != nil,
            hasReID,
+           !hasOnDeviceEmbedding,
            let thumbnails {
           let reidCrops = thumbnails.filter { (i, _) in
             result.detections[i].boundingBox != nil
@@ -1218,6 +1223,23 @@ class StreamSessionViewModel: ObservableObject {
     let hasBhattacharyya = trackingConfig.gates.contains(where: { $0.gateType == "gate-bhattacharyya" })
     if let visionStage {
       await visionStage.setExtractHistograms(hasBhattacharyya)
+    }
+
+    // Enable on-device OSNet embedding extraction when ReID gate has useOnDevice=true.
+    // Bypasses server reid_crops roundtrip — embeddings arrive directly in TrackDetection.
+    let reidGate = trackingConfig.gates.first(where: { $0.gateType == "gate-reid" })
+    let useOnDeviceReID = reidGate?.params["useOnDevice"] == 1.0
+    if useOnDeviceReID, let visionStage {
+      do {
+        let extractor = try EmbeddingExtractor.createFromBundle()
+        await visionStage.setEmbeddingExtractor(extractor)
+        NSLog("[StreamSession] On-device ReID enabled: OSNet-x0.25 embedding extraction active")
+      } catch {
+        NSLog("[StreamSession] Failed to load on-device ReID model: \(error.localizedDescription)")
+        await visionStage.setEmbeddingExtractor(nil)
+      }
+    } else if let visionStage {
+      await visionStage.setEmbeddingExtractor(nil)
     }
 
     // Wire result callback to update overlay AND relay to server

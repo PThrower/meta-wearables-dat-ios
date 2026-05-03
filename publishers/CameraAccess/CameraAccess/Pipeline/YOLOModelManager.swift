@@ -158,7 +158,8 @@ actor YOLOModelManager {
 
         let continuation = progressContinuations[id]
 
-        // Download with progress
+        // Stream download directly to disk (avoids buffering entire ZIP in RAM)
+        NSLog("[YOLOModel] Streaming download to \(downloadedFile.lastPathComponent)...")
         let (asyncBytes, response) = try await URLSession.shared.bytes(from: url)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw YOLOModelError.downloadFailed(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1)
@@ -166,30 +167,40 @@ actor YOLOModelManager {
 
         let totalBytes = response.expectedContentLength
         var receivedBytes: Int64 = 0
-        var data = Data()
-        data.reserveCapacity(Int(totalBytes))
+
+        // Open file handle for streaming writes
+        FileManager.default.createFile(atPath: downloadedFile.path, contents: nil)
+        let fileHandle = try FileHandle(forWritingTo: downloadedFile)
+        defer { try? fileHandle.close() }
+
+        // Read magic bytes from first chunk to detect ZIP
+        var headerChecked = false
+        var isZip = false
 
         for try await byte in asyncBytes {
-            data.append(byte)
+            try fileHandle.write(contentsOf: Data([byte]))
             receivedBytes += 1
-            if totalBytes > 0 {
+
+            // Check magic bytes from first 4 bytes
+            if !headerChecked && receivedBytes == 4 {
+                try fileHandle.seek(toOffset: 0)
+                let header = try fileHandle.read(upToCount: 4) ?? Data()
+                isZip = header.count >= 4 && header[0] == 0x50 && header[1] == 0x4B
+                headerChecked = true
+                try fileHandle.seek(toOffset: UInt64(receivedBytes))
+            }
+
+            // Yield progress every 64KB to avoid flooding
+            if totalBytes > 0 && receivedBytes % 65536 == 0 {
                 continuation?.yield(Double(receivedBytes) / Double(totalBytes))
             }
         }
         continuation?.yield(1.0)
+        NSLog("[YOLOModel] Downloaded \(receivedBytes) bytes, isZip=\(isZip)")
 
-        try data.write(to: downloadedFile)
-
-        // Extract: try ZIP first, fall back to direct file
-        // On iOS, ZIP extraction is limited — if server sends a compiled .mlmodelc,
-        // we can use it directly. For .mlpackage, we need to compile.
         let extractedDir = tempDir.appendingPathComponent("extracted")
         try FileManager.default.createDirectory(at: extractedDir, withIntermediateDirectories: true)
 
-        // Check if downloaded file is a ZIP (by magic bytes)
-        let header = data.prefix(4)
-        let isZip = header.count >= 4 && header[0] == 0x50 && header[1] == 0x4B
-        NSLog("[YOLOModel] Downloaded \(data.count) bytes, isZip=\(isZip), header=\(header.map { String(format: "%02x", $0) }.joined())")
         if isZip {
             // Use built-in ZIP extraction via URL resource
             NSLog("[YOLOModel] Extracting ZIP...")
@@ -316,7 +327,8 @@ actor YOLOModelManager {
     /// Parses ZIP local file headers and extracts stored or deflated entries.
     /// Ref: PKZIP APPNOTE — local file header signature = 0x04034b50
     private nonisolated func extractZip(at source: URL, to destination: URL) throws {
-        let data = try Data(contentsOf: source)
+        // Use mmap instead of heap allocation — kernel manages paging, doesn't eat RAM
+        let data = try Data(contentsOf: source, options: .alwaysMapped)
 
         // ZIP structures
         let localFileHeaderSignature: UInt32 = 0x04034b50
@@ -391,14 +403,14 @@ actor YOLOModelManager {
             }
         }
     }
-    /// Inflate raw deflated data from ZIP entries.
+    /// Inflate raw deflated data from ZIP entries using chunked output.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
     /// Uses zlib via Swiftzlib module with real z_stream struct.
+    /// Uses a small 64KB output buffer to avoid allocating the full uncompressed size in RAM.
     private static func inflateRawDeflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
         let rawDeflate = Data(data)
         NSLog("[YOLOModel] inflate: \(rawDeflate.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
 
-        // Use real z_stream struct via bridging header — compiler handles layout
         var stream = z_stream()
         stream.zalloc = nil
         stream.zfree = nil
@@ -406,35 +418,48 @@ actor YOLOModelManager {
 
         let streamSize = Int32(MemoryLayout<z_stream>.size)
         let ret = inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, streamSize)
-        NSLog("[YOLOModel] inflate: inflateInit2_ ret=\(ret), streamSize=\(streamSize)")
         guard ret == Z_OK else {
             NSLog("[YOLOModel] inflate: inflateInit2_ FAILED ret=\(ret)")
             throw YOLOModelError.invalidArchive
         }
         defer { inflateEnd(&stream) }
 
-        // Set up input — rawDeflate bytes
-        let inputCount = rawDeflate.count
-        let outputSize = max(uncompressedSize, inputCount * 4, 4096)
-        var outputBuffer = [UInt8](repeating: 0, count: outputSize)
+        let chunkSize = 65536 // 64KB output chunks — small fixed buffer
+        var result = Data()
+        result.reserveCapacity(min(uncompressedSize, 4 * 1024 * 1024)) // hint, capped at 4MB
 
         try rawDeflate.withUnsafeBytes { inputPtr in
-            try outputBuffer.withUnsafeMutableBufferPointer { outPtr in
-                stream.next_in = UnsafeMutablePointer<Bytef>(mutating: inputPtr.baseAddress!.assumingMemoryBound(to: Bytef.self))
-                stream.avail_in = UInt32(inputCount)
-                stream.next_out = outPtr.baseAddress
-                stream.avail_out = UInt32(outputSize)
+            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: inputPtr.baseAddress!.assumingMemoryBound(to: Bytef.self))
+            stream.avail_in = UInt32(rawDeflate.count)
 
-                let inflateRet = inflate(&stream, Z_FINISH)
-                NSLog("[YOLOModel] inflate: ret=\(inflateRet) total_out=\(stream.total_out)")
-                guard inflateRet == Z_STREAM_END else {
-                    NSLog("[YOLOModel] inflate: FAILED ret=\(inflateRet) (expected Z_STREAM_END=\(Z_STREAM_END))")
+            var done = false
+            while !done {
+                var chunk = [UInt8](repeating: 0, count: chunkSize)
+                var produced = 0
+                var inflateRet: Int32 = Z_OK
+                try chunk.withUnsafeMutableBufferPointer { outPtr in
+                    stream.next_out = outPtr.baseAddress
+                    stream.avail_out = UInt32(chunkSize)
+
+                    inflateRet = inflate(&stream, Z_FINISH)
+                    produced = chunkSize - Int(stream.avail_out)
+                }
+                result.append(contentsOf: chunk.prefix(produced))
+
+                switch inflateRet {
+                case Z_STREAM_END:
+                    done = true
+                case Z_OK:
+                    break // need more output space
+                default:
+                    NSLog("[YOLOModel] inflate: FAILED ret=\(inflateRet)")
                     throw YOLOModelError.invalidArchive
                 }
             }
         }
 
-        return Data(outputBuffer.prefix(Int(stream.total_out)))
+        NSLog("[YOLOModel] inflate: done total_out=\(stream.total_out)")
+        return result
     }
 }
 
