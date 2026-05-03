@@ -659,8 +659,9 @@ export class GuidancePanel {
           e.metadata?.stepNumber != null
             ? ` <span class="guidance-step-num">#${e.metadata.stepNumber}</span>`
             : "";
-        const severityMeta = e.metadata?.severity
-          ? ` <span class="guidance-severity guidance-severity-${e.metadata.severity}">${e.metadata.severity}</span>`
+        const severity = normalizeSeverity(e.metadata?.severity);
+        const severityMeta = severity
+          ? ` <span class="guidance-severity guidance-severity-${severity}">${esc(severity)}</span>`
           : "";
         const objectMeta = e.metadata?.objectLabel
           ? ` <span class="guidance-object">${esc(e.metadata.objectLabel)}</span>`
@@ -945,6 +946,12 @@ export function esc(str: string): string {
   const d = document.createElement("div");
   d.textContent = str;
   return d.innerHTML;
+}
+
+type GuidanceSeverity = "info" | "warning" | "critical";
+
+function normalizeSeverity(value: unknown): GuidanceSeverity | null {
+  return value === "info" || value === "warning" || value === "critical" ? value : null;
 }
 
 function formatUptime(ms: number): string {

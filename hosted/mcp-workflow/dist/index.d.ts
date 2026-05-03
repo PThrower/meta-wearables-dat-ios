@@ -2,7 +2,7 @@
 /**
  * MCP server for the MWDAT workflow editor.
  *
- * Provides 14 tools for workflow CRUD, node/edge operations,
+ * Provides 20 tools for workflow CRUD, node/edge operations,
  * activation, and node definitions — all via the relay server REST API.
  *
  * Environment variables:

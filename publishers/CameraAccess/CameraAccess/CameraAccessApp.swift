@@ -129,7 +129,8 @@ struct CameraAccessApp: App {
   #endif
   private let wearables: WearablesInterface
   @StateObject private var wearablesViewModel: WearablesViewModel
-  @StateObject private var telemetryService = TelemetryService()
+  @StateObject private var telemetryService: TelemetryService
+  @State private var coordinator: StreamCoordinator
 
   init() {
     NSLog("[CameraAccess] App init starting")

@@ -1,7 +1,8 @@
 /**
  * HTTP client for the MWDAT relay server's workflow REST API.
  */
-import type { WorkflowSummary, WorkflowDetail, NodeDefinition, ActivationResult, SessionInfo } from "./types.js";
+import type { WorkflowSummary, WorkflowDetail, NodeDefinition, ActivationResult, SessionInfo, ActiveSession, NodeStatesResponse, SessionTelemetry } from "./types.js";
+export declare function request<T>(method: string, path: string, body?: unknown): Promise<T>;
 export declare function listWorkflows(): Promise<WorkflowSummary[]>;
 export declare function getWorkflow(id: string): Promise<WorkflowDetail>;
 export declare function createWorkflow(data: {
@@ -52,4 +53,12 @@ export declare function activateWorkflow(workflowId: string, sessionId?: string,
 }): Promise<ActivationResult>;
 export declare function getNodeDefinitions(forceRefresh?: boolean): Promise<NodeDefinition[]>;
 export declare function listSessions(): Promise<SessionInfo[]>;
+export declare function getActiveSessions(): Promise<ActiveSession[]>;
+export declare function getNodeStates(sessionId: string, limit?: number): Promise<NodeStatesResponse>;
+export declare function getSessionTelemetry(sessionId: string): Promise<SessionTelemetry>;
+export declare function deactivateWorkflow(sessionId: string): Promise<{
+    ok: boolean;
+    sessionId: string;
+    deactivatedWorkflowId: string;
+}>;
 //# sourceMappingURL=client.d.ts.map

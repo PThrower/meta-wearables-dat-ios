@@ -174,8 +174,9 @@ function renderGuidanceEvent(e: GuidanceEvent): string {
   const confidence = Math.round(e.confidence * 100);
   const stepMeta = e.metadata?.stepNumber != null
     ? ` <span class="guidance-step-num">#${e.metadata.stepNumber}</span>` : "";
-  const severityMeta = e.metadata?.severity
-    ? ` <span class="guidance-severity guidance-severity-${e.metadata.severity}">${e.metadata.severity}</span>` : "";
+  const severity = normalizeSeverity(e.metadata?.severity);
+  const severityMeta = severity
+    ? ` <span class="guidance-severity guidance-severity-${severity}">${esc(severity)}</span>` : "";
   const objectMeta = e.metadata?.objectLabel
     ? ` <span class="guidance-object">${esc(e.metadata.objectLabel)}</span>` : "";
 
@@ -230,6 +231,12 @@ export function closeRecordedPlayer(): void {
   setText("ri-guidance-count", "--");
 
   currentSessionId = null;
+}
+
+type GuidanceSeverity = "info" | "warning" | "critical";
+
+function normalizeSeverity(value: unknown): GuidanceSeverity | null {
+  return value === "info" || value === "warning" || value === "critical" ? value : null;
 }
 
 /** Wire up all recorded player event handlers */

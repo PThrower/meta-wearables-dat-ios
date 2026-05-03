@@ -70,6 +70,10 @@ export interface GuidanceEvent {
   boundingBoxes?: BoundingBox[];
 }
 
+function normalizeSeverity(value: unknown): "info" | "warning" | "critical" {
+  return value === "warning" || value === "critical" ? value : "info";
+}
+
 export interface AIStatus {
   appId: string | null;
   status: "idle" | "activating" | "active" | "error" | "rate_limited";
@@ -1246,7 +1250,7 @@ export class GuidanceOrchestrator {
         trigger: "ai_tool_call",
         timestampMs: Date.now(),
         metadata: {
-          severity: (toolCall.args.severity as "info" | "warning" | "critical") ?? "info",
+          severity: normalizeSeverity(toolCall.args.severity),
         },
       });
 

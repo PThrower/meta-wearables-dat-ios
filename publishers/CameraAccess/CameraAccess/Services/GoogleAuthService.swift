@@ -69,7 +69,7 @@ actor GoogleAuthService {
         }
 
         // Build authorization URL
-        let scope = "openid%20email%20profile"
+        let scope = "openid email profile"
         let state = UUID().uuidString
         let codeVerifier = generateCodeVerifier()
         let codeChallenge = generateCodeChallenge(from: codeVerifier)
@@ -114,8 +114,16 @@ actor GoogleAuthService {
         }
 
         // Extract authorization code from callback
-        guard let callbackComponents = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
-              let codeItem = callbackComponents.queryItems?.first(where: { $0.name == "code" }),
+        guard let callbackComponents = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false) else {
+            throw GoogleAuthError.missingAuthCode
+        }
+
+        let returnedState = callbackComponents.queryItems?.first(where: { $0.name == "state" })?.value
+        guard returnedState == state else {
+            throw GoogleAuthError.invalidState
+        }
+
+        guard let codeItem = callbackComponents.queryItems?.first(where: { $0.name == "code" }),
               let code = codeItem.value else {
             throw GoogleAuthError.missingAuthCode
         }
@@ -148,7 +156,7 @@ actor GoogleAuthService {
             "code_verifier": codeVerifier,
         ]
 
-        request.httpBody = params.map { "\($0.key)=\($0.value)" }.joined(separator: "&").data(using: .utf8)
+        request.httpBody = formURLEncode(params).data(using: .utf8)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -189,6 +197,18 @@ actor GoogleAuthService {
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
             .trimmingCharacters(in: .whitespaces)
+    }
+
+    private func formURLEncode(_ params: [String: String]) -> String {
+        params.map { key, value in
+            "\(percentEncode(key))=\(percentEncode(value))"
+        }.joined(separator: "&")
+    }
+
+    private func percentEncode(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":#[]@!$&'()*+,;=")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     // MARK: - Keychain
@@ -244,6 +264,7 @@ enum GoogleAuthError: LocalizedError {
     case invalidURL
     case cancelled
     case missingAuthCode
+    case invalidState
     case tokenExchangeFailed
     case missingIdToken
 
@@ -253,6 +274,7 @@ enum GoogleAuthError: LocalizedError {
         case .invalidURL: return "Invalid OAuth URL"
         case .cancelled: return "Sign-in cancelled"
         case .missingAuthCode: return "Authorization code not received"
+        case .invalidState: return "OAuth state mismatch"
         case .tokenExchangeFailed: return "Token exchange failed"
         case .missingIdToken: return "ID token not received"
         }

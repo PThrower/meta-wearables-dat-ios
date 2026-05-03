@@ -8,6 +8,9 @@ import type {
   NodeDefinition,
   ActivationResult,
   SessionInfo,
+  ActiveSession,
+  NodeStatesResponse,
+  SessionTelemetry,
 } from "./types.js";
 
 const DEFAULT_URL = "https://relay.simulationapi.com";
@@ -26,7 +29,7 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(
+export async function request<T>(
   method: string,
   path: string,
   body?: unknown,
@@ -169,4 +172,22 @@ export async function listSessions(): Promise<SessionInfo[]> {
         }
       : (s.device as SessionInfo["device"]),
   }));
+}
+
+// --- Runtime Observability ---
+
+export async function getActiveSessions(): Promise<ActiveSession[]> {
+  return request<ActiveSession[]>("GET", "/sessions/active");
+}
+
+export async function getNodeStates(sessionId: string, limit = 100): Promise<NodeStatesResponse> {
+  return request<NodeStatesResponse>("GET", `/sessions/${sessionId}/node-states?limit=${limit}`);
+}
+
+export async function getSessionTelemetry(sessionId: string): Promise<SessionTelemetry> {
+  return request<SessionTelemetry>("GET", `/sessions/${sessionId}/telemetry`);
+}
+
+export async function deactivateWorkflow(sessionId: string): Promise<{ ok: boolean; sessionId: string; deactivatedWorkflowId: string }> {
+  return request<{ ok: boolean; sessionId: string; deactivatedWorkflowId: string }>("POST", `/sessions/${sessionId}/deactivate`);
 }

@@ -15,7 +15,7 @@ class ApiError extends Error {
         this.name = "ApiError";
     }
 }
-async function request(method, path, body) {
+export async function request(method, path, body) {
     const url = `${baseUrl()}${path}`;
     const res = await fetch(url, {
         method,
@@ -105,5 +105,18 @@ export async function listSessions() {
             }
             : s.device,
     }));
+}
+// --- Runtime Observability ---
+export async function getActiveSessions() {
+    return request("GET", "/sessions/active");
+}
+export async function getNodeStates(sessionId, limit = 100) {
+    return request("GET", `/sessions/${sessionId}/node-states?limit=${limit}`);
+}
+export async function getSessionTelemetry(sessionId) {
+    return request("GET", `/sessions/${sessionId}/telemetry`);
+}
+export async function deactivateWorkflow(sessionId) {
+    return request("POST", `/sessions/${sessionId}/deactivate`);
 }
 //# sourceMappingURL=client.js.map

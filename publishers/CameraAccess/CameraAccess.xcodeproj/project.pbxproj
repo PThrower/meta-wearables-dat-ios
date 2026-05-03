@@ -106,6 +106,14 @@
 		YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF7D6C464283423908 /* YOLODecoder.swift */; };
 		YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */; };
 		YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */; };
+		D3F279C39FCD4058295FDD40 /* AppRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C0D3AC2B4242742D850767 /* AppRoute.swift */; };
+		2A1E0572B0CE1263B2348DBC /* AudioStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EDDEFCF377A8A787772090 /* AudioStore.swift */; };
+		2FC44ED7F8117E917BFBFA0D /* ErrorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7EF45FD7E98F8CF43963F04 /* ErrorStore.swift */; };
+		7D02F4F24CA9D88FC398EC5D /* PipelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F053EFFE3460B4EC09FAA5 /* PipelineStore.swift */; };
+		AF69169637186FA68E043C2E /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 201B948DF8C350E3A657EB33 /* RecordingStore.swift */; };
+		2F3D34EC88E7546644DB486E /* StreamConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026A17D10C4706163190AF39 /* StreamConfigStore.swift */; };
+		3DCEA819B41B6D2B560003C4 /* StreamCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D5677D5CC7BA31AA6529B6C /* StreamCoordinator.swift */; };
+		75B2A4705D424EF41655E5F8 /* TelemetryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2148E47F9BB6F1811D603ADC /* TelemetryStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -242,6 +250,14 @@
 		YOLFREF7D6C464283423908 /* YOLODecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLODecoder.swift; sourceTree = "<group>"; };
 		YOLFREF52B34BAF9E86D750 /* YOLOStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOStage.swift; sourceTree = "<group>"; };
 		YOLFREF920E43949B4E8EE8 /* YOLOOverlayRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YOLOOverlayRenderer.swift; sourceTree = "<group>"; };
+		F0C0D3AC2B4242742D850767 /* AppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoute.swift; sourceTree = "<group>"; };
+		F0EDDEFCF377A8A787772090 /* AudioStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioStore.swift; sourceTree = "<group>"; };
+		D7EF45FD7E98F8CF43963F04 /* ErrorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorStore.swift; sourceTree = "<group>"; };
+		B5F053EFFE3460B4EC09FAA5 /* PipelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineStore.swift; sourceTree = "<group>"; };
+		201B948DF8C350E3A657EB33 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingStore.swift; sourceTree = "<group>"; };
+		026A17D10C4706163190AF39 /* StreamConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamConfigStore.swift; sourceTree = "<group>"; };
+		3D5677D5CC7BA31AA6529B6C /* StreamCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamCoordinator.swift; sourceTree = "<group>"; };
+		2148E47F9BB6F1811D603ADC /* TelemetryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -360,6 +376,7 @@
 				E66CC01A2F3E1A9300B07379 /* TestResources */,
 				PIPE00B02E91PIPE01 /* Pipeline */,
 				TELE00092EB918740097D0E1 /* Services */,
+				BACFDE332F26852864069799 /* State */,
 				8FD96B702E6F0A9800F56AB1 /* ViewModels */,
 				8FD96B762E6F0A9800F56AB1 /* Views */,
 				8FD96B772E6F0A9800F56AB1 /* Assets.xcassets */,
@@ -495,6 +512,21 @@
 				DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		BACFDE332F26852864069799 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				F0C0D3AC2B4242742D850767 /* AppRoute.swift */,
+				F0EDDEFCF377A8A787772090 /* AudioStore.swift */,
+				D7EF45FD7E98F8CF43963F04 /* ErrorStore.swift */,
+				B5F053EFFE3460B4EC09FAA5 /* PipelineStore.swift */,
+				201B948DF8C350E3A657EB33 /* RecordingStore.swift */,
+				026A17D10C4706163190AF39 /* StreamConfigStore.swift */,
+				3D5677D5CC7BA31AA6529B6C /* StreamCoordinator.swift */,
+				2148E47F9BB6F1811D603ADC /* TelemetryStore.swift */,
+			);
+			path = State;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -751,6 +783,14 @@
 				YOLBLDF5D443D6A6C9732C /* YOLODecoder.swift in Sources */,
 				YOLBLD99FE4A7FAB11EE19 /* YOLOStage.swift in Sources */,
 				YOLBLDC6864BA8BBEEC9D5 /* YOLOOverlayRenderer.swift in Sources */,
+				D3F279C39FCD4058295FDD40 /* AppRoute.swift in Sources */,
+				2A1E0572B0CE1263B2348DBC /* AudioStore.swift in Sources */,
+				2FC44ED7F8117E917BFBFA0D /* ErrorStore.swift in Sources */,
+				7D02F4F24CA9D88FC398EC5D /* PipelineStore.swift in Sources */,
+				AF69169637186FA68E043C2E /* RecordingStore.swift in Sources */,
+				2F3D34EC88E7546644DB486E /* StreamConfigStore.swift in Sources */,
+				3DCEA819B41B6D2B560003C4 /* StreamCoordinator.swift in Sources */,
+				75B2A4705D424EF41655E5F8 /* TelemetryStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

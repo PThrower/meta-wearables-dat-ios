@@ -36,6 +36,26 @@ export class ExportError extends Error {
 }
 
 /**
+ * Serial export queue — only one ffmpeg export runs at a time.
+ * Prevents OOM on the VPS from parallel encodes (each ~300MB RSS).
+ */
+let exportLock: Promise<Response> | null = null;
+
+async function withExportLock(fn: () => Promise<Response>): Promise<Response> {
+  // Wait for any in-flight export to finish, then run ours
+  while (exportLock !== null) {
+    try { await exportLock; } catch { /* previous export failed, that's fine */ }
+  }
+  const promise = fn();
+  exportLock = promise;
+  try {
+    return await promise;
+  } finally {
+    if (exportLock === promise) exportLock = null;
+  }
+}
+
+/**
  * Get metadata about what's available for export.
  */
 export async function getSessionExportMeta(sessionId: string, store: ObjectStore) {
@@ -80,6 +100,10 @@ export async function getCachedMp4Url(sessionId: string, store: ObjectStore, inc
  * response AND upload to R2 after ffmpeg completes.
  */
 export async function exportAndCacheMp4(opts: ExportOptions): Promise<Response> {
+  return withExportLock(() => exportAndCacheMp4Inner(opts));
+}
+
+async function exportAndCacheMp4Inner(opts: ExportOptions): Promise<Response> {
   const { sessionId, store, includeAudio, ffmpegPath = "ffmpeg" } = opts;
 
   const segKeys = (await store.list(`sessions/${sessionId}/video/`))

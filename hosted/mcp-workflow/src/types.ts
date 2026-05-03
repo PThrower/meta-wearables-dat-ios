@@ -155,6 +155,86 @@ export interface ActivationResult {
   };
 }
 
+// --- Runtime Observability ---
+
+export interface ActiveSession {
+  id: string;
+  live: boolean;
+  publisherConnected: boolean;
+  publisherStandby: boolean;
+  viewerCount: number;
+  uptimeMs: number;
+  activeWorkflowId: string | null;
+  createdAt: number | undefined;
+  lastActivityAt: number | undefined;
+  state: string;
+  linkState: string;
+  device: {
+    deviceId: string | null;
+    deviceName: string | null;
+    deviceModel: string | null;
+    wearableType: string | null;
+    systemVersion: string | null;
+    appVersion: string | null;
+    buildNumber: string | null;
+  } | null;
+  battery: { level: number | null; state: string | null; lowPowerMode: boolean } | null;
+  frames: { frameCount: number; totalBytes: number; audioCount: number; audioBytes: number } | null;
+}
+
+export interface NodeStateInfo {
+  nodeId: string;
+  nodeType: string;
+  label: string;
+  state: string;
+  startedAt: number | null;
+  completedAt: number | null;
+  error?: string;
+}
+
+export interface NodeExecutionLogEntry {
+  id: string;
+  sessionId: string;
+  workflowId: string;
+  nodeId: string;
+  appId: string | null;
+  nodeType: string;
+  state: string;
+  action: string;
+  error: string | null;
+  triggeredBy: string | null;
+  timestampMs: number;
+}
+
+export interface NodeStatesResponse {
+  sessionId: string;
+  workflowId: string | null;
+  workflowName: string | null;
+  activatedAt: number | null;
+  nodes: NodeStateInfo[];
+  log: NodeExecutionLogEntry[];
+}
+
+export interface SessionTelemetry {
+  sessionId: string;
+  publisher: {
+    connected: boolean;
+    standby?: boolean;
+    frameCount?: number;
+    totalBytes?: number;
+    audioCount?: number;
+    audioBytes?: number;
+    timing?: Record<string, unknown>;
+    lastHeader?: { width: number; height: number; quality: number } | null;
+    battery?: { level: number | null; state: string | null; lowPowerMode: boolean };
+  };
+  ai: {
+    status: Record<string, unknown>;
+    telemetry: Record<string, unknown>;
+    eventHistory: Record<string, unknown>[];
+  };
+}
+
 // --- Sessions ---
 
 export interface SessionInfo {
