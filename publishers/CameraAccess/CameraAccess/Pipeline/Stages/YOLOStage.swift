@@ -90,9 +90,11 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
-        // Medium-quality snapshot (960 max, ~2MB) — saves ~6MB/frame vs full resolution.
-        // VNImageRequestHandler returns normalized coords regardless of input resolution.
-        let snapshotBuffer = SnapshotConfig.medium.createSnapshot(from: packet.sampleBuffer)
+        // Full-resolution snapshot — VNCoreMLRequest.centerCrop + downscaling caused
+        // coordinate mapping errors (centerCrop discards edges, shifts detection coords).
+        // Memory savings from model cache (1 model), streaming inflate, and pressure
+        // check are much larger than per-frame snapshot savings.
+        let snapshotBuffer = SnapshotConfig.full.createSnapshot(from: packet.sampleBuffer)
         await processFrameInternal(packet, pixelBuffer: snapshotBuffer)
     }
 
