@@ -113,7 +113,7 @@ struct NonStreamView: View {
         CustomButton(
           title: "Start streaming",
           style: .primary,
-          isDisabled: !coordinator.hasActiveDevice || !coordinator.isSessionReady
+          isDisabled: !coordinator.hasActiveDevice
         ) {
           Task {
             await coordinator.handleStartStreaming()
