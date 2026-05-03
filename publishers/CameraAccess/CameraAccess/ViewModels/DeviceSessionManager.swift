@@ -88,6 +88,29 @@ final class DeviceSessionManager: ObservableObject {
           return nil
         }
       }
+    } catch let error as DeviceSessionError {
+      switch error {
+      case .noEligibleDevice:
+        NSLog("[DeviceSessionManager] No eligible device found")
+      case .sessionAlreadyExists:
+        NSLog("[DeviceSessionManager] Session already exists — tearing down stale session")
+        deviceSession = nil
+      case .sessionAlreadyStopped:
+        NSLog("[DeviceSessionManager] Session already stopped")
+        deviceSession = nil
+      case .sessionIdle:
+        NSLog("[DeviceSessionManager] Session is idle")
+      case .capabilityAlreadyActive:
+        NSLog("[DeviceSessionManager] Capability already active on session")
+      case .capabilityNotFound:
+        NSLog("[DeviceSessionManager] Capability not found on session")
+      case .unexpectedError(let description):
+        NSLog("[DeviceSessionManager] Unexpected session error: \(description)")
+      @unknown default:
+        NSLog("[DeviceSessionManager] Unknown DeviceSessionError: \(error)")
+      }
+      isReady = false
+      deviceSession = nil
     } catch {
       NSLog("[DeviceSessionManager] Failed to create session: \(error)")
       isReady = false

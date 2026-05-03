@@ -628,7 +628,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "osnet-x10", label: "OSNet x1.0 (accurate)" },
       ] },
       { kind: "range", key: "gallerySize", label: "Gallery size (frames kept per track)", min: 1, max: 50, step: 1 },
-      { kind: "toggle", key: "useOnDevice", label: "On-device Embedding", description: "Extract OSNet-x0.25 embeddings on iOS (no server roundtrip)" },
+      { kind: "checkbox", key: "useOnDevice", label: "On-device embedding (OSNet-x0.25 on iOS)" },
     ],
     defaultConfig: { embedDistance: 0.5, model: "osnet-x05", gallerySize: 10, useOnDevice: false },
     defaultLabel: "ReID Gate",

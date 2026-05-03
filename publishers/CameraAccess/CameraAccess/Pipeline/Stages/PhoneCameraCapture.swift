@@ -12,6 +12,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import MWDATCore
 
 // MARK: - Delegate (NSObject required by AVCaptureVideoDataOutputSampleBufferDelegate)
 
@@ -56,19 +57,14 @@ actor PhoneCameraCapture {
     private var captureSession: AVCaptureSession?
     private var delegate: SampleBufferDelegate?
     private var _isRunning = false
-    private let deviceLock = NSLock()
-    private nonisolated(unsafe) var _currentDevice: AVCaptureDevice?
+    private let currentDeviceMutex = Mutex<AVCaptureDevice?>(nil)
 
     nonisolated var currentDevice: AVCaptureDevice? {
-        deviceLock.lock()
-        defer { deviceLock.unlock() }
-        return _currentDevice
+        currentDeviceMutex.withLock { $0 }
     }
 
     private func setCurrentDevice(_ device: AVCaptureDevice?) {
-        deviceLock.lock()
-        defer { deviceLock.unlock() }
-        _currentDevice = device
+        currentDeviceMutex.withLock { $0 = device }
     }
 
     private let targetFPS: Int

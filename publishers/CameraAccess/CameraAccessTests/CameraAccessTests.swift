@@ -24,8 +24,11 @@ class ViewModelIntegrationTests: XCTestCase {
     try await super.setUp()
     try? Wearables.configure()
 
-    // 0.6.0: enable MockDeviceKit before pairing
-    MockDeviceKit.shared.enable()
+    // 0.6.0: enable MockDeviceKit with explicit config before pairing
+    MockDeviceKit.shared.enable(config: MockDeviceKitConfig(
+      initiallyRegistered: true,
+      initialPermissionsGranted: true
+    ))
 
     // Pair mock device and set up camera kit
     let pairedMockDevice = MockDeviceKit.shared.pairRaybanMeta()
@@ -64,8 +67,8 @@ class ViewModelIntegrationTests: XCTestCase {
       return
     }
 
-    // Setup camera feed (0.6.0: setCameraFeed is no longer async)
-    camera.setCameraFeed(fileURL: videoURL)
+    // Setup camera feed (0.6.0: setCameraFeed is no longer async, explicit CameraFacing)
+    camera.setCameraFeed(cameraFacing: .back, fileURL: videoURL)
 
     let viewModel = StreamSessionViewModel(wearables: Wearables.shared)
 
@@ -96,6 +99,25 @@ class ViewModelIntegrationTests: XCTestCase {
     // Verify streaming stopped (allow for final states to be stopped or waiting)
     XCTAssertFalse(viewModel.isStreaming)
     XCTAssertTrue([.stopped, .waiting].contains(viewModel.streamingStatus))
+  }
+
+  // MARK: - Permission Simulation Tests
+
+  func testPermissionDenialFlow() async throws {
+    // Use MockDeviceKit.permissions (MockPermissions) to simulate permission states
+    let permissions = MockDeviceKit.shared.permissions
+    permissions.set(.camera, .denied)
+
+    let viewModel = StreamSessionViewModel(wearables: Wearables.shared)
+    await viewModel.handleStartStreaming()
+
+    // Should not reach streaming with denied camera permission
+    try await Task.sleep(nanoseconds: 3_000_000_000)
+    XCTAssertFalse(viewModel.isStreaming)
+
+    // Grant permission and verify recovery
+    permissions.set(.camera, .granted)
+    permissions.setRequestResult(.camera, result: .granted)
   }
 
   // MARK: - Photo Capture Flow Tests

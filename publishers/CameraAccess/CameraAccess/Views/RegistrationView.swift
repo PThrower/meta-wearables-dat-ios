@@ -39,6 +39,8 @@ struct RegistrationView: View {
             _ = try await Wearables.shared.handleUrl(url)
           } catch let error as RegistrationError {
             viewModel.showError(error.description)
+          } catch let error as WearablesHandleURLError {
+            viewModel.showError("Registration callback failed: \(error.localizedDescription)")
           } catch {
             viewModel.showError("Unknown error: \(error.localizedDescription)")
           }

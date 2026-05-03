@@ -337,7 +337,7 @@ final class TelemetryService: ObservableObject {
     // MARK: - Attach to SDK
 
     func attachToStreamSession(_ session: StreamSession) {
-        NSLog("[Telemetry] attachToStreamSession called, initial state=\(String(describing: session.state))")
+        NSLog("[Telemetry] attachToStreamSession called, initial state=\(String(describing: session.state)), capabilityState=\(String(describing: session.capabilityState))")
         let stateToken = session.statePublisher.listen { [weak self] state in
             Task { @MainActor [weak self] in
                 self?.handleSessionState(state)

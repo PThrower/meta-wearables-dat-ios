@@ -172,7 +172,10 @@ struct CameraAccessApp: App {
     #if DEBUG
     // Auto-configure MockDeviceKit when launched by XCUITests
     if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
-      MockDeviceKit.shared.enable()
+      MockDeviceKit.shared.enable(config: MockDeviceKitConfig(
+        initiallyRegistered: true,
+        initialPermissionsGranted: true
+      ))
       let device = MockDeviceKit.shared.pairRaybanMeta()
 
       let cameraKit = device.services.camera

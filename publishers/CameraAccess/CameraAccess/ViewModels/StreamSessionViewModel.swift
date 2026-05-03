@@ -72,6 +72,7 @@ class StreamSessionViewModel: ObservableObject {
   @Published var currentVideoFrame: UIImage?
   @Published var hasReceivedFirstFrame: Bool = false
   @Published var streamingStatus: StreamingStatus = .stopped
+  @Published private(set) var capabilityState: CapabilityState?
   @Published var showError: Bool = false
   @Published var errorMessage: String = ""
   @Published var errorLog: [String] = []
@@ -427,6 +428,10 @@ class StreamSessionViewModel: ObservableObject {
         self?.updateStatusFromState(state)
       }
     }
+
+    // Track Capability protocol state (active/stopped) for telemetry
+    capabilityState = stream.capabilityState
+    NSLog("[StreamSession] Initial capabilityState: \(String(describing: stream.capabilityState))")
 
     // Video frames are now routed through FramePipelineManager — no inline listener
 
@@ -2339,11 +2344,32 @@ class StreamSessionViewModel: ObservableObject {
     if session.recordPermission == .granted { return true }
 
     NSLog("[StreamSession] Requesting microphone permission")
-    return await withCheckedContinuation { cont in
+    let granted = await withCheckedContinuation { cont in
       session.requestRecordPermission { granted in
         cont.resume(returning: granted)
       }
     }
+
+    // Also check DAT SDK platform permission for glasses mic (HFP)
+    // This is separate from the iOS system permission above.
+    // Only needed when audio input mode includes glasses mic.
+    if granted && audioInputMode != .builtInMic {
+      do {
+        let status = try await wearables.checkPermissionStatus(.microphone)
+        if status != .granted {
+          NSLog("[StreamSession] Requesting DAT SDK mic permission (current: \(status))")
+          let sdkStatus = try await wearables.requestPermission(.microphone)
+          if sdkStatus != .granted {
+            NSLog("[StreamSession] DAT SDK mic permission denied — falling back to phone mic")
+          }
+        }
+      } catch {
+        // Non-blocking — SDK permission check requires connected device
+        NSLog("[StreamSession] DAT SDK mic permission check skipped: \(error)")
+      }
+    }
+
+    return granted
   }
 
   /// Route audio input based on user-selected `audioInputMode`.
@@ -2556,8 +2582,37 @@ class StreamSessionViewModel: ObservableObject {
     }
 
     let config = streamConfig
-    guard let stream = try? deviceSession.addStream(config: config) else {
-      NSLog("[StreamSession] addStream(config:) returned nil")
+    let stream: StreamSession
+    do {
+      guard let s = try deviceSession.addStream(config: config) else {
+        NSLog("[StreamSession] addStream returned nil")
+        return
+      }
+      stream = s
+    } catch let error as DeviceSessionError {
+      switch error {
+      case .capabilityAlreadyActive:
+        NSLog("[StreamSession] Stream already active — stopping existing before recreating")
+        if let existing = streamSession { await existing.stop() }
+        do {
+          guard let s = try deviceSession.addStream(config: config) else {
+            NSLog("[StreamSession] Retry addStream returned nil")
+            return
+          }
+          stream = s
+        } catch {
+          NSLog("[StreamSession] Retry addStream failed: \(error)")
+          return
+        }
+      case .sessionAlreadyStopped:
+        NSLog("[StreamSession] DeviceSession stopped — cannot add stream")
+        return
+      default:
+        NSLog("[StreamSession] addStream failed: \(error)")
+        return
+      }
+    } catch {
+      NSLog("[StreamSession] addStream unexpected error: \(error)")
       return
     }
 
@@ -2566,6 +2621,9 @@ class StreamSessionViewModel: ObservableObject {
     setupSessionListeners(for: stream)
     pipeline.attachToStreamSession(stream)
     telemetryService?.attachToStreamSession(stream)
+
+    let frameSize = selectedResolution.videoFrameSize
+    NSLog("[StreamSession] Starting stream: \(frameSize.width)x\(frameSize.height) @ \(selectedFrameRate)fps")
 
     await stream.start()
   }

@@ -46,7 +46,10 @@ class RelayPipelineTests: XCTestCase {
 
     func testMockDeviceStreamingProducesFrames() async throws {
         try? Wearables.configure()
-        MockDeviceKit.shared.enable()
+        MockDeviceKit.shared.enable(config: MockDeviceKitConfig(
+            initiallyRegistered: true,
+            initialPermissionsGranted: true
+        ))
         let pairedMockDevice = MockDeviceKit.shared.pairRaybanMeta()
         mockDevice = pairedMockDevice
         cameraKit = pairedMockDevice.services.camera

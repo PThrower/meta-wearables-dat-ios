@@ -9,11 +9,15 @@
  *
  * Uses a non-blocking pipeline: the C-style callback stores the encoded frame,
  * and encode() returns the previously stored frame. 1-frame pipeline delay.
+ *
+ * Thread safety: pending frame state is protected by Mutex from the DAT SDK,
+ * replacing the previous NSLock + mutable ivar pattern.
  */
 
 import CoreMedia
 import CoreVideo
 import Foundation
+import MWDATCore
 import VideoToolbox
 
 struct H264EncoderConfig: Sendable {
@@ -28,7 +32,13 @@ struct H264EncoderConfig: Sendable {
     )
 }
 
-final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
+/// Pending frame state protected by SDK Mutex for Sendable-safe access.
+struct PendingFrameState: Sendable {
+    var frame: EncodedFrame?
+    var isKeyframe: Bool = false
+}
+
+final class H264FrameEncoder: FrameEncoder, Sendable {
     let codec: RelayVideoCodec = .h264
 
     private var session: VTCompressionSession?
@@ -36,12 +46,8 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     private var frameCount: Int = 0
     private var keyframeRequested = false
 
-    // Pipeline: callback writes, encode() reads. Protected by lock.
-    private let lock = NSLock()
-    private var _pendingFrame: EncodedFrame?
-
-    // Track keyframe status for the pending frame
-    private var _pendingIsKeyframe = false
+    // Pipeline state: callback writes, encode() reads. Protected by SDK Mutex.
+    let pendingState = Mutex<PendingFrameState>(PendingFrameState())
 
     // Last encoded dimensions — recreate session if they change
     private var lastWidth: Int = 0
@@ -75,15 +81,15 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
                 return
             }
 
+            let isKeyframe = encoder.pendingState.withLock { $0.isKeyframe }
+
             let frame = encoder.extractNALUnits(
                 from: sampleBuffer,
-                isKeyframe: encoder._pendingIsKeyframe
+                isKeyframe: isKeyframe
             )
 
             if let frame = frame {
-                encoder.lock.lock()
-                encoder._pendingFrame = frame
-                encoder.lock.unlock()
+                encoder.pendingState.withLock { $0.frame = frame }
             }
         }
 
@@ -153,9 +159,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         // Recreate session if dimensions changed
         if width != lastWidth || height != lastHeight {
             NSLog("[H264] dimension change: \(lastWidth)x\(lastHeight) -> \(width)x\(height)")
-            lock.lock()
-            _pendingFrame = nil
-            lock.unlock()
+            pendingState.withLock { $0.frame = nil }
             frameCount = 0
             do {
                 try createSession(width: width, height: height)
@@ -168,16 +172,17 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         guard let session = session else { return nil }
 
         // Return the previously encoded frame (pipeline delay)
-        lock.lock()
-        let result = _pendingFrame
-        _pendingFrame = nil
-        lock.unlock()
+        let result = pendingState.withLock { state -> EncodedFrame? in
+            let frame = state.frame
+            state.frame = nil
+            return frame
+        }
 
         let needsKeyframe = keyframeRequested || frameCount == 0 || (frameCount % config.keyframeInterval == 0)
         keyframeRequested = false
 
         // Store keyframe status for the callback to use
-        _pendingIsKeyframe = needsKeyframe
+        pendingState.withLock { $0.isKeyframe = needsKeyframe }
 
         let presentationTimestamp = CMTime(
             seconds: Double(frameCount) / Double(config.expectedFPS),
@@ -210,11 +215,11 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
 
         // For the first frame, check if output arrived synchronously
         if result == nil && frameCount == 1 {
-            lock.lock()
-            let syncResult = _pendingFrame
-            _pendingFrame = nil
-            lock.unlock()
-            return syncResult
+            return pendingState.withLock { state -> EncodedFrame? in
+                let frame = state.frame
+                state.frame = nil
+                return frame
+            }
         }
 
         return result
@@ -319,9 +324,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         keyframeRequested = false
         lastWidth = 0
         lastHeight = 0
-        lock.lock()
-        _pendingFrame = nil
-        lock.unlock()
+        pendingState.withLock { $0 = PendingFrameState() }
     }
 }
 

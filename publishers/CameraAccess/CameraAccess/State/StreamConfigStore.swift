@@ -40,6 +40,11 @@ final class StreamConfigStore {
 
   // MARK: - Derived
 
+  /// Expected frame dimensions for the selected resolution.
+  var selectedResolutionSize: VideoFrameSize {
+    selectedResolution.videoFrameSize
+  }
+
   var videoCodec: RelayVideoCodec {
     get { RelayVideoCodec(rawValue: videoCodecRaw) ?? .jpeg }
     set { videoCodecRaw = newValue.rawValue }
