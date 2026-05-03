@@ -65,8 +65,21 @@ final class DeviceSessionManager: ObservableObject {
     }
 
     guard deviceSession == nil else {
-      // Session exists but not in .started state - wait or return nil
-      return nil
+      // Session is in-flight — await it reaching .started or .stopped
+      // rather than returning nil and silently failing the caller
+      if let existing = deviceSession, existing.state != .started {
+        for await state in existing.stateStream() {
+          if state == .started {
+            isReady = true
+            return existing
+          } else if state == .stopped {
+            isReady = false
+            deviceSession = nil
+            return nil
+          }
+        }
+      }
+      return deviceSession?.state == .started ? deviceSession : nil
     }
 
     do {

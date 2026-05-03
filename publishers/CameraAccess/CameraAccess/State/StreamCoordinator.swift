@@ -45,6 +45,7 @@ final class StreamCoordinator {
   var isPhoneCameraMode: Bool = false
 
   var isStreaming: Bool { streamingStatus != .stopped }
+  var isSessionReady: Bool { isPhoneCameraMode || sessionManager.isReady }
 
   // MARK: - Pipeline Stage Instances
 
@@ -312,16 +313,19 @@ final class StreamCoordinator {
     // DAT SDK 0.6.0: Get DeviceSession from manager, then add a StreamSession
     guard let deviceSession = await sessionManager.getSession() else {
       NSLog("[StreamCoordinator] No DeviceSession available")
+      errors.present("Glasses not ready — please wait a moment and try again")
       return
     }
     guard deviceSession.state == .started else {
       NSLog("[StreamCoordinator] DeviceSession not started: \(deviceSession.state)")
+      errors.present("Glasses session not started — ensure glasses are connected and try again")
       return
     }
 
     let config = streamConfig
     guard let stream = try? deviceSession.addStream(config: config) else {
       NSLog("[StreamCoordinator] addStream(config:) returned nil")
+      errors.present("Failed to start stream — ensure glasses are connected and try again")
       return
     }
 
