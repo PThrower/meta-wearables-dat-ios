@@ -90,20 +90,21 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
-        // Snapshot pixel buffer synchronously (same pattern as VisionStage)
+        // Snapshot at 640x640 (1.6MB) instead of full frame (1920x1080 = 8MB).
+        // VNImageRequestHandler returns normalized coords regardless of input resolution,
+        // so detections overlay correctly on the full frame in BoundingBoxOverlayView.
+        // 640 matches standard YOLO input size — Vision handles any resize internally.
+        let snapSize = 640
         var snapshotBuffer: CVPixelBuffer?
         if let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) {
-            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
-            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
             let attrs: [String: Any] = [
                 kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
             ]
-            if bufWidth > 0, bufHeight > 0,
-               CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
+            if CVPixelBufferCreate(kCFAllocatorDefault, snapSize, snapSize,
                                     kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
                let snap = snapshotBuffer {
                 PipelineCIContext.shared.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
-                             bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
+                             bounds: CGRect(x: 0, y: 0, width: snapSize, height: snapSize),
                              colorSpace: CGColorSpaceCreateDeviceRGB())
             }
         }
@@ -113,7 +114,8 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     func start() async {
         lastProcessTime = nil
         await loadModel()
-        NSLog("[YOLOStage] Started: model=\(yoloConfig.modelId) task=\(yoloConfig.task.rawValue) fps=\(yoloConfig.targetFPS)")
+        let freeMB = os_proc_available_memory() / (1024 * 1024)
+        NSLog("[YOLOStage] Started: model=\(yoloConfig.modelId) task=\(yoloConfig.task.rawValue) fps=\(yoloConfig.targetFPS) freeMem=\(freeMB)MB")
     }
 
     func stop() async {
@@ -235,111 +237,115 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
 
         guard let pixelBuffer = pixelBuffer ?? CMSampleBufferGetImageBuffer(packet.sampleBuffer) else { return }
 
-        let cpuStart = metricsTracker.beginFrame()
-        let startTime = ContinuousClock.Instant.now
+        // Autorelease pool ensures ObjC objects (CVPixelBuffer, CIImage, VNRequestHandler)
+        // are released each frame, preventing accumulation in actor executor threads.
+        autoreleasepool {
+            let cpuStart = metricsTracker.beginFrame()
+            let startTime = ContinuousClock.Instant.now
 
-        // Create VNImageRequestHandler per frame
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+            // Create VNImageRequestHandler per frame
+            let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
 
-        var detections: [YOLODetection] = []
+            var detections: [YOLODetection] = []
 
-        do {
-            guard let request = visionRequest else { return }
-            try handler.perform([request])
+            do {
+                guard let request = visionRequest else { return }
+                try handler.perform([request])
 
-            let results = request.results ?? []
+                let results = request.results ?? []
 
-            // Determine format from result types
-            if results.first is VNRecognizedObjectObservation {
-                // Format A: Vision NMS-pipelined
-                detections = YOLODecoder.decodeVisionNMS(
-                    from: results,
-                    classLabels: yoloConfig.classLabels,
-                    task: yoloConfig.task,
-                    confidence: Float(yoloConfig.confidence),
-                    maxSize: CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
-                )
-            } else if let mlResults = request.results as? [VNCoreMLFeatureValueObservation],
-                      let firstOutput = mlResults.first?.featureValue.multiArrayValue {
-                // Format B or C: raw MLMultiArray output
-                if outputFormat == .endToEnd {
-                    detections = YOLODecoder.decodeEndToEnd(
-                        output: firstOutput,
+                // Determine format from result types
+                if results.first is VNRecognizedObjectObservation {
+                    // Format A: Vision NMS-pipelined
+                    detections = YOLODecoder.decodeVisionNMS(
+                        from: results,
                         classLabels: yoloConfig.classLabels,
                         task: yoloConfig.task,
                         confidence: Float(yoloConfig.confidence),
-                        maxDetections: yoloConfig.maxDetections,
-                        inputSize: yoloConfig.inputSize
+                        maxSize: CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
                     )
-                } else {
-                    detections = YOLODecoder.decodeTraditional(
-                        output: firstOutput,
-                        classLabels: yoloConfig.classLabels,
-                        task: yoloConfig.task,
-                        confidence: Float(yoloConfig.confidence),
-                        iouThreshold: Float(yoloConfig.iouThreshold),
-                        maxDetections: yoloConfig.maxDetections,
-                        inputSize: yoloConfig.inputSize
+                } else if let mlResults = request.results as? [VNCoreMLFeatureValueObservation],
+                          let firstOutput = mlResults.first?.featureValue.multiArrayValue {
+                    // Format B or C: raw MLMultiArray output
+                    if outputFormat == .endToEnd {
+                        detections = YOLODecoder.decodeEndToEnd(
+                            output: firstOutput,
+                            classLabels: yoloConfig.classLabels,
+                            task: yoloConfig.task,
+                            confidence: Float(yoloConfig.confidence),
+                            maxDetections: yoloConfig.maxDetections,
+                            inputSize: yoloConfig.inputSize
+                        )
+                    } else {
+                        detections = YOLODecoder.decodeTraditional(
+                            output: firstOutput,
+                            classLabels: yoloConfig.classLabels,
+                            task: yoloConfig.task,
+                            confidence: Float(yoloConfig.confidence),
+                            iouThreshold: Float(yoloConfig.iouThreshold),
+                            maxDetections: yoloConfig.maxDetections,
+                            inputSize: yoloConfig.inputSize
+                        )
+                    }
+                }
+            } catch {
+                NSLog("[YOLOStage] Inference error: \(error)")
+                return
+            }
+
+            let endTime = ContinuousClock.Instant.now
+            let inferenceTime = endTime - startTime
+            let inferenceMs = Double(inferenceTime.components.seconds) * 1000.0
+                + Double(inferenceTime.components.attoseconds) / 1e15
+            metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceMs)
+
+            // Apply confidence smoothing (EMA, keyed by class+spatial)
+            if yoloConfig.smoothingAlpha < 1.0 {
+                confidenceSmoother.alpha = yoloConfig.smoothingAlpha
+                detections = detections.map { detection in
+                    let key = confidenceSmoother.spatialKey(
+                        type: "yolo-\(detection.classLabel)",
+                        bbox: detection.bbox
+                    )
+                    let smoothed = confidenceSmoother.smooth(key: key, raw: detection.confidence, bbox: detection.bbox)
+                    return YOLODetection(
+                        bbox: detection.bbox,
+                        confidence: smoothed,
+                        classIndex: detection.classIndex,
+                        classLabel: detection.classLabel,
+                        task: detection.task,
+                        maskCoefficients: detection.maskCoefficients,
+                        keypoints: detection.keypoints
                     )
                 }
+                confidenceSmoother.prune()
             }
-        } catch {
-            NSLog("[YOLOStage] Inference error: \(error)")
-            return
-        }
 
-        let endTime = ContinuousClock.Instant.now
-        let inferenceTime = endTime - startTime
-        let inferenceMs = Double(inferenceTime.components.seconds) * 1000.0
-            + Double(inferenceTime.components.attoseconds) / 1e15
-        metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: inferenceMs)
+            // Filter by (smoothed) confidence
+            detections = detections.filter { $0.confidence >= yoloConfig.confidence }
 
-        // Apply confidence smoothing (EMA, keyed by class+spatial)
-        if yoloConfig.smoothingAlpha < 1.0 {
-            confidenceSmoother.alpha = yoloConfig.smoothingAlpha
-            detections = detections.map { detection in
-                let key = confidenceSmoother.spatialKey(
-                    type: "yolo-\(detection.classLabel)",
-                    bbox: detection.bbox
-                )
-                let smoothed = confidenceSmoother.smooth(key: key, raw: detection.confidence, bbox: detection.bbox)
-                return YOLODetection(
-                    bbox: detection.bbox,
-                    confidence: smoothed,
-                    classIndex: detection.classIndex,
-                    classLabel: detection.classLabel,
-                    task: detection.task,
-                    maskCoefficients: detection.maskCoefficients,
-                    keypoints: detection.keypoints
-                )
+            // Cap by maxDetections
+            if detections.count > yoloConfig.maxDetections {
+                detections = Array(detections.prefix(yoloConfig.maxDetections))
             }
-            confidenceSmoother.prune()
-        }
 
-        // Filter by (smoothed) confidence
-        detections = detections.filter { $0.confidence >= yoloConfig.confidence }
+            let result = YOLOFrameResult(
+                timestamp: CFAbsoluteTimeGetCurrent(),
+                sequenceNumber: packet.sequenceNumber,
+                detections: detections,
+                inferenceTimeMs: inferenceMs,
+                task: yoloConfig.task
+            )
 
-        // Cap by maxDetections
-        if detections.count > yoloConfig.maxDetections {
-            detections = Array(detections.prefix(yoloConfig.maxDetections))
-        }
+            // Publish to PreviewBus for overlay rendering
+            if let previewBus {
+                Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict())) }
+            }
 
-        let result = YOLOFrameResult(
-            timestamp: CFAbsoluteTimeGetCurrent(),
-            sequenceNumber: packet.sequenceNumber,
-            detections: detections,
-            inferenceTimeMs: inferenceMs,
-            task: yoloConfig.task
-        )
-
-        // Publish to PreviewBus for overlay rendering
-        if let previewBus {
-            Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict())) }
-        }
-
-        // Relay to server via callback
-        if let onResult {
-            Task { await onResult(result) }
+            // Relay to server via callback
+            if let onResult {
+                Task { await onResult(result) }
+            }
         }
     }
 }

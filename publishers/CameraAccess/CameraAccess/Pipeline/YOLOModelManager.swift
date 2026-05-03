@@ -29,8 +29,9 @@ actor YOLOModelManager {
     }()
 
     /// Maximum number of compiled MLModel instances kept in memory.
-    /// On 4GB devices, each model can be 50-200MB of Neural Engine weights.
-    private static let maxLoadedModels = 2
+    /// On 4GB devices (2GB per-process limit), even one model can be 50-200MB.
+    /// Keeping only 1 minimizes Jetsam risk — model is evicted when stage stops.
+    private static let maxLoadedModels = 1
 
     // In-memory model cache (keyed by modelId) with LRU eviction
     private var loadedModels: [String: MLModel] = [:]
@@ -63,12 +64,24 @@ actor YOLOModelManager {
         let downloadSizeBytes: Int64
     }
 
+    /// Minimum free memory (bytes) required before loading a model.
+    /// YOLO models can use 50-200MB of Neural Engine memory at inference time.
+    private static let minFreeMemoryForLoad: Int64 = 200 * 1024 * 1024  // 200MB
+
     /// Load a compiled MLModel, downloading or compiling as needed.
     /// - Parameters:
     ///   - id: Model identifier (e.g. "yolo11n", "yolo11s-seg")
     ///   - serverUrl: Optional server URL to download from. Nil/empty = use known or bundled model.
     /// - Returns: ModelLoadResult with compiled model and resource metrics.
     func loadModel(id: String, serverUrl: String? = nil) async throws -> ModelLoadResult {
+        // Memory pressure check — refuse to load if device is near Jetsam limit
+        let freeMemory = Int64(os_proc_available_memory())
+        NSLog("[YOLOModel] Available memory: \(freeMemory / (1024*1024))MB")
+        if freeMemory > 0 && freeMemory < Self.minFreeMemoryForLoad {
+            NSLog("[YOLOModel] MEMORY WARNING: only \(freeMemory / (1024*1024))MB free, refusing to load model '\(id)'")
+            throw YOLOModelError.insufficientMemory(freeMB: freeMemory / (1024*1024))
+        }
+
         // Return cached model if available
         if let cached = loadedModels[id] {
             touchModel(id)  // LRU: move to most-recent
@@ -459,12 +472,11 @@ actor YOLOModelManager {
                     remaining -= chunk.count
                 }
             } else if compressionMethod == 8 {
-                // Deflate — stream inflate directly to output file (never accumulates in RAM)
+                // Deflate — streaming inflate: read compressed data in chunks, inflate to output file
                 try handle.seek(toOffset: dataStart)
-                let compressedData = try handle.read(upToCount: compressedSize) ?? Data()
                 let outHandle = try FileHandle(forWritingTo: destFile)
                 defer { try? outHandle.close() }
-                try Self.inflateRawDeflateToStream(compressedData, to: outHandle)
+                try Self.streamingInflate(from: handle, compressedSize: compressedSize, to: outHandle)
             }
 
             offset = dataStart + UInt64(compressedSize)
@@ -488,6 +500,7 @@ actor YOLOModelManager {
     /// Inflate raw deflated data directly to a FileHandle — writes 64KB chunks
     /// as they're produced, never accumulating the full decompressed buffer in RAM.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
+    /// Input data is provided as a single buffer (used for small entries).
     private static func inflateRawDeflateToStream(_ data: Data, to output: FileHandle) throws {
         NSLog("[YOLOModel] streaming inflate: \(data.count) compressed bytes -> file")
 
@@ -544,6 +557,78 @@ actor YOLOModelManager {
 
         NSLog("[YOLOModel] streaming inflate: done total_out=\(stream.total_out)")
     }
+
+    /// Streaming inflate: reads compressed data in 256KB chunks from the source FileHandle,
+    /// inflates, and writes 64KB output chunks to the destination FileHandle.
+    /// Never loads the full compressed entry into RAM — critical for large model weight files.
+    private static func streamingInflate(from input: FileHandle, compressedSize: Int, to output: FileHandle) throws {
+        NSLog("[YOLOModel] streaming inflate: \(compressedSize) compressed bytes (chunked input)")
+
+        var stream = z_stream()
+        stream.zalloc = nil
+        stream.zfree = nil
+        stream.opaque = nil
+
+        let streamSize = Int32(MemoryLayout<z_stream>.size)
+        let ret = inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, streamSize)
+        guard ret == Z_OK else {
+            NSLog("[YOLOModel] streaming inflate: inflateInit2_ FAILED ret=\(ret)")
+            throw YOLOModelError.invalidArchive
+        }
+        defer { inflateEnd(&stream) }
+
+        let inChunkSize = 256 * 1024   // 256KB input reads
+        let outChunkSize = 65536       // 64KB output buffer
+
+        var totalRead: Int = 0
+        var inflateRet: Int32 = Z_OK
+
+        while inflateRet != Z_STREAM_END {
+            // Read next input chunk if zlib consumed all previous input
+            guard stream.avail_in == 0 else {
+                // Shouldn't happen — inner loop drains all input before we get here
+                break
+            }
+            guard totalRead < compressedSize else { break }
+
+            let toRead = min(compressedSize - totalRead, inChunkSize)
+            let chunk = try input.read(upToCount: toRead) ?? Data()
+            guard !chunk.isEmpty else { break }
+            totalRead += chunk.count
+
+            // Set up input and drain it entirely within this closure —
+            // this guarantees stream.next_in is valid for all inflate() calls
+            let chunkLen = chunk.count
+            try chunk.withUnsafeBytes { rawBuf in
+                guard let base = rawBuf.baseAddress else { return }
+                stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base.assumingMemoryBound(to: Bytef.self))
+                stream.avail_in = UInt32(chunkLen)
+
+                // Drain all input from this chunk
+                while stream.avail_in > 0 && inflateRet != Z_STREAM_END {
+                    var outBuf = [UInt8](repeating: 0, count: outChunkSize)
+                    var produced = 0
+                    try outBuf.withUnsafeMutableBufferPointer { outPtr in
+                        stream.next_out = outPtr.baseAddress
+                        stream.avail_out = UInt32(outChunkSize)
+                        inflateRet = inflate(&stream, Z_NO_FLUSH)
+                        produced = outChunkSize - Int(stream.avail_out)
+                    }
+                    if produced > 0 {
+                        try output.write(contentsOf: outBuf[0..<produced])
+                    }
+                    if inflateRet != Z_OK && inflateRet != Z_STREAM_END {
+                        NSLog("[YOLOModel] streaming inflate: FAILED ret=\(inflateRet)")
+                        throw YOLOModelError.invalidArchive
+                    }
+                }
+            }
+            // chunk.withUnsafeBytes exits — stream.next_in is now dangling,
+            // but stream.avail_in == 0, so inflate() won't read from it.
+        }
+
+        NSLog("[YOLOModel] streaming inflate: done total_out=\(stream.total_out)")
+    }
 }
 
 // MARK: - Errors
@@ -554,6 +639,7 @@ enum YOLOModelError: LocalizedError {
     case downloadFailed(statusCode: Int)
     case invalidArchive
     case compilationFailed(Error)
+    case insufficientMemory(freeMB: Int64)
 
     var errorDescription: String? {
         switch self {
@@ -567,6 +653,8 @@ enum YOLOModelError: LocalizedError {
             return "Downloaded archive does not contain a valid .mlpackage"
         case .compilationFailed(let error):
             return "Model compilation failed: \(error.localizedDescription)"
+        case .insufficientMemory(let freeMB):
+            return "Insufficient memory to load model (only \(freeMB)MB free)"
         }
     }
 }
