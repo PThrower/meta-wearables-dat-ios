@@ -9,6 +9,8 @@ import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
+import { evaluateCondition } from "./shared-config.js";
+import type { GraphContext } from "./shared-config.js";
 import { evaluateCondition, type GraphContext } from "./shared-config.js";
 import { wireSVGEvents } from "./interactions.js";
 import { isTouchDevice } from "./interactions.js";

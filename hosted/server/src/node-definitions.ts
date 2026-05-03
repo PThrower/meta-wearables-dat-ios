@@ -20,7 +20,8 @@ export type ConfigFieldSchema =
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
   | { kind: "geofence-map"; key: string; label: string }
   | { kind: "zones"; key: string; label: string }
-  | { kind: "section"; label: string; fields: ConfigFieldSchema[] };
+  | { kind: "section"; label: string; fields: ConfigFieldSchema[] }
+  | { kind: "conditional"; condition?: { key: string; value: unknown }; fields: ConfigFieldSchema[] };
 
 // --- Structural & Activation Types ---
 
@@ -59,6 +60,8 @@ export interface NodeDefinition {
   defaultLabel: string;
   /** Where this node executes at runtime */
   runtime: RuntimeTarget[];
+  /** Optional: restrict which source node types may connect TO this node (incoming edge filter) */
+  allowedSources?: string[];
 }
 
 // --- Sentinel ---
@@ -1539,4 +1542,34 @@ export function isTriggerType(type: string): boolean {
 /** Check if a node type is a source (resolves aliases first) */
 export function isSourceType(type: string): boolean {
   return SOURCE_TYPES.includes(resolveNodeType(type));
+}
+
+/**
+ * Build a reverse map: target node type → Set of allowed source types.
+ * Only populated for nodes that declare an explicit `allowedSources` list.
+ * Used in validateEdges() as a reverse check on top of allowedTargets.
+ */
+export function buildAllowedSourcesMap(): Map<string, Set<string>> {
+  const map = new Map<string, Set<string>>();
+  for (const def of NODE_DEFINITIONS) {
+    if (def.allowedSources && def.allowedSources.length > 0) {
+      map.set(def.type, new Set(def.allowedSources));
+    }
+  }
+  return map;
+}
+
+/**
+ * Return the effective configSchema for a node given its graph context.
+ * Currently returns the static configSchema from the definition; this is the
+ * hook point for future context-sensitive field filtering (e.g. showing
+ * reconciliation fields only when a ReID node is upstream).
+ */
+export function resolveEffectiveConfigSchema(
+  def: NodeDefinition,
+  _nodeId: string,
+  _nodes: Array<{ id: string; type: string }>,
+  _edges: Array<{ sourceNodeId: string; targetNodeId: string }>,
+): ConfigFieldSchema[] {
+  return def.configSchema;
 }

@@ -16,7 +16,7 @@ import {
   nanoid, getWorkflowId, getViewBox,
   loadPaletteCollapse, savePaletteCollapse, getPaletteCollapseState, setPaletteCollapseState,
 } from "./state.js";
-import { getNodeDef, getNodeDefs, loadNodeDefs, getSubnodes } from "./node-defs.js";
+import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
 import type { NodeDefinition } from "../../core/api-client.js";
 import { NODE_W, NODE_H } from "./constants.js";
 import { isAvailable, getReason, renderAvailBadge, availCls, lockedAttrs } from "./node-availability.js";
