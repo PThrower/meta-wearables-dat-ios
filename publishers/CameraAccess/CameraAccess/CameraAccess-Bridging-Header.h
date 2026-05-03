@@ -3,5 +3,3 @@
  *
  * Bridging header for Swift <-> C interop.
  */
-
-#include <zlib.h>

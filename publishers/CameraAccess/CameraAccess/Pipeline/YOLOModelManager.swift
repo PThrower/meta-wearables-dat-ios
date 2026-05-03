@@ -6,12 +6,13 @@
  * Bundled .mlpackage models are compiled on first use.
  * Server-served models are downloaded, extracted, and compiled.
  *
- * zlib is accessed via the bridging header (CameraAccess-Bridging-Header.h)
- * which includes <zlib.h>, giving us direct access to z_stream and inflate/deflate.
+ * zlib accessed via Swiftzlib module map (Swiftzlib/module.modulemap).
+ * Gives us real z_stream struct with correct MemoryLayout on all platforms.
  */
 
 import CoreML
 import Foundation
+import Swiftzlib
 
 actor YOLOModelManager {
     // MARK: - Cache
@@ -192,10 +193,21 @@ actor YOLOModelManager {
         let isFlatModelC = isExtractedMLModelC(in: extractedDir)
         NSLog("[YOLOModel] isExtractedMLModelC=\(isFlatModelC)")
         if isFlatModelC {
+            // Ultralytics ZIPs ship as flat mlmodelc (Manifest.json + Data/) but
+            // are NOT compiled — they need MLModel.compileModel() first.
+            // Copy to a temp location with .mlmodelc extension so compileModel can find it.
+            let tempModelC = tempDir.appendingPathComponent("\(id)_flat.mlmodelc")
+            if FileManager.default.fileExists(atPath: tempModelC.path) {
+                try FileManager.default.removeItem(at: tempModelC)
+            }
+            try FileManager.default.copyItem(at: extractedDir, to: tempModelC)
+            NSLog("[YOLOModel] Compiling flat mlmodelc at \(tempModelC.lastPathComponent)...")
+            let compiled = try await MLModel.compileModel(at: tempModelC)
             if FileManager.default.fileExists(atPath: compiledUrl.path) {
                 try FileManager.default.removeItem(at: compiledUrl)
             }
-            try FileManager.default.copyItem(at: extractedDir, to: compiledUrl)
+            try FileManager.default.moveItem(at: compiled, to: compiledUrl)
+            NSLog("[YOLOModel] Compiled to \(compiledUrl.lastPathComponent)")
             return try await loadCompiledModel(at: compiledUrl)
         }
 
@@ -328,7 +340,7 @@ actor YOLOModelManager {
             } else if compressionMethod == 8 {
                 // Deflate — use Compression framework
                 let compressed = data[dataOffset ..< dataOffset + compressedSize]
-                let decompressed = try Self.inflate(compressed, uncompressedSize: uncompressedSize)
+                let decompressed = try Self.inflateRawDeflate(compressed, uncompressedSize: uncompressedSize)
                 try decompressed.write(to: destFile)
             } else {
                 // Unsupported compression — skip
@@ -353,8 +365,8 @@ actor YOLOModelManager {
     }
     /// Inflate raw deflated data from ZIP entries.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
-    /// Uses zlib via bridging header with real z_stream struct.
-    private static func inflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
+    /// Uses zlib via Swiftzlib module with real z_stream struct.
+    private static func inflateRawDeflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
         let rawDeflate = Data(data)
         NSLog("[YOLOModel] inflate: \(rawDeflate.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
 
