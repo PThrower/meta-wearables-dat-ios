@@ -80,7 +80,16 @@ extension FramePipelineStage {
 /// Sharing one instance avoids Metal context thrashing across stages.
 /// Safe to use from any isolation domain — CIContext is thread-safe.
 enum PipelineCIContext {
-    static let shared = CIContext(options: [.useSoftwareRenderer: false])
+    /// Shared CIContext for the entire pipeline.
+    /// - useSoftwareRenderer: false = GPU-accelerated (Metal)
+    /// - cacheIntermediates: false = never re-render same frame (streaming pipeline)
+    /// - memoryTarget: 128MB ceiling for CI internal caches/buffers
+    ///   (actual usage ~20-40MB; cap prevents pathological allocation on 4GB devices)
+    static let shared = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .cacheIntermediates: false,
+        .memoryTarget: 128
+    ])
 }
 
 // MARK: - Snapshot Configuration

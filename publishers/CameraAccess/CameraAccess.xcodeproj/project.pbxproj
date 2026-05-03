@@ -82,6 +82,7 @@
 		TELE00012EB918740097D0E1 /* TelemetryTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00022EB918740097D0E1 /* TelemetryTypes.swift */; };
 		TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00042EB918740097D0E1 /* TelemetryLogger.swift */; };
 		TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00062EB918740097D0E1 /* TelemetryService.swift */; };
+		MPMO00052EB918740097D0E1 /* MemoryPressureMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = MPMO00062EB918740097D0E1 /* MemoryPressureMonitor.swift */; };
 		TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */; };
 		VISNSTGBLD01 /* VisionStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNSTGFLE01 /* VisionStage.swift */; };
 		VISNTYPBLD01 /* VisionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = VISNTYPFLE01 /* VisionTypes.swift */; };
@@ -215,6 +216,7 @@
 		TELE00022EB918740097D0E1 /* TelemetryTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryTypes.swift; sourceTree = "<group>"; };
 		TELE00042EB918740097D0E1 /* TelemetryLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryLogger.swift; sourceTree = "<group>"; };
 		TELE00062EB918740097D0E1 /* TelemetryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryService.swift; sourceTree = "<group>"; };
+		MPMO00062EB918740097D0E1 /* MemoryPressureMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryPressureMonitor.swift; sourceTree = "<group>"; };
 		TELE00082EB918740097D0E1 /* TelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetryHUDView.swift; sourceTree = "<group>"; };
 		V1V1V1V1V1V1V1V1V1V1V1V1 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		VISNSTGFLE01 /* VisionStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionStage.swift; sourceTree = "<group>"; };
@@ -485,6 +487,7 @@
 				TELE00022EB918740097D0E1 /* TelemetryTypes.swift */,
 				TELE00042EB918740097D0E1 /* TelemetryLogger.swift */,
 				TELE00062EB918740097D0E1 /* TelemetryService.swift */,
+				MPMO00062EB918740097D0E1 /* MemoryPressureMonitor.swift */,
 				PN002PN002EB918740097D0E1 /* PushNotificationService.swift */,
 				DI002DI002EB918740097D0E1 /* DeviceIdentity.swift */,
 			);
@@ -679,6 +682,7 @@
 				TELE00012EB918740097D0E1 /* TelemetryTypes.swift in Sources */,
 				TELE00032EB918740097D0E1 /* TelemetryLogger.swift in Sources */,
 				TELE00052EB918740097D0E1 /* TelemetryService.swift in Sources */,
+				MPMO00052EB918740097D0E1 /* MemoryPressureMonitor.swift in Sources */,
 				PN001PN002EB918740097D0E1 /* PushNotificationService.swift in Sources */,
 				DI001DI002EB918740097D0E1 /* DeviceIdentity.swift in Sources */,
 				TELE00072EB918740097D0E1 /* TelemetryHUDView.swift in Sources */,

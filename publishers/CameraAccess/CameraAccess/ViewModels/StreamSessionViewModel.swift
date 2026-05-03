@@ -218,6 +218,7 @@ class StreamSessionViewModel: ObservableObject {
   private var telemetryPushTimer: Task<Void, Never>?
   private var stageMetricsCollector: StageMetricsCollector?
   private var stageMetricsTimer: Task<Void, Never>?
+  private let memoryPressureMonitor = MemoryPressureMonitor()
 
   // Phone camera mode
   private let phoneCamera = PhoneCameraCapture()
@@ -259,6 +260,11 @@ class StreamSessionViewModel: ObservableObject {
       guard let self, !self.hasReceivedFirstFrame else { return }
       self.hasReceivedFirstFrame = true
       self.cancelRetry()
+    }
+
+    // Wire memory pressure monitor — gracefully degrade stages near Jetsam limit
+    memoryPressureMonitor.onPressureChange = { [weak self] actions in
+      await self?.handleMemoryPressure(actions)
     }
 
     // Register stages
@@ -1777,6 +1783,9 @@ class StreamSessionViewModel: ObservableObject {
   /// Start audio capture, telemetry push, and audio tap client.
   /// Shared between startRelay() and activateFromStandby().
   private func startRelayAudioAndTelemetry() async {
+    // Start memory pressure monitor — degrades stages near Jetsam limit
+    memoryPressureMonitor.start()
+
     // Attach relay stage to event bus before starting capture so packets flow immediately
     await audioRelayStage.attachToEventBus(audioEventBus)
 
@@ -1890,10 +1899,79 @@ class StreamSessionViewModel: ObservableObject {
     NSLog("[StreamSession] All pipeline stages stopped (relay still active)")
   }
 
+  // MARK: - Memory Pressure Handling
+
+  /// Gracefully degrade pipeline stages when approaching Jetsam limit.
+  /// Triggered by MemoryPressureMonitor at 85% (warning) and 92% (critical) of 2098MB.
+  private func handleMemoryPressure(_ actions: MemoryPressureActions) async {
+    let footprintMB = MemoryPressureMonitor.currentFootprintMB
+    NSLog("[StreamSession] Memory pressure actions: \(actions), footprint: \(String(format: "%.0f", footprintMB))MB")
+
+    if actions.contains(.flushCaches) {
+      // Flush buffer pools and CI caches
+      enhanceStage?.flushPool()
+      PipelineCIContext.shared.clearCaches()
+      NSLog("[StreamSession] Flushed CI caches + buffer pools")
+    }
+
+    if actions.contains(.disableYOLO) || actions.contains(.disableAllInference) {
+      if let yolo = yoloStage {
+        await yolo.stop()
+        yoloStage = nil
+        yoloDetections = []
+        NSLog("[StreamSession] Disabled YOLO stage (memory pressure)")
+      }
+    }
+
+    if actions.contains(.disableTracking) || actions.contains(.disableAllInference) {
+      if let tracking = trackingStage {
+        await tracking.stop()
+        trackingStage = nil
+        trackingTracks = []
+        trackingSnapshot = nil
+        heatMap = nil
+        NSLog("[StreamSession] Disabled tracking stage (memory pressure)")
+      }
+    }
+
+    if actions.contains(.disableMeasurement) || actions.contains(.disableAllInference) {
+      if let measure = measureStage {
+        await measure.stop()
+        measureStage = nil
+        NSLog("[StreamSession] Disabled measurement stage (memory pressure)")
+      }
+    }
+
+    if actions.contains(.disableAllInference) {
+      // Also disable vision, speech, sensor stages in emergency
+      if let vision = visionStage {
+        await vision.stop()
+        visionStage = nil
+        visionDetections = []
+        boundingBoxes = []
+        NSLog("[StreamSession] Disabled vision stage (critical memory)")
+      }
+      if let speech = speechRecognitionStage {
+        await speech.stop()
+        speechRecognitionStage = nil
+        NSLog("[StreamSession] Disabled speech stage (critical memory)")
+      }
+    }
+  }
+
   func stopRelay() async {
+    // Notify server to deactivate workflow before disconnecting
+    // (server close handler alone does not clear activeWorkflowId)
+    if relayMode == .active, activeAppId != nil {
+      await relayStage.sendJson(["type": "deactivate_app"])
+    }
+
     // Cancel telemetry push timer
     telemetryPushTimer?.cancel()
     telemetryPushTimer = nil
+
+    // Stop memory pressure monitor
+    memoryPressureMonitor.stop()
 
     // Stop sensor stages (sound classification, GPS location)
     if let audioStage = audioClassificationStage {

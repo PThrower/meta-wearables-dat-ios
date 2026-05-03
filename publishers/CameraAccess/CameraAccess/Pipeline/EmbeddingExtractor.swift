@@ -57,10 +57,18 @@ struct EmbeddingExtractor: Sendable {
     // MARK: - Factory Methods
 
     /// Create an extractor from a compiled .mlmodelc URL.
-    /// Uses all available compute units (prefers Neural Engine).
+    /// Uses cpuAndGPU to avoid ANE memory spike (same rationale as YOLOModelManager).
+    /// Pre-load memory gate prevents loading when device is near Jetsam limit.
     static func create(modelURL: URL) throws -> EmbeddingExtractor {
+        // Memory pressure gate — refuse if near per-process Jetsam limit
+        let footprintMB = Self.physFootprintMB()
+        if footprintMB > 1500.0 {
+            NSLog("[Embedding] MEMORY WARNING: footprint \(String(format: "%.0f", footprintMB))MB, refusing to load OSNet model")
+            throw EmbeddingError.inferenceFailed("Insufficient memory: \(String(format: "%.0f", footprintMB))MB footprint")
+        }
+
         let config = MLModelConfiguration()
-        config.computeUnits = .all
+        config.computeUnits = .cpuAndGPU
         let model = try MLModel(contentsOf: modelURL, configuration: config)
         let visionModel = try VNCoreMLModel(for: model)
         let request = VNCoreMLRequest(model: visionModel)
@@ -180,5 +188,21 @@ struct EmbeddingExtractor: Sendable {
         let norm = sqrt(embedding.reduce(0.0) { $0 + $1 * $1 })
         guard norm > 0 else { return nil }
         return embedding.map { $0 / norm }
+    }
+
+    // MARK: - Memory Helper
+
+    /// Current process physical footprint in MB (same implementation as YOLOModelManager).
+    /// Uses task_info(TASK_VM_INFO) phys_footprint — the metric the kernel tracks for Jetsam.
+    nonisolated private static func physFootprintMB() -> Double {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        return Double(info.phys_footprint) / 1_048_576.0
     }
 }

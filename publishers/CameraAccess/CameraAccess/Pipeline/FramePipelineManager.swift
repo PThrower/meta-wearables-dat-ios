@@ -21,6 +21,11 @@ final class FramePipelineManager {
     private var sequenceNumber: UInt64 = 0
     private var listenerToken: AnyListenerToken?
 
+    // Periodic CI cache reclaim — prevents intermediate IOSurface accumulation
+    // in long streaming sessions. Every ~900 frames at 15fps = ~60s.
+    private var reclaimCounter: UInt64 = 0
+    private static let reclaimInterval: UInt64 = 900
+
     // Pre-broadcast transform stage (frame enhancements). nil = no transform.
     var transformStage: FrameTransformStage?
 
@@ -87,6 +92,14 @@ final class FramePipelineManager {
     private func onVideoFrame(_ videoFrame: VideoFrame) {
         let sampleBuffer = videoFrame.sampleBuffer
         sequenceNumber += 1
+
+        // Periodic CI cache reclaim — every ~60s at 15fps.
+        // Reclaims intermediate IOSurfaces that CI internally cached during render.
+        reclaimCounter += 1
+        if reclaimCounter >= Self.reclaimInterval {
+            reclaimCounter = 0
+            PipelineCIContext.shared.clearCaches()
+        }
 
         // Apply pre-broadcast transform chain (frame enhancements) if configured.
         // Transform is synchronous GPU work (<3ms) — runs inline before fan-out.

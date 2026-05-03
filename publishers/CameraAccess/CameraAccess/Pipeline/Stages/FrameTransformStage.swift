@@ -25,6 +25,13 @@ final class FrameTransformStage: @unchecked Sendable {
     // Per-stage metrics
     private var metricsTracker = StageMetricsTracker(stageId: "enhance", nodeType: "enhance-brightness")
 
+    // CVPixelBuffer pool — recycles IOSurface memory across frames.
+    // Pool of 3: one being rendered to, one held by downstream stages, one spare.
+    // Eliminates ~8MB allocation/deallocation churn per frame on 4GB devices.
+    private var bufferPool: CVPixelBufferPool?
+    private var poolWidth: Int = 0
+    private var poolHeight: Int = 0
+
     init(config: EnhanceStageConfig = .empty) {
         self.config = config
     }
@@ -65,25 +72,16 @@ final class FrameTransformStage: @unchecked Sendable {
             }
         }
 
-        // Allocate a fresh output buffer per frame.
-        // Reuse would cause a race: main actor renders frame N+1 into the buffer
-        // while VisionStage (Task.detached) is still reading frame N for OCR.
-        let size = CGSize(width: width, height: height)
-        var outBuffer: CVPixelBuffer?
-        let attrs: [String: Any] = [
-            kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
-            kCVPixelBufferMetalCompatibilityKey as String: true,
-        ]
+        // Allocate output buffer from pool (recycles IOSurface memory).
+        // IMPORTANT: Each frame still gets its own CVPixelBuffer. Reuse would cause a race:
+        // main actor renders frame N+1 into the buffer while VisionStage (Task.detached)
+        // is still reading frame N for OCR. The pool recycles the underlying IOSurface
+        // memory (not the same buffer object), avoiding ~8MB allocation churn per frame.
         // Use BGRA — native CIImage/CGImage format, no RGB→YCbCr conversion,
         // directly compatible with display pipeline and Vision framework.
-        let status = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            Int(size.width), Int(size.height),
-            kCVPixelFormatType_32BGRA,
-            attrs as CFDictionary,
-            &outBuffer
-        )
-        guard status == kCVReturnSuccess, let outBuffer else { return pixelBuffer }
+        let size = CGSize(width: width, height: height)
+        let outBuffer: CVPixelBuffer? = getPoolBuffer(width: width, height: height)
+        guard let outBuffer else { return pixelBuffer }
 
         // Render to output CVPixelBuffer (GPU → GPU, no copy to CPU).
         // No CVPixelBufferLockBaseAddress needed — CIContext.render writes
@@ -96,6 +94,51 @@ final class FrameTransformStage: @unchecked Sendable {
         metricsTracker.endFrame(cpuStart: cpuStart, wallClockMs: ms)
 
         return outBuffer
+    }
+
+    // MARK: - Buffer Pool
+
+    /// Get a CVPixelBuffer from the pool. Recreates pool if dimensions change.
+    /// Returns nil if pool creation or allocation fails (caller falls back to original buffer).
+    private func getPoolBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+        // Recreate pool if dimensions changed
+        if width != poolWidth || height != poolHeight || bufferPool == nil {
+            let poolAttrs: [String: Any] = [
+                kCVPixelBufferPoolMinimumBufferCountKey as String: 3
+            ]
+            let bufferAttrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height,
+                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any],
+                kCVPixelBufferMetalCompatibilityKey as String: true,
+            ]
+            var newPool: CVPixelBufferPool?
+            let status = CVPixelBufferPoolCreate(
+                kCFAllocatorDefault,
+                poolAttrs as CFDictionary,
+                bufferAttrs as CFDictionary,
+                &newPool
+            )
+            guard status == kCVReturnSuccess, let newPool else { return nil }
+            bufferPool = newPool
+            poolWidth = width
+            poolHeight = height
+        }
+
+        // Get a buffer from the pool. If all 3 are in-flight, pool allocates a new one.
+        var buffer: CVPixelBuffer?
+        guard let pool = bufferPool else { return nil }
+        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+        guard status == kCVReturnSuccess, let buffer else { return nil }
+        return buffer
+    }
+
+    /// Flush idle buffers from the pool on memory pressure.
+    func flushPool() {
+        if let pool = bufferPool {
+            CVPixelBufferPoolFlush(pool, CVPixelBufferPoolFlushFlags(rawValue: 0))
+        }
     }
 
     // MARK: - Filter Application

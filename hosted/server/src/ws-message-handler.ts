@@ -317,8 +317,10 @@ export async function handleWsMessage(
           console.log(`[relay] App deactivated: ${prevApp} session=${sessionId}`);
           if (prevApp) {
             dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
-            dbWriter.flushNow();
           }
+          // Clear workflow from DB so reconnect doesn't replay stale config
+          dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
+          dbWriter.flushNow();
           sendAllStageDisables(session);
           ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
           orchestrator.deactivateApp(sessionId).catch(() => {});
@@ -550,6 +552,7 @@ export async function handleWsMessage(
               session.activeWorkflowId = null;
               session.appPipeline = null;
               dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
+              dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
               dbWriter.flushNow();
               sendAllStageDisables(session);
               if (session.publisher?.ws?.readyState === 1) {
@@ -791,8 +794,10 @@ export async function handleWsMessage(
           console.log(`[relay] Viewer deactivated app: ${prevApp} session=${sessionId}`);
           if (prevApp) {
             dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
-            dbWriter.flushNow();
           }
+          // Clear workflow from DB so reconnect doesn't replay stale config
+          dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
+          dbWriter.flushNow();
           sendAllStageDisables(session);
           ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
           broadcast(session, { type: "app_status", appId: null, status: "inactive" });
@@ -845,6 +850,7 @@ export async function handleWsMessage(
               session.activeWorkflowId = null;
               session.appPipeline = null;
               dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
+              dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
               dbWriter.flushNow();
               sendAllStageDisables(session);
               if (session.publisher?.ws?.readyState === 1) {

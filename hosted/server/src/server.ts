@@ -1381,10 +1381,21 @@ const server = Bun.serve<WsData>({
             // Default: deactivate AI on publisher disconnect
             orchestrator.deactivateApp(sessionId).catch(() => {});
             dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher_disconnect"));
+            // Clear workflow state so reconnect doesn't replay stale config
+            session.activeWorkflowId = null;
+            session.activeAppId = null;
+            session.appPipeline = null;
+            dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
             dbWriter.flushNow();
           } else if (onDisconnect === "pause") {
             // Pause: disconnect AI services but keep session state
             orchestrator.forceDeactivate(sessionId);
+            // Still clear workflow — paused AI shouldn't replay on reconnect
+            session.activeWorkflowId = null;
+            session.activeAppId = null;
+            session.appPipeline = null;
+            dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
+            dbWriter.flushNow();
             console.log(`[relay] AI paused (publisher disconnect) session=${sessionId}`);
           } else {
             // Continue: AI keeps running. Schedule auto-deactivation if configured.

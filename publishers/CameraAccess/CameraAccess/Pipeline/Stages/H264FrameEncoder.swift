@@ -47,6 +47,11 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
     private var lastWidth: Int = 0
     private var lastHeight: Int = 0
 
+    // Encoder's pixel buffer pool — get from VTCompressionSession after creation.
+    // Using this pool avoids a format conversion copy per frame (pipeline BGRA → encoder NV12).
+    // The encoder owns the buffer lifecycle, reducing peak allocation count.
+    private var encoderBufferPool: CVPixelBufferPool?
+
     init(config: H264EncoderConfig = .default) {
         self.config = config
         // Session created lazily in encode() when we have real dimensions
@@ -109,6 +114,13 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: false as CFBoolean)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaximizePowerEfficiency, value: true as CFBoolean)
 
+        // Data rate limit: 1.5x target bitrate over 1-second window.
+        // Prevents encoder from spiking internal buffer allocation during complex scenes.
+        // On 4GB devices, unbounded encoder buffers can spike 100-200MB.
+        let dataRateLimitBytes = Int64(config.bitrate) * 3 / 2 / 8  // 1.5x bitrate in bytes/sec
+        let dataRateLimits = [NSNumber(value: dataRateLimitBytes), NSNumber(value: 1)] as CFArray
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits, value: dataRateLimits)
+
         let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
         guard prepareStatus == noErr else {
             throw H264EncoderError.prepareFailed(prepareStatus)
@@ -117,6 +129,10 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         self.session = session
         self.lastWidth = width
         self.lastHeight = height
+
+        // Cache the encoder's pixel buffer pool for zero-copy frame submission.
+        // Callers can get buffers from this pool to avoid BGRA→NV12 copy overhead.
+        self.encoderBufferPool = VTCompressionSessionGetPixelBufferPool(session)
 
         NSLog("[H264] session created: \(width)x\(height)")
     }
@@ -279,6 +295,16 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
         return result
     }
 
+    /// Get a pixel buffer from the encoder's internal pool.
+    /// Rendering directly into this buffer avoids a BGRA→NV12 copy during encode.
+    /// Returns nil if session hasn't been created yet.
+    func getEncoderBuffer() -> CVPixelBuffer? {
+        guard let pool = encoderBufferPool else { return nil }
+        var buffer: CVPixelBuffer?
+        let status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &buffer)
+        return status == kCVReturnSuccess ? buffer : nil
+    }
+
     func forceKeyframe() {
         keyframeRequested = true
     }
@@ -288,6 +314,7 @@ final class H264FrameEncoder: FrameEncoder, @unchecked Sendable {
             VTCompressionSessionInvalidate(session)
         }
         session = nil
+        encoderBufferPool = nil
         frameCount = 0
         keyframeRequested = false
         lastWidth = 0
