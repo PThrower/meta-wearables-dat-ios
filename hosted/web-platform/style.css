@@ -5114,6 +5114,11 @@ select.wf-settings-input { appearance: none; cursor: pointer; }
 .cmd-card-canvas, .cmd-card-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cmd-card-video .live-badge { position: absolute; top: 8px; left: 8px; background: var(--accent-red); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; z-index: 2; }
 .cmd-card-duration { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Menlo, monospace; z-index: 2; }
+.cmd-signal-lost { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(0,0,0,0.75); z-index: 2; }
+.cmd-signal-lost.visible { display: flex; }
+.cmd-signal-lost-icon { width: 28px; height: 28px; color: var(--accent-red); }
+.cmd-signal-lost-text { font-family: 'SF Mono', Menlo, monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #fff; }
+.cmd-signal-lost-sub { font-size: 10px; color: rgba(255,255,255,0.6); }
 
 .cmd-card-meta { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 .cmd-card-row-1, .cmd-card-row-2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

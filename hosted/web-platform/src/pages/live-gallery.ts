@@ -262,6 +262,8 @@ class StreamCard {
   private detectionWindow: number[] = [];
   private decayInterval: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
+  private signalLostEl: HTMLDivElement | null = null;
+  private signalLostSubEl: HTMLDivElement | null = null;
 
   constructor(session: SessionInfo, makeLive: boolean) {
     this.session = session;
@@ -293,6 +295,15 @@ class StreamCard {
       <div class="cmd-card-video">
         <span class="live-badge">LIVE</span>
         <span class="cmd-card-duration">${this.session.startedAt ? elapsedSince(this.session.startedAt) : ""}</span>
+        <div class="cmd-signal-lost">
+          <svg class="cmd-signal-lost-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>
+            <line x1="2" y1="2" x2="22" y2="22"/>
+          </svg>
+          <div class="cmd-signal-lost-text">SIGNAL LOST</div>
+          <div class="cmd-signal-lost-sub">Reconnecting...</div>
+        </div>
       </div>
       <div class="cmd-card-meta">
         <div class="cmd-card-row-1">
@@ -312,6 +323,8 @@ class StreamCard {
       </div>
     `;
     this.placeMedia();
+    this.signalLostEl = this.el.querySelector<HTMLDivElement>(".cmd-signal-lost");
+    this.signalLostSubEl = this.el.querySelector<HTMLDivElement>(".cmd-signal-lost-sub");
   }
 
   private placeMedia(): void {
@@ -338,7 +351,11 @@ class StreamCard {
       canvas: this.canvas,
       onFps: (fps) => this.onFps(fps),
       onLatency: (ms) => this.onLatency(ms),
-      onConnectionState: (s) => { if (s === "connected") player.setQuality("low"); },
+      onConnectionState: (s) => {
+        if (s === "connected") { player.setQuality("low"); this.hideSignalLost(); }
+        else if (s === "reconnecting") this.showSignalLost(true);
+        else if (s === "disconnected" || s === "error") this.showSignalLost(false);
+      },
       onAuthRequired: () => this.downgradeToThumb(),
     });
     player.onJsonMessage = (msg) => this.handleJson(msg);
@@ -353,11 +370,21 @@ class StreamCard {
     this.player = null;
     this.fpsBuffer = [];
     this.detectionWindow = [];
+    this.hideSignalLost();
     this.placeMedia();
     this.setMetric("fps", "—");
     this.setMetric("det", "—");
     this.setMetric("lat", "—");
     this.updateSpark();
+  }
+
+  private showSignalLost(reconnecting: boolean): void {
+    this.signalLostEl?.classList.add("visible");
+    if (this.signalLostSubEl) this.signalLostSubEl.style.display = reconnecting ? "" : "none";
+  }
+
+  private hideSignalLost(): void {
+    this.signalLostEl?.classList.remove("visible");
   }
 
   updateMeta(session: SessionInfo): void {
