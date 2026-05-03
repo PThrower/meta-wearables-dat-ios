@@ -151,6 +151,112 @@ Server will fail with `Cannot find module '@ebowwa/relay-protocol'` if dist/ is 
 > There is exactly ONE place bun runs from: `/root/relay-server/hosted/server/`.
 > If you find anything else claiming to be the relay server — delete it.
 
+## Preview Deployments
+
+Dynamic preview environments for branch-based testing, similar to Vercel.
+
+### DNS
+
+Requires a wildcard A record:
+
+| Type | Host | Value |
+|------|------|-------|
+| A Record | `*.dev` | `46.225.151.52` |
+
+This makes `anything.dev.simulationapi.com` resolve to the VPS.
+Caddy auto-provisions TLS per-subdomain via Let's Encrypt.
+
+### How It Works
+
+```
+Push to feat/my-feature (paths: hosted/**)
+  → .github/workflows/deploy-preview.yml fires
+  → SSH into VPS, runs preview-manager.sh spawn feat/my-feature
+    → Allocates port pair from pool (relay:8081+, gateway:3001+)
+    → git clone into /root/previews/feat-my-feature/
+    → Builds WASM + relay-protocol + web-platform
+    → Copies production .env, overrides RELAY_PORT + GATEWAY_PORT
+    → Starts relay + gateway as background processes
+    → Injects route into Caddyfile between BEGIN/END PREVIEWS markers
+    → caddy reload
+    → Health checks
+  → Preview live at https://feat-my-feature.dev.simulationapi.com
+
+Branch delete / PR merge
+  → .github/workflows/destroy-preview.yml fires
+  → SSH into VPS, runs preview-manager.sh destroy feat-my-feature
+    → Kills processes, frees ports
+    → Removes Caddy route, reloads
+    → rm -rf /root/previews/feat-my-feature/
+```
+
+### VPS Layout (Previews)
+
+```
+/root/previews/
+  registry.json                    # State: { slug → { ports, pids, branch, ... } }
+  feat-my-feature/                 # git checkout
+    hosted/server/                 # built relay
+    hosted/gateway/                # built gateway
+    hosted/web-platform/dist/      # built SPA
+    hosted/packages/               # built WASM + relay-protocol
+  feat-other-thing/
+    ...
+
+/var/log/previews/
+  feat-my-feature-relay.log
+  feat-my-feature-gateway.log
+```
+
+### Port Pool
+
+| Service | Range | Max |
+|---------|-------|-----|
+| Relay | 8081–8090 | 10 concurrent |
+| Gateway | 3001–3010 | 10 concurrent |
+
+### Preview Manager Commands
+
+```bash
+# Run on VPS:
+/root/relay-server/hosted/infra/preview-manager.sh spawn feat/my-feature
+/root/relay-server/hosted/infra/preview-manager.sh destroy feat-my-feature
+/root/relay-server/hosted/infra/preview-manager.sh list
+/root/relay-server/hosted/infra/preview-manager.sh status feat-my-feature
+/root/relay-server/hosted/infra/preview-manager.sh cleanup    # destroy expired + dead
+```
+
+### Workflow Triggers
+
+| Workflow | Trigger | Branches |
+|----------|---------|----------|
+| `deploy-preview.yml` | Push to `feat/*`, `fix/*`, `chore/*`, `dev` | Paths: `hosted/**` |
+| `destroy-preview.yml` | Branch delete, PR merge/close | Excludes `main`, `feat/stream-registry` |
+| `deploy.yml` (production) | Push to `feat/stream-registry` | Paths: `hosted/**` |
+
+### Auto-Cleanup
+
+- Previews older than **24 hours** are destroyed by `cleanup`
+- Previews with dead processes are destroyed by `cleanup`
+- Run cleanup via cron for automatic maintenance:
+  ```bash
+  # Add to crontab on VPS:
+  0 * * * * /root/relay-server/hosted/infra/preview-manager.sh cleanup >> /var/log/previews/cleanup.log 2>&1
+  ```
+
+### Secrets
+
+Previews copy the production `.env` (same API keys: Deepgram, Palantir, APNS, etc.).
+Port overrides are injected per-preview. No separate secret management needed.
+
+### iOS Client
+
+The iOS app must point to the preview URL for testing:
+```swift
+// In StreamSessionViewModel — change the default relay URL
+let relayURL = "wss://feat-my-feature.dev.simulationapi.com/publish"
+```
+
 ## Local ↔ VPS Sync Check
 
 ```bash
