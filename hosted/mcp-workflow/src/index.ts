@@ -2,8 +2,8 @@
 /**
  * MCP server for the MWDAT workflow editor.
  *
- * Provides 20 tools for workflow CRUD, node/edge operations,
- * activation, and node definitions — all via the relay server REST API.
+ * Provides 26 tools for workflow CRUD, node/edge operations, activation,
+ * node definitions, runtime observability, flow config, settings, and config awareness.
  *
  * Environment variables:
  *   MWDAT_RELAY_URL  — relay server URL (default: https://relay.simulationapi.com)
@@ -15,7 +15,7 @@ import { registerTools } from "./tools.js";
 
 const server = new McpServer({
   name: "mwdat-workflow-mcp",
-  version: "1.0.0",
+  version: "1.1.0",
 });
 
 registerTools(server);

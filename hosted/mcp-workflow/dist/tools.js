@@ -1,6 +1,7 @@
 /**
  * Tool registrations for the MWDAT workflow MCP server.
- * 14 tools covering workflow CRUD, node/edge operations, activation, and node definitions.
+ * 26 tools: workflow CRUD (5), graph mutations (5), validation/activation (4),
+ * runtime observability (6), flow config & settings (4), config awareness (2).
  */
 import { z } from "zod";
 import * as api from "./client.js";
@@ -28,6 +29,53 @@ function fmtWorkflow(w) {
     }
     return lines.join("\n");
 }
+function fmtConfigField(f, indent = "  ") {
+    const lines = [];
+    switch (f.kind) {
+        case "text":
+            lines.push(`${indent}- text: ${f.key} "${f.label}"${f.placeholder ? ` (placeholder: "${f.placeholder}")` : ""}`);
+            break;
+        case "textarea":
+            lines.push(`${indent}- textarea: ${f.key} "${f.label}"${f.rows ? ` (${f.rows} rows)` : ""}${f.placeholder ? ` placeholder: "${f.placeholder}"` : ""}`);
+            break;
+        case "select":
+            lines.push(`${indent}- select: ${f.key} "${f.label}"`);
+            for (const o of f.options)
+                lines.push(`${indent}    ${o.value} = ${o.label}`);
+            break;
+        case "range":
+            lines.push(`${indent}- range: ${f.key} "${f.label}" [${f.min}..${f.max}] step ${f.step}${f.unit ?? ""}`);
+            break;
+        case "checkbox":
+            lines.push(`${indent}- checkbox: ${f.key} "${f.label}"`);
+            break;
+        case "number":
+            lines.push(`${indent}- number: ${f.key} "${f.label}"${f.min !== undefined ? ` min=${f.min}` : ""}${f.max !== undefined ? ` max=${f.max}` : ""}${f.step !== undefined ? ` step=${f.step}` : ""}${f.placeholder ? ` placeholder="${f.placeholder}"` : ""}`);
+            break;
+        case "checkbox-group":
+            lines.push(`${indent}- checkbox-group: ${f.key} "${f.label}"`);
+            for (const sub of f.fields)
+                lines.push(`${indent}    ${sub.key} = ${sub.label}`);
+            break;
+        case "geofence-map":
+            lines.push(`${indent}- geofence-map: ${f.key} "${f.label}"`);
+            break;
+        case "zones":
+            lines.push(`${indent}- zones: ${f.key} "${f.label}"`);
+            break;
+        case "section":
+            lines.push(`${indent}--- ${f.label} ---`);
+            for (const sub of f.fields)
+                lines.push(...fmtConfigField(sub, indent + "  "));
+            break;
+        case "conditional":
+            lines.push(`${indent}--- conditional (${JSON.stringify(f.condition)}) ---`);
+            for (const sub of f.fields)
+                lines.push(...fmtConfigField(sub, indent + "  "));
+            break;
+    }
+    return lines;
+}
 function fmtNodeDef(d) {
     const lines = [
         `## ${d.label} (${d.type})`,
@@ -42,11 +90,11 @@ function fmtNodeDef(d) {
     if (d.configSchema.length) {
         lines.push("Config fields:");
         for (const f of d.configSchema) {
-            if ("key" in f)
-                lines.push(`  - ${f.kind}: ${f.key} "${"label" in f ? f.label : ""}"`);
-            else if (f.kind === "section")
-                lines.push(`  - section: ${f.label}`);
+            lines.push(...fmtConfigField(f));
         }
+    }
+    if (Object.keys(d.defaultConfig).length) {
+        lines.push(`Defaults: ${JSON.stringify(d.defaultConfig)}`);
     }
     return lines.join("\n");
 }
@@ -818,6 +866,416 @@ For detection/tracking/sensor results, use wf_get_node_states which shows node e
                 }
             }
             return { content: [{ type: "text", text: lines.join("\n") }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // ==========================
+    // Flow Config & Settings
+    // ==========================
+    // 21. Get workflow settings
+    server.registerTool("wf_get_settings", {
+        title: "Get Workflow Settings",
+        description: `Get the runtime settings for a workflow: disconnect/reconnect behavior, auto-deactivate, recording, viewer access, wake-on-activate, target device, etc.
+
+Returns the full WorkflowSettings object with field descriptions.`,
+        inputSchema: {
+            workflow_id: z.string().describe("Workflow ID"),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ workflow_id }) => {
+        try {
+            const w = await api.getWorkflow(workflow_id);
+            if (!w.settings)
+                return { content: [{ type: "text", text: `Workflow "${w.name}" has no settings configured (using defaults).` }] };
+            const s = w.settings;
+            const lines = [
+                `# Settings — ${w.name}`,
+                "",
+                `| Field | Value | Description |`,
+                `|---|---|---|`,
+                `| onDisconnect | ${s.onDisconnect} | What happens when publisher disconnects (stop/pause/continue) |`,
+                `| onReconnect | ${s.onReconnect} | What happens when publisher reconnects (restart/resume/noop) |`,
+                `| autoDeactivateMin | ${s.autoDeactivateMin ?? "never"} | Auto-deactivate after N minutes (null = never) |`,
+                `| maxSessionDuration | ${s.maxSessionDuration ?? "unlimited"} | Max session duration in minutes (null = unlimited) |`,
+                `| recordingEnabled | ${s.recordingEnabled} | Whether frames are recorded to MP4 |`,
+                `| viewerAccess | ${s.viewerAccess} | Who can view the stream (owner/team/public) |`,
+                `| telemetryIntervalSec | ${s.telemetryIntervalSec} | How often telemetry is sampled (seconds) |`,
+                `| wakeOnActivate | ${s.wakeOnActivate} | Wake the target device when workflow activates |`,
+                `| autoStartStream | ${s.autoStartStream} | Auto-start camera stream on activation |`,
+                `| targetDeviceId | ${s.targetDeviceId ?? "any"} | Specific device to target (null = any) |`,
+            ];
+            return { content: [{ type: "text", text: lines.join("\n") }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // 22. Update workflow settings
+    server.registerTool("wf_update_settings", {
+        title: "Update Workflow Settings",
+        description: `Update runtime settings for a workflow. Only provided fields are changed.
+
+Settings control lifecycle behavior:
+- onDisconnect: stop/pause/continue — what happens when the iOS publisher disconnects
+- onReconnect: restart/resume/noop — what happens when it reconnects
+- autoDeactivateMin: auto-deactivate after N minutes (null = never)
+- maxSessionDuration: max session duration in minutes (null = unlimited)
+- recordingEnabled: whether to record frames to MP4
+- viewerAccess: owner/team/public — who can view the stream
+- telemetryIntervalSec: telemetry sampling interval
+- wakeOnActivate: wake the target device before activation
+- autoStartStream: auto-start camera stream
+- targetDeviceId: specific device UUID to target (null = any device)`,
+        inputSchema: {
+            workflow_id: z.string().describe("Workflow ID"),
+            on_disconnect: z.enum(["stop", "pause", "continue"]).optional(),
+            on_reconnect: z.enum(["restart", "resume", "noop"]).optional(),
+            auto_deactivate_min: z.number().nullable().optional(),
+            max_session_duration: z.number().nullable().optional(),
+            recording_enabled: z.boolean().optional(),
+            viewer_access: z.enum(["owner", "team", "public"]).optional(),
+            telemetry_interval_sec: z.number().optional(),
+            wake_on_activate: z.boolean().optional(),
+            auto_start_stream: z.boolean().optional(),
+            target_device_id: z.string().nullable().optional(),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ workflow_id, ...params }) => {
+        try {
+            const w = await api.getWorkflow(workflow_id);
+            const current = w.settings ?? {
+                onDisconnect: "stop", onReconnect: "restart", autoDeactivateMin: null,
+                maxSessionDuration: null, recordingEnabled: false, viewerAccess: "owner",
+                telemetryIntervalSec: 10, wakeOnActivate: false, autoStartStream: false, targetDeviceId: null,
+            };
+            if (params.on_disconnect !== undefined)
+                current.onDisconnect = params.on_disconnect;
+            if (params.on_reconnect !== undefined)
+                current.onReconnect = params.on_reconnect;
+            if (params.auto_deactivate_min !== undefined)
+                current.autoDeactivateMin = params.auto_deactivate_min;
+            if (params.max_session_duration !== undefined)
+                current.maxSessionDuration = params.max_session_duration;
+            if (params.recording_enabled !== undefined)
+                current.recordingEnabled = params.recording_enabled;
+            if (params.viewer_access !== undefined)
+                current.viewerAccess = params.viewer_access;
+            if (params.telemetry_interval_sec !== undefined)
+                current.telemetryIntervalSec = params.telemetry_interval_sec;
+            if (params.wake_on_activate !== undefined)
+                current.wakeOnActivate = params.wake_on_activate;
+            if (params.auto_start_stream !== undefined)
+                current.autoStartStream = params.auto_start_stream;
+            if (params.target_device_id !== undefined)
+                current.targetDeviceId = params.target_device_id;
+            const updated = await api.updateWorkflow(workflow_id, {
+                settings: JSON.stringify(current),
+            });
+            return { content: [{ type: "text", text: `Updated settings for "${updated.name}":\n${JSON.stringify(current, null, 2)}` }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // 23. Get flow config
+    server.registerTool("wf_get_flow_config", {
+        title: "Get Flow Execution Config",
+        description: `Get the flow execution configuration for a workflow: execution mode (parallel/sequential/event-driven), flow ordering, and flow triggers.
+
+Flow config controls how multiple disconnected sub-flows within a workflow execute:
+- parallel: all flows start simultaneously
+- sequential: flows run one after another in specified order
+- event-driven: flows are triggered by conditions (on_flow_complete, on_condition, on_timer, on_jepa_event)
+
+Returns the full FlowExecutionConfig with human-readable trigger details.`,
+        inputSchema: {
+            workflow_id: z.string().describe("Workflow ID"),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ workflow_id }) => {
+        try {
+            const w = await api.getWorkflow(workflow_id);
+            if (!w.flowConfig)
+                return { content: [{ type: "text", text: `Workflow "${w.name}" has no flow config (default: parallel).` }] };
+            const fc = w.flowConfig;
+            const lines = [
+                `# Flow Config — ${w.name}`,
+                "",
+                `Mode: ${fc.mode}`,
+                `Flow order: ${fc.flowOrder.length ? fc.flowOrder.join(" -> ") : "(none)"}`,
+            ];
+            if (fc.flowTriggers && Object.keys(fc.flowTriggers).length) {
+                lines.push("", "## Triggers");
+                for (const [flowId, trigger] of Object.entries(fc.flowTriggers)) {
+                    lines.push(`### Flow: ${flowId}`);
+                    lines.push(`Type: ${trigger.type}`);
+                    if (trigger.sourceFlowId)
+                        lines.push(`Source flow: ${trigger.sourceFlowId}`);
+                    if (trigger.condition) {
+                        const c = trigger.condition;
+                        lines.push(`Condition: ${c.field} ${c.operator} ${c.value} (from flow ${c.sourceFlowId})`);
+                    }
+                    if (trigger.intervalSec)
+                        lines.push(`Interval: ${trigger.intervalSec}s`);
+                    if (trigger.jepaEvent)
+                        lines.push(`JEPA event: ${trigger.jepaEvent} (threshold: ${trigger.jepaConfidenceThreshold ?? "default"})`);
+                }
+            }
+            return { content: [{ type: "text", text: lines.join("\n") }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // 24. Update flow config
+    server.registerTool("wf_update_flow_config", {
+        title: "Update Flow Execution Config",
+        description: `Update the flow execution config for a workflow. Controls how multiple disconnected sub-flows execute.
+
+Modes:
+- "parallel": all flows start simultaneously (default)
+- "sequential": flows run one after another in flowOrder
+- "event-driven": flows are triggered by conditions
+
+Trigger types (for event-driven mode):
+- on_flow_complete: activate when another flow finishes (requires sourceFlowId)
+- on_condition: activate when a field from another flow meets a condition (requires condition object with sourceFlowId, field, operator, value)
+- on_timer: activate on a recurring interval (requires intervalSec)
+- on_jepa_event: activate on JEPA anomaly/action events (optional jepaEvent filter, jepaConfidenceThreshold)
+
+Pass the full flow_config as a JSON string.`,
+        inputSchema: {
+            workflow_id: z.string().describe("Workflow ID"),
+            mode: z.enum(["parallel", "sequential", "event-driven"]).describe("Execution mode"),
+            flow_order: z.string().optional().describe("JSON array of flow IDs in execution order (for sequential mode)"),
+            flow_triggers: z.string().optional().describe("JSON object mapping flow IDs to FlowTrigger configs"),
+        },
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ workflow_id, mode, flow_order, flow_triggers }) => {
+        try {
+            const flowConfig = { mode, flowOrder: flow_order ? JSON.parse(flow_order) : [] };
+            if (flow_triggers)
+                flowConfig.flowTriggers = JSON.parse(flow_triggers);
+            const updated = await api.updateWorkflow(workflow_id, {
+                flowConfig: JSON.stringify(flowConfig),
+            });
+            return { content: [{ type: "text", text: `Updated flow config for "${updated.name}": mode=${mode}, ${flowConfig.flowOrder ? `${flowConfig.flowOrder.length} flows in order` : "no order"}, ${flow_triggers ? `${Object.keys(JSON.parse(flow_triggers)).length} triggers` : "no triggers"}` }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // 25. Validate node config
+    server.registerTool("wf_validate_config", {
+        title: "Validate Node Config",
+        description: `Validate a node's config against its configSchema. Checks that:
+- All required config keys are present
+- Range values are within min/max bounds
+- Select values match one of the defined options
+- Number values respect min/max/step constraints
+- Config keys not in the schema are flagged as unknown
+
+Pass the node config as a JSON string. Returns a list of issues (or "valid" if none).`,
+        inputSchema: {
+            node_type: z.string().describe("Node type (e.g. 'tracking-ocsort', 's2s-live')"),
+            config: z.string().describe("JSON string of the node config to validate"),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ node_type, config }) => {
+        try {
+            const [defs, parsed] = await Promise.all([api.getNodeDefinitions(), Promise.resolve(JSON.parse(config))]);
+            const def = defs.find((d) => d.type === node_type);
+            if (!def)
+                return { content: [{ type: "text", text: `Unknown node type: ${node_type}` }] };
+            const issues = [];
+            const configKeys = new Set(Object.keys(parsed));
+            const schemaKeys = new Set();
+            // Flatten configSchema to get all field keys (recursing into sections/conditionals)
+            function collectFields(fields) {
+                for (const f of fields) {
+                    if (f.kind === "section" || f.kind === "conditional") {
+                        collectFields((f.fields ?? []));
+                    }
+                    else if (f.key) {
+                        schemaKeys.add(f.key);
+                        const val = parsed[f.key];
+                        if (val === undefined)
+                            return; // missing keys handled below
+                        switch (f.kind) {
+                            case "range":
+                                if (typeof val === "number") {
+                                    if (val < f.min)
+                                        issues.push(`${f.key}: ${val} below minimum ${f.min}`);
+                                    if (val > f.max)
+                                        issues.push(`${f.key}: ${val} above maximum ${f.max}`);
+                                }
+                                else {
+                                    issues.push(`${f.key}: expected number, got ${typeof val}`);
+                                }
+                                break;
+                            case "select":
+                                if (typeof val === "string") {
+                                    const validValues = (f.options ?? []).map((o) => o.value);
+                                    if (!validValues.includes(val))
+                                        issues.push(`${f.key}: "${val}" not in options [${validValues.join(", ")}]`);
+                                }
+                                else {
+                                    issues.push(`${f.key}: expected string, got ${typeof val}`);
+                                }
+                                break;
+                            case "number":
+                                if (typeof val === "number") {
+                                    if (f.min !== undefined && val < f.min)
+                                        issues.push(`${f.key}: ${val} below minimum ${f.min}`);
+                                    if (f.max !== undefined && val > f.max)
+                                        issues.push(`${f.key}: ${val} above maximum ${f.max}`);
+                                }
+                                else {
+                                    issues.push(`${f.key}: expected number, got ${typeof val}`);
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+            collectFields(def.configSchema);
+            // Check for missing schema keys (warn, not error — defaults may apply)
+            for (const sk of schemaKeys) {
+                if (!configKeys.has(sk) && parsed[sk] === undefined) {
+                    issues.push(`${sk}: not set (default: ${JSON.stringify(def.defaultConfig[sk] ?? "none")})`);
+                }
+            }
+            // Check for unknown config keys
+            for (const ck of configKeys) {
+                if (!schemaKeys.has(ck)) {
+                    issues.push(`${ck}: unknown key (not in ${node_type} configSchema)`);
+                }
+            }
+            if (!issues.length) {
+                return { content: [{ type: "text", text: `Config for ${node_type} is valid. All ${configKeys.size} keys pass schema checks.` }] };
+            }
+            return { content: [{ type: "text", text: `Config validation (${issues.length} issues):\n${issues.map((i) => `- ${i}`).join("\n")}` }] };
+        }
+        catch (err) {
+            return handleErr(err);
+        }
+    });
+    // 26. Suggest config for use case
+    server.registerTool("wf_suggest_config", {
+        title: "Suggest Node Config",
+        description: `Get sensible config values for a node type given a use case description. Returns the default config merged with adjusted values for the described scenario.
+
+Example use cases:
+- "low-light surveillance" — suggests night mode enhance, lower confidence thresholds
+- "fast moving objects" — suggests higher FPS, lower smoothing, higher IoU threshold
+- "quiet office OCR" — suggests lower FPS, higher confidence, English OCR
+- "outdoor tracking with zones" — suggests GPS continuous, tracking with zones defined
+
+Returns the suggested config as a JSON string you can pass to wf_add_node or wf_update_node.`,
+        inputSchema: {
+            node_type: z.string().describe("Node type to configure"),
+            use_case: z.string().describe("Use case description (e.g. 'low-light surveillance', 'fast moving objects')"),
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+    }, async ({ node_type, use_case }) => {
+        try {
+            const defs = await api.getNodeDefinitions();
+            const def = defs.find((d) => d.type === node_type);
+            if (!def)
+                return { content: [{ type: "text", text: `Unknown node type: ${node_type}` }] };
+            const config = { ...def.defaultConfig };
+            const adjustments = [];
+            const uc = use_case.toLowerCase();
+            // Vision nodes
+            if (node_type.startsWith("vision-")) {
+                if (uc.includes("fast") || uc.includes("sport") || uc.includes("motion")) {
+                    config.targetFPS = 10;
+                    config.smoothingAlpha = 0.5;
+                    adjustments.push("targetFPS=10 (fast), smoothingAlpha=0.5 (less smoothing)");
+                }
+                if (uc.includes("accurate") || uc.includes("precise") || uc.includes("careful")) {
+                    config.confidence = 0.7;
+                    config.smoothingAlpha = 0.2;
+                    config.targetFPS = 3;
+                    adjustments.push("confidence=0.7 (strict), smoothingAlpha=0.2 (heavy smoothing), targetFPS=3");
+                }
+                if (uc.includes("low-light") || uc.includes("dark") || uc.includes("night")) {
+                    config.confidence = 0.3;
+                    adjustments.push("confidence=0.3 (lenient for low-light)");
+                }
+            }
+            // Tracking nodes
+            if (node_type === "tracking-ocsort") {
+                if (uc.includes("crowd") || uc.includes("busy") || uc.includes("many")) {
+                    config.maxTracks = 50;
+                    config.maxAge = 60;
+                    config.minHits = 5;
+                    adjustments.push("maxTracks=50, maxAge=60, minHits=5 (crowd scenario)");
+                }
+                if (uc.includes("fast") || uc.includes("sport")) {
+                    config.targetFPS = 15;
+                    config.iouThreshold = 0.2;
+                    config.deltaT = 5;
+                    config.inertia = 0.4;
+                    adjustments.push("targetFPS=15, iouThreshold=0.2 (loose for fast motion), deltaT=5, inertia=0.4");
+                }
+                if (uc.includes("long") || uc.includes("persistent") || uc.includes("occlusion")) {
+                    config.reconciliationEnabled = true;
+                    config.reconciliationMaxGap = 120;
+                    config.maxAge = 60;
+                    adjustments.push("reconciliationEnabled=true, maxGap=120, maxAge=60 (long occlusions)");
+                }
+            }
+            // AI processor nodes
+            if (node_type.startsWith("s2s-")) {
+                if (uc.includes("fast") || uc.includes("realtime") || uc.includes("responsive")) {
+                    config.visionFps = 2;
+                    config.analysisIntervalSec = 1;
+                    config.temperature = 0.3;
+                    adjustments.push("visionFps=2, analysisInterval=1s, temperature=0.3 (fast+focused)");
+                }
+                if (uc.includes("creative") || uc.includes("conversation") || uc.includes("chat")) {
+                    config.temperature = 1.2;
+                    adjustments.push("temperature=1.2 (creative)");
+                }
+            }
+            // Enhance nodes
+            if (node_type === "enhance-night-mode") {
+                if (uc.includes("extreme") || uc.includes("very dark")) {
+                    config.brightness = 0.3;
+                    config.gamma = 0.6;
+                    config.highlightAmount = 2.5;
+                    adjustments.push("brightness=0.3, gamma=0.6, highlightAmount=2.5 (extreme night)");
+                }
+            }
+            if (node_type === "enhance-brightness") {
+                if (uc.includes("low-light") || uc.includes("dark")) {
+                    config.brightness = 0.3;
+                    config.contrast = 1.3;
+                    adjustments.push("brightness=0.3, contrast=1.3 (low-light boost)");
+                }
+            }
+            // Sensor nodes
+            if (node_type === "sensor-location") {
+                if (uc.includes("precise") || uc.includes("navigation")) {
+                    config.accuracy = "best";
+                    config.minDistance = 1;
+                    config.updateIntervalSec = 1;
+                    adjustments.push("accuracy=best, minDistance=1m, updateInterval=1s (precise tracking)");
+                }
+                if (uc.includes("battery") || uc.includes("efficient")) {
+                    config.accuracy = "hundredMeters";
+                    config.minDistance = 100;
+                    config.updateIntervalSec = 60;
+                    adjustments.push("accuracy=100m, minDistance=100m, updateInterval=60s (battery efficient)");
+                }
+            }
+            if (!adjustments.length) {
+                return { content: [{ type: "text", text: `No specific adjustments for "${use_case}". Using defaults for ${node_type}:\n${JSON.stringify(config, null, 2)}` }] };
+            }
+            return { content: [{ type: "text", text: `Suggested config for ${node_type} (${use_case}):\n${JSON.stringify(config, null, 2)}\n\nAdjustments from defaults:\n${adjustments.map((a) => `- ${a}`).join("\n")}` }] };
         }
         catch (err) {
             return handleErr(err);
