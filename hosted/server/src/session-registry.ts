@@ -9,7 +9,7 @@
 import type { ServerWebSocket } from "bun";
 import type { ObjectStore } from "@ebowwa/object-store";
 import type { WsData, Publisher, Viewer, Session, SessionMetadata, AccessLevel, AclEntry } from "./types.js";
-import type { PublisherDropReason } from "./session-state.js";
+import type { PublisherDropReason, SessionState } from "./session-state.js";
 import { stateToLegacyStatus, dropReasonFromCloseCode } from "./session-state.js";
 import { stateMachine } from "./session-state-machine.js";
 import { SessionRecorder } from "./session-recorder.js";
@@ -991,7 +991,9 @@ export class SessionRegistry {
   /** List all active (non-expired) sessions with metadata */
   listActive(): Array<{
     id: string;
+    state: SessionState;
     publisherConnected: boolean;
+    publisherStandby: boolean;
     viewerCount: number;
     metadata: SessionMetadata;
     uptimeMs: number;
@@ -1004,7 +1006,9 @@ export class SessionRegistry {
     const now = Date.now();
     return [...this.sessions.values()].map(s => ({
       id: s.id,
+      state: s.state,
       publisherConnected: s.publisher !== null,
+      publisherStandby: s.publisher?.standby ?? true,
       viewerCount: s.viewers.size,
       metadata: s.metadata,
       uptimeMs: now - s.createdAt,

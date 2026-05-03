@@ -146,6 +146,7 @@ function renderGrid(container: HTMLElement, devices: DeviceInfo[], sessions: Ses
           <span class="device-name">${esc(d.deviceName || d.device_id || "Unknown")}</span>
           <div class="device-card-badges">
             ${liveCount > 0 ? `<span class="device-live-badge">${liveCount} LIVE</span>` : ""}
+            ${d.sessionState && d.online ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--surface-tertiary);color:var(--text-secondary)">${d.sessionState}</span>` : ""}
             <span class="device-status-dot ${d.online ? "online" : "offline"}"></span>
           </div>
         </div>
@@ -375,7 +376,7 @@ function openDeviceModal(container: HTMLElement, deviceId: string): void {
         <div class="modal-row"><span class="modal-label">Device ID</span><span class="modal-value">${esc(device.device_id)}</span></div>
         <div class="modal-row"><span class="modal-label">Model</span><span class="modal-value">${esc(device.deviceModel || device.device_model || "--")}</span></div>
         ${device.systemVersion ? `<div class="modal-row"><span class="modal-label">iOS</span><span class="modal-value">${esc(device.systemVersion)}</span></div>` : ""}
-        <div class="modal-row"><span class="modal-label">Status</span><span class="modal-value"><span class="device-status-dot ${device.online ? "online" : "offline"}"></span> ${device.online ? "Online" : "Offline"}</span></div>
+        <div class="modal-row"><span class="modal-label">Status</span><span class="modal-value"><span class="device-status-dot ${device.online ? "online" : "offline"}"></span> ${device.online ? "Online" : "Offline"}${device.sessionState ? ` <span style="font-size:11px;color:var(--text-secondary)">(${device.sessionState})</span>` : ""}</span></div>
         <div class="modal-row"><span class="modal-label">Build</span><span class="modal-value">${esc(device.appVersion || "--")}${device.buildNumber ? ` (${device.buildNumber})` : ""}</span></div>
         <div class="modal-row"><span class="modal-label">APNs Token</span><span class="modal-value">${device.apnsToken ? "Registered" : "None"}</span></div>
         <div class="modal-row"><span class="modal-label">Last Seen</span><span class="modal-value">${device.lastSeen ? formatTime(device.lastSeen) : "--"}</span></div>
