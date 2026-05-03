@@ -5092,3 +5092,95 @@ select.wf-settings-input { appearance: none; cursor: pointer; }
     display: none !important;
   }
 }
+
+/* === Command Center === */
+
+.cmd-page { display: flex; flex-direction: column; gap: 16px; }
+.cmd-page-header-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.cmd-body { display: flex; gap: 16px; align-items: flex-start; }
+
+.cmd-pills { display: inline-flex; gap: 8px; }
+.cmd-pill { display: inline-flex; align-items: baseline; gap: 6px; padding: 6px 12px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; }
+.cmd-pill .label { font-size: 10px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.4px; }
+.cmd-pill .val { font-size: 16px; font-weight: 700; color: var(--text-primary); font-family: 'SF Mono', Menlo, monospace; }
+
+.cmd-stream-grid { flex: 1; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; min-width: 0; }
+.cmd-stream-grid .empty-state-large { grid-column: 1 / -1; }
+
+.cmd-stream-card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; overflow: hidden; cursor: pointer; transition: border-color 0.15s; display: flex; flex-direction: column; }
+.cmd-stream-card:hover { border-color: rgba(74,222,128,0.3); }
+
+.cmd-card-video { position: relative; width: 100%; height: 160px; background: #000; overflow: hidden; flex-shrink: 0; }
+.cmd-card-canvas, .cmd-card-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cmd-card-video .live-badge { position: absolute; top: 8px; left: 8px; background: var(--accent-red); color: #fff; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; z-index: 2; }
+.cmd-card-duration { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', Menlo, monospace; z-index: 2; }
+
+.cmd-card-meta { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.cmd-card-row-1, .cmd-card-row-2 { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cmd-card-device { font-size: 12px; font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cmd-card-id { font-size: 10px; color: var(--text-tertiary); font-family: 'SF Mono', Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cmd-card-workflow { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; }
+
+.cmd-card-metrics { display: flex; gap: 12px; align-items: center; padding-top: 6px; border-top: 1px solid var(--border-subtle); margin-top: 2px; }
+.cmd-metric { display: flex; flex-direction: column; gap: 1px; min-width: 36px; }
+.cmd-metric .k { font-size: 9px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.4px; }
+.cmd-metric .v { font-size: 12px; font-weight: 700; color: var(--text-primary); font-family: 'SF Mono', Menlo, monospace; }
+.cmd-spark-slot { flex: 1; height: 24px; min-width: 60px; }
+
+.cmd-sidebar { width: 320px; flex-shrink: 0; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; transition: width 0.18s ease; overflow: hidden; }
+.cmd-sidebar[data-collapsed] { width: 36px; }
+.cmd-sidebar[data-collapsed] .cmd-sidebar-body { display: none; }
+.cmd-sidebar[data-collapsed] .cmd-sidebar-title { display: none; }
+.cmd-sidebar[data-collapsed] .cmd-sidebar-header { justify-content: center; padding: 10px 6px; }
+.cmd-sidebar[data-collapsed] .cmd-sidebar-chevron { transform: rotate(180deg); }
+.cmd-sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+.cmd-sidebar-title { margin: 0 !important; }
+.cmd-sidebar-chevron { background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; padding: 4px 6px; font-size: 14px; line-height: 1; border-radius: 4px; transition: color 0.15s, background 0.15s, transform 0.18s; }
+.cmd-sidebar-chevron:hover { color: var(--text-primary); background: var(--border-subtle); }
+.cmd-sidebar-body { padding: 8px; }
+.cmd-workflow-list { display: flex; flex-direction: column; gap: 0; }
+.cmd-workflow-row { cursor: pointer; padding: 8px 6px; border-radius: 4px; transition: background 0.12s; }
+.cmd-workflow-row:hover { background: var(--border-subtle); }
+.cmd-workflow-row.is-active { background: rgba(74,222,128,0.08); }
+.cmd-workflow-row.is-active .activity-text { color: var(--accent-green); }
+
+/* Tablet — 2 column grid */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .cmd-stream-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .cmd-sidebar {
+    width: 260px;
+  }
+}
+
+/* Mobile — stack layout */
+@media (max-width: 768px) {
+  .cmd-body {
+    flex-direction: column;
+  }
+  .cmd-sidebar {
+    width: 100%;
+    order: 2;
+  }
+  .cmd-stream-grid {
+    order: 1;
+    grid-template-columns: 1fr;
+  }
+  .cmd-page-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .cmd-pills {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .cmd-card-video {
+    height: 200px;
+  }
+  .cmd-card-metrics {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}

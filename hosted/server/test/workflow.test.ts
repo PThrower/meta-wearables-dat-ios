@@ -301,7 +301,7 @@ describe("NODE_DEFINITIONS", () => {
 
   test("processable nodes have activationMode", () => {
     const processable = NODE_DEFINITIONS.filter(d => d.activationMode !== null);
-    const validModes = ["ai", "jepa", "vision", "enhance", "sensor", "speech", "tracking", "stt", "measure"];
+    const validModes = ["ai", "jepa", "vision", "enhance", "sensor", "speech", "tracking", "stt", "measure", "palantir", "passthrough", "gating", "yolo"];
     for (const def of processable) {
       expect(validModes).toContain(def.activationMode);
     }
