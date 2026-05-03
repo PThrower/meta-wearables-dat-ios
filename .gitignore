@@ -45,7 +45,8 @@ test-results/
 hosted/server/viewer/dist/
 hosted/server/viewer/node_modules/
 
-# YOLO model files
-yolo11n.pt
-yolo11n.mlpackage/
-yolo11n-int8.mlpackage.zip
+# YOLO model files (downloaded/quantized)
+*.pt
+*.mlpackage/
+*-int8.mlpackage.zip
+quantized_output/
