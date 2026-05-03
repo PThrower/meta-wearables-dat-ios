@@ -148,9 +148,7 @@ final class DeviceSessionManager: ObservableObject {
       if let autoSelector = self.deviceSelector as? AutoDeviceSelector {
         for await device in autoSelector.activeDeviceStream() {
           self.hasActiveDevice = device != nil
-          if device != nil {
-            _ = await self.getSession()
-          } else {
+          if device == nil {
             self.handleDeviceLost()
           }
         }
