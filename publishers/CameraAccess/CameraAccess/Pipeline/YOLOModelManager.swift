@@ -353,65 +353,48 @@ actor YOLOModelManager {
     }
     /// Inflate raw deflated data from ZIP entries.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
-    /// Uses zlib inflateInit2_ with -MAX_WBITS for raw deflate decompression.
+    /// Uses zlib via bridging header with real z_stream struct.
     private static func inflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
         let rawDeflate = Data(data)
         NSLog("[YOLOModel] inflate: \(rawDeflate.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
-        let outputSize = max(uncompressedSize, 4096)
+
+        // Use real z_stream struct via bridging header — compiler handles layout
+        var stream = z_stream()
+        stream.zalloc = nil
+        stream.zfree = nil
+        stream.opaque = nil
+
+        let streamSize = Int32(MemoryLayout<z_stream>.size)
+        let ret = inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, streamSize)
+        NSLog("[YOLOModel] inflate: inflateInit2_ ret=\(ret), streamSize=\(streamSize)")
+        guard ret == Z_OK else {
+            NSLog("[YOLOModel] inflate: inflateInit2_ FAILED ret=\(ret)")
+            throw YOLOModelError.invalidArchive
+        }
+        defer { inflateEnd(&stream) }
+
+        // Set up input — rawDeflate bytes
+        let inputCount = rawDeflate.count
+        let outputSize = max(uncompressedSize, inputCount * 4, 4096)
         var outputBuffer = [UInt8](repeating: 0, count: outputSize)
 
-        // z_stream struct on arm64: 112 bytes
-        // Key offsets: next_in=0, avail_in=8, next_out=24, avail_out=32, total_out=40
-        let zStreamSize = 112
-        let zs = UnsafeMutableRawPointer.allocate(byteCount: zStreamSize, alignment: 8)
-        defer { zs.deallocate() }
-        memset(zs, 0, zStreamSize)
+        try rawDeflate.withUnsafeBytes { inputPtr in
+            try outputBuffer.withUnsafeMutableBufferPointer { outPtr in
+                stream.next_in = UnsafeMutablePointer<Bytef>(mutating: inputPtr.baseAddress!.assumingMemoryBound(to: Bytef.self))
+                stream.avail_in = UInt32(inputCount)
+                stream.next_out = outPtr.baseAddress
+                stream.avail_out = UInt32(outputSize)
 
-        let Z_OK: Int32 = 0
-        let Z_STREAM_END: Int32 = 1
-        let Z_FINISH: Int32 = 4
-
-        var ret: Int32 = -1
-        var totalOut: UInt64 = 0
-
-        // Set input pointer
-        rawDeflate.withUnsafeBytes { inputPtr in
-            zs.storeBytes(of: inputPtr.baseAddress!.assumingMemoryBound(to: UInt8.self),
-                          toByteOffset: 0, as: UnsafePointer<UInt8>.self)
-        }
-        zs.storeBytes(of: UInt32(rawDeflate.count), toByteOffset: 8, as: UInt32.self)
-
-        // Set output pointer
-        outputBuffer.withUnsafeMutableBufferPointer { outPtr in
-            zs.storeBytes(of: outPtr.baseAddress!,
-                          toByteOffset: 24, as: UnsafeMutablePointer<UInt8>.self)
-        }
-        zs.storeBytes(of: UInt32(outputBuffer.count), toByteOffset: 32, as: UInt32.self)
-
-        // Get actual zlib version from the library itself
-        let verPtr = c_zlibVersion()
-        let verStr = String(cString: verPtr)
-        NSLog("[YOLOModel] inflate: zlib version=\(verStr)")
-
-        // Initialize for raw inflate: windowBits = -15
-        ret = c_inflateInit2(zs, -15, verPtr, Int32(zStreamSize))
-        NSLog("[YOLOModel] inflate: inflateInit2 ret=\(ret)")
-        guard ret == Z_OK else {
-            NSLog("[YOLOModel] inflate: inflateInit2 FAILED ret=\(ret)")
-            throw YOLOModelError.invalidArchive
+                let inflateRet = inflate(&stream, Z_FINISH)
+                NSLog("[YOLOModel] inflate: ret=\(inflateRet) total_out=\(stream.total_out)")
+                guard inflateRet == Z_STREAM_END else {
+                    NSLog("[YOLOModel] inflate: FAILED ret=\(inflateRet) (expected Z_STREAM_END=\(Z_STREAM_END))")
+                    throw YOLOModelError.invalidArchive
+                }
+            }
         }
 
-        ret = c_inflate(zs, Z_FINISH)
-        NSLog("[YOLOModel] inflate: inflate ret=\(ret) (expect \(Z_STREAM_END)=Z_STREAM_END)")
-        totalOut = zs.load(fromByteOffset: 40, as: UInt64.self)
-        NSLog("[YOLOModel] inflate: totalOut=\(totalOut)")
-        _ = c_inflateEnd(zs)
-
-        guard ret == Z_STREAM_END else {
-            NSLog("[YOLOModel] inflate: inflate FAILED ret=\(ret)")
-            throw YOLOModelError.invalidArchive
-        }
-        return Data(outputBuffer.prefix(Int(totalOut)))
+        return Data(outputBuffer.prefix(Int(stream.total_out)))
     }
 }
 

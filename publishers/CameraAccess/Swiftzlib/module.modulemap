@@ -1,0 +1,5 @@
+module Swiftzlib [system] {
+    header "include.h"
+    link "z"
+    export *
+}
