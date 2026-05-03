@@ -174,7 +174,7 @@ actor YOLOModelManager {
 
         // Check magic bytes to detect ZIP
         let headerData = try Data(contentsOf: downloadedFile, options: [.alwaysMapped]).prefix(4)
-        let isZip = headerData.count >= 2 && headerData[0] == 0x50 && headerData[1] == 0x4B
+        let isZip = headerData.count >= 4 && headerData[0] == 0x50 && headerData[1] == 0x4B
         let fileSize = try FileManager.default.attributesOfItem(atPath: downloadedFile.path)[.size] as? Int64 ?? 0
         NSLog("[YOLOModel] Downloaded \(fileSize) bytes, isZip=\(isZip)")
 
@@ -409,7 +409,11 @@ actor YOLOModelManager {
         result.reserveCapacity(min(uncompressedSize, 4 * 1024 * 1024)) // hint, capped at 4MB
 
         try rawDeflate.withUnsafeBytes { inputPtr in
-            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: inputPtr.baseAddress!.assumingMemoryBound(to: Bytef.self))
+            guard let base = inputPtr.baseAddress else {
+                NSLog("[YOLOModel] inflate: empty input data")
+                throw YOLOModelError.invalidArchive
+            }
+            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base.assumingMemoryBound(to: Bytef.self))
             stream.avail_in = UInt32(rawDeflate.count)
 
             var done = false

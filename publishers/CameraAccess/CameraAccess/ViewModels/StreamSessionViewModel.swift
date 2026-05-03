@@ -928,7 +928,7 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - YOLO Stage
 
   /// Configure YOLO CoreML on-device inference stage from server-sent config.
-  private func configureYOLOStage(config: [String: Any]) async {
+  private func configureYOLOStage(config: [String: Any]) async throws {
     // Unregister existing YOLO stage if any
     if let existing = yoloStage {
       await existing.stop()
@@ -1635,7 +1635,12 @@ class StreamSessionViewModel: ObservableObject {
         } else {
           Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.configureYOLOStage(config: msg)
+            do {
+              try await self.configureYOLOStage(config: msg)
+            } catch {
+              NSLog("[StreamSession] YOLO configuration failed: \(error.localizedDescription)")
+              yoloModelState = .failed(modelId: msg["modelId"] as? String ?? "unknown", error: error.localizedDescription)
+            }
           }
         }
       }
