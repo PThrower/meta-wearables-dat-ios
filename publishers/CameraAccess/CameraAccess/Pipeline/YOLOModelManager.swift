@@ -60,11 +60,14 @@ actor YOLOModelManager {
 
         let compiledUrl = cacheDir.appendingPathComponent("\(id).mlmodelc")
 
-        // Check for existing compiled model
+        // Check for existing compiled model — delete stale/corrupt cache on failure
         if FileManager.default.fileExists(atPath: compiledUrl.path) {
-            let model = try await loadCompiledModel(at: compiledUrl)
-            loadedModels[id] = model
-            return model
+            if let model = try? await loadCompiledModel(at: compiledUrl) {
+                loadedModels[id] = model
+                return model
+            }
+            NSLog("[YOLOModel] Cached model failed to load, deleting stale cache at \(compiledUrl.lastPathComponent)")
+            try? FileManager.default.removeItem(at: compiledUrl)
         }
 
         // Resolve download URL: server-provided > known defaults

@@ -1315,6 +1315,7 @@ class StreamSessionViewModel: ObservableObject {
       if msgType == "app_status" {
         let status = msg["status"] as? String
         let appId = msg["appId"] as? String
+        let errorMsg = msg["error"] as? String
         Task { @MainActor [weak self] in
           if status == "active" {
             self?.activeAppId = appId
@@ -1326,7 +1327,50 @@ class StreamSessionViewModel: ObservableObject {
             // The server should also send individual *_stage_config enabled:false
             // messages, but this handles edge cases (missed WS, server restart).
             await self?.stopAllPipelineStages()
+            if status == "error", let err = errorMsg {
+              let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+              self?.errorLog.append("[\(ts)] App error (\(appId ?? "unknown")): \(err)")
+              if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+              self?.errorMessage = "App error: \(err)"
+              self?.showError = true
+            }
           }
+        }
+      }
+
+      // Workflow activation errors from server
+      if msgType == "workflow_error", let error = msg["error"] as? String {
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] Workflow error: \(error)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+          self?.errorMessage = "Workflow error: \(error)"
+          self?.showError = true
+        }
+      }
+
+      // Server-originated operational errors (guidance, JEPA, ReID failures)
+      if msgType == "server_error", let message = msg["message"] as? String {
+        let source = msg["source"] as? String ?? "unknown"
+        let severity = msg["severity"] as? String ?? "warning"
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] [\(source)/\(severity)] \(message)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+          if severity == "critical" {
+            self?.errorMessage = "[\(source)] \(message)"
+            self?.showError = true
+          }
+        }
+      }
+
+      // ReID crop processing failure (transient — log only)
+      if msgType == "reid_error", let error = msg["error"] as? String {
+        let cropCount = msg["cropCount"] as? Int ?? 0
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] ReID error (\(cropCount) crops): \(error)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
         }
       }
 

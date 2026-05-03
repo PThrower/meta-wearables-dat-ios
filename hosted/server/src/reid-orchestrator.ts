@@ -17,6 +17,7 @@ import type {
   ReIDServiceStatus,
 } from "./reid-service.js";
 import { createReIDService } from "./reid-service.js";
+import type { ServerErrorCallback } from "./message-types.js";
 // Register Modal provider (side-effect import)
 import "./reid-modal-provider.js";
 
@@ -61,6 +62,13 @@ interface SessionReIDState {
 export class ReIDOrchestrator {
   private reidState = new Map<string, SessionReIDState>(); // sessionId -> state
 
+  /** Callback for pushing server errors to publisher + viewers */
+  private serverErrorCb: ServerErrorCallback | null = null;
+
+  setServerErrorCallback(cb: ServerErrorCallback): void {
+    this.serverErrorCb = cb;
+  }
+
   // --- Lifecycle ---
 
   /** Activate a ReID node for a session */
@@ -89,6 +97,13 @@ export class ReIDOrchestrator {
       },
       onError: (error) => {
         console.error(`[reid-orchestrator] Session ${sessionId} error:`, error.message);
+        if (this.serverErrorCb) {
+          this.serverErrorCb(sessionId, {
+            source: "reid",
+            severity: "warning",
+            message: error.message,
+          });
+        }
       },
     };
 
@@ -183,6 +198,25 @@ export class ReIDOrchestrator {
       }
     } catch (err) {
       console.error(`[reid-orchestrator] Error processing crops for ${sessionId}:`, err);
+      // Notify iOS publisher so it stops waiting for reid_embeddings
+      const message = err instanceof Error ? err.message : "ReID crop processing failed";
+      if (state.publisherWs?.readyState === 1) {
+        try {
+          state.publisherWs.send(JSON.stringify({
+            type: "reid_error",
+            error: message,
+            cropCount: crops.length,
+          }));
+        } catch { /* ws send failed */ }
+      }
+      if (this.serverErrorCb) {
+        this.serverErrorCb(sessionId, {
+          source: "reid",
+          severity: "warning",
+          message,
+          context: { crops: String(crops.length) },
+        });
+      }
     }
   }
 

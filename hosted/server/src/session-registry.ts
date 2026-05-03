@@ -810,6 +810,14 @@ export class SessionRegistry {
     return true;
   }
 
+  /** Send a JSON message to a session's publisher. Returns true if sent. */
+  sendJsonToPublisher(sessionId: string, msg: object): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session?.publisher) return false;
+    if (session.publisher.ws.readyState !== WebSocket.OPEN) return false;
+    try { session.publisher.ws.send(JSON.stringify(msg)); return true; } catch { return false; }
+  }
+
   // --- Stale connection cleanup ---
 
   /** Evict stale publishers (15s timeout) and viewers (30s timeout) */
