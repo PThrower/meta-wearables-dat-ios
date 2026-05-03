@@ -125,9 +125,8 @@ actor ToolMeasurementStage: @preconcurrency FramePipelineStage {
         // Create CIImage from pixel buffer
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
 
-        // Create CGImage for Vision requests that need it
-        let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        // Create CGImage for Vision requests that need it (reuse shared CIContext)
+        guard let cgImage = PipelineCIContext.shared.createCGImage(ciImage, from: ciImage.extent) else { return nil }
 
         // Step 1: Detect reference object
         guard let refResult = detectReferenceObject(cgImage: cgImage, width: width, height: height) else {

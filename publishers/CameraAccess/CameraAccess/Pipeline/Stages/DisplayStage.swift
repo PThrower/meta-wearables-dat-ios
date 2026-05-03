@@ -23,8 +23,8 @@ actor DisplayStage: @preconcurrency FramePipelineStage {
     // Per-stage metrics
     private var metricsTracker = StageMetricsTracker(stageId: "display", nodeType: "camera-source")
 
-    // Shared CIContext -- reused across frames for efficiency
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    // Shared CIContext — reuse pipeline-wide singleton to avoid duplicate Metal contexts
+    private let ciContext = PipelineCIContext.shared
 
     // Preview
     private var previewBus: PreviewBus?

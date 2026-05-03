@@ -1316,7 +1316,7 @@ class StreamSessionViewModel: ObservableObject {
   func configureRelayEncoder() async {
     switch videoCodec {
     case .jpeg:
-      await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
+      await relayStage.setEncoder(JPEGFrameEncoder(ciContext: PipelineCIContext.shared, quality: 0.5))
     case .h264:
       do {
         let h264Encoder = try H264FrameEncoder(config: .default)
@@ -1324,7 +1324,7 @@ class StreamSessionViewModel: ObservableObject {
         NSLog("[StreamSession] H.264 encoder configured")
       } catch {
         NSLog("[StreamSession] H.264 encoder init failed, falling back to JPEG: \(error)")
-        await relayStage.setEncoder(JPEGFrameEncoder(quality: 0.5))
+        await relayStage.setEncoder(JPEGFrameEncoder(ciContext: PipelineCIContext.shared, quality: 0.5))
       }
     }
   }

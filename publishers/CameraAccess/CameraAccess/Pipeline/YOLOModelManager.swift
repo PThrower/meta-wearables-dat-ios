@@ -6,6 +6,12 @@
  * Bundled .mlpackage models are compiled on first use.
  * Server-served models are downloaded, extracted, and compiled.
  *
+ * Memory-safe on 4GB devices:
+ *   - FileHandle streaming ZIP extraction (never loads full ZIP into RAM)
+ *   - Streaming inflate to file (never accumulates decompressed data in RAM)
+ *   - LRU model cache (max 2 models in memory at once)
+ *   - Early temp cleanup (ZIP deleted after extraction, before compilation)
+ *
  * zlib accessed via Swiftzlib module map (Swiftzlib/module.modulemap).
  * Gives us real z_stream struct with correct MemoryLayout on all platforms.
  */
@@ -22,8 +28,13 @@ actor YOLOModelManager {
         return caches.appendingPathComponent("YOLOModels", isDirectory: true)
     }()
 
-    // In-memory model cache (keyed by modelId)
+    /// Maximum number of compiled MLModel instances kept in memory.
+    /// On 4GB devices, each model can be 50-200MB of Neural Engine weights.
+    private static let maxLoadedModels = 2
+
+    // In-memory model cache (keyed by modelId) with LRU eviction
     private var loadedModels: [String: MLModel] = [:]
+    private var loadedModelOrder: [String] = []  // oldest first
 
     // Download progress stream
     private var progressContinuations: [String: AsyncStream<Double>.Continuation] = [:]
@@ -60,6 +71,7 @@ actor YOLOModelManager {
     func loadModel(id: String, serverUrl: String? = nil) async throws -> ModelLoadResult {
         // Return cached model if available
         if let cached = loadedModels[id] {
+            touchModel(id)  // LRU: move to most-recent
             let compiledUrl = cacheDir.appendingPathComponent("\(id).mlmodelc")
             let diskSize = Self.directorySize(at: compiledUrl)
             return ModelLoadResult(model: cached, diskSizeBytes: diskSize, downloadSizeBytes: 0)
@@ -73,7 +85,7 @@ actor YOLOModelManager {
         // Check for existing compiled model — delete stale/corrupt cache on failure
         if FileManager.default.fileExists(atPath: compiledUrl.path) {
             if let model = try? await loadCompiledModel(at: compiledUrl) {
-                loadedModels[id] = model
+                insertModel(id, model)
                 let diskSize = Self.directorySize(at: compiledUrl)
                 return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: 0)
             }
@@ -87,19 +99,27 @@ actor YOLOModelManager {
         // If URL available, download and compile
         if let resolvedUrl {
             let result = try await downloadAndCompile(id: id, serverUrl: resolvedUrl, compiledUrl: compiledUrl)
-            loadedModels[id] = result.model
+            insertModel(id, result.model)
             return result
         }
 
         // Try bundled .mlpackage -> compile to cache
         if let bundledUrl = findBundledModel(id: id) {
             let model = try await compileBundledModel(at: bundledUrl, to: compiledUrl)
-            loadedModels[id] = model
+            insertModel(id, model)
             let diskSize = Self.directorySize(at: compiledUrl)
             return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: 0)
         }
 
         throw YOLOModelError.modelNotFound(id: id)
+    }
+
+    /// Unload a model from the in-memory cache. Called when YOLOStage stops.
+    func unloadModel(id: String) {
+        if loadedModels.removeValue(forKey: id) != nil {
+            loadedModelOrder.removeAll { $0 == id }
+            NSLog("[YOLOModel] Unloaded model '\(id)' from memory")
+        }
     }
 
     // MARK: - Disk Size
@@ -152,6 +172,7 @@ actor YOLOModelManager {
     /// Clear all cached models (compiled files and in-memory).
     func clearCache() async {
         loadedModels.removeAll()
+        loadedModelOrder.removeAll()
         progressContinuations.values.forEach { $0.finish() }
         progressContinuations.removeAll()
         try? FileManager.default.removeItem(at: cacheDir)
@@ -161,6 +182,27 @@ actor YOLOModelManager {
     func downloadProgress(id: String) -> AsyncStream<Double> {
         AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             progressContinuations[id] = continuation
+        }
+    }
+
+    // MARK: - LRU Cache Management
+
+    private func insertModel(_ id: String, _ model: MLModel) {
+        loadedModels[id] = model
+        touchModel(id)
+        evictIfNeeded()
+    }
+
+    private func touchModel(_ id: String) {
+        loadedModelOrder.removeAll { $0 == id }
+        loadedModelOrder.append(id)
+    }
+
+    private func evictIfNeeded() {
+        while loadedModels.count > Self.maxLoadedModels, let oldest = loadedModelOrder.first {
+            loadedModels.removeValue(forKey: oldest)
+            loadedModelOrder.removeFirst()
+            NSLog("[YOLOModel] LRU evicted model '\(oldest)' from memory")
         }
     }
 
@@ -213,15 +255,13 @@ actor YOLOModelManager {
         try FileManager.default.createDirectory(at: extractedDir, withIntermediateDirectories: true)
 
         if isZip {
-            // Use built-in ZIP extraction via URL resource
             NSLog("[YOLOModel] Extracting ZIP...")
             try self.extractZip(at: downloadedFile, to: extractedDir)
-            NSLog("[YOLOModel] ZIP extraction done, listing extracted contents...")
-            if let contents = try? FileManager.default.contentsOfDirectory(at: extractedDir, includingPropertiesForKeys: nil) {
-                for item in contents {
-                    NSLog("[YOLOModel]   extracted: \(item.lastPathComponent) isDir=\(item.hasDirectoryPath)")
-                }
-            }
+            NSLog("[YOLOModel] ZIP extraction done")
+
+            // Early cleanup: delete ZIP now to free disk before compilation
+            try? FileManager.default.removeItem(at: downloadedFile)
+            NSLog("[YOLOModel] Deleted ZIP after extraction")
         } else {
             // Assume it's a raw mlmodel or mlpackage — copy directly
             let dest = extractedDir.appendingPathComponent(downloadedFile.lastPathComponent)
@@ -235,26 +275,28 @@ actor YOLOModelManager {
                 try FileManager.default.removeItem(at: compiledUrl)
             }
             try FileManager.default.copyItem(at: mlmodelcUrl, to: compiledUrl)
+            // Early cleanup: delete extracted files after copy to cache
+            try? FileManager.default.removeItem(at: extractedDir)
             let model = try await loadCompiledModel(at: compiledUrl)
             let diskSize = Self.directorySize(at: compiledUrl)
             return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
         }
 
         // Check if extracted dir itself IS an .mlmodelc (flat structure: Manifest.json + Data/com.apple.CoreML/)
-        // Ultralytics ZIPs ship this way — no wrapping directory with .mlmodelc extension
         let isFlatModelC = isExtractedMLModelC(in: extractedDir)
         NSLog("[YOLOModel] isExtractedMLModelC=\(isFlatModelC)")
         if isFlatModelC {
-            // Ultralytics ZIPs ship as flat mlmodelc (Manifest.json + Data/) but
-            // are NOT compiled — they need MLModel.compileModel() first.
-            // Copy to a temp location with .mlmodelc extension so compileModel can find it.
             let tempModelC = tempDir.appendingPathComponent("\(id)_flat.mlmodelc")
             if FileManager.default.fileExists(atPath: tempModelC.path) {
                 try FileManager.default.removeItem(at: tempModelC)
             }
             try FileManager.default.copyItem(at: extractedDir, to: tempModelC)
+            // Early cleanup: extracted files copied, free the originals
+            try? FileManager.default.removeItem(at: extractedDir)
             NSLog("[YOLOModel] Compiling flat mlmodelc at \(tempModelC.lastPathComponent)...")
             let compiled = try await MLModel.compileModel(at: tempModelC)
+            // Delete temp model copy now — compiled output is what we need
+            try? FileManager.default.removeItem(at: tempModelC)
             if FileManager.default.fileExists(atPath: compiledUrl.path) {
                 try FileManager.default.removeItem(at: compiledUrl)
             }
@@ -274,6 +316,8 @@ actor YOLOModelManager {
 
         // Compile
         let compiled = try await MLModel.compileModel(at: mlpackageUrl)
+        // Early cleanup: delete extracted files after compilation
+        try? FileManager.default.removeItem(at: extractedDir)
         // Move to cache
         if FileManager.default.fileExists(atPath: compiledUrl.path) {
             try FileManager.default.removeItem(at: compiledUrl)
@@ -317,7 +361,6 @@ actor YOLOModelManager {
 
     /// Check if a directory itself contains a flat .mlmodelc structure
     /// (Manifest.json + Data/com.apple.CoreML/) without the .mlmodelc extension.
-    /// Ultralytics YOLO ZIPs ship in this format.
     private func isExtractedMLModelC(in directory: URL) -> Bool {
         let manifest = directory.appendingPathComponent("Manifest.json")
         let coreMLDir = directory.appendingPathComponent("Data/com.apple.CoreML")
@@ -341,7 +384,7 @@ actor YOLOModelManager {
     }
 
     /// Extract a ZIP file using FileHandle for streaming — never loads full ZIP into RAM.
-    /// Parses ZIP local file headers and extracts stored or deflated entries.
+    /// Deflated entries are inflated directly to output files via streaming inflate.
     /// Ref: PKZIP APPNOTE — local file header signature = 0x04034b50
     private nonisolated func extractZip(at source: URL, to destination: URL) throws {
         let handle = try FileHandle(forReadingFrom: source)
@@ -366,15 +409,12 @@ actor YOLOModelManager {
             guard headerRest.count == 26 else { break }
 
             // Parse fields relative to header start (offset + 0)
-            // Bytes 0-3: sig (already validated), 4-5: version, 6-7: flags, 8-9: compression
-            // 10-13: mod time/date, 14-17: crc32, 18-21: compressed size, 22-25: uncompressed size
-            // 26-27: filename length, 28-29: extra length
-            let flags = headerRest.readUInt16(at: 2)         // offset 6 from entry start
-            let compressionMethod = headerRest.readUInt16(at: 4)  // offset 8
-            let compressedSize = Int(headerRest.readUInt32(at: 14))  // offset 18
-            let uncompressedSize = Int(headerRest.readUInt32(at: 18))  // offset 22
-            let filenameLength = Int(headerRest.readUInt16(at: 22))  // offset 26
-            let extraLength = Int(headerRest.readUInt16(at: 24))  // offset 28
+            let flags = headerRest.readUInt16(at: 2)
+            let compressionMethod = headerRest.readUInt16(at: 4)
+            let compressedSize = Int(headerRest.readUInt32(at: 14))
+            let uncompressedSize = Int(headerRest.readUInt32(at: 18))
+            let filenameLength = Int(headerRest.readUInt16(at: 22))
+            let extraLength = Int(headerRest.readUInt16(at: 24))
 
             let dataStart = offset + 30 + UInt64(filenameLength) + UInt64(extraLength)
 
@@ -410,7 +450,7 @@ actor YOLOModelManager {
                 defer { try? outHandle.close() }
 
                 var remaining = compressedSize
-                let chunkSize = 256 * 1024  // 256KB read/write chunks
+                let chunkSize = 256 * 1024
                 while remaining > 0 {
                     let toRead = min(remaining, chunkSize)
                     let chunk = try handle.read(upToCount: toRead) ?? Data()
@@ -419,12 +459,12 @@ actor YOLOModelManager {
                     remaining -= chunk.count
                 }
             } else if compressionMethod == 8 {
-                // Deflate — read compressed data, then inflate with streaming output to file
+                // Deflate — stream inflate directly to output file (never accumulates in RAM)
                 try handle.seek(toOffset: dataStart)
-                // Read compressed chunk into memory (one entry at a time, not the whole ZIP)
                 let compressedData = try handle.read(upToCount: compressedSize) ?? Data()
-                let decompressed = try Self.inflateRawDeflate(compressedData, uncompressedSize: uncompressedSize)
-                try decompressed.write(to: destFile)
+                let outHandle = try FileHandle(forWritingTo: destFile)
+                defer { try? outHandle.close() }
+                try Self.inflateRawDeflateToStream(compressedData, to: outHandle)
             }
 
             offset = dataStart + UInt64(compressedSize)
@@ -434,9 +474,9 @@ actor YOLOModelManager {
                 try handle.seek(toOffset: offset)
                 if let ddBytes = try handle.read(upToCount: 4), ddBytes.count == 4 {
                     if ddBytes.readUInt32(at: 0) == dataDescriptorSignature {
-                        offset += 16  // sig(4) + crc32(4) + compressed(4) + uncompressed(4)
+                        offset += 16
                     } else {
-                        offset += 12  // no sig: crc32(4) + compressed(4) + uncompressed(4)
+                        offset += 12
                     }
                 }
             }
@@ -444,12 +484,12 @@ actor YOLOModelManager {
 
         NSLog("[YOLOModel] Streaming ZIP extraction complete")
     }
-    /// Inflate raw deflated data from ZIP entries using chunked output.
+
+    /// Inflate raw deflated data directly to a FileHandle — writes 64KB chunks
+    /// as they're produced, never accumulating the full decompressed buffer in RAM.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
-    /// Uses zlib via Swiftzlib module with real z_stream struct.
-    /// Uses a small 64KB output buffer to avoid allocating the full uncompressed size in RAM.
-    private static func inflateRawDeflate(_ data: Data, uncompressedSize: Int) throws -> Data {
-        NSLog("[YOLOModel] inflate: \(data.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
+    private static func inflateRawDeflateToStream(_ data: Data, to output: FileHandle) throws {
+        NSLog("[YOLOModel] streaming inflate: \(data.count) compressed bytes -> file")
 
         var stream = z_stream()
         stream.zalloc = nil
@@ -464,9 +504,7 @@ actor YOLOModelManager {
         }
         defer { inflateEnd(&stream) }
 
-        let chunkSize = 65536 // 64KB output chunks — small fixed buffer
-        var result = Data()
-        result.reserveCapacity(min(uncompressedSize, 4 * 1024 * 1024)) // hint, capped at 4MB
+        let chunkSize = 65536 // 64KB output chunks — fixed, small buffer
 
         try data.withUnsafeBytes { inputPtr in
             guard let base = inputPtr.baseAddress else {
@@ -484,11 +522,13 @@ actor YOLOModelManager {
                 try chunk.withUnsafeMutableBufferPointer { outPtr in
                     stream.next_out = outPtr.baseAddress
                     stream.avail_out = UInt32(chunkSize)
-
                     inflateRet = inflate(&stream, Z_FINISH)
                     produced = chunkSize - Int(stream.avail_out)
                 }
-                result.append(contentsOf: chunk.prefix(produced))
+                // Write produced bytes directly to file — no accumulation
+                if produced > 0 {
+                    try output.write(contentsOf: chunk[0..<produced])
+                }
 
                 switch inflateRet {
                 case Z_STREAM_END:
@@ -502,8 +542,7 @@ actor YOLOModelManager {
             }
         }
 
-        NSLog("[YOLOModel] inflate: done total_out=\(stream.total_out)")
-        return result
+        NSLog("[YOLOModel] streaming inflate: done total_out=\(stream.total_out)")
     }
 }
 

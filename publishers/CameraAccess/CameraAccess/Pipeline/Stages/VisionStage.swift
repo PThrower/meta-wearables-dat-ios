@@ -33,8 +33,8 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     // Confidence smoothing (EMA per tracked detection)
     private var confidenceSmoother = ConfidenceSmoother(alpha: 0.3)
 
-    // CIContext for thumbnail extraction (reused across frames, thread-confined to this actor)
-    private lazy var ciContext: CIContext = CIContext(options: [.useSoftwareRenderer: false])
+    // CIContext for thumbnail extraction (shared pipeline-wide, avoids duplicate Metal contexts)
+    private lazy var ciContext: CIContext = PipelineCIContext.shared
 
     // Built VNRequests (rebuilt when config changes)
     private var requests: [VNRequest] = []
@@ -166,8 +166,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
                CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
                                     kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
                let snap = snapshotBuffer {
-                let ciCtx = CIContext(options: [.useSoftwareRenderer: false])
-                ciCtx.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
+                PipelineCIContext.shared.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
                              bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
                              colorSpace: CGColorSpaceCreateDeviceRGB())
             }

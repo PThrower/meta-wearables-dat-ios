@@ -20,7 +20,7 @@ import Foundation
 
 final class FrameTransformStage: @unchecked Sendable {
     private var config: EnhanceStageConfig
-    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    private let ciContext = PipelineCIContext.shared
 
     // Per-stage metrics
     private var metricsTracker = StageMetricsTracker(stageId: "enhance", nodeType: "enhance-brightness")

@@ -134,7 +134,7 @@ actor RelayStage: @preconcurrency FramePipelineStage {
     init(config: FrameStageConfig = FrameStageConfig(targetFPS: 15), jpegQuality: CGFloat = 0.5) {
         self.config = config
         self.adaptiveQuality = jpegQuality
-        self.encoder = JPEGFrameEncoder(quality: jpegQuality)
+        self.encoder = JPEGFrameEncoder(ciContext: PipelineCIContext.shared, quality: jpegQuality)
     }
 
     func setPreviewBus(_ bus: PreviewBus) {

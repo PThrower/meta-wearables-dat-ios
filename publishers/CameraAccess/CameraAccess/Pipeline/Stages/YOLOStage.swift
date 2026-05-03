@@ -119,9 +119,12 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     func stop() async {
         lastProcessTime = nil
         confidenceSmoother.reset()
+        let modelId = yoloConfig.modelId
         mlModel = nil
         visionRequest = nil
-        NSLog("[YOLOStage] Stopped")
+        // Release model from YOLOModelManager in-memory cache
+        await modelManager.unloadModel(id: modelId)
+        NSLog("[YOLOStage] Stopped, unloaded model '\(modelId)' from cache")
     }
 
     // MARK: - Model Loading
