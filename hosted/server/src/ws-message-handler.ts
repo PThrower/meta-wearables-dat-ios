@@ -319,6 +319,7 @@ export async function handleWsMessage(
             dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
             dbWriter.flushNow();
           }
+          sendAllStageDisables(session);
           ws.send(JSON.stringify({ type: "app_status", appId: prevApp, status: "inactive" }));
           orchestrator.deactivateApp(sessionId).catch(() => {});
         } else if (cmd.type === "activate_workflow") {
@@ -551,6 +552,9 @@ export async function handleWsMessage(
               dbWriter.enqueue(q.deactivateActivation(sessionId, "publisher"));
               dbWriter.flushNow();
               sendAllStageDisables(session);
+              if (session.publisher?.ws?.readyState === 1) {
+                session.publisher.ws.send(JSON.stringify({ type: "app_status", appId: null, status: "inactive" }));
+              }
               broadcast(session, { type: "app_status", appId: null, status: "inactive" });
             }
           }
@@ -841,6 +845,9 @@ export async function handleWsMessage(
               dbWriter.enqueue(q.deactivateActivation(sessionId, "viewer"));
               dbWriter.flushNow();
               sendAllStageDisables(session);
+              if (session.publisher?.ws?.readyState === 1) {
+                session.publisher.ws.send(JSON.stringify({ type: "app_status", appId: null, status: "inactive" }));
+              }
               broadcast(session, { type: "app_status", appId: null, status: "inactive" });
             }
           }
