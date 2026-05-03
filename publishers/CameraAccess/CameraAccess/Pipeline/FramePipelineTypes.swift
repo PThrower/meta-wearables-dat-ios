@@ -92,11 +92,26 @@ enum PipelineCIContext {
 /// read pixel data must create its own snapshot in the `nonisolated processFrame`
 /// before hopping to actor isolation.
 ///
-/// Memory budget per snapshot (BGRA, 4 bytes/pixel):
-///   - 1920x1080 (full):   ~8.3 MB
-///   - 1280x720 (high):    ~3.7 MB
-///   - 960x540  (medium):  ~2.1 MB
-///   - 640x360  (low):     ~0.9 MB
+/// ## Source Resolutions
+///
+/// Frame dimensions are NOT known at compile time — they vary by source:
+///
+/// | Source | Config | Typical Resolution | BGRA Size |
+/// |--------|--------|--------------------|-----------|
+/// | Glasses (MWDAT SDK) | `StreamingResolution.high` | Varies by device | Unknown until first frame |
+/// | Glasses (MWDAT SDK) | `StreamingResolution.low/medium` | Varies by device | Smaller |
+/// | Phone camera | `AVCaptureSession.Preset.hd1280x720` | 1280x720 | 3.7 MB |
+///
+/// `createSnapshot` reads `CVPixelBufferGetWidth/Height` at runtime to compute
+/// output dimensions. The `.capped` sizing preserves aspect ratio regardless of
+/// source, so the same `SnapshotConfig.medium` works for any input resolution.
+///
+/// ## Memory Budget (BGRA, 4 bytes/pixel, 16:9 source at 1920x1080)
+///
+///   - `.full`:                1920x1080 = 8.3 MB
+///   - `.high` (capped 1280):  1280x720  = 3.7 MB
+///   - `.medium` (capped 960): 960x540   = 2.1 MB
+///   - `.low` (capped 640):    640x360   = 0.9 MB
 ///
 /// On 4GB devices (2GB per-process Jetsam limit), prefer `.medium` or `.low`
 /// for inference-only stages. Stages that extract thumbnails/embeddings from
@@ -108,7 +123,9 @@ struct SnapshotConfig: Sendable {
         case full
 
         /// Downscale so the longest dimension fits `maxDimension`, preserving aspect ratio.
-        /// E.g. maxDimension=960 on a 1920x1080 source produces 960x540.
+        /// Output dimensions are computed at runtime from the source pixel buffer.
+        /// E.g. maxDimension=960 on a 1280x720 source produces 960x540.
+        /// If source is already smaller than maxDimension, no upscaling occurs.
         case capped(maxDimension: Int)
 
         /// Fixed output size. The source image is rendered to exactly this size.
@@ -119,6 +136,24 @@ struct SnapshotConfig: Sendable {
 
     let sizing: Sizing
 
+    /// Compute output dimensions from source and sizing strategy.
+    /// Returns (width, height, isDownscaled) — pure function, no side effects.
+    nonisolated static func resolveDimensions(
+        srcWidth: Int, srcHeight: Int, sizing: Sizing
+    ) -> (width: Int, height: Int, downscaled: Bool) {
+        switch sizing {
+        case .full:
+            return (srcWidth, srcHeight, false)
+        case .capped(let maxDim):
+            let scale = min(Double(maxDim) / Double(srcWidth), Double(maxDim) / Double(srcHeight), 1.0)
+            let w = max(1, Int(Double(srcWidth) * scale))
+            let h = max(1, Int(Double(srcHeight) * scale))
+            return (w, h, scale < 1.0)
+        case .fixed(let w, let h):
+            return (w, h, w != srcWidth || h != srcHeight)
+        }
+    }
+
     /// Create a snapshot from a source pixel buffer using this configuration.
     /// Returns nil if the source is invalid or buffer allocation fails.
     /// Must be called from a nonisolated or synchronous context (same thread as frame arrival).
@@ -127,17 +162,9 @@ struct SnapshotConfig: Sendable {
         let srcHeight = CVPixelBufferGetHeight(source)
         guard srcWidth > 0, srcHeight > 0 else { return nil }
 
-        let (outWidth, outHeight): (Int, Int) = {
-            switch sizing {
-            case .full:
-                return (srcWidth, srcHeight)
-            case .capped(let maxDim):
-                let scale = min(Double(maxDim) / Double(srcWidth), Double(maxDim) / Double(srcHeight), 1.0)
-                return (max(1, Int(Double(srcWidth) * scale)), max(1, Int(Double(srcHeight) * scale)))
-            case .fixed(let w, let h):
-                return (w, h)
-            }
-        }()
+        let (outWidth, outHeight, _) = Self.resolveDimensions(
+            srcWidth: srcWidth, srcHeight: srcHeight, sizing: sizing
+        )
 
         var buffer: CVPixelBuffer?
         let attrs: [String: Any] = [
@@ -171,15 +198,18 @@ struct SnapshotConfig: Sendable {
     /// (thumbnails, embeddings, measurement).
     static let full = SnapshotConfig(sizing: .full)
 
-    /// High quality downscale (max 1280) — ~3.7MB for 16:9. Good balance for
-    /// stages that need detail but not full resolution.
+    /// High quality downscale (max 1280) — preserves aspect ratio.
+    /// ~3.7MB for a 16:9 source. Good balance for stages that need detail
+    /// but not full resolution.
     static let high = SnapshotConfig(sizing: .capped(maxDimension: 1280))
 
-    /// Medium quality downscale (max 960) — ~2.1MB for 16:9.
-    /// Recommended for inference stages (YOLO, Vision) on 4GB devices.
+    /// Medium quality downscale (max 960) — preserves aspect ratio.
+    /// ~2.1MB for a 16:9 source. Recommended for inference stages (YOLO, Vision)
+    /// on 4GB devices.
     static let medium = SnapshotConfig(sizing: .capped(maxDimension: 960))
 
-    /// Low quality downscale (max 640) — ~0.9MB for 16:9.
-    /// For lightweight stages where detection quality is less critical.
+    /// Low quality downscale (max 640) — preserves aspect ratio.
+    /// ~0.9MB for a 16:9 source. For lightweight stages where detection quality
+    /// is less critical.
     static let low = SnapshotConfig(sizing: .capped(maxDimension: 640))
 }
