@@ -20,11 +20,6 @@ const UNAVAILABLE_NODES: Record<string, AvailabilityEntry> = {
   "jepa-vision": { status: "unavailable", reason: "JEPA integration pending" },
   "jepa-trigger": { status: "unavailable", reason: "JEPA integration pending" },
   "gate-reid": { status: "unavailable", reason: "ReID embedding model pending" },
-  "palantir-ontology": { status: "unavailable", reason: "Palantir Foundry credentials pending" },
-  "palantir-aip": { status: "unavailable", reason: "Palantir Foundry credentials pending" },
-  "palantir-dataset": { status: "unavailable", reason: "Palantir Foundry credentials pending" },
-  "palantir-llm": { status: "unavailable", reason: "Palantir Foundry credentials pending" },
-  "palantir-action": { status: "unavailable", reason: "Palantir Foundry credentials pending" },
 };
 
 /** Check if a node type is available for use. */
