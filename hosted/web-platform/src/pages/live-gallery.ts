@@ -1,12 +1,12 @@
 /**
  * Command Center — operator dashboard for live streams.
  * Grid of stream cards (live video + per-stream telemetry) + right sidebar
- * with active workflows grouped by workflow ID.
+ * with active workflows grouped by workflow ID, showing per-node analytics.
  */
 
 import type { PageModule } from "../router/router.js";
-import { fetchSessions, fetchWorkflows, esc } from "../core/api-client.js";
-import type { SessionInfo } from "../core/api-client.js";
+import { fetchSessions, fetchWorkflows, fetchWorkflow, esc } from "../core/api-client.js";
+import type { SessionInfo, WorkflowDetail } from "../core/api-client.js";
 import { RelayPlayer } from "../player/relay-player.js";
 import { watchLive } from "../live/index.js";
 import { getToken } from "../auth.js";
@@ -19,6 +19,19 @@ const SIDEBAR_STORAGE_KEY = "cmd-sidebar-collapsed";
 const WORKFLOW_NAME_TTL_MS = 60_000;
 const HEARTBEAT_ALIVE_MS = 3_000;
 const HEARTBEAT_STALE_MS = 10_000;
+const FLASH_DURATION_MS = 600;
+const NODE_TICK_MS = 250;
+
+// Node types with no telemetry source — no firing signal exists
+const SILENT_TYPES = new Set([
+  "camera-source", "overlays", "phone-speaker", "glasses-speaker",
+  "tones", "local-tts", "debug-sink", "jepa-trigger", "timer-trigger", "conditional",
+]);
+
+interface NodeStat {
+  frames: number;
+  lastFiredAt: number;
+}
 
 interface SessionTelCache {
   fps: number;
@@ -28,12 +41,17 @@ interface SessionTelCache {
   aiLatencyMs: number;
   aiStatus: string;
   lastHeartbeat: number;
+  nodeStats: Map<string, NodeStat>;   // keyed by nodeType or nodeId (AI)
+  aiNodeStates: Map<string, string>;  // keyed by graph nodeId → execution state
 }
 
 let _container: HTMLElement | null = null;
 let _pollTimer: ReturnType<typeof setInterval> | null = null;
+let _flashTimer: ReturnType<typeof setInterval> | null = null;
 const _cards = new Map<string, StreamCard>();
 const _workflowNames = new Map<string, string>();
+const _workflowGraphs = new Map<string, WorkflowDetail>();
+const _workflowGraphsRefreshedAt = new Map<string, number>();
 let _workflowsRefreshedAt = 0;
 let _sidebarCollapsed = false;
 let _activeWorkflowFilter: string | null = null;
@@ -51,6 +69,7 @@ export const page: PageModule = {
     poll();
     startPolling();
     openAiLogWs();
+    _flashTimer = setInterval(tickFlash, NODE_TICK_MS);
     document.addEventListener("visibilitychange", onVisibilityChange);
   },
 
@@ -60,7 +79,10 @@ export const page: PageModule = {
     for (const card of _cards.values()) card.destroy();
     _cards.clear();
     closeAiLogWs();
+    if (_flashTimer) { clearInterval(_flashTimer); _flashTimer = null; }
     _sessionTelemetry.clear();
+    _workflowGraphs.clear();
+    _workflowGraphsRefreshedAt.clear();
     _lastSessions = [];
     _activeWorkflowFilter = null;
     _container = null;
@@ -154,7 +176,6 @@ async function poll(): Promise<void> {
   const cap = (typeof VideoDecoder !== "undefined") ? 6 : 2;
   const liveSet = new Set(sessions.slice(0, cap).map(s => s.sessionId));
 
-  // Add new + update existing
   const seen = new Set<string>();
   for (const s of sessions) {
     seen.add(s.sessionId);
@@ -168,12 +189,10 @@ async function poll(): Promise<void> {
       else if (!wantLive && existing.player) existing.downgradeToThumb();
     }
   }
-  // Remove gone
   for (const [id, card] of _cards) {
     if (!seen.has(id)) { card.destroy(); _cards.delete(id); }
   }
 
-  // Filter still valid?
   if (_activeWorkflowFilter && !sessions.some(s => s.activeWorkflowId === _activeWorkflowFilter)) {
     _activeWorkflowFilter = null;
   }
@@ -244,6 +263,9 @@ function renderSidebar(sessions: SessionInfo[]): void {
     return;
   }
 
+  // Trigger graph fetches for any unseen workflow IDs (fire-and-forget)
+  for (const wfId of groups.keys()) ensureWorkflowGraph(wfId);
+
   const now = Date.now();
   list.innerHTML = Array.from(groups.entries()).map(([wfId, sids]) => {
     const n = sids.length;
@@ -268,7 +290,6 @@ function renderSidebar(sessions: SessionInfo[]): void {
     }
 
     let metricsHtml = "";
-    let stagesHtml = "";
     if (hasTel) {
       const fpsVals = telItems.filter(t => t.fps > 0);
       const avgFps = fpsVals.length ? fpsVals.reduce((s, t) => s + t.fps, 0) / fpsVals.length : 0;
@@ -292,13 +313,9 @@ function renderSidebar(sessions: SessionInfo[]): void {
         <div class="cmd-wf-metric"><span class="k">AI</span><span class="v">${esc(aiLatStr)}</span></div>
         <span class="cmd-wf-status-badge ${aiStatusStr}">${aiStatusStr.toUpperCase()}</span>
       </div>`;
-
-      const allStages = Array.from(new Set(telItems.flatMap(t => t.stages)));
-      if (allStages.length > 0) {
-        const abbr = allStages.map(s => s.replace(/^[^-]+-/, "")).join(" · ");
-        stagesHtml = `<div class="cmd-wf-stages">${esc(abbr)}</div>`;
-      }
     }
+
+    const nodesHtml = buildNodesHtml(wfId, sids, now);
 
     return `<div class="cmd-workflow-row activity-item${isActive ? " is-active" : ""}" data-workflow-id="${esc(wfId)}">
       <div class="cmd-wf-header">
@@ -306,7 +323,7 @@ function renderSidebar(sessions: SessionInfo[]): void {
         <span class="activity-text">${esc(name)}</span>
         <span class="activity-time">${n} ${n === 1 ? "device" : "devices"}</span>
       </div>
-      ${metricsHtml}${stagesHtml}
+      ${metricsHtml}${nodesHtml}
     </div>`;
   }).join("");
 
@@ -319,7 +336,86 @@ function renderSidebar(sessions: SessionInfo[]): void {
   });
 }
 
-// ── Workflow name cache ────────────────────────────────────────────────────
+function buildNodesHtml(wfId: string, sids: string[], now: number): string {
+  const graph = _workflowGraphs.get(wfId);
+  if (!graph) return `<div class="cmd-wf-nodes-loading">Loading nodes…</div>`;
+  if (graph.nodes.length === 0) return "";
+
+  const rows = graph.nodes.map(node => {
+    let maxFiredAt = 0;
+    let totalFrames = 0;
+    let aiState = "";
+
+    for (const sid of sids) {
+      const tel = _sessionTelemetry.get(sid);
+      if (!tel) continue;
+      // Check by nodeType
+      const nsByType = tel.nodeStats.get(node.type);
+      if (nsByType) {
+        if (nsByType.lastFiredAt > maxFiredAt) maxFiredAt = nsByType.lastFiredAt;
+        totalFrames += nsByType.frames;
+      }
+      // Check by nodeId (AI processors)
+      const nsById = tel.nodeStats.get(node.id);
+      if (nsById && nsById.lastFiredAt > maxFiredAt) maxFiredAt = nsById.lastFiredAt;
+      // AI execution state
+      const state = tel.aiNodeStates.get(node.id);
+      if (state && state !== "pending" && state !== "skipped") aiState = state;
+    }
+
+    const hasFired = maxFiredAt > 0;
+    const isDim = SILENT_TYPES.has(node.type) && !hasFired;
+
+    let nodeDotClass = "hb-dead";
+    if (aiState === "running") {
+      nodeDotClass = "hb-live";
+    } else if (hasFired) {
+      const age = now - maxFiredAt;
+      if (age < HEARTBEAT_ALIVE_MS) nodeDotClass = "hb-live";
+      else if (age < HEARTBEAT_STALE_MS) nodeDotClass = "hb-stale";
+    }
+
+    const label = node.label || node.type.replace(/^[^-]+-/, "");
+    const rateStr = totalFrames > 0 ? `${totalFrames}/s` : "";
+    const ageStr = hasFired ? formatAge(now - maxFiredAt) : "";
+
+    return `<div class="cmd-wf-node${isDim ? " dim" : ""}" data-node-type="${esc(node.type)}" data-node-id="${esc(node.id)}"${hasFired ? ` data-fired-at="${maxFiredAt}"` : ""}>
+      <span class="cmd-wf-node-dot ${nodeDotClass}"></span>
+      <span class="cmd-wf-node-label">${esc(label)}</span>
+      ${rateStr ? `<span class="cmd-wf-node-rate">${esc(rateStr)}</span>` : ""}
+      <span class="cmd-wf-node-age">${esc(ageStr)}</span>
+    </div>`;
+  }).join("");
+
+  return `<div class="cmd-wf-nodes">${rows}</div>`;
+}
+
+function formatAge(ms: number): string {
+  if (ms < 1000) return "<1s";
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  return `${Math.round(ms / 60_000)}m`;
+}
+
+// ── Flash tick ─────────────────────────────────────────────────────────────
+
+function tickFlash(): void {
+  if (!_container) return;
+  const now = Date.now();
+  _container.querySelectorAll<HTMLElement>(".cmd-wf-node[data-fired-at]").forEach(el => {
+    const firedAt = Number(el.dataset.firedAt ?? 0);
+    if (firedAt === 0) return;
+    const age = now - firedAt;
+    if (age < FLASH_DURATION_MS) {
+      el.classList.add("firing");
+    } else {
+      el.classList.remove("firing");
+    }
+    const ageEl = el.querySelector<HTMLElement>(".cmd-wf-node-age");
+    if (ageEl) ageEl.textContent = formatAge(age);
+  });
+}
+
+// ── Workflow caches ────────────────────────────────────────────────────────
 
 async function refreshWorkflowNames(): Promise<void> {
   if (Date.now() - _workflowsRefreshedAt < WORKFLOW_NAME_TTL_MS) return;
@@ -330,12 +426,29 @@ async function refreshWorkflowNames(): Promise<void> {
   } catch {}
 }
 
+async function ensureWorkflowGraph(wfId: string): Promise<void> {
+  const last = _workflowGraphsRefreshedAt.get(wfId) ?? 0;
+  if (Date.now() - last < WORKFLOW_NAME_TTL_MS) return;
+  _workflowGraphsRefreshedAt.set(wfId, Date.now());
+  try {
+    const detail = await fetchWorkflow(wfId);
+    if (detail) {
+      _workflowGraphs.set(wfId, detail);
+      scheduleRenderSidebar();
+    }
+  } catch {}
+}
+
 // ── Telemetry store + AI log WS ───────────────────────────────────────────
 
 function ensureTelCache(sessionId: string): SessionTelCache {
   let t = _sessionTelemetry.get(sessionId);
   if (!t) {
-    t = { fps: 0, latencyMs: 0, detRate: 0, stages: [], aiLatencyMs: 0, aiStatus: "idle", lastHeartbeat: 0 };
+    t = {
+      fps: 0, latencyMs: 0, detRate: 0, stages: [],
+      aiLatencyMs: 0, aiStatus: "idle", lastHeartbeat: 0,
+      nodeStats: new Map(), aiNodeStates: new Map(),
+    };
     _sessionTelemetry.set(sessionId, t);
   }
   return t;
@@ -347,6 +460,29 @@ function scheduleRenderSidebar(): void {
   requestAnimationFrame(() => {
     _sidebarRafPending = false;
     renderSidebar(_lastSessions);
+  });
+}
+
+function touchNodeByType(wfId: string, nodeType: string): void {
+  const row = _container?.querySelector<HTMLElement>(`[data-workflow-id="${wfId}"]`);
+  const el = row?.querySelector<HTMLElement>(`.cmd-wf-node[data-node-type="${nodeType}"]`);
+  if (el) el.dataset.firedAt = String(Date.now());
+}
+
+function touchNodeById(wfId: string, nodeId: string, nodeType?: string): void {
+  const row = _container?.querySelector<HTMLElement>(`[data-workflow-id="${wfId}"]`);
+  if (!row) return;
+  let el = row.querySelector<HTMLElement>(`.cmd-wf-node[data-node-id="${nodeId}"]`);
+  if (!el && nodeType) el = row.querySelector<HTMLElement>(`.cmd-wf-node[data-node-type="${nodeType}"]`);
+  if (el) el.dataset.firedAt = String(Date.now());
+}
+
+function touchNodesByTypePrefix(wfId: string, prefix: string): void {
+  const row = _container?.querySelector<HTMLElement>(`[data-workflow-id="${wfId}"]`);
+  if (!row) return;
+  const now = String(Date.now());
+  row.querySelectorAll<HTMLElement>(".cmd-wf-node").forEach(el => {
+    if ((el.dataset.nodeType ?? "").startsWith(prefix)) el.dataset.firedAt = now;
   });
 }
 
@@ -362,13 +498,55 @@ function openAiLogWs(): void {
         const sid = msg.sessionId as string | undefined;
         if (!sid) return;
         const tel = ensureTelCache(sid);
+        const wfId = _lastSessions.find(s => s.sessionId === sid)?.activeWorkflowId;
+
         if (msg.type === "ai_telemetry") {
           const td = msg.telemetry as Record<string, unknown> | undefined;
           if (typeof td?.avgLatencyMs === "number") tel.aiLatencyMs = td.avgLatencyMs as number;
         } else if (msg.type === "ai_status") {
           const s = String(msg.status ?? "");
           tel.aiStatus = s === "active" || s === "error" ? s : "idle";
+        } else if (msg.type === "node_states") {
+          const nodes = msg.nodes as Array<Record<string, unknown>> | undefined;
+          if (Array.isArray(nodes)) {
+            for (const n of nodes) {
+              const nodeId = String(n.nodeId ?? "");
+              const state = String(n.state ?? "");
+              if (nodeId && state) {
+                tel.aiNodeStates.set(nodeId, state);
+                if (wfId && (state === "running" || state === "completed")) {
+                  const nodeType = n.nodeType ? String(n.nodeType) : undefined;
+                  const ns = tel.nodeStats.get(nodeId) ?? { frames: 0, lastFiredAt: 0 };
+                  ns.lastFiredAt = Date.now();
+                  tel.nodeStats.set(nodeId, ns);
+                  touchNodeById(wfId, nodeId, nodeType);
+                }
+              }
+            }
+            tel.lastHeartbeat = Date.now();
+            scheduleRenderSidebar();
+            return;
+          }
+        } else if (msg.type === "guidance_event") {
+          const eventObj = msg.event as Record<string, unknown> | undefined;
+          const source = eventObj?.source as string | undefined;
+          if (source && wfId) {
+            const graph = _workflowGraphs.get(wfId);
+            const graphNode = graph?.nodes.find(n => n.id === source);
+            const nodeType = graphNode?.type;
+            const fireTime = Date.now();
+            const ns = tel.nodeStats.get(source) ?? { frames: 0, lastFiredAt: 0 };
+            ns.lastFiredAt = fireTime;
+            tel.nodeStats.set(source, ns);
+            if (nodeType) {
+              const nsT = tel.nodeStats.get(nodeType) ?? { frames: 0, lastFiredAt: 0 };
+              nsT.lastFiredAt = fireTime;
+              tel.nodeStats.set(nodeType, nsT);
+            }
+            touchNodeById(wfId, source, nodeType);
+          }
         }
+
         tel.lastHeartbeat = Date.now();
         scheduleRenderSidebar();
       } catch {}
@@ -405,7 +583,6 @@ class StreamCard {
     this.el.dataset.sessionId = session.sessionId;
     this.renderShell();
     this.el.addEventListener("click", (e) => {
-      // Don't navigate if user clicked something interactive inside
       if ((e.target as HTMLElement).closest("button")) return;
       watchLive(session.sessionId);
     });
@@ -566,13 +743,30 @@ class StreamCard {
   private handleJson(msg: Record<string, unknown>): void {
     const sid = this.session.sessionId;
     const tel = ensureTelCache(sid);
+    const wfId = this.session.activeWorkflowId;
+
     if (msg.type === "stage_telemetry") {
       const stgs = msg.stages as Array<Record<string, unknown>> | undefined;
-      if (Array.isArray(stgs)) tel.stages = stgs.map(s => String(s.nodeType ?? s.stageId ?? "")).filter(Boolean);
+      if (Array.isArray(stgs)) {
+        const types: string[] = [];
+        const fireTime = Date.now();
+        for (const s of stgs) {
+          const nodeType = String(s.nodeType ?? s.stageId ?? "");
+          if (!nodeType) continue;
+          types.push(nodeType);
+          const frames = typeof s.frames === "number" ? (s.frames as number) : 0;
+          if (frames > 0) {
+            tel.nodeStats.set(nodeType, { frames, lastFiredAt: fireTime });
+            if (wfId) touchNodeByType(wfId, nodeType);
+          }
+        }
+        tel.stages = types;
+      }
       tel.lastHeartbeat = Date.now();
       scheduleRenderSidebar();
       return;
     }
+
     if (msg.type === "publisher_telemetry") {
       const frame = msg.frame as Record<string, unknown> | undefined;
       if (typeof frame?.fps === "number") tel.fps = frame.fps as number;
@@ -582,6 +776,7 @@ class StreamCard {
       scheduleRenderSidebar();
       return;
     }
+
     if (msg.type === "ai_telemetry") {
       const td = msg.telemetry as Record<string, unknown> | undefined;
       if (typeof td?.avgLatencyMs === "number") tel.aiLatencyMs = td.avgLatencyMs as number;
@@ -589,6 +784,7 @@ class StreamCard {
       scheduleRenderSidebar();
       return;
     }
+
     if (msg.type === "ai_status") {
       const s = String(msg.status ?? "");
       tel.aiStatus = s === "active" || s === "error" ? s : "idle";
@@ -596,13 +792,111 @@ class StreamCard {
       scheduleRenderSidebar();
       return;
     }
-    if (msg.type !== "guidance_event") return;
-    tel.lastHeartbeat = Date.now();
-    const payload = msg.payload as Record<string, unknown> | undefined;
-    const bboxes = (payload?.bbox ?? payload?.boundingBoxes) as unknown[] | undefined;
-    const count = Array.isArray(bboxes) ? bboxes.length : 1;
-    const now = Date.now();
-    for (let i = 0; i < count; i++) this.detectionWindow.push(now);
+
+    if (msg.type === "node_states") {
+      const nodes = msg.nodes as Array<Record<string, unknown>> | undefined;
+      if (Array.isArray(nodes)) {
+        for (const n of nodes) {
+          const nodeId = String(n.nodeId ?? "");
+          const state = String(n.state ?? "");
+          if (nodeId && state) {
+            tel.aiNodeStates.set(nodeId, state);
+            if (wfId && (state === "running" || state === "completed")) {
+              const nodeType = n.nodeType ? String(n.nodeType) : undefined;
+              const ns = tel.nodeStats.get(nodeId) ?? { frames: 0, lastFiredAt: 0 };
+              ns.lastFiredAt = Date.now();
+              tel.nodeStats.set(nodeId, ns);
+              touchNodeById(wfId, nodeId, nodeType);
+            }
+          }
+        }
+      }
+      tel.lastHeartbeat = Date.now();
+      scheduleRenderSidebar();
+      return;
+    }
+
+    if (msg.type === "vision_result") {
+      const fireTime = Date.now();
+      // Touch all vision-* nodes (can't discriminate which one without nodeId)
+      tel.stages.filter(s => s.startsWith("vision-")).forEach(t => {
+        tel.nodeStats.set(t, { frames: tel.nodeStats.get(t)?.frames ?? 0, lastFiredAt: fireTime });
+      });
+      if (wfId) touchNodesByTypePrefix(wfId, "vision-");
+      return;
+    }
+
+    if (msg.type === "tool_measure_result") {
+      const fireTime = Date.now();
+      tel.nodeStats.set("vision-tool-measure", { frames: tel.nodeStats.get("vision-tool-measure")?.frames ?? 0, lastFiredAt: fireTime });
+      if (wfId) touchNodeByType(wfId, "vision-tool-measure");
+      return;
+    }
+
+    if (msg.type === "yolo_result") {
+      const task = String(msg.task ?? "detect");
+      const nodeType = `yolo-${task}`;
+      const fireTime = Date.now();
+      tel.nodeStats.set(nodeType, { frames: tel.nodeStats.get(nodeType)?.frames ?? 0, lastFiredAt: fireTime });
+      if (wfId) touchNodeByType(wfId, nodeType);
+      return;
+    }
+
+    if (msg.type === "tracking_result") {
+      const fireTime = Date.now();
+      tel.stages.filter(s => s.startsWith("tracking-")).forEach(t => {
+        tel.nodeStats.set(t, { frames: tel.nodeStats.get(t)?.frames ?? 0, lastFiredAt: fireTime });
+      });
+      if (wfId) touchNodesByTypePrefix(wfId, "tracking-");
+      return;
+    }
+
+    if (msg.type === "stt_result") {
+      const fireTime = Date.now();
+      tel.nodeStats.set("mobile-stt", { frames: tel.nodeStats.get("mobile-stt")?.frames ?? 0, lastFiredAt: fireTime });
+      if (wfId) touchNodeByType(wfId, "mobile-stt");
+      return;
+    }
+
+    if (msg.type === "vad_result") {
+      const fireTime = Date.now();
+      tel.nodeStats.set("vad", { frames: tel.nodeStats.get("vad")?.frames ?? 0, lastFiredAt: fireTime });
+      if (wfId) touchNodeByType(wfId, "vad");
+      return;
+    }
+
+    if (msg.type === "sensor_result") {
+      const sensorType = String((msg as Record<string, unknown>).sensorType ?? "sensor-sound");
+      const fireTime = Date.now();
+      tel.nodeStats.set(sensorType, { frames: tel.nodeStats.get(sensorType)?.frames ?? 0, lastFiredAt: fireTime });
+      if (wfId) touchNodeByType(wfId, sensorType);
+      return;
+    }
+
+    if (msg.type === "guidance_event") {
+      tel.lastHeartbeat = Date.now();
+      const eventObj = msg.event as Record<string, unknown> | undefined;
+      const source = eventObj?.source as string | undefined;
+      const fireTime = Date.now();
+      if (source && wfId) {
+        const graph = _workflowGraphs.get(wfId);
+        const graphNode = graph?.nodes.find(n => n.id === source);
+        const nodeType = graphNode?.type;
+        const ns = tel.nodeStats.get(source) ?? { frames: 0, lastFiredAt: 0 };
+        ns.lastFiredAt = fireTime;
+        tel.nodeStats.set(source, ns);
+        if (nodeType) {
+          const nsT = tel.nodeStats.get(nodeType) ?? { frames: 0, lastFiredAt: 0 };
+          nsT.lastFiredAt = fireTime;
+          tel.nodeStats.set(nodeType, nsT);
+        }
+        touchNodeById(wfId, source, nodeType);
+      }
+      const payload = msg.payload as Record<string, unknown> | undefined;
+      const bboxes = (payload?.bbox ?? payload?.boundingBoxes) as unknown[] | undefined;
+      const count = Array.isArray(bboxes) ? bboxes.length : 1;
+      for (let i = 0; i < count; i++) this.detectionWindow.push(fireTime);
+    }
   }
 
   private decayDetections(): void {

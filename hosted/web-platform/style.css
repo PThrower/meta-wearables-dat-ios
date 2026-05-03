@@ -5159,6 +5159,20 @@ select.wf-settings-input { appearance: none; cursor: pointer; }
 .cmd-wf-status-badge.idle { background: var(--bg-surface-alt); color: var(--text-tertiary); }
 .cmd-wf-status-badge.error { background: rgba(239,68,68,0.15); color: var(--accent-red); }
 .cmd-wf-stages { font-size: 10px; color: var(--text-tertiary); padding: 2px 0 4px 16px; font-family: 'SF Mono', Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmd-wf-nodes { padding: 2px 0 4px 0; }
+.cmd-wf-nodes-loading { font-size: 10px; color: var(--text-tertiary); padding: 3px 6px 4px 16px; font-style: italic; }
+.cmd-wf-node { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 16px; border-radius: 3px; }
+.cmd-wf-node.dim { opacity: 0.35; }
+@keyframes cmd-node-glow { 0% { background: rgba(74,222,128,0.18); } 100% { background: transparent; } }
+.cmd-wf-node.firing { animation: cmd-node-glow 0.6s ease-out forwards; }
+.cmd-wf-node-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.cmd-wf-node-dot.hb-live  { background: var(--accent-green); }
+.cmd-wf-node-dot.hb-stale { background: var(--accent-yellow); }
+.cmd-wf-node-dot.hb-dead  { background: var(--text-tertiary); }
+.cmd-wf-node-label { flex: 1; font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'SF Mono', Menlo, monospace; min-width: 0; }
+.cmd-wf-node.dim .cmd-wf-node-label { color: var(--text-tertiary); }
+.cmd-wf-node-rate { font-size: 9px; font-weight: 700; color: var(--accent-green); font-family: 'SF Mono', Menlo, monospace; flex-shrink: 0; }
+.cmd-wf-node-age { font-size: 9px; color: var(--text-tertiary); font-family: 'SF Mono', Menlo, monospace; flex-shrink: 0; min-width: 22px; text-align: right; }
 .activity-dot.hb-live  { background: var(--accent-green); }
 .activity-dot.hb-stale { background: var(--accent-yellow); }
 .activity-dot.hb-dead  { background: var(--text-tertiary); }
