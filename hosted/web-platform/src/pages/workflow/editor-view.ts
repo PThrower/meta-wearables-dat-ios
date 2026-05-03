@@ -8,6 +8,7 @@ import {
   activateWorkflow, fetchSessions, fetchDevices, esc,
   wakeDevice, startStream, stopStream,
 } from "../../core/api-client.js";
+import type { SessionState } from "../../core/api-client.js";
 import {
   getContainer, getWorkflow, setWorkflow,
   isDirty, setDirty, setViewX, setViewY, setZoom,
@@ -686,8 +687,7 @@ async function refreshTestingPanel(): Promise<void> {
   const body = getContainer()?.querySelector("#wf-testing-body");
   if (!body) return;
 
-  const [devices, sessions] = await Promise.all([fetchDevices(), fetchSessions()]);
-  const liveSessions = sessions.filter(s => s.live);
+  const devices = await fetchDevices();
   const workflow = getWorkflow();
 
   if (devices.length === 0) {
@@ -696,27 +696,40 @@ async function refreshTestingPanel(): Promise<void> {
   }
 
   body.innerHTML = devices.map(d => {
-    // Match device to live session via metadata.deviceId
-    const session = liveSessions.find(s => s.device?.deviceId === d.device_id);
-    const isOnline = !!session;
-    const isStreaming = isOnline && session!.publisherStandby === false;
-    const isStandby = isOnline && session!.publisherStandby !== false;
-    const activeWf = session?.activeWorkflowId;
+    // Server now provides session state directly on each device
+    const sState = (d.sessionState ?? null) as SessionState | null;
+    const isOnline = !!d.online && sState !== null;
+    const isStreaming = sState === "active";
+    const isStandby = sState === "standby" || sState === "paused";
+    const isOrphaned = sState === "orphaned";
+    const isCreated = sState === "created";
+    const activeWf = d.activeWorkflowId ?? null;
     const isActivated = activeWf === workflow?.id;
+    const sessionId = d.sessionId ?? "";
 
-    const onlineBadge = isOnline
-      ? (isStreaming
-        ? '<span class="wf-testing-badge wf-testing-badge-streaming">Streaming</span>'
-        : '<span class="wf-testing-badge wf-testing-badge-standby">Standby</span>')
-      : '<span class="wf-testing-badge wf-testing-badge-offline">Offline</span>';
+    // Derive display state label from server session state
+    let stateBadge: string;
+    if (!isOnline) {
+      stateBadge = '<span class="wf-testing-badge wf-testing-badge-offline">Offline</span>';
+    } else if (isOrphaned) {
+      stateBadge = '<span class="wf-testing-badge wf-testing-badge-offline" style="border-color:rgba(251,191,36,0.5);color:#fbbf24">Orphaned</span>';
+    } else if (isCreated) {
+      stateBadge = '<span class="wf-testing-badge wf-testing-badge-standby" style="border-color:rgba(96,165,250,0.5);color:#60a5fa">Connecting</span>';
+    } else if (isStreaming) {
+      stateBadge = '<span class="wf-testing-badge wf-testing-badge-streaming">Streaming</span>';
+    } else if (isStandby) {
+      stateBadge = '<span class="wf-testing-badge wf-testing-badge-standby">Standby</span>';
+    } else {
+      stateBadge = `<span class="wf-testing-badge wf-testing-badge-offline">${esc(sState ?? "unknown")}</span>`;
+    }
     const activatedBadge = isActivated
       ? '<span class="wf-testing-badge wf-testing-badge-activated">Activated</span>'
       : '';
 
-    // Button states: Stream is independent of activation — just needs publisher connected
+    // Button states
     const canWake = !isOnline && !!d.apnsToken;
-    const canActivate = isOnline && !isActivated;
-    const canStartStream = isOnline && !isStreaming;
+    const canActivate = isOnline && !isOrphaned && !isActivated && !isCreated;
+    const canStartStream = isOnline && !isStreaming && !isOrphaned && !isCreated;
     const canStopStream = isStreaming;
 
     return `
@@ -728,18 +741,18 @@ async function refreshTestingPanel(): Promise<void> {
           </div>
         </div>
         <div class="wf-testing-device-status">
-          ${onlineBadge} ${activatedBadge}
+          ${stateBadge} ${activatedBadge}
         </div>
         <div class="wf-testing-device-actions">
           <button class="btn wf-test-wake" data-device-id="${d.device_id}" ${canWake ? "" : "disabled"}>Wake</button>
           ${isActivated
-            ? `<button class="btn wf-test-deactivate" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop</button>
-               <button class="btn wf-test-rerun" data-session-id="${session!.sessionId}">Re-run</button>`
-            : `<button class="btn wf-test-activate" data-session-id="${session?.sessionId ?? ""}" ${canActivate ? "" : "disabled"}>Activate</button>`
+            ? `<button class="btn wf-test-deactivate" data-session-id="${sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop</button>
+               <button class="btn wf-test-rerun" data-session-id="${sessionId}">Re-run</button>`
+            : `<button class="btn wf-test-activate" data-session-id="${sessionId}" ${canActivate ? "" : "disabled"}>Activate</button>`
           }
           ${canStopStream
-            ? `<button class="btn wf-test-stop-stream" data-session-id="${session!.sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop Stream</button>`
-            : `<button class="btn wf-test-start-stream" data-session-id="${session?.sessionId ?? ""}" ${canStartStream ? "" : "disabled"}>Stream</button>`
+            ? `<button class="btn wf-test-stop-stream" data-session-id="${sessionId}" style="border-color:rgba(248,113,113,0.4)">Stop Stream</button>`
+            : `<button class="btn wf-test-start-stream" data-session-id="${sessionId}" ${canStartStream ? "" : "disabled"}>Stream</button>`
           }
         </div>
       </div>
@@ -836,7 +849,7 @@ async function refreshTestingPanel(): Promise<void> {
   });
 }
 
-/** Start auto-refresh polling for the testing panel (every 15s). */
+/** Start auto-refresh polling for the testing panel (every 8s). */
 function startTestingPoll(): void {
   stopTestingPoll();
   _testingPollTimer = setInterval(() => {
@@ -844,7 +857,7 @@ function startTestingPoll(): void {
     if (panel && panel.style.display !== "none") {
       refreshTestingPanel();
     }
-  }, 15_000);
+  }, 8_000);
 }
 
 /** Stop testing panel auto-refresh. */

@@ -533,8 +533,9 @@ const server = Bun.serve<WsData>({
         ...active.map(s => ({
           id: s.id,
           live: true,
+          state: s.state,
           publisherConnected: s.publisherConnected,
-          publisherStandby: (registry.get(s.id)?.publisher?.standby ?? true) as boolean,
+          publisherStandby: s.publisherStandby,
           viewerCount: s.viewerCount,
           metadata: s.metadata,
           uptimeMs: s.uptimeMs,
@@ -693,30 +694,40 @@ const server = Bun.serve<WsData>({
     if (url.pathname === "/api/registered-devices" && req.method === "GET") {
       const dbDevices = q.listAllDevices();
 
-      // Cross-reference with active sessions to determine online status + lastSeen
+      // Cross-reference with active sessions to determine online status + lastSeen + session state
       const activeSessions = registry.listActive();
-      const onlineDeviceIds = new Set<string>();
+      const deviceSessions = new Map<string, typeof activeSessions[number]>();
       const deviceLastSeen = new Map<string, string>();
       for (const s of activeSessions) {
-        if (s.publisherConnected && s.metadata.deviceId) {
-          onlineDeviceIds.add(s.metadata.deviceId);
-          deviceLastSeen.set(s.metadata.deviceId, new Date().toISOString());
+        if (s.metadata.deviceId) {
+          deviceSessions.set(s.metadata.deviceId, s);
+          if (s.publisherConnected) {
+            deviceLastSeen.set(s.metadata.deviceId, new Date().toISOString());
+          }
         }
       }
 
-      const devices = dbDevices.map(d => ({
-        device_id: d.id,
-        deviceName: d.name,
-        deviceModel: d.model,
-        systemVersion: d.systemVersion,
-        wearableType: d.wearableType,
-        appVersion: d.appVersion,
-        buildNumber: d.buildNumber,
-        battery: d.batteryLevel,
-        online: onlineDeviceIds.has(d.id),
-        lastSeen: deviceLastSeen.get(d.id) ?? d.lastSeenAt,
-        apnsToken: d.hasApnsToken ? "registered" : null,
-      }));
+      const devices = dbDevices.map(d => {
+        const session = deviceSessions.get(d.id);
+        const online = !!session && session.publisherConnected;
+        return {
+          device_id: d.id,
+          deviceName: d.name,
+          deviceModel: d.model,
+          systemVersion: d.systemVersion,
+          wearableType: d.wearableType,
+          appVersion: d.appVersion,
+          buildNumber: d.buildNumber,
+          battery: d.batteryLevel,
+          online,
+          sessionState: session?.state ?? null,
+          sessionId: session?.id ?? null,
+          publisherStandby: session?.publisherStandby ?? null,
+          activeWorkflowId: session?.activeWorkflowId ?? null,
+          lastSeen: deviceLastSeen.get(d.id) ?? d.lastSeenAt,
+          apnsToken: d.hasApnsToken ? "registered" : null,
+        };
+      });
       return Response.json({ devices });
     }
 

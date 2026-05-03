@@ -19,9 +19,19 @@ export interface StatsResponse {
   guidance_events?: number;
 }
 
+export type SessionState =
+  | "created"    // In-memory, no publisher yet
+  | "standby"    // Publisher connected, not streaming
+  | "active"     // Publisher streaming frames
+  | "paused"     // Publisher went standby, resources released
+  | "orphaned"   // Publisher disconnected, viewers remain
+  | "ended"      // Clean shutdown, all gone
+  | "expired";   // Timeout cleanup
+
 export interface SessionInfo {
   sessionId: string;
   live: boolean;
+  state?: SessionState;
   startedAt?: string;
   endedAt?: string;
   durationMs?: number;
@@ -61,6 +71,10 @@ export interface DeviceInfo {
   apnsToken?: string;
   lastSeen?: string;
   online?: boolean;
+  sessionState?: SessionState | null;
+  sessionId?: string | null;
+  publisherStandby?: boolean | null;
+  activeWorkflowId?: string | null;
   battery?: number;
   storage?: { used: number; total: number };
   signalStrength?: number;
@@ -198,6 +212,7 @@ export function fetchSessions(): Promise<SessionInfo[]> {
       return {
         sessionId: (s.id ?? s.sessionId) as string,
         live: s.live as boolean,
+        state: s.state as SessionState | undefined,
         startedAt: (s.startedAt ?? meta?.startedAt) as string | undefined,
         device: meta
           ? { deviceId: meta.deviceId, deviceName: meta.deviceName, deviceModel: meta.deviceModel, wearableType: meta.wearableType }
