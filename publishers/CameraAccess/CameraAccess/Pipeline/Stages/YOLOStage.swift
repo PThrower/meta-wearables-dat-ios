@@ -185,8 +185,10 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
             await onModelState?(.ready(modelId: modelId, resources: resources))
             NSLog("[YOLOStage] Model loaded: \(modelId), format=\(outputFormat), disk=\(String(format: "%.1f", resources.diskSizeMB))MB, classes=\(resources.classCount)")
         } catch {
-            await onModelState?(.failed(modelId: modelId, error: error.localizedDescription))
-            NSLog("[YOLOStage] Model load failed: \(error)")
+            let desc = error.localizedDescription
+            NSLog("[YOLOStage] ❌ Model load failed for '\(modelId)': \(desc)")
+            NSLog("[YOLOStage] Error type: \(type(of: error)) — full: \(error)")
+            await onModelState?(.failed(modelId: modelId, error: desc))
         }
     }
 

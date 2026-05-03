@@ -31,6 +31,9 @@ final class PipelineStore {
 
   var isYoloConfigured: Bool { yoloStage != nil }
 
+  /// Called when any pipeline stage encounters a fatal error that should be shown to the user.
+  var onError: ((String) -> Void)?
+
   // MARK: - Pipeline Stage References
 
   private let pipeline: FramePipelineManager
@@ -235,6 +238,8 @@ final class PipelineStore {
           "stage": "yolo",
           "modelId": modelId,
         ])
+        let message = "YOLO model failed to load (\(modelId)): \(error)"
+        await MainActor.run { self?.onError?(message) }
       }
     }
 

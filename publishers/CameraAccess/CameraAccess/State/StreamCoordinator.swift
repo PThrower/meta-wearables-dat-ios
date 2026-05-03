@@ -192,6 +192,13 @@ final class StreamCoordinator {
       }
       .store(in: &cancellables)
 
+    // Surface YOLO model failures as user-visible alerts
+    pipeline.onError = { [weak self] message in
+      Task { @MainActor [weak self] in
+        self?.errors.present(message)
+      }
+    }
+
     // Monitor device availability
     deviceMonitorTask = Task { @MainActor [weak self] in
       guard let self else { return }

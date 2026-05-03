@@ -779,18 +779,23 @@ export async function handleWorkflowActivation(
 
   // 10. Fire-and-forget: send YOLO CoreML config to iOS
   if (yoloIdx.length > 0) {
+    const sentModelIds: string[] = [];
     for (const i of yoloIdx) {
       const rawNode = rawNodeByAppId.get(appsToActivate[i].id);
-      if (!rawNode) continue;
+      if (!rawNode) {
+        console.error(`[relay] YOLO node at index ${i} missing rawNode — skipped, session=${sid}`);
+        continue;
+      }
       const rawConfig = (rawNode.config ?? {}) as Record<string, unknown>;
       const yoloTask = rawNode.type === "yolo-segment" ? "segment"
         : rawNode.type === "yolo-pose" ? "pose"
         : "detect";
+      const modelId = (rawConfig.modelId as string) ?? "yolo11n";
       const yoloConfig = {
         type: "yolo_stage_config" as const,
         enabled: true,
         task: yoloTask,
-        modelId: (rawConfig.modelId as string) ?? "yolo11n",
+        modelId,
         modelUrl: rawConfig.modelUrl as string | undefined,
         confidence: (rawConfig.confidence as number) ?? 0.25,
         iouThreshold: (rawConfig.iouThreshold as number) ?? 0.45,
@@ -801,10 +806,15 @@ export async function handleWorkflowActivation(
       };
       if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
         session.publisher.ws.send(JSON.stringify(yoloConfig));
+        sentModelIds.push(modelId);
+      } else {
+        console.warn(`[relay] YOLO config not sent — publisher WS not open (model=${modelId}) session=${sid}`);
       }
       activatedAppIds.push(appsToActivate[i].id);
     }
-    console.log(`[relay] Sent YOLO config for ${yoloIdx.length} nodes session=${sid}`);
+    if (sentModelIds.length > 0) {
+      console.log(`[relay] Sent YOLO config for ${sentModelIds.length} nodes (${sentModelIds.join(", ")}) session=${sid}`);
+    }
   }
 
   const cachedFrame = registry.getLastFrame(body.sessionId);
