@@ -796,7 +796,7 @@ export async function handleWorkflowActivation(
         enabled: true,
         task: yoloTask,
         modelId,
-        modelUrl: rawConfig.modelUrl as string | undefined,
+        modelUrl: (NODE_DEF_MAP.get(rawNode.type)?.defaultConfig as Record<string, unknown> | undefined)?.modelUrl as string | undefined,
         confidence: (rawConfig.confidence as number) ?? 0.25,
         iouThreshold: (rawConfig.iouThreshold as number) ?? 0.45,
         targetFPS: (rawConfig.targetFPS as number) ?? 10,
