@@ -874,9 +874,10 @@ export class SessionRegistry {
           continue;
         }
 
-        // Standby or paused publishers: skip frame-based stale eviction entirely.
+        // Standby or paused publishers with an active connection: skip frame-based stale eviction.
         // The WebSocket ping keepalive handles transport liveness; Bun's idleTimeout (120s) handles transport cleanup.
-        if (session.state === "standby" || session.state === "paused") {
+        // A standby session with no publisher (publisher === null) is a dead session and falls through to TTL eviction.
+        if ((session.state === "standby" || session.state === "paused") && session.publisher !== null) {
           continue;
         }
 
@@ -1008,7 +1009,7 @@ export class SessionRegistry {
       id: s.id,
       state: s.state,
       publisherConnected: s.publisher !== null,
-      publisherStandby: s.publisher?.standby ?? true,
+      publisherStandby: s.publisher?.standby ?? false,
       viewerCount: s.viewers.size,
       metadata: s.metadata,
       uptimeMs: now - s.createdAt,

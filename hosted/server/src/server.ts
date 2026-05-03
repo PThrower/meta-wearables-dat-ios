@@ -524,7 +524,7 @@ const server = Bun.serve<WsData>({
 
     if (url.pathname === "/sessions") {
       // Only show sessions that have (or had) a publisher — skip phantom sessions
-      const active = registry.listActive().filter(s => s.publisherConnected || s.metadata.deviceName);
+      const active = registry.listActive().filter(s => s.publisherConnected);
 
       const historicalSessionIds = await sessionStore.getSessionIds();
 
@@ -1164,7 +1164,7 @@ const server = Bun.serve<WsData>({
 
     // GET /sessions/active — active session detail with device info + workflow
     if (url.pathname === "/sessions/active") {
-      const active = registry.listActive().filter(s => s.publisherConnected || s.metadata.deviceName);
+      const active = registry.listActive().filter(s => s.publisherConnected);
       const detailed = active.map(s => {
         const session = registry.get(s.id);
         const pub = session?.publisher;
