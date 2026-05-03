@@ -15,6 +15,7 @@
 //
 
 import AVFoundation
+import Combine
 import MediaPlayer
 import MWDATCamera
 import MWDATCore
@@ -163,8 +164,10 @@ class StreamSessionViewModel: ObservableObject {
   private var activeWearableId: DeviceIdentifier?
   private var activeWearableType: String?
 
-  // The core DAT SDK StreamSession - handles all streaming operations
-  private var streamSession: StreamSession
+  // DAT SDK 0.6.0: StreamSession is now created lazily via DeviceSession.addStream(config:)
+  private var streamSession: StreamSession?
+  // DeviceSessionManager handles DeviceSession lifecycle (0.6.0+)
+  private let sessionManager: DeviceSessionManager
   // Listener tokens for non-video-frame subscriptions (state, error, photo)
   private var stateListenerToken: AnyListenerToken?
   private var errorListenerToken: AnyListenerToken?
@@ -243,10 +246,10 @@ class StreamSessionViewModel: ObservableObject {
     self.telemetryService = telemetryService
     // Start with auto-select
     self.currentSelector = AutoDeviceSelector(wearables: wearables)
-    self.streamSession = StreamSession(
-      streamSessionConfig: StreamSessionConfig(videoCodec: .raw, resolution: .high, frameRate: 30),
-      deviceSelector: currentSelector
-    )
+
+    // DAT SDK 0.6.0: DeviceSessionManager owns the DeviceSession lifecycle.
+    // StreamSession is created lazily via deviceSession.addStream(config:) in startSession().
+    self.sessionManager = DeviceSessionManager(wearables: wearables, selector: currentSelector)
 
     // Wire decoupled audio pipeline before display stage closure captures self:
     //   AudioStage(builtIn) -> AudioEventBus -> AudioRelayStage -> RelayStage -> WebSocket
@@ -302,9 +305,10 @@ class StreamSessionViewModel: ObservableObject {
       #endif
     }
 
-    setupSessionListeners()
-    attachPipeline()
-    telemetryService?.attachToStreamSession(streamSession)
+    // Forward DeviceSessionManager state to SwiftUI bindings
+    sessionManager.$hasActiveDevice
+      .receive(on: DispatchQueue.main)
+      .assign(to: &$hasActiveDevice)
 
     // Monitor device availability and capture wearable identity for auto-select
     deviceMonitorTask = Task { @MainActor [weak self] in
@@ -317,8 +321,6 @@ class StreamSessionViewModel: ObservableObject {
         }
       }
     }
-
-    updateStatusFromState(streamSession.state)
 
     // Wire phone camera device provider for telemetry camera metrics
     self.telemetryService?.phoneCameraDeviceProvider = { [weak self] in
@@ -350,11 +352,15 @@ class StreamSessionViewModel: ObservableObject {
       NSLog("[StreamSession] Using auto device selector")
     }
 
-    // Rebuild session with new selector
-    streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
-    setupSessionListeners()
-    attachPipeline()
-    telemetryService?.attachToStreamSession(streamSession)
+    // Rebuild session with new selector via DeviceSessionManager (0.6.0)
+    sessionManager.updateSelector(currentSelector)
+
+    // If a stream session exists, tear it down (will be recreated in startSession)
+    if let stream = streamSession {
+      streamSession = nil
+      clearListeners()
+      streamingStatus = .stopped
+    }
 
     // Re-monitor device availability and capture wearable identity
     deviceMonitorTask = Task { @MainActor [weak self] in
@@ -368,7 +374,8 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    updateStatusFromState(streamSession.state)
+    // No active session to read state from — stay stopped until user starts
+    streamingStatus = .stopped
   }
 
   // MARK: - Phone Camera Selection
@@ -400,13 +407,22 @@ class StreamSessionViewModel: ObservableObject {
 
   /// Attach the pipeline as the single subscriber to videoFramePublisher.
   private func attachPipeline() {
-    pipeline.attachToStreamSession(streamSession)
+    if let stream = streamSession {
+      pipeline.attachToStreamSession(stream)
+    }
+  }
+
+  /// Clear all session listener tokens.
+  private func clearListeners() {
+    stateListenerToken = nil
+    errorListenerToken = nil
+    photoDataListenerToken = nil
   }
 
   // MARK: - Session Listeners
 
-  private func setupSessionListeners() {
-    stateListenerToken = streamSession.statePublisher.listen { [weak self] state in
+  private func setupSessionListeners(for stream: StreamSession) {
+    stateListenerToken = stream.statePublisher.listen { [weak self] state in
       Task { @MainActor [weak self] in
         self?.updateStatusFromState(state)
       }
@@ -414,7 +430,7 @@ class StreamSessionViewModel: ObservableObject {
 
     // Video frames are now routed through FramePipelineManager — no inline listener
 
-    errorListenerToken = streamSession.errorPublisher.listen { [weak self] error in
+    errorListenerToken = stream.errorPublisher.listen { [weak self] error in
       Task { @MainActor [weak self] in
         guard let self else { return }
         let rawError = String(describing: error)
@@ -445,7 +461,7 @@ class StreamSessionViewModel: ObservableObject {
       }
     }
 
-    photoDataListenerToken = streamSession.photoDataPublisher.listen { [weak self] photoData in
+    photoDataListenerToken = stream.photoDataPublisher.listen { [weak self] photoData in
       Task { @MainActor [weak self] in
         guard let self else { return }
         if let uiImage = UIImage(data: photoData.data) {
@@ -578,9 +594,10 @@ class StreamSessionViewModel: ObservableObject {
 
       // Send initial link state to viewers (session may already be .streaming)
       let linkState: String
-      switch streamSession.state {
+      switch streamSession?.state {
       case .streaming: linkState = "connected"
       case .waitingForDevice: linkState = "disconnected"
+      case nil: linkState = "disconnected"
       default: linkState = "unknown"
       }
       await relayStage.sendJson(["type": "link_state_changed", "state": linkState])
@@ -755,9 +772,10 @@ class StreamSessionViewModel: ObservableObject {
 
     // Send link state
     let linkState: String
-    switch streamSession.state {
+    switch streamSession?.state {
     case .streaming: linkState = "connected"
     case .waitingForDevice: linkState = "disconnected"
+    case nil: linkState = "disconnected"
     default: linkState = "unknown"
     }
     await relayStage.sendJson(["type": "link_state_changed", "state": linkState])
@@ -1760,7 +1778,7 @@ class StreamSessionViewModel: ObservableObject {
             if self.isPhoneCameraMode {
               await self.stopPhoneCameraSession()
             } else {
-              await self.streamSession.stop()
+              await self.streamSession?.stop()
             }
             let audioSession = AVAudioSession.sharedInstance()
             try? audioSession.setActive(false, options: .notifyOthersOnDeactivation)
@@ -2469,7 +2487,8 @@ class StreamSessionViewModel: ObservableObject {
       try? await Task.sleep(nanoseconds: delay)
       guard !Task.isCancelled else { return }
       NSLog("[StreamSession] Executing retry \(self.retryCount)/\(Self.maxRetries)")
-      await self.streamSession.start()
+      // Retry: recreate stream session via DeviceSession.addStream
+      await self.startSession()
     }
   }
 
@@ -2486,25 +2505,15 @@ class StreamSessionViewModel: ObservableObject {
     guard !isStreaming else { return }
     NSLog("[StreamSession] Rebuilding session with resolution=\(String(describing: selectedResolution)) fps=\(selectedFrameRate)")
 
-    deviceMonitorTask?.cancel()
-
-    streamSession = StreamSession(streamSessionConfig: streamConfig, deviceSelector: currentSelector)
-    setupSessionListeners()
-    attachPipeline()
-    telemetryService?.attachToStreamSession(streamSession)
-
-    deviceMonitorTask = Task { @MainActor [weak self] in
-      guard let self else { return }
-      for await device in self.currentSelector.activeDeviceStream() {
-        self.hasActiveDevice = device != nil
-        if let device {
-          self.activeWearableId = device
-          self.activeWearableType = self.wearables.deviceForIdentifier(device)?.deviceType().displayName
-        }
-      }
+    // Tear down any existing stream session (will be recreated via addStream in startSession)
+    if let stream = streamSession {
+      streamSession = nil
+      clearListeners()
     }
 
-    updateStatusFromState(streamSession.state)
+    // Config change doesn't require recreating DeviceSession — the new config
+    // will be applied when startSession() calls deviceSession.addStream(config:)
+    streamingStatus = .stopped
   }
 
   // MARK: - Config
@@ -2535,7 +2544,30 @@ class StreamSessionViewModel: ObservableObject {
 
   func startSession() async {
     cancelRetry()
-    await streamSession.start()
+
+    // DAT SDK 0.6.0: Get DeviceSession from manager, then add a StreamSession as a capability
+    guard let deviceSession = await sessionManager.getSession() else {
+      NSLog("[StreamSession] No DeviceSession available")
+      return
+    }
+    guard deviceSession.state == .started else {
+      NSLog("[StreamSession] DeviceSession not started: \(deviceSession.state)")
+      return
+    }
+
+    let config = streamConfig
+    guard let stream = try? deviceSession.addStream(config: config) else {
+      NSLog("[StreamSession] addStream(config:) returned nil")
+      return
+    }
+
+    streamSession = stream
+    streamingStatus = .waiting
+    setupSessionListeners(for: stream)
+    pipeline.attachToStreamSession(stream)
+    telemetryService?.attachToStreamSession(stream)
+
+    await stream.start()
   }
 
   // MARK: - Phone Camera Session
@@ -2639,7 +2671,11 @@ class StreamSessionViewModel: ObservableObject {
       NSLog("[StreamSession] Stopped session, relay in standby")
     }
     cancelRetry()
-    await streamSession.stop()
+    if let stream = streamSession {
+      streamSession = nil
+      clearListeners()
+      await stream.stop()
+    }
 
     // Notify OS to restore background music that was ducked during streaming
     let audioSession = AVAudioSession.sharedInstance()
@@ -2663,7 +2699,7 @@ class StreamSessionViewModel: ObservableObject {
       return
     }
 
-    streamSession.capturePhoto(format: .jpeg)
+    streamSession?.capturePhoto(format: .jpeg)
   }
 
   func dismissPhotoPreview() {

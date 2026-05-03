@@ -171,9 +171,10 @@ struct CameraAccessApp: App {
     #if DEBUG
     // Auto-configure MockDeviceKit when launched by XCUITests
     if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+      MockDeviceKit.shared.enable()
       let device = MockDeviceKit.shared.pairRaybanMeta()
 
-      let cameraKit = device.getCameraKit()
+      let cameraKit = device.services.camera
       Task {
         guard let videoURL = Bundle.main.url(forResource: "plant", withExtension: "mp4"),
           let imageURL = Bundle.main.url(forResource: "plant", withExtension: "png")
@@ -181,8 +182,8 @@ struct CameraAccessApp: App {
           NSLog("[CameraAccess] WARNING: Test resources not found - skipping UI testing resources")
           return
         }
-        await cameraKit.setCameraFeed(fileURL: videoURL)
-        await cameraKit.setCapturedImage(fileURL: imageURL)
+        cameraKit.setCameraFeed(fileURL: videoURL)
+        cameraKit.setCapturedImage(fileURL: imageURL)
 
         device.powerOn()
         device.don()

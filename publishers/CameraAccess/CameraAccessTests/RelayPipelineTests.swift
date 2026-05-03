@@ -36,6 +36,7 @@ class RelayPipelineTests: XCTestCase {
         MockDeviceKit.shared.pairedDevices.forEach { mockDevice in
             MockDeviceKit.shared.unpairDevice(mockDevice)
         }
+        MockDeviceKit.shared.disable()
         mockDevice = nil
         cameraKit = nil
         try await super.tearDown()
@@ -45,9 +46,10 @@ class RelayPipelineTests: XCTestCase {
 
     func testMockDeviceStreamingProducesFrames() async throws {
         try? Wearables.configure()
+        MockDeviceKit.shared.enable()
         let pairedMockDevice = MockDeviceKit.shared.pairRaybanMeta()
         mockDevice = pairedMockDevice
-        cameraKit = pairedMockDevice.getCameraKit()
+        cameraKit = pairedMockDevice.services.camera
         pairedMockDevice.powerOn()
         pairedMockDevice.unfold()
         try await Task.sleep(nanoseconds: 1_000_000_000)
@@ -62,7 +64,7 @@ class RelayPipelineTests: XCTestCase {
             return
         }
 
-        await camera.setCameraFeed(fileURL: videoURL)
+        camera.setCameraFeed(fileURL: videoURL)
 
         let viewModel = StreamSessionViewModel(wearables: Wearables.shared)
         await viewModel.handleStartStreaming()

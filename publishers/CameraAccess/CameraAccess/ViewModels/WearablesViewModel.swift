@@ -32,6 +32,7 @@ extension DeviceType {
     var displayName: String {
         switch self {
         case .rayBanMeta: return "Ray-Ban Meta"
+        case .rayBanMetaOptics: return "Ray-Ban Meta Optics"
         case .oakleyMetaHSTN: return "Oakley Meta HSTN"
         case .oakleyMetaVanguard: return "Oakley Meta Vanguard"
         case .metaRayBanDisplay: return "Meta Ray-Ban Display"

@@ -18,6 +18,7 @@
 		8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B792E6F0A9800F56AB1 /* CameraAccessApp.swift */; };
 		8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B722E6F0A9800F56AB1 /* HomeScreenView.swift */; };
 		8FD96B872E6F0A9800F56AB1 /* StreamSessionViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */; };
+		DSM001DSM002E6F0A9800F56AB1 /* DeviceSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DSM002DSM002E6F0A9800F56AB1 /* DeviceSessionManager.swift */; };
 		8FD96B882E6F0A9800F56AB1 /* StreamSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B752E6F0A9800F56AB1 /* StreamSessionView.swift */; };
 		8FD96B8A2E6F0A9800F56AB1 /* PhotoPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD96B742E6F0A9800F56AB1 /* PhotoPreviewView.swift */; };
 		8FD96B8D2E6F0A9800F56AB1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8FD96B772E6F0A9800F56AB1 /* Assets.xcassets */; };
@@ -145,6 +146,7 @@
 		8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugMenuViewModel.swift; sourceTree = "<group>"; };
 		8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WearablesViewModel.swift; sourceTree = "<group>"; };
 		8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionViewModel.swift; sourceTree = "<group>"; };
+		DSM002DSM002E6F0A9800F56AB1 /* DeviceSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSessionManager.swift; sourceTree = "<group>"; };
 		8FD96B722E6F0A9800F56AB1 /* HomeScreenView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScreenView.swift; sourceTree = "<group>"; };
 		8FD96B742E6F0A9800F56AB1 /* PhotoPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoPreviewView.swift; sourceTree = "<group>"; };
 		8FD96B752E6F0A9800F56AB1 /* StreamSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSessionView.swift; sourceTree = "<group>"; };
@@ -321,6 +323,7 @@
 			isa = PBXGroup;
 			children = (
 				8FFD602B2E8433E20035E446 /* MockDeviceKit */,
+				DSM002DSM002E6F0A9800F56AB1 /* DeviceSessionManager.swift */,
 				8F2D237F2E856711002D0588 /* DebugMenuViewModel.swift */,
 				8FD96B6F2E6F0A9800F56AB1 /* StreamSessionViewModel.swift */,
 				8F8F00772E8ACB4500A4BDAF /* WearablesViewModel.swift */,
@@ -666,6 +669,7 @@
 				E6DA451D2E79A63100E3F688 /* MockDeviceCardView.swift in Sources */,
 				E6DA451E2E79A63100E3F688 /* CardView.swift in Sources */,
 				E6DA451F2E79A63100E3F688 /* MockDeviceKitView.swift in Sources */,
+				DSM001DSM002E6F0A9800F56AB1 /* DeviceSessionManager.swift in Sources */,
 				8FD96B872E6F0A9800F56AB1 /* StreamSessionViewModel.swift in Sources */,
 				8FD96B882E6F0A9800F56AB1 /* StreamSessionView.swift in Sources */,
 				8FFD60602E84A2F70035E446 /* MainAppView.swift in Sources */,
@@ -1108,7 +1112,7 @@
 			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
 			requirement = {
 				kind = exactVersion;
-				version = 0.5.0;
+				version = 0.6.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
