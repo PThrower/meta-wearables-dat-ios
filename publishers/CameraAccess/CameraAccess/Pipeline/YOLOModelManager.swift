@@ -200,8 +200,10 @@ actor YOLOModelManager {
         try FileManager.default.moveItem(at: tempLocalUrl, to: downloadedFile)
         continuation?.yield(1.0)
 
-        // Check magic bytes to detect ZIP
-        let headerData = try Data(contentsOf: downloadedFile, options: [.alwaysMapped]).prefix(4)
+        // Check magic bytes to detect ZIP (read only first 4 bytes, not entire file)
+        let headerHandle = try FileHandle(forReadingFrom: downloadedFile)
+        let headerData = (try headerHandle.read(upToCount: 4)) ?? Data()
+        try? headerHandle.close()
         let isZip = headerData.count >= 4 && headerData[0] == 0x50 && headerData[1] == 0x4B
         let fileSize = try FileManager.default.attributesOfItem(atPath: downloadedFile.path)[.size] as? Int64 ?? 0
         let downloadSizeBytes = fileSize
@@ -338,39 +340,52 @@ actor YOLOModelManager {
         return nil
     }
 
-    /// Extract a ZIP file using iOS Compression framework.
+    /// Extract a ZIP file using FileHandle for streaming — never loads full ZIP into RAM.
     /// Parses ZIP local file headers and extracts stored or deflated entries.
     /// Ref: PKZIP APPNOTE — local file header signature = 0x04034b50
     private nonisolated func extractZip(at source: URL, to destination: URL) throws {
-        // Use mmap instead of heap allocation — kernel manages paging, doesn't eat RAM
-        let data = try Data(contentsOf: source, options: .alwaysMapped)
+        let handle = try FileHandle(forReadingFrom: source)
+        defer { try? handle.close() }
 
-        // ZIP structures
+        let fileSize = try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? Int64 ?? 0
+        NSLog("[YOLOModel] Streaming ZIP extraction: \(fileSize) bytes on disk")
+
         let localFileHeaderSignature: UInt32 = 0x04034b50
         let dataDescriptorSignature: UInt32 = 0x08074b50
 
-        var offset = 0
+        var offset: UInt64 = 0
 
-        while offset < data.count - 4 {
-            // Read local file header signature
-            let sig = data.readUInt32(at: offset)
-            guard sig == localFileHeaderSignature else { break }
+        while offset < UInt64(fileSize) - 4 {
+            try handle.seek(toOffset: offset)
+            let sigData = try handle.read(upToCount: 4) ?? Data()
+            guard sigData.count == 4, sigData.readUInt32(at: 0) == localFileHeaderSignature else { break }
 
-            // Parse local file header (30 bytes fixed + variable)
-            // Offset 26: filename length (2), offset 28: extra field length (2)
-            let compressionMethod = data.readUInt16(at: offset + 8)
-            let compressedSize = Int(data.readUInt32(at: offset + 18))
-            let uncompressedSize = Int(data.readUInt32(at: offset + 22))
-            let filenameLength = Int(data.readUInt16(at: offset + 26))
-            let extraLength = Int(data.readUInt16(at: offset + 28))
+            // Read fixed 30-byte local file header (minus the 4-byte sig already read)
+            try handle.seek(toOffset: offset + 4)
+            let headerRest = try handle.read(upToCount: 26) ?? Data()
+            guard headerRest.count == 26 else { break }
 
-            let dataOffset = offset + 30 + filenameLength + extraLength
-            let filenameData = data[offset + 30 ..< offset + 30 + filenameLength]
+            // Parse fields relative to header start (offset + 0)
+            // Bytes 0-3: sig (already validated), 4-5: version, 6-7: flags, 8-9: compression
+            // 10-13: mod time/date, 14-17: crc32, 18-21: compressed size, 22-25: uncompressed size
+            // 26-27: filename length, 28-29: extra length
+            let flags = headerRest.readUInt16(at: 2)         // offset 6 from entry start
+            let compressionMethod = headerRest.readUInt16(at: 4)  // offset 8
+            let compressedSize = Int(headerRest.readUInt32(at: 14))  // offset 18
+            let uncompressedSize = Int(headerRest.readUInt32(at: 18))  // offset 22
+            let filenameLength = Int(headerRest.readUInt16(at: 22))  // offset 26
+            let extraLength = Int(headerRest.readUInt16(at: 24))  // offset 28
+
+            let dataStart = offset + 30 + UInt64(filenameLength) + UInt64(extraLength)
+
+            // Read filename
+            try handle.seek(toOffset: offset + 30)
+            let filenameData = try handle.read(upToCount: filenameLength) ?? Data()
             let filename = String(data: filenameData, encoding: .utf8) ?? ""
 
             // Skip directories
             guard !filename.hasSuffix("/"), !filename.isEmpty else {
-                offset = dataOffset + compressedSize
+                offset = dataStart + UInt64(compressedSize)
                 continue
             }
 
@@ -379,7 +394,7 @@ actor YOLOModelManager {
                 .components(separatedBy: "/")
                 .filter { !$0.isEmpty && $0 != "." && $0 != ".." }
             guard !components.isEmpty else {
-                offset = dataOffset + compressedSize
+                offset = dataStart + UInt64(compressedSize)
                 continue
             }
             let sanitized = components.joined(separator: "/")
@@ -389,42 +404,52 @@ actor YOLOModelManager {
             try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
 
             if compressionMethod == 0 {
-                // Stored (no compression)
-                let fileData = data[dataOffset ..< dataOffset + compressedSize]
-                try fileData.write(to: destFile)
+                // Stored (no compression) — stream directly to file in chunks
+                try handle.seek(toOffset: dataStart)
+                let outHandle = try FileHandle(forWritingTo: destFile)
+                defer { try? outHandle.close() }
+
+                var remaining = compressedSize
+                let chunkSize = 256 * 1024  // 256KB read/write chunks
+                while remaining > 0 {
+                    let toRead = min(remaining, chunkSize)
+                    let chunk = try handle.read(upToCount: toRead) ?? Data()
+                    guard !chunk.isEmpty else { break }
+                    try outHandle.write(contentsOf: chunk)
+                    remaining -= chunk.count
+                }
             } else if compressionMethod == 8 {
-                // Deflate — use Compression framework
-                let compressed = data[dataOffset ..< dataOffset + compressedSize]
-                let decompressed = try Self.inflateRawDeflate(compressed, uncompressedSize: uncompressedSize)
+                // Deflate — read compressed data, then inflate with streaming output to file
+                try handle.seek(toOffset: dataStart)
+                // Read compressed chunk into memory (one entry at a time, not the whole ZIP)
+                let compressedData = try handle.read(upToCount: compressedSize) ?? Data()
+                let decompressed = try Self.inflateRawDeflate(compressedData, uncompressedSize: uncompressedSize)
                 try decompressed.write(to: destFile)
-            } else {
-                // Unsupported compression — skip
             }
 
-            offset = dataOffset + compressedSize
+            offset = dataStart + UInt64(compressedSize)
 
             // Skip data descriptor if present (bit 3 of general purpose flags)
-            let flags = data.readUInt16(at: offset - compressedSize - filenameLength - extraLength - 30 + 6)
             if flags & 0x08 != 0 {
-                // Data descriptor follows compressed data
-                if offset + 4 < data.count {
-                    let ddSig = data.readUInt32(at: offset)
-                    if ddSig == dataDescriptorSignature {
-                        offset += 16 // sig(4) + crc32(4) + compressed(4) + uncompressed(4)
+                try handle.seek(toOffset: offset)
+                if let ddBytes = try handle.read(upToCount: 4), ddBytes.count == 4 {
+                    if ddBytes.readUInt32(at: 0) == dataDescriptorSignature {
+                        offset += 16  // sig(4) + crc32(4) + compressed(4) + uncompressed(4)
                     } else {
-                        offset += 12 // no sig: crc32(4) + compressed(4) + uncompressed(4)
+                        offset += 12  // no sig: crc32(4) + compressed(4) + uncompressed(4)
                     }
                 }
             }
         }
+
+        NSLog("[YOLOModel] Streaming ZIP extraction complete")
     }
     /// Inflate raw deflated data from ZIP entries using chunked output.
     /// ZIP method 8 stores raw deflate (no zlib header/trailer).
     /// Uses zlib via Swiftzlib module with real z_stream struct.
     /// Uses a small 64KB output buffer to avoid allocating the full uncompressed size in RAM.
-    private static func inflateRawDeflate(_ data: Data.SubSequence, uncompressedSize: Int) throws -> Data {
-        let rawDeflate = Data(data)
-        NSLog("[YOLOModel] inflate: \(rawDeflate.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
+    private static func inflateRawDeflate(_ data: Data, uncompressedSize: Int) throws -> Data {
+        NSLog("[YOLOModel] inflate: \(data.count) compressed bytes, uncompressedSize=\(uncompressedSize)")
 
         var stream = z_stream()
         stream.zalloc = nil
@@ -443,13 +468,13 @@ actor YOLOModelManager {
         var result = Data()
         result.reserveCapacity(min(uncompressedSize, 4 * 1024 * 1024)) // hint, capped at 4MB
 
-        try rawDeflate.withUnsafeBytes { inputPtr in
+        try data.withUnsafeBytes { inputPtr in
             guard let base = inputPtr.baseAddress else {
                 NSLog("[YOLOModel] inflate: empty input data")
                 throw YOLOModelError.invalidArchive
             }
             stream.next_in = UnsafeMutablePointer<Bytef>(mutating: base.assumingMemoryBound(to: Bytef.self))
-            stream.avail_in = UInt32(rawDeflate.count)
+            stream.avail_in = UInt32(data.count)
 
             var done = false
             while !done {
