@@ -5,7 +5,7 @@
  */
 
 import { NODE_W, NODE_H } from "../pages/workflow/constants.js";
-import type { WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef } from "../core/api-client.js";
+import type { WorkflowDetail, WorkflowNodeDef, WorkflowEdgeDef } from "../core/workflow-types.js";
 import { getNodeDef } from "../pages/workflow/node-defs.js";
 
 export interface MiniEditorState {

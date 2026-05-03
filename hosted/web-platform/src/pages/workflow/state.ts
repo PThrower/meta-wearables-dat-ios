@@ -8,7 +8,7 @@
 import {
   fetchWorkflow, createWorkflow, updateWorkflow,
 } from "../../core/api-client.js";
-import type { WorkflowDetail } from "../../core/api-client.js";
+import type { WorkflowDetail } from "../../core/workflow-types.js";
 
 // --- State variables ---
 
@@ -126,13 +126,15 @@ export async function doSave(): Promise<void> {
       if (result) {
         const published = await updateWorkflow(result.id, { status: "published" });
         _workflow = published ?? result;
-        history.replaceState(null, "", `#/workflows/${_workflow.id}`);
+        history.replaceState(null, "", `#/workflows/${_workflow!.id}`);
         _dirty = false;
       } else {
         console.warn("[auto-save] server rejected create — server may need redeploy");
       }
     }
     updateSaveIndicator();
+  } catch (err) {
+    console.error("[auto-save] failed:", err);
   } finally {
     _saving = false;
   }
@@ -170,6 +172,7 @@ export function savePaletteCollapse(): void {
 // --- Reset (called from page.destroy) ---
 
 export function resetState(): void {
+  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
   _container = null;
   _dirty = false;
   _saving = false;

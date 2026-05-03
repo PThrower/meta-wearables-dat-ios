@@ -14,12 +14,7 @@ import { hideNodeActionPopover } from "./node-actions.js";
 
 // --- State ---
 
-interface PanState {
-  startX: number;
-  startY: number;
-  viewX: number;
-  viewY: number;
-}
+import type { PanState } from "./types.js";
 
 let _panState: PanState | null = null;
 let _activePointers = new Map<number, PointerEvent>();

@@ -17,7 +17,8 @@ import {
   loadPaletteCollapse, savePaletteCollapse, getPaletteCollapseState, setPaletteCollapseState,
 } from "./state.js";
 import { getNodeDef, getNodeDefs, loadNodeDefs } from "./node-defs.js";
-import type { NodeDefinition } from "../../core/api-client.js";
+import type { NodeDefinition } from "../../core/workflow-types.js";
+import type { PaletteSubcategory, PaletteCategory } from "./types.js";
 import { NODE_W, NODE_H } from "./constants.js";
 import { isAvailable, getReason, renderAvailBadge, availCls, lockedAttrs } from "./node-availability.js";
 import { getDescription } from "./node-descriptions.js";
@@ -32,6 +33,10 @@ import {
   addPreviewListener, removePreviewListener, getNodePreviews,
   isPreviewConnected, sendPreviewJson, getConnectedSessionId,
 } from "./editor-preview.js";
+
+// Module-level references for cleanup
+let _resizeHandler: (() => void) | null = null;
+let _observer: MutationObserver | null = null;
 
 /** Render the editor view — palette + canvas + config panel + toolbar. */
 export async function renderEditor(isNew: boolean): Promise<void> {
@@ -140,15 +145,6 @@ export async function renderEditor(isNew: boolean): Promise<void> {
 
   // Initial config panel render (shows flow summary + "Select a node")
   renderConfigPanel();
-}
-
-/** Palette categories — grouped by capability, not DAG role. */
-interface PaletteSubcategory { label: string; match: (d: NodeDefinition) => boolean; }
-interface PaletteCategory {
-  label: string;
-  accent: string;
-  match: (d: NodeDefinition) => boolean;
-  subcategories?: PaletteSubcategory[];
 }
 
 const PALETTE_CATEGORIES: PaletteCategory[] = [
@@ -667,8 +663,9 @@ function wireMobileToggles(): void {
     observer.observe(canvasWrap, { childList: true, subtree: true });
   }
 
-  // Responsive listener
-  window.addEventListener("resize", () => detectMobile());
+  // Responsive listener — stored for cleanup
+  _resizeHandler = () => detectMobile();
+  window.addEventListener("resize", _resizeHandler);
 }
 
 /** Close all mobile drawers. */
@@ -929,6 +926,19 @@ export function destroyEditorPreview(): void {
     removePreviewListener(_previewListener);
     _previewListener = null;
   }
+  if (_resizeHandler) {
+    window.removeEventListener("resize", _resizeHandler);
+    _resizeHandler = null;
+  }
+  if (_observer) {
+    _observer.disconnect();
+    _observer = null;
+  }
+  if (_searchDebounce) {
+    clearTimeout(_searchDebounce);
+    _searchDebounce = null;
+  }
+  document.removeEventListener("keydown", onKeyDown);
   destroyPreview();
   stopTestingPoll();
   hideNodeActionPopover();

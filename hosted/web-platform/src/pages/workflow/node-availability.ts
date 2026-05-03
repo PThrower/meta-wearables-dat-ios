@@ -8,15 +8,8 @@
  * Edge validation: still works (unavailable nodes can be targets in existing workflows).
  */
 
-export type AvailabilityStatus = "available" | "unavailable";
-
-/** Availability reason shown as tooltip on locked nodes. */
-export type UnavailabilityReason = string;
-
-interface AvailabilityEntry {
-  status: "unavailable";
-  reason: UnavailabilityReason;
-}
+import type { AvailabilityStatus, UnavailabilityReason, AvailabilityEntry } from "./types.js";
+export type { AvailabilityStatus, UnavailabilityReason, AvailabilityEntry } from "./types.js";
 
 /**
  * Nodes not yet confirmed for production use.

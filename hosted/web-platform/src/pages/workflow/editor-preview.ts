@@ -13,20 +13,8 @@ import { getWorkflow } from "./state.js";
 
 // --- Types ---
 
-export interface NodePreviewState {
-  nodeId: string;
-  nodeType: string;
-  label: string;
-  executionState: string;
-  error?: string;
-  lastText?: string;
-  lastTextTime?: number;
-  numerics: Map<string, { value: number; unit: string; time: number }>;
-  thumbnails?: Array<{ dataUrl: string; label: string; confidence: number }>;
-  updated: number;
-}
-
-export type PreviewChangeListener = () => void;
+import type { NodePreviewState, PreviewChangeListener } from "./types.js";
+export type { NodePreviewState, PreviewChangeListener } from "./types.js";
 
 // --- Module state ---
 
@@ -256,21 +244,26 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     const source = evt.source;
     if (!source) return;
 
-    // Find the node that corresponds to this source
+    // Find the node that corresponds to this source — match by source appId
     for (const [, preview] of nodePreviews) {
-      if (preview.nodeType.includes("s2s") || preview.nodeType === "jepa-vision" || preview.nodeType === "deepgram-stt") {
+      if (preview.nodeType === source) {
         preview.lastText = (evt.content || "").slice(0, 200);
         preview.lastTextTime = now;
         preview.updated = now;
+        break;
       }
     }
     notifyListeners();
   }
 
   if (msg.type === "spoken_text" && msg.text) {
-    // Spoken text comes from AI — map to running processor nodes
+    // Spoken text comes from AI — map to the specific source node if provided
+    const spokenSource = msg.source as string | undefined;
     for (const [, preview] of nodePreviews) {
-      if (preview.executionState === "running" && (preview.nodeType.includes("s2s") || preview.nodeType === "local-tts")) {
+      const matches = spokenSource
+        ? preview.nodeType === spokenSource
+        : (preview.executionState === "running" && (preview.nodeType.includes("s2s") || preview.nodeType === "local-tts"));
+      if (matches) {
         preview.lastText = msg.text.slice(0, 200);
         preview.lastTextTime = now;
         preview.updated = now;
@@ -280,20 +273,24 @@ function handlePreviewMessage(msg: Record<string, any>): void {
   }
 
   if (msg.type === "publisher_telemetry") {
-    // Map telemetry to source nodes
+    // Map telemetry to the first matching source node (publisher is a single device)
+    let cameraMatched = false;
+    let micMatched = false;
     for (const [, preview] of nodePreviews) {
-      if (preview.nodeType === "camera-source") {
+      if (preview.nodeType === "camera-source" && !cameraMatched) {
         if (msg.fps != null) preview.numerics.set("FPS", { value: msg.fps, unit: "fps", time: now });
         if (msg.encodeMs != null) preview.numerics.set("Encode", { value: msg.encodeMs, unit: "ms", time: now });
         if (msg.frameSize != null) preview.numerics.set("Frame", { value: msg.frameSize, unit: "B", time: now });
         preview.updated = now;
+        cameraMatched = true;
       }
-      if (preview.nodeType === "phone-mic-source" || preview.nodeType === "glasses-mic-source") {
+      if ((preview.nodeType === "phone-mic-source" || preview.nodeType === "glasses-mic-source") && !micMatched) {
         if (msg.audioMode) {
           preview.lastText = `Audio: ${msg.audioMode}`;
           preview.lastTextTime = now;
         }
         preview.updated = now;
+        micMatched = true;
       }
     }
     notifyListeners();
@@ -312,11 +309,9 @@ function handlePreviewMessage(msg: Record<string, any>): void {
     }>;
     for (const stage of stages) {
       for (const [, preview] of nodePreviews) {
-        // Match by nodeType prefix (e.g. "vision-face-detect" matches "vision-*")
-        const typeMatches = preview.nodeType === stage.nodeType
-          || preview.nodeType.startsWith(stage.nodeType.split("-")[0] + "-");
-        // Also match by stageId for non-prefixed matches
-        const idMatches = preview.nodeType.includes(stage.stageId);
+        // Match by exact nodeType, or by stageId substring for legacy compatibility
+        const typeMatches = preview.nodeType === stage.nodeType;
+        const idMatches = preview.nodeType.includes(stage.stageId) && !typeMatches;
         if (typeMatches || idMatches) {
           preview.numerics.set("Process", { value: stage.wallClockMs, unit: "ms", time: now });
           preview.numerics.set("CPU", { value: stage.cpuMs, unit: "ms", time: now });

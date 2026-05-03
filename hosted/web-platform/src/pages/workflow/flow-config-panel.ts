@@ -10,8 +10,9 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { DetectedFlow, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType } from "../../core/api-client.js";
+import type { DetectedFlow, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType } from "../../core/workflow-types.js";
 import { buildDefaultFlowConfig } from "./flow-detection.js";
+import type { FlowConfigCallbacks } from "./types.js";
 
 /* ── Style tokens ── */
 
@@ -39,19 +40,6 @@ const S = {
   list: (active: boolean) =>
     `display:flex;flex-direction:column;gap:6px;${active ? "" : "opacity:0.5;pointer-events:none;"}`,
 };
-
-/* ── Callback interface ── */
-
-/** Minimal workflow shape needed by flow config. */
-export interface FlowConfigCallbacks {
-  getWorkflow: () => { flowConfig?: FlowExecutionConfig | null; nodes: any[]; edges: any[] } | null;
-  setFlowConfig: (config: FlowExecutionConfig) => void;
-  setDirty: () => void;
-  autoSave: () => void;
-  rerender: () => void;
-  onBack?: () => void;
-  getSVGContainer?: () => Element | null;
-}
 
 /* ── PRIMITIVE 1: render — pure data → HTML ── */
 

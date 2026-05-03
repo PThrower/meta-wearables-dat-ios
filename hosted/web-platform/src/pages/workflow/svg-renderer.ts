@@ -5,15 +5,14 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/api-client.js";
+import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/workflow-types.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
-import { evaluateCondition, type GraphContext } from "./shared-config.js";
-import { wireSVGEvents } from "./interactions.js";
-import { isTouchDevice } from "./interactions.js";
+import { evaluateCondition } from "./shared-config.js";
+import { wireSVGEvents, isTouchDevice } from "./interactions.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "./flow-detection.js";
-import type { NodePreviewState } from "./editor-preview.js";
+import type { GraphContext, NodePreviewState } from "./types.js";
 
 /** Render runtime badge SVG for a node definition. */
 export function runtimeBadgeSVG(def: { runtime?: string[] | null } | undefined, scale = 1): string {
@@ -91,13 +90,8 @@ function resolveSVGOverrides(
  *   skip = gray                       — bypassed
  *   idle = muted yellow               — no activity
  */
-export interface NodeStateVisual {
-  color: string;       // primary state color
-  glow: number;        // SVG filter stdDeviation (0 = no glow)
-  borderWidth: number; // node border stroke-width
-  opacity: number;     // glow border opacity (0-1)
-  anim: string;        // CSS animation class (empty = none)
-}
+import type { NodeStateVisual } from "./types.js";
+export type { NodeStateVisual } from "./types.js";
 
 export const NODE_STATE_VISUALS: Record<string, NodeStateVisual> = {
   running:   { color: "#50fa7b", glow: 5, borderWidth: 2, opacity: 0.6, anim: "wf-anim-running" },
@@ -329,7 +323,7 @@ export function buildSVGFromData(
         <rect class="wf-node-bg" width="${w}" height="${nodeH}" rx="${r}" fill="${c.fill}" stroke="${borderStroke}" stroke-width="${borderStrokeWidth}" />
         <rect class="wf-node-header" width="${w}" height="${24 * scale}" rx="${r}" fill="${c.header}" />
         <rect x="0" y="${r}" width="${w}" height="${(24 * scale) - r}" fill="${c.header}" />
-        <text x="${w / 2}" y="${16 * scale}" text-anchor="middle" fill="#fff" font-size="${10 * scale}" font-weight="600">${esc(n.type.replace("-", " "))}</text>
+        <text x="${w / 2}" y="${16 * scale}" text-anchor="middle" fill="#fff" font-size="${10 * scale}" font-weight="600">${esc(n.type.replace(/-/g, " "))}</text>
         <text x="${12 * scale}" y="${44 * scale}" fill="#ccc" font-size="${11 * scale}">${esc(n.label || n.type)}</text>
         <text x="${12 * scale}" y="${60 * scale}" fill="#888" font-size="${9 * scale}">${esc(configSummary)}</text>
         ${liveOutput}

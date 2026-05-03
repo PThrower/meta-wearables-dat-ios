@@ -7,13 +7,13 @@
 import { GuidancePanel, NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeState } from "../guidance.js";
 import { fetchWorkflow, updateWorkflow, esc } from "../core/api-client.js";
-import type { WorkflowDetail } from "../core/api-client.js";
+import type { WorkflowDetail } from "../core/workflow-types.js";
 import { NODE_STATE_VISUALS, resolveSubtitle } from "../pages/workflow/svg-renderer.js";
 import { getNodeDef, loadNodeDefs } from "../pages/workflow/node-defs.js";
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "../pages/workflow/constants.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "../pages/workflow/flow-detection.js";
 import { renderFlowConfigHTML, wireFlowConfigEvents } from "../pages/workflow/shared-config.js";
-import type { FlowConfigCallbacks, ConfigFieldCallbacks } from "../pages/workflow/shared-config.js";
+import type { FlowConfigCallbacks, ConfigFieldCallbacks } from "../pages/workflow/types.js";
 import { wireMiniInteractions, rewireMiniSVG } from "./mini-editor-interactions.js";
 import type { MiniEditorState } from "./mini-editor-interactions.js";
 import { buildMiniPaletteHTML, wirePaletteEvents } from "./mini-editor-palette.js";

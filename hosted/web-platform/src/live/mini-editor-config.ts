@@ -4,12 +4,12 @@
  */
 
 import { esc } from "../core/api-client.js";
-import type { WorkflowNodeDef, NodeDefinition } from "../core/api-client.js";
+import type { WorkflowNodeDef, NodeDefinition } from "../core/workflow-types.js";
 import { NODE_STATE_COLORS } from "../guidance.js";
 import type { NodeExecutionState } from "../guidance.js";
 import { detectFlows } from "../pages/workflow/flow-detection.js";
 import { renderConfigField, wireConfigFieldInputs } from "../pages/workflow/shared-config.js";
-import type { ConfigFieldCallbacks } from "../pages/workflow/shared-config.js";
+import type { ConfigFieldCallbacks } from "../pages/workflow/types.js";
 
 /** Render config panel with schema-driven form + exec controls + delete button. */
 export function renderMiniConfigPanel(

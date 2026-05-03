@@ -22,18 +22,7 @@ export { isTouchDevice } from "./canvas-controls.js";
 
 // --- Drag state ---
 
-interface DragState {
-  nodeId: string;
-  startX: number;
-  startY: number;
-  nodeStartX: number;
-  nodeStartY: number;
-}
-
-interface EdgeState {
-  sourceNodeId: string;
-  tempLine: SVGLineElement;
-}
+import type { DragState, EdgeState } from "./types.js";
 
 let _dragState: DragState | null = null;
 let _edgeState: EdgeState | null = null;
@@ -466,5 +455,6 @@ export function resetInteractions(): void {
   if (_longPressTimer) clearTimeout(_longPressTimer);
   _longPressTimer = null;
   _longPressNodeId = null;
+  hideThumbModal();
   resetCanvasControls();
 }

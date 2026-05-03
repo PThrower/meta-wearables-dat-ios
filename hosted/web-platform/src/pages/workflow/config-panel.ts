@@ -5,18 +5,18 @@
  */
 
 import { esc, fetchDevices } from "../../core/api-client.js";
-import type { DetectedFlow, FlowExecutionConfig, WorkflowSettings } from "../../core/api-client.js";
+import type { DetectedFlow, FlowExecutionConfig, WorkflowSettings } from "../../core/workflow-types.js";
 import { getContainer, getWorkflow, getSelectedNodeId, setSelectedNodeId, setDirty, autoSave, isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG } from "./svg-renderer.js";
 import { detectFlows } from "./flow-detection.js";
 import { renderConfigField, wireConfigFieldInputs, renderWorkflowSettingsHTML, wireSettingsFieldInputs, updateDeviceOptions, evaluateCondition } from "./shared-config.js";
-import type { ConfigFieldCallbacks, SettingsCallbacks, GraphContext } from "./shared-config.js";
+import type { ConfigFieldCallbacks, SettingsCallbacks, GraphContext, FlowConfigCallbacks } from "./types.js";
 import { getNodePreview, renderNodePreviewHTML } from "./editor-preview.js";
 import * as FlowPanel from "./flow-config-panel.js";
 
 /** Flow config callbacks for the full editor (wires to state module). */
-const flowCallbacks: FlowPanel.FlowConfigCallbacks = {
+const flowCallbacks: FlowConfigCallbacks = {
   getWorkflow: () => getWorkflow(),
   setFlowConfig: (config: FlowExecutionConfig) => {
     const wf = getWorkflow();
@@ -227,4 +227,12 @@ export function renderConfigPanel(): void {
 
   // State 2: Empty
   panel.innerHTML = `<p class="empty-state">Select a node</p>`;
+}
+
+/** Clean up flow popup DOM element. Called from page.destroy. */
+export function destroyConfigPanel(): void {
+  if (_flowPopup) {
+    _flowPopup.remove();
+    _flowPopup = null;
+  }
 }

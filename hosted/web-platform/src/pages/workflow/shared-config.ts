@@ -5,48 +5,18 @@
  */
 
 import { esc } from "../../core/api-client.js";
-import type { WorkflowNodeDef, ConfigFieldSchema, ConnectionCondition, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow, WorkflowSettings } from "../../core/api-client.js";
-import { DEFAULT_WORKFLOW_SETTINGS } from "../../core/api-client.js";
+import type { ConfigFieldSchema, ConnectionCondition, FlowExecutionConfig, FlowExecutionMode, FlowTrigger, FlowTriggerType, DetectedFlow, WorkflowSettings, WorkflowNodeDef } from "../../core/workflow-types.js";
+import { DEFAULT_WORKFLOW_SETTINGS } from "../../core/workflow-types.js";
 import { buildDefaultFlowConfig } from "./flow-detection.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-/* ── Callback interfaces ── */
+/* ── Callback interfaces (centralized in types.ts, re-exported for consumers) ── */
 
-/** Minimal workflow shape needed by flow config wiring. */
-export interface WorkflowLike {
-  flowConfig?: FlowExecutionConfig | null;
-  nodes: Array<{ id: string; type?: string; label?: string }>;
-  edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }>;
-}
-
-/** Callbacks for flow config panel events — no coupling to either editor's state. */
-export interface FlowConfigCallbacks {
-  getWorkflow: () => WorkflowLike | null;
-  setFlowConfig: (config: FlowExecutionConfig) => void;
-  setDirty: () => void;
-  autoSave: () => void;
-  rerender: () => void;
-  onBack?: () => void;
-  getSVGContainer?: () => Element | null;
-}
-
-/** Callbacks for config field change events. */
-export interface ConfigFieldCallbacks {
-  getWorkflow: () => { nodes: WorkflowNodeDef[] } | null;
-  getSelectedNodeId: () => string | null;
-  setDirty: () => void;
-  autoSave: () => void;
-  refreshSVG: () => void;
-}
+export type { WorkflowLike, FlowConfigCallbacks, ConfigFieldCallbacks, GraphContext, SettingsCallbacks } from "./types.js";
+import type { FlowConfigCallbacks, ConfigFieldCallbacks, GraphContext, SettingsCallbacks } from "./types.js";
 
 /* ── Config field rendering ── */
-
-/** Graph context for connection-conditional config fields. */
-export interface GraphContext {
-  edges: Array<{ sourceNodeId: string; targetNodeId: string }>;
-  nodes: Array<{ id: string; type: string }>;
-}
 
 /** Evaluate a ConnectionCondition against the current graph context. */
 export function evaluateCondition(
@@ -745,7 +715,7 @@ export function wireGeofenceMap(container: Element, callbacks: ConfigFieldCallba
         currentGfs.push(gf);
         hiddenInput.value = JSON.stringify(currentGfs);
         const idx = currentGfs.length - 1;
-        addMapItem(leafletMap!, mapItems, gf, idx);
+        addMapItem(leafletMap!, mapItems, gf, idx, callbacks);
         appendCard(gf, idx, leafletMap!, mapItems, hiddenInput, callbacks);
         syncModalConfig(hiddenInput, section, callbacks);
         updateCount();
@@ -797,7 +767,7 @@ export function wireGeofenceMap(container: Element, callbacks: ConfigFieldCallba
       cardsList.innerHTML = geofences.map((gf, i) => renderGeofenceCard(gf, i)).join("");
     }
     for (let i = 0; i < geofences.length; i++) {
-      addMapItem(leafletMap!, mapItems, geofences[i], i);
+      addMapItem(leafletMap!, mapItems, geofences[i], i, callbacks);
     }
     // Wire card events
     cardsList.querySelectorAll(".wf-gf-card").forEach(card => {
@@ -830,7 +800,7 @@ function createMarkerIcon(colorIndex: number): L.DivIcon {
 }
 
 /** Add circle + draggable marker to map for a geofence. */
-function addMapItem(map: L.Map, mapItems: Map<string, { circle: L.Circle; marker: L.Marker }>, gf: GeofenceItem, index: number): void {
+function addMapItem(map: L.Map, mapItems: Map<string, { circle: L.Circle; marker: L.Marker }>, gf: GeofenceItem, index: number, callbacks?: ConfigFieldCallbacks): void {
   const color = GEOFENCE_COLORS[index % GEOFENCE_COLORS.length];
   const circle = L.circle([gf.latitude, gf.longitude], {
     radius: gf.radius,
@@ -870,7 +840,7 @@ function addMapItem(map: L.Map, mapItems: Map<string, { circle: L.Circle; marker
       if (hiddenInput) hiddenInput.value = JSON.stringify(updated);
       // Sync to workflow
       const section = document.querySelector("[data-geofence-section]");
-      if (section) syncModalConfig(hiddenInput, section, null!);
+      if (section) syncModalConfig(hiddenInput, section, callbacks!);
     }
   });
 
@@ -1002,15 +972,6 @@ function showToast(msg: string): void {
 }
 
 /* ── Workflow settings callbacks ── */
-
-/** Callbacks for workflow settings panel events. */
-export interface SettingsCallbacks {
-  getWorkflow: () => { settings?: WorkflowSettings | null } | null;
-  setSettings: (settings: WorkflowSettings) => void;
-  setDirty: () => void;
-  autoSave: () => void;
-  onBack?: () => void;
-}
 
 /* ── Workflow settings schema ── */
 
@@ -1283,14 +1244,16 @@ export function wireFlowConfigEvents(panel: Element, flows: DetectedFlow[], call
         const targetId = (item as HTMLElement).dataset.flowId;
         if (!draggedId || !targetId || draggedId === targetId) return;
         const workflow = callbacks.getWorkflow();
-        if (!workflow?.flowConfig) return;
-        const order = [...workflow.flowConfig.flowOrder];
+        if (!workflow) return;
+        const config = workflow.flowConfig ?? buildDefaultFlowConfig(flows);
+        if (!config) return;
+        const order = [...config.flowOrder];
         const fromIdx = order.indexOf(draggedId);
         const toIdx = order.indexOf(targetId);
         if (fromIdx < 0 || toIdx < 0) return;
         order.splice(fromIdx, 1);
         order.splice(toIdx, 0, draggedId);
-        callbacks.setFlowConfig({ ...workflow.flowConfig, flowOrder: order });
+        callbacks.setFlowConfig({ ...config, flowOrder: order });
         callbacks.setDirty();
         callbacks.autoSave();
         callbacks.rerender();

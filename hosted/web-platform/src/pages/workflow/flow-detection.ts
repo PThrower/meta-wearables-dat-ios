@@ -9,7 +9,7 @@
  * Keep both in sync — they are intentionally identical pure functions with no deps.
  */
 
-import type { DetectedFlow, FlowExecutionConfig } from "../../core/api-client.js";
+import type { DetectedFlow, FlowExecutionConfig } from "../../core/workflow-types.js";
 
 /** Color palette for flow visualization (cycled when >8 flows) */
 export const FLOW_COLORS = [
