@@ -5148,6 +5148,22 @@ select.wf-settings-input { appearance: none; cursor: pointer; }
 .cmd-workflow-row:hover { background: var(--border-subtle); }
 .cmd-workflow-row.is-active { background: rgba(74,222,128,0.08); }
 .cmd-workflow-row.is-active .activity-text { color: var(--accent-green); }
+.cmd-workflow-row { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+.cmd-wf-header { display: flex; align-items: center; gap: 10px; }
+.cmd-wf-metrics { display: flex; flex-wrap: wrap; gap: 8px; padding: 5px 0 2px 16px; align-items: center; }
+.cmd-wf-metric { display: flex; flex-direction: column; gap: 1px; min-width: 40px; }
+.cmd-wf-metric .k { font-size: 9px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.4px; }
+.cmd-wf-metric .v { font-size: 11px; font-weight: 700; color: var(--text-primary); font-family: 'SF Mono', Menlo, monospace; }
+.cmd-wf-status-badge { font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px; align-self: center; flex-shrink: 0; }
+.cmd-wf-status-badge.active { background: rgba(74,222,128,0.15); color: var(--accent-green); }
+.cmd-wf-status-badge.idle { background: var(--bg-surface-alt); color: var(--text-tertiary); }
+.cmd-wf-status-badge.error { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+.cmd-wf-stages { font-size: 10px; color: var(--text-tertiary); padding: 2px 0 4px 16px; font-family: 'SF Mono', Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activity-dot.hb-live  { background: var(--accent-green); }
+.activity-dot.hb-stale { background: var(--accent-yellow); }
+.activity-dot.hb-dead  { background: var(--text-tertiary); }
+@keyframes cmd-pulse { from { opacity: 0.5; } to { opacity: 1.0; } }
+.activity-dot.pulsing { animation: cmd-pulse 1s ease-in-out infinite alternate; }
 
 /* Tablet — 2 column grid */
 @media (max-width: 1024px) and (min-width: 769px) {
