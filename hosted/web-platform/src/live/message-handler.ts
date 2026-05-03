@@ -211,6 +211,12 @@ export function wireMessageHandler(player: RelayPlayer, guidancePanel: GuidanceP
         }
       }
     }
+
+    // Detection overlay boxes from vision/yolo/tracking
+    if (msg.type === "detection_overlay" && Array.isArray(msg.boxes)) {
+      const p = getPlayer();
+      if (p) p.setDetectionBoxes(msg.boxes as Array<{ x1: number; y1: number; x2: number; y2: number; label: string; confidence: number; subType: string }>);
+    }
   };
 }
 

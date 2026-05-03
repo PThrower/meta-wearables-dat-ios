@@ -556,6 +556,7 @@ export type ConfigFieldSchema =
   | { kind: "select"; key: string; label: string; options: Array<{ value: string; label: string }> }
   | { kind: "range"; key: string; label: string; min: number; max: number; step: number; unit?: string }
   | { kind: "checkbox"; key: string; label: string }
+  | { kind: "toggle"; key: string; label: string; description?: string }
   | { kind: "number"; key: string; label: string; min?: number; max?: number; step?: number; placeholder?: string }
   | { kind: "checkbox-group"; key: string; label: string; fields: Array<{ key: string; label: string }> }
   | { kind: "geofence-map"; key: string; label: string }

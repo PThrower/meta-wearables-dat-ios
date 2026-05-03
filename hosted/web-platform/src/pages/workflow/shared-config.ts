@@ -122,6 +122,11 @@ export function renderConfigField(field: ConfigFieldSchema, node: WorkflowNodeDe
       const checked = node.config[field.key] === true;
       return `<div class="${prefix}-field"><label><input type="checkbox" data-field="config.${field.key}" ${checked ? "checked" : ""} /> ${esc(field.label)}</label></div>`;
     }
+    case "toggle": {
+      const checked = node.config[field.key] === true;
+      const desc = field.description ? `<span style="display:block;font-size:11px;color:#888;margin-top:2px;">${esc(field.description)}</span>` : "";
+      return `<div class="${prefix}-field"><label><input type="checkbox" data-field="config.${field.key}" ${checked ? "checked" : ""} /> ${esc(field.label)}</label>${desc}</div>`;
+    }
     case "checkbox-group": {
       const checks = field.fields.map(f => {
         const checked = node.config[f.key] !== false;

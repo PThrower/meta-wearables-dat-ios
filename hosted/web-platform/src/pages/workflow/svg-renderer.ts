@@ -9,8 +9,6 @@ import type { WorkflowNodeDef, WorkflowEdgeDef, DetectedFlow } from "../../core/
 import { NODE_W, NODE_H, NODE_R, FALLBACK_COLOR } from "./constants.js";
 import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
-import { evaluateCondition } from "./shared-config.js";
-import type { GraphContext } from "./shared-config.js";
 import { evaluateCondition, type GraphContext } from "./shared-config.js";
 import { wireSVGEvents } from "./interactions.js";
 import { isTouchDevice } from "./interactions.js";
@@ -380,7 +378,44 @@ export function buildSVGFromData(
 
   const vbW = 1100 * scale / zoom;
   const vbH = 600 * scale / zoom;
-  return `<svg class="wf-canvas-svg" id="${svgId}" viewBox="${vx} ${vy} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg" ${touch ? 'data-touch="true"' : ''}>${glowFilter}${grid}${edgeSVGs}${nodeSVGs}</svg>`;
+
+  // Flow indicator badge — pinned to viewport top-right when multi-flow
+  let flowIndicatorSVG = "";
+  if (multiFlow) {
+    const pad = 12 * scale;
+    const rowH = 16 * scale;
+    const dotR = 4 * scale;
+    const fontSize = 10 * scale;
+    const maxShow = 3;
+    const showMore = detectedFlows.length > maxShow;
+    const rows = Math.min(detectedFlows.length, maxShow);
+    const extraRow = showMore ? 1 : 0;
+    const totalRows = rows + extraRow;
+    const badgeW = 130 * scale;
+    const badgeH = pad * 2 + totalRows * rowH;
+    const bx = vx + vbW - badgeW - pad;
+    const by = vy + pad;
+
+    let rowsSVG = "";
+    for (let i = 0; i < rows; i++) {
+      const f = detectedFlows[i];
+      const ry = by + pad + i * rowH + rowH / 2;
+      const label = f.label.length > 20 ? f.label.slice(0, 19) + "…" : f.label;
+      rowsSVG += `<circle cx="${bx + pad + dotR}" cy="${ry}" r="${dotR}" fill="${f.color}" />`;
+      rowsSVG += `<text x="${bx + pad + dotR * 2 + 6 * scale}" y="${ry + fontSize * 0.35}" fill="#e2e8f0" font-size="${fontSize}" font-family="system-ui,sans-serif">${esc(label)}</text>`;
+    }
+    if (showMore) {
+      const ey = by + pad + rows * rowH + rowH / 2;
+      rowsSVG += `<text x="${bx + pad}" y="${ey + fontSize * 0.35}" fill="#94a3b8" font-size="${fontSize}" font-family="system-ui,sans-serif">+${detectedFlows.length - maxShow} more</text>`;
+    }
+
+    flowIndicatorSVG = `<g class="wf-flow-indicator" pointer-events="none">` +
+      `<rect x="${bx}" y="${by}" width="${badgeW}" height="${badgeH}" rx="6" fill="rgba(15,15,20,0.85)" stroke="rgba(255,255,255,0.08)" stroke-width="1" />` +
+      rowsSVG +
+      `</g>`;
+  }
+
+  return `<svg class="wf-canvas-svg" id="${svgId}" viewBox="${vx} ${vy} ${vbW} ${vbH}" xmlns="http://www.w3.org/2000/svg" ${touch ? 'data-touch="true"' : ''}>${glowFilter}${grid}${edgeSVGs}${nodeSVGs}${flowIndicatorSVG}</svg>`;
 }
 
 /** Build the full SVG string for nodes + edges + grid (singleton state wrapper). */

@@ -414,6 +414,23 @@ export async function handleWsMessage(
             }
           }
           broadcast(session, cmd);
+          // Fan out normalized detection overlay to web viewers
+          const visionDetections = (cmd.detections as any[]).filter((d: any) => d.bbox);
+          if (visionDetections.length > 0) {
+            broadcast(session, {
+              type: "detection_overlay",
+              source: "vision",
+              boxes: visionDetections.map((d: any) => ({
+                x1: d.bbox.x1 * 1024,
+                y1: d.bbox.y1 * 1024,
+                x2: d.bbox.x2 * 1024,
+                y2: d.bbox.y2 * 1024,
+                label: d.label || d.type,
+                confidence: d.confidence ?? 0,
+                subType: d.type,
+              })),
+            });
+          }
         } else if (cmd.type === "sensor_result") {
           if (session.activeAppId) {
             const sensorType = cmd.sensorType as string;
@@ -506,6 +523,64 @@ export async function handleWsMessage(
             }
           }
           broadcast(session, cmd);
+          // Fan out normalized detection overlay to web viewers
+          const trackingBoxes = (cmd.tracks as any[]).filter((t: any) => t.bbox);
+          if (trackingBoxes.length > 0) {
+            broadcast(session, {
+              type: "detection_overlay",
+              source: "tracking",
+              boxes: trackingBoxes.map((t: any) => ({
+                x1: t.bbox.x1 * 1024,
+                y1: t.bbox.y1 * 1024,
+                x2: t.bbox.x2 * 1024,
+                y2: t.bbox.y2 * 1024,
+                label: `#${t.trackId ?? "?"} ${t.classLabel ?? "object"}`,
+                confidence: t.confidence ?? 0,
+                subType: t.classLabel ?? "track",
+              })),
+            });
+          }
+        } else if (cmd.type === "yolo_result" && Array.isArray(cmd.detections)) {
+          if (session.activeAppId) {
+            const detections = cmd.detections as any[];
+            const labelCounts: Record<string, number[]> = {};
+            for (const d of detections) {
+              const cls = d.classLabel ?? "object";
+              if (!labelCounts[cls]) labelCounts[cls] = [];
+              labelCounts[cls].push(d.confidence ?? 0);
+            }
+            const summaryParts = Object.entries(labelCounts).map(([cls, confs]) => {
+              const top = confs.sort((a, b) => b - a)[0];
+              return `${cls} ${Math.round(top * 100)}%`;
+            });
+            const summary = `YOLO detect: ${detections.length} objects (${summaryParts.join(", ")})`;
+            const throttled = detectionThrottle.check(sessionId, "yolo", summary);
+            if (throttled) {
+              orchestrator.sendTrigger(sessionId, `[YOLO: ${throttled}]`);
+            }
+            // Fan out to Palantir nodes (non-blocking)
+            if (palantirOrchestrator.isActive(sessionId)) {
+              palantirOrchestrator.fanoutTrigger(sessionId, summary).catch(() => {});
+            }
+          }
+          broadcast(session, cmd);
+          // Fan out normalized detection overlay to web viewers
+          const yoloBoxes = (cmd.detections as any[]).filter((d: any) => d.bbox);
+          if (yoloBoxes.length > 0) {
+            broadcast(session, {
+              type: "detection_overlay",
+              source: "yolo",
+              boxes: yoloBoxes.map((d: any) => ({
+                x1: d.bbox.x1 * 1024,
+                y1: d.bbox.y1 * 1024,
+                x2: d.bbox.x2 * 1024,
+                y2: d.bbox.y2 * 1024,
+                label: d.classLabel ?? "object",
+                confidence: d.confidence ?? 0,
+                subType: d.classLabel ?? "yolo",
+              })),
+            });
+          }
         } else if (cmd.type === "reid_crops" && Array.isArray(cmd.crops)) {
           // Person crops for ReID embedding extraction (JEPA pattern)
           if (reidOrchestrator.isActive(sessionId)) {

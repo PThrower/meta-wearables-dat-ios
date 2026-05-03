@@ -130,6 +130,8 @@ export class RelayPlayer {
   private latestBoundingBoxes: Array<{ y1: number; x1: number; y2: number; x2: number; label: string; confidence: number }> = [];
   private showOverlays = true;
   private bboxTimeout: ReturnType<typeof setTimeout> | null = null;
+  private detectionBoxes: Array<{ x1: number; y1: number; x2: number; y2: number; label: string; confidence: number; subType: string }> = [];
+  private detectionTimeout: ReturnType<typeof setTimeout> | null = null;
   private lastVideoWidth = 0;
   private lastVideoHeight = 0;
 
@@ -182,6 +184,17 @@ export class RelayPlayer {
     this.drawBoundingBoxes();
   }
 
+  /** Update raw detection boxes from vision/yolo/tracking results */
+  setDetectionBoxes(boxes: Array<{ x1: number; y1: number; x2: number; y2: number; label: string; confidence: number; subType: string }>): void {
+    this.detectionBoxes = boxes;
+    this.drawBoundingBoxes();
+    if (this.detectionTimeout) clearTimeout(this.detectionTimeout);
+    this.detectionTimeout = setTimeout(() => {
+      this.detectionBoxes = [];
+      this.drawBoundingBoxes();
+    }, 5_000);
+  }
+
   /** Draw current bounding boxes on the overlay canvas */
   private drawBoundingBoxes(): void {
     if (!this.overlayCanvas || !this.overlayCtx) return;
@@ -197,7 +210,7 @@ export class RelayPlayer {
 
     ctx.clearRect(0, 0, w, h);
 
-    if (!this.showOverlays || this.latestBoundingBoxes.length === 0) return;
+    if (!this.showOverlays || (this.latestBoundingBoxes.length === 0 && this.detectionBoxes.length === 0)) return;
 
     // Color palette for different labels
     const colors = ["#4ade80", "#60a5fa", "#facc15", "#f87171", "#a78bfa", "#fb923c", "#2dd4bf", "#e879f9"];
@@ -225,6 +238,34 @@ export class RelayPlayer {
       ctx.fillRect(px, py - 16, textWidth + 8, 16);
       ctx.fillStyle = "#000";
       ctx.fillText(label, px + 4, py - 4);
+    }
+
+    // Detection boxes (vision/yolo/tracking) — dashed border, muted teal/cyan
+    const detColors = ["#2dd4bf", "#22d3ee", "#06b6d4", "#14b8a6", "#5eead4", "#67e8f9"];
+    for (let i = 0; i < this.detectionBoxes.length; i++) {
+      const box = this.detectionBoxes[i];
+      const px = (box.x1 / 1024) * w;
+      const py = (box.y1 / 1024) * h;
+      const pw = ((box.x2 - box.x1) / 1024) * w;
+      const ph = ((box.y2 - box.y1) / 1024) * h;
+
+      const color = detColors[i % detColors.length];
+
+      // Dashed border to distinguish from AI solid boxes
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(px, py, pw, ph);
+      ctx.setLineDash([]);
+
+      // Label badge
+      const detLabel = `${box.label} ${Math.round(box.confidence * 100)}%`;
+      ctx.font = "10px 'SF Mono', monospace";
+      const detTextWidth = ctx.measureText(detLabel).width;
+      ctx.fillStyle = color;
+      ctx.fillRect(px, py + ph, detTextWidth + 6, 14);
+      ctx.fillStyle = "#000";
+      ctx.fillText(detLabel, px + 3, py + ph + 11);
     }
   }
 
@@ -522,6 +563,7 @@ export class RelayPlayer {
     this._firstFrameLocalTime = 0;
     this._firstFrameSenderTime = 0;
     this.latestBoundingBoxes = [];
+    this.detectionBoxes = [];
     this.lastVideoWidth = 0;
     this.lastVideoHeight = 0;
     this._h264ParameterSets = [];
