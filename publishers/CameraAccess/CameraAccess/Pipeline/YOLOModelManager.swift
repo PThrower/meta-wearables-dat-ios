@@ -42,18 +42,19 @@ actor YOLOModelManager {
 
     // MARK: - Public
 
-    /// Known YOLO11 CoreML model download URLs (Ultralytics GitHub releases).
+    /// Known YOLO11 CoreML model download URLs.
+    /// INT8 quantized models from our GitHub releases — ~50% smaller than FP16 Ultralytics originals.
     /// Used as fallback when server sends empty/missing modelUrl.
     private static let knownModelUrls: [String: String] = [
-        "yolo11n": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n.mlpackage.zip",
-        "yolo11s": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s.mlpackage.zip",
-        "yolo11m": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m.mlpackage.zip",
-        "yolo11n-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n-seg.mlpackage.zip",
-        "yolo11s-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s-seg.mlpackage.zip",
-        "yolo11m-seg": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m-seg.mlpackage.zip",
-        "yolo11n-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11n-pose.mlpackage.zip",
-        "yolo11s-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11s-pose.mlpackage.zip",
-        "yolo11m-pose": "https://github.com/ultralytics/yolo-ios-app/releases/download/v8.3.0/yolo11m-pose.mlpackage.zip",
+        "yolo11n": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11n-int8.mlpackage.zip",
+        "yolo11s": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11s-int8.mlpackage.zip",
+        "yolo11m": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11m-int8.mlpackage.zip",
+        "yolo11n-seg": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11n-seg-int8.mlpackage.zip",
+        "yolo11s-seg": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11s-seg-int8.mlpackage.zip",
+        "yolo11m-seg": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11m-seg-int8.mlpackage.zip",
+        "yolo11n-pose": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11n-pose-int8.mlpackage.zip",
+        "yolo11s-pose": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11s-pose-int8.mlpackage.zip",
+        "yolo11m-pose": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/quantized-yolo-v1/yolo11m-pose-int8.mlpackage.zip",
         "YOLO11PokerInt8LUT": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/poker-model-v1.0/YOLO11PokerInt8LUT.mlpackage.zip",
     ]
 
