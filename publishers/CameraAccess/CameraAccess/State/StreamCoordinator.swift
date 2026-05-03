@@ -310,6 +310,21 @@ final class StreamCoordinator {
       return
     }
 
+    // Request DAT SDK camera permission if not already granted
+    do {
+      let status = try await wearables.checkPermissionStatus(.camera)
+      if status != .granted {
+        let requested = try await wearables.requestPermission(.camera)
+        if requested != .granted {
+          errors.present("Camera permission denied. Please grant permission in the Meta app.")
+          return
+        }
+      }
+    } catch {
+      errors.present("Permission check failed: \(error.localizedDescription)")
+      return
+    }
+
     // DAT SDK 0.6.0: Get DeviceSession from manager, then add a StreamSession
     guard let deviceSession = await sessionManager.getSession() else {
       NSLog("[StreamCoordinator] No DeviceSession available")
@@ -1035,7 +1050,7 @@ final class StreamCoordinator {
         if self.shouldRetry(error: error) {
           self.scheduleRetry()
         } else {
-          self.errors.present("\(rawError) | \(state) | \(device)")
+          self.errors.present(Self.formatStreamingError(error))
         }
       }
     }
@@ -1047,6 +1062,20 @@ final class StreamCoordinator {
           self.recording.handleCapturedPhoto(uiImage)
         }
       }
+    }
+  }
+
+  private static func formatStreamingError(_ error: StreamSessionError) -> String {
+    switch error {
+    case .internalError:       return "An internal error occurred. Please try again."
+    case .deviceNotFound:      return "Device not found. Please ensure your glasses are connected."
+    case .deviceNotConnected:  return "Glasses disconnected. Please check your connection and try again."
+    case .timeout:             return "The operation timed out. Please try again."
+    case .videoStreamingError: return "Video streaming failed. Please try again."
+    case .permissionDenied:    return "Camera permission denied. Please grant permission in the Meta app."
+    case .hingesClosed:        return "Open the glasses hinges to start streaming."
+    case .thermalCritical:     return "Glasses are overheating. Streaming paused to protect the device."
+    @unknown default:          return "An unexpected streaming error occurred."
     }
   }
 
