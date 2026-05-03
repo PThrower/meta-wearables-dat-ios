@@ -5,7 +5,7 @@
  */
 
 import { esc, fetchDevices } from "../../core/api-client.js";
-import type { FlowExecutionConfig, WorkflowSettings } from "../../core/api-client.js";
+import type { DetectedFlow, FlowExecutionConfig, WorkflowSettings } from "../../core/api-client.js";
 import { getContainer, getWorkflow, getSelectedNodeId, setSelectedNodeId, setDirty, autoSave, isSettingsPanelActive, setSettingsPanelActive } from "./state.js";
 import { getNodeDef } from "./node-defs.js";
 import { refreshSVG } from "./svg-renderer.js";
@@ -49,6 +49,87 @@ const settingsCallbacks: SettingsCallbacks = {
   onBack: () => { setSettingsPanelActive(false); renderConfigPanel(); },
 };
 
+// ── Flows floating popup ──
+
+let _flowPopup: HTMLElement | null = null;
+let _flowPopupCollapsed = false;
+
+function getOrCreateFlowPopup(): HTMLElement {
+  if (_flowPopup && document.body.contains(_flowPopup)) return _flowPopup;
+
+  const popup = document.createElement("div");
+  popup.id = "wf-flows-popup";
+  popup.innerHTML = `
+    <div class="wf-flows-popup-header">
+      <span class="wf-flows-popup-title">Flows</span>
+      <span class="wf-flows-popup-count"></span>
+      <button class="wf-flows-popup-chevron" title="Toggle">▾</button>
+    </div>
+    <div class="wf-flows-popup-body"></div>
+  `;
+  document.body.appendChild(popup);
+  _flowPopup = popup;
+
+  if (_flowPopupCollapsed) popup.classList.add("collapsed");
+
+  popup.querySelector(".wf-flows-popup-chevron")!.addEventListener("click", (e) => {
+    e.stopPropagation();
+    _flowPopupCollapsed = !_flowPopupCollapsed;
+    popup.classList.toggle("collapsed", _flowPopupCollapsed);
+  });
+
+  wirePopupDrag(popup, popup.querySelector(".wf-flows-popup-header") as HTMLElement);
+  return popup;
+}
+
+function wirePopupDrag(popup: HTMLElement, handle: HTMLElement): void {
+  let active = false;
+  let startX = 0, startY = 0, originLeft = 0, originTop = 0;
+
+  handle.addEventListener("pointerdown", (e) => {
+    if ((e.target as HTMLElement).closest(".wf-flows-popup-chevron")) return;
+    active = true;
+    handle.setPointerCapture(e.pointerId);
+    const rect = popup.getBoundingClientRect();
+    // Convert right-anchored CSS to left-anchored so drag math is consistent
+    popup.style.right = "auto";
+    popup.style.left = `${rect.left}px`;
+    popup.style.top = `${rect.top}px`;
+    startX = e.clientX;
+    startY = e.clientY;
+    originLeft = rect.left;
+    originTop = rect.top;
+    e.preventDefault();
+  });
+
+  handle.addEventListener("pointermove", (e) => {
+    if (!active) return;
+    const newLeft = Math.max(0, Math.min(originLeft + (e.clientX - startX), window.innerWidth - popup.offsetWidth));
+    const newTop = Math.max(0, Math.min(originTop + (e.clientY - startY), window.innerHeight - popup.offsetHeight));
+    popup.style.left = `${newLeft}px`;
+    popup.style.top = `${newTop}px`;
+  });
+
+  handle.addEventListener("pointerup", () => { active = false; });
+  handle.addEventListener("pointercancel", () => { active = false; });
+}
+
+function updateFlowPopup(flows: DetectedFlow[], config: FlowExecutionConfig | null | undefined): void {
+  if (flows.length < 2) {
+    if (_flowPopup) _flowPopup.style.display = "none";
+    return;
+  }
+  const popup = getOrCreateFlowPopup();
+  popup.style.display = "";
+
+  const countEl = popup.querySelector(".wf-flows-popup-count");
+  if (countEl) countEl.textContent = `${flows.length} found`;
+
+  const body = popup.querySelector(".wf-flows-popup-body") as HTMLElement;
+  body.innerHTML = FlowPanel.render(flows, config);
+  FlowPanel.wire(body, flows, flowCallbacks);
+}
+
 /** Detect multi-flow for the current workflow. */
 function getMultiFlowInfo(workflow: { nodes: Array<{ id: string; type?: string; label?: string }>; edges: Array<{ id: string; sourceNodeId: string; targetNodeId: string }> }) {
   const flows = detectFlows(workflow.nodes, workflow.edges);
@@ -83,24 +164,22 @@ export function renderConfigPanel(): void {
     return;
   }
 
-  const { flows, multiFlow } = getMultiFlowInfo(workflow);
+  const { flows } = getMultiFlowInfo(workflow);
 
-  // Flow config section — rendered by flow-config-panel primitives
-  const flowHtml = FlowPanel.render(flows, workflow.flowConfig);
+  // Flow popup — always updated separately, never part of #wf-config-panel
+  updateFlowPopup(flows, workflow.flowConfig);
 
-  // State 1: Node selected → flow config (if multi) + node config
+  // State 1: Node selected → node config
   const selectedId = getSelectedNodeId();
   if (selectedId) {
     const node = workflow.nodes.find(n => n.id === selectedId);
     if (!node) {
-      panel.innerHTML = `${flowHtml}<p class="empty-state">Select a node</p>`;
-      if (multiFlow) FlowPanel.wire(panel, flows, flowCallbacks);
+      panel.innerHTML = `<p class="empty-state">Select a node</p>`;
       return;
     }
     const def = getNodeDef(node.type);
     if (!def) {
-      panel.innerHTML = `${flowHtml}<p class="empty-state">Unknown node type</p>`;
-      if (multiFlow) FlowPanel.wire(panel, flows, flowCallbacks);
+      panel.innerHTML = `<p class="empty-state">Unknown node type</p>`;
       return;
     }
     const c = def.color;
@@ -118,7 +197,6 @@ export function renderConfigPanel(): void {
     const previewHtml = renderNodePreviewHTML(selectedId);
 
     panel.innerHTML = `
-      ${flowHtml}
       <div class="wf-node-config-section">
         <div class="wf-config-header" style="border-left: 3px solid ${c.header}">
           <span class="wf-config-type">${esc(def.label)}</span>
@@ -129,7 +207,6 @@ export function renderConfigPanel(): void {
       </div>
     `;
 
-    if (multiFlow) FlowPanel.wire(panel, flows, flowCallbacks);
     wireConfigFieldInputs(panel, configCallbacks);
 
     // Delete node button (full-editor-specific)
@@ -148,11 +225,6 @@ export function renderConfigPanel(): void {
     return;
   }
 
-  // State 2: Empty — flow config + "Select a node"
-  if (flowHtml) {
-    panel.innerHTML = `${flowHtml}<p class="empty-state">Select a node</p>`;
-    if (multiFlow) FlowPanel.wire(panel, flows, flowCallbacks);
-  } else {
-    panel.innerHTML = `<p class="empty-state">Select a node</p>`;
-  }
+  // State 2: Empty
+  panel.innerHTML = `<p class="empty-state">Select a node</p>`;
 }

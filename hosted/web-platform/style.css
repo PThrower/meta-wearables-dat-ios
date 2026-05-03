@@ -3362,6 +3362,71 @@ body {
   gap: 12px;
 }
 
+/* ── Flows floating popup ── */
+#wf-flows-popup {
+  position: fixed;
+  top: 72px;
+  right: 260px;
+  width: 220px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  z-index: 250;
+  overflow: hidden;
+}
+.wf-flows-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  cursor: grab;
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+.wf-flows-popup-header:active { cursor: grabbing; }
+.wf-flows-popup-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.wf-flows-popup-count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+.wf-flows-popup-chevron {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  line-height: 1;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+#wf-flows-popup.collapsed .wf-flows-popup-chevron {
+  transform: rotate(-90deg);
+}
+.wf-flows-popup-body {
+  padding: 10px 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+#wf-flows-popup.collapsed .wf-flows-popup-body {
+  display: none;
+}
+/* suppress inner FlowPanel header — popup drag header replaces it */
+#wf-flows-popup .wf-flows-popup-body > div > div:first-child {
+  display: none;
+}
+#wf-flows-popup .wf-flows-popup-body > div {
+  border-bottom: none !important;
+  padding-bottom: 0 !important;
+  margin-bottom: 0 !important;
+}
+
 .wf-config-header {
   padding-left: 10px;
   padding-bottom: 8px;
