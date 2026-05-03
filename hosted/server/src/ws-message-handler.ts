@@ -250,7 +250,7 @@ export async function handleWsMessage(
         } else if (cmd.type === "activate_app") {
           const appId = cmd.appId as string;
           if (appId.startsWith("wf-")) {
-            const wfId = appId.slice(3);
+            const wfId = appId.slice(3).replace(/-\d+$/, "");
             try {
               const wf = q.getWorkflow(wfId);
               if (!wf) throw new Error("Workflow not found");
@@ -709,7 +709,7 @@ export async function handleWsMessage(
         } else if (cmd.type === "activate_app" && cmd.appId) {
           const appId = cmd.appId as string;
           if (appId.startsWith("wf-")) {
-            const wfId = appId.slice(3);
+            const wfId = appId.slice(3).replace(/-\d+$/, "");
             try {
               const wf = q.getWorkflow(wfId);
               if (!wf) throw new Error("Workflow not found");
