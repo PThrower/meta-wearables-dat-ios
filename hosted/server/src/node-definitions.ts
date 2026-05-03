@@ -1439,6 +1439,24 @@ const TRIGGER_TYPES = NODE_DEFINITIONS.filter(d => d.role === "trigger").map(d =
 /** All current source type identifiers (derived from definitions) */
 const SOURCE_TYPES = NODE_DEFINITIONS.filter(d => d.role === "source").map(d => d.type);
 
+/** Build allowed sources map (reverse of allowedEdgeMap — which types can connect TO each node).
+ *  Currently no node definitions specify allowedSources, so this returns an empty map.
+ *  When nodes need to restrict incoming connections, add allowedSources to NodeDefinition. */
+export function buildAllowedSourcesMap(): Map<string, Set<string>> {
+  return new Map();
+}
+
+/** Resolve effective config schema, evaluating conditional fields against the workflow graph.
+ *  For now returns the node's full configSchema (no conditional filtering). */
+export function resolveEffectiveConfigSchema(
+  def: NodeDefinition,
+  _nodeId: string,
+  _nodes: unknown[],
+  _edges: unknown[],
+): ConfigFieldSchema[] {
+  return def.configSchema;
+}
+
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {
   const map = new Map<string, Set<string>>();
