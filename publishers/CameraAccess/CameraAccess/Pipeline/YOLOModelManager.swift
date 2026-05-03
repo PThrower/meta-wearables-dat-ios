@@ -45,15 +45,24 @@ actor YOLOModelManager {
         "YOLO11PokerInt8LUT": "https://github.com/ebowwa/meta-wearables-dat-ios/releases/download/poker-model-v1.0/YOLO11PokerInt8LUT.mlpackage.zip",
     ]
 
+    /// Load result including model and resource metrics.
+    struct ModelLoadResult: Sendable {
+        let model: MLModel
+        let diskSizeBytes: Int64
+        let downloadSizeBytes: Int64
+    }
+
     /// Load a compiled MLModel, downloading or compiling as needed.
     /// - Parameters:
     ///   - id: Model identifier (e.g. "yolo11n", "yolo11s-seg")
     ///   - serverUrl: Optional server URL to download from. Nil/empty = use known or bundled model.
-    /// - Returns: Compiled MLModel ready for inference.
-    func loadModel(id: String, serverUrl: String? = nil) async throws -> MLModel {
+    /// - Returns: ModelLoadResult with compiled model and resource metrics.
+    func loadModel(id: String, serverUrl: String? = nil) async throws -> ModelLoadResult {
         // Return cached model if available
         if let cached = loadedModels[id] {
-            return cached
+            let compiledUrl = cacheDir.appendingPathComponent("\(id).mlmodelc")
+            let diskSize = Self.directorySize(at: compiledUrl)
+            return ModelLoadResult(model: cached, diskSizeBytes: diskSize, downloadSizeBytes: 0)
         }
 
         // Ensure cache directory exists
@@ -65,7 +74,8 @@ actor YOLOModelManager {
         if FileManager.default.fileExists(atPath: compiledUrl.path) {
             if let model = try? await loadCompiledModel(at: compiledUrl) {
                 loadedModels[id] = model
-                return model
+                let diskSize = Self.directorySize(at: compiledUrl)
+                return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: 0)
             }
             NSLog("[YOLOModel] Cached model failed to load, deleting stale cache at \(compiledUrl.lastPathComponent)")
             try? FileManager.default.removeItem(at: compiledUrl)
@@ -76,19 +86,37 @@ actor YOLOModelManager {
 
         // If URL available, download and compile
         if let resolvedUrl {
-            let model = try await downloadAndCompile(id: id, serverUrl: resolvedUrl, compiledUrl: compiledUrl)
-            loadedModels[id] = model
-            return model
+            let result = try await downloadAndCompile(id: id, serverUrl: resolvedUrl, compiledUrl: compiledUrl)
+            loadedModels[id] = result.model
+            return result
         }
 
         // Try bundled .mlpackage -> compile to cache
         if let bundledUrl = findBundledModel(id: id) {
             let model = try await compileBundledModel(at: bundledUrl, to: compiledUrl)
             loadedModels[id] = model
-            return model
+            let diskSize = Self.directorySize(at: compiledUrl)
+            return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: 0)
         }
 
         throw YOLOModelError.modelNotFound(id: id)
+    }
+
+    // MARK: - Disk Size
+
+    /// Recursively calculate directory size in bytes.
+    nonisolated static func directorySize(at url: URL) -> Int64 {
+        let manager = FileManager.default
+        guard let enumerator = manager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [], errorHandler: nil) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let fileUrl as URL in enumerator {
+            if let size = try? fileUrl.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                total += Int64(size)
+            }
+        }
+        return total
     }
 
     /// Extract class labels from a compiled MLModel's metadata.
@@ -144,7 +172,7 @@ actor YOLOModelManager {
         return try MLModel(contentsOf: url, configuration: config)
     }
 
-    private func downloadAndCompile(id: String, serverUrl: String, compiledUrl: URL) async throws -> MLModel {
+    private func downloadAndCompile(id: String, serverUrl: String, compiledUrl: URL) async throws -> ModelLoadResult {
         guard let url = URL(string: serverUrl) else {
             throw YOLOModelError.invalidURL(serverUrl)
         }
@@ -176,6 +204,7 @@ actor YOLOModelManager {
         let headerData = try Data(contentsOf: downloadedFile, options: [.alwaysMapped]).prefix(4)
         let isZip = headerData.count >= 4 && headerData[0] == 0x50 && headerData[1] == 0x4B
         let fileSize = try FileManager.default.attributesOfItem(atPath: downloadedFile.path)[.size] as? Int64 ?? 0
+        let downloadSizeBytes = fileSize
         NSLog("[YOLOModel] Downloaded \(fileSize) bytes, isZip=\(isZip)")
 
         let extractedDir = tempDir.appendingPathComponent("extracted")
@@ -204,7 +233,9 @@ actor YOLOModelManager {
                 try FileManager.default.removeItem(at: compiledUrl)
             }
             try FileManager.default.copyItem(at: mlmodelcUrl, to: compiledUrl)
-            return try await loadCompiledModel(at: compiledUrl)
+            let model = try await loadCompiledModel(at: compiledUrl)
+            let diskSize = Self.directorySize(at: compiledUrl)
+            return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
         }
 
         // Check if extracted dir itself IS an .mlmodelc (flat structure: Manifest.json + Data/com.apple.CoreML/)
@@ -227,7 +258,9 @@ actor YOLOModelManager {
             }
             try FileManager.default.moveItem(at: compiled, to: compiledUrl)
             NSLog("[YOLOModel] Compiled to \(compiledUrl.lastPathComponent)")
-            return try await loadCompiledModel(at: compiledUrl)
+            let model = try await loadCompiledModel(at: compiledUrl)
+            let diskSize = Self.directorySize(at: compiledUrl)
+            return ModelLoadResult(model: model, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
         }
 
         let mlpackageUrl = findMLPackage(in: extractedDir)
@@ -245,7 +278,9 @@ actor YOLOModelManager {
         }
         try FileManager.default.moveItem(at: compiled, to: compiledUrl)
 
-        return try await loadCompiledModel(at: compiledUrl)
+        let loadedModel = try await loadCompiledModel(at: compiledUrl)
+        let diskSize = Self.directorySize(at: compiledUrl)
+        return ModelLoadResult(model: loadedModel, diskSizeBytes: diskSize, downloadSizeBytes: downloadSizeBytes)
     }
 
     private func compileBundledModel(at source: URL, to destination: URL) async throws -> MLModel {

@@ -378,11 +378,11 @@ struct YOLOStateBadge: View {
         Text(state.label)
           .font(.system(size: 10, weight: .medium, design: .monospaced))
           .foregroundColor(.yellow)
-      case .ready(let modelId):
+      case .ready(let modelId, let resources):
         Image(systemName: "checkmark.circle.fill")
           .font(.system(size: 11))
           .foregroundColor(.green)
-        Text(modelId)
+        Text("\(modelId) \(String(format: "%.1f", resources.diskSizeMB))MB")
           .font(.system(size: 10, weight: .medium, design: .monospaced))
           .foregroundColor(.green)
       case .idle:
