@@ -31,6 +31,10 @@
  *   /stats                   - JSON stats (platform-wide + per-session)
  *   /telemetry/ai            - JSON AI telemetry (aggregate or per-session with ?session=<id>)
  *   /telemetry/ai/log        - WebSocket, live AI guidance event log (optional ?session=<id>)
+ *   /sessions/active         - Active sessions with device info + workflow (GET)
+ *   /sessions/:id/node-states - Per-node execution state + recent log (GET, ?limit=N)
+ *   /sessions/:id/telemetry  - Publisher timing/battery + AI status (GET)
+ *   /sessions/:id/deactivate - Deactivate current workflow (POST)
  *
  * Backward compatible: omitting ?session= routes to "default" session.
  *
@@ -1145,6 +1149,148 @@ const server = Bun.serve<WsData>({
       });
     }
 
+    // --- Runtime Observability (MCP workflow tools) ---
+
+    // GET /sessions/active — active session detail with device info + workflow
+    if (url.pathname === "/sessions/active") {
+      const active = registry.listActive().filter(s => s.publisherConnected || s.metadata.deviceName);
+      const detailed = active.map(s => {
+        const session = registry.get(s.id);
+        const pub = session?.publisher;
+        return {
+          id: s.id,
+          live: true,
+          publisherConnected: s.publisherConnected,
+          publisherStandby: pub?.standby ?? true,
+          viewerCount: s.viewerCount,
+          uptimeMs: s.uptimeMs,
+          activeWorkflowId: s.activeWorkflowId ?? null,
+          createdAt: session?.createdAt,
+          lastActivityAt: session?.lastActivityAt,
+          state: session?.state ?? "unknown",
+          linkState: session?.linkState ?? "unknown",
+          device: pub ? {
+            deviceId: pub.deviceId,
+            deviceName: pub.deviceName,
+            deviceModel: pub.deviceModel,
+            wearableType: pub.wearableType,
+            systemVersion: pub.systemVersion,
+            appVersion: pub.appVersion,
+            buildNumber: pub.buildNumber,
+          } : (s.metadata ?? null),
+          battery: pub ? {
+            level: pub.batteryLevel,
+            state: pub.batteryState,
+            lowPowerMode: pub.lowPowerMode,
+          } : null,
+          frames: pub ? {
+            frameCount: pub.frameCount,
+            totalBytes: pub.totalBytes,
+            audioCount: pub.audioCount,
+            audioBytes: pub.audioBytes,
+          } : null,
+        };
+      });
+      return Response.json(detailed);
+    }
+
+    // GET /sessions/:id/node-states — current node execution states + recent log
+    const nodeStatesMatch = url.pathname.match(/^\/sessions\/([^/]+)\/node-states$/);
+    if (nodeStatesMatch) {
+      const sessionId = nodeStatesMatch[1];
+      const limit = Math.min(parseInt(url.searchParams.get("limit") ?? "100"), 500);
+
+      // Live state from orchestrator
+      const instance = orchestrator.getActiveWorkflow(sessionId);
+      const liveNodes = instance
+        ? [...instance.nodes.values()].map(n => ({
+            nodeId: n.nodeId,
+            nodeType: n.nodeType,
+            label: n.label,
+            state: n.state,
+            startedAt: n.startedAt,
+            completedAt: n.completedAt,
+            error: n.error,
+          }))
+        : [];
+
+      // Recent execution log from DB
+      const log = q.getNodeExecutionLog(sessionId, limit);
+
+      return Response.json({
+        sessionId,
+        workflowId: instance?.workflowId ?? registry.get(sessionId)?.activeWorkflowId ?? null,
+        workflowName: instance?.workflowName ?? null,
+        activatedAt: instance?.activatedAt ?? null,
+        nodes: liveNodes,
+        log,
+      });
+    }
+
+    // GET /sessions/:id/telemetry — publisher timing + battery + AI status
+    const telemetryMatch = url.pathname.match(/^\/sessions\/([^/]+)\/telemetry$/);
+    if (telemetryMatch) {
+      const sessionId = telemetryMatch[1];
+      const session = registry.get(sessionId);
+      const pub = session?.publisher;
+
+      return Response.json({
+        sessionId,
+        publisher: pub ? {
+          connected: true,
+          standby: pub.standby,
+          frameCount: pub.frameCount,
+          totalBytes: pub.totalBytes,
+          audioCount: pub.audioCount,
+          audioBytes: pub.audioBytes,
+          timing: pub.timing,
+          lastHeader: pub.lastHeader,
+          battery: {
+            level: pub.batteryLevel,
+            state: pub.batteryState,
+            lowPowerMode: pub.lowPowerMode,
+          },
+        } : { connected: false },
+        ai: {
+          status: orchestrator.getStatus(sessionId),
+          telemetry: orchestrator.getTelemetry(sessionId),
+          eventHistory: orchestrator.getEventHistory(sessionId),
+        },
+      });
+    }
+
+    // POST /sessions/:id/deactivate — stop current workflow
+    const deactivateMatch = url.pathname.match(/^\/sessions\/([^/]+)\/deactivate$/);
+    if (deactivateMatch && req.method === "POST") {
+      const sessionId = deactivateMatch[1];
+      const session = registry.getSession(sessionId);
+      if (!session) return Response.json({ error: "Session not found" }, { status: 404 });
+
+      const workflowId = session.activeWorkflowId;
+      if (!workflowId) return Response.json({ error: "No active workflow" }, { status: 400 });
+
+      // Send deactivate to iOS publisher
+      if (session.publisher?.ws && session.publisher.ws.readyState === WebSocket.OPEN) {
+        session.publisher.ws.send(JSON.stringify({ type: "deactivate_app" }));
+      }
+
+      // Deactivate AI services
+      await orchestrator.deactivateApp(sessionId);
+      jepaOrchestrator.deactivate(sessionId);
+      palantirOrchestrator.deactivateAll(sessionId);
+
+      // Clear workflow state
+      session.activeWorkflowId = null;
+      session.activeAppId = null;
+      session.appPipeline = null;
+      dbWriter.enqueue(q.deactivateActivation(sessionId, "api_deactivate"));
+      dbWriter.enqueue(q.updateSession(sessionId, { activeWorkflowId: null }));
+      dbWriter.flushNow();
+
+      console.log(`[api] Deactivated workflow ${workflowId} on session ${sessionId}`);
+      return Response.json({ ok: true, sessionId, deactivatedWorkflowId: workflowId });
+    }
+
     // --- AI Telemetry Live Log WebSocket: /telemetry/ai/log ---
 
     if (url.pathname === "/telemetry/ai/log") {
@@ -1276,17 +1422,10 @@ const server = Bun.serve<WsData>({
           console.log(`[relay] Publisher reconnected: AI policy=${onReconnect} session=${sessionId}`);
         }
 
-        // Replay workflow config if there's an active workflow (publisher reconnected)
-        // Check in-memory first, then fall back to DB (survives server restarts)
-        let wfId = session?.activeWorkflowId;
-        if (!wfId) {
-          const dbSession = q.getSession(sessionId);
-          wfId = (dbSession as any)?.active_workflow_id ?? (dbSession as any)?.activeWorkflowId ?? undefined;
-          if (wfId && session) {
-            session.activeWorkflowId = wfId;
-            console.log(`[relay] Restored activeWorkflowId=${wfId} from DB for session=${sessionId}`);
-          }
-        }
+        // Replay workflow config only on genuine reconnects (in-memory activeWorkflowId).
+        // Do NOT fall back to DB — a new stream session should start clean,
+        // not resume a stale workflow from a previous streaming session.
+        const wfId = session?.activeWorkflowId;
         if (wfId && ws.readyState === WebSocket.OPEN) {
           const wf = q.getWorkflow(wfId);
           if (wf) {
