@@ -139,15 +139,36 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
                 }
             }
 
-            let model = try await modelManager.loadModel(
+            let result = try await modelManager.loadModel(
                 id: modelId,
                 serverUrl: yoloConfig.modelUrl
             )
+            let model = result.model
             progressTask.cancel()
 
             await onModelState?(.compiling(modelId: modelId))
 
             self.mlModel = model
+
+            // Extract class labels from model metadata (e.g. custom YOLO models)
+            // Falls back to config labels (COCO default) if model has none
+            var effectiveLabels = yoloConfig.classLabels
+            if let modelLabels = YOLOModelManager.extractClassLabels(from: model) {
+                NSLog("[YOLOStage] Using \(modelLabels.count) class labels from model metadata")
+                effectiveLabels = modelLabels
+                self.yoloConfig = YOLOStageConfig(
+                    task: yoloConfig.task,
+                    modelId: yoloConfig.modelId,
+                    modelUrl: yoloConfig.modelUrl,
+                    classLabels: modelLabels,
+                    confidence: yoloConfig.confidence,
+                    iouThreshold: yoloConfig.iouThreshold,
+                    targetFPS: yoloConfig.targetFPS,
+                    maxDetections: yoloConfig.maxDetections,
+                    inputSize: yoloConfig.inputSize,
+                    smoothingAlpha: yoloConfig.smoothingAlpha
+                )
+            }
 
             // Create VNCoreMLModel for Vision framework integration
             let visionModel = try VNCoreMLModel(for: model)
@@ -158,8 +179,16 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
             // Detect output format
             self.outputFormat = detectFormat(from: model)
 
-            await onModelState?(.ready(modelId: modelId))
-            NSLog("[YOLOStage] Model loaded: \(modelId), format=\(outputFormat)")
+            // Build resource info and report ready state
+            let resources = YOLOResourceInfo(
+                diskSizeMB: Double(result.diskSizeBytes) / (1024 * 1024),
+                downloadSizeMB: Double(result.downloadSizeBytes) / (1024 * 1024),
+                classCount: effectiveLabels.count,
+                inputSize: yoloConfig.inputSize,
+                task: yoloConfig.task
+            )
+            await onModelState?(.ready(modelId: modelId, resources: resources))
+            NSLog("[YOLOStage] Model loaded: \(modelId), format=\(outputFormat), disk=\(String(format: "%.1f", resources.diskSizeMB))MB, classes=\(resources.classCount)")
         } catch {
             await onModelState?(.failed(modelId: modelId, error: error.localizedDescription))
             NSLog("[YOLOStage] Model load failed: \(error)")

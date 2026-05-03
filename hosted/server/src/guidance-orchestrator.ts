@@ -20,6 +20,7 @@ import type { AppRegistry } from "./app-registry.js";
 import type { AIService, AIServiceCallbacks, AIServiceStatusContext } from "./ai-service.js";
 import { createAIService } from "./ai-service.js";
 import { resamplePcm } from "./pcm-resample.js";
+import type { ServerErrorCallback } from "./message-types.js";
 import { dbWriter } from "./db/db-writer.js";
 import * as q from "./db/queries.js";
 // Import to register the AI providers
@@ -204,6 +205,9 @@ export class GuidanceOrchestrator {
   /** Callback to persist guidance events to R2 JSONL sidecar */
   private guidancePersistFn: GuidancePersistFn | null = null;
 
+  /** Callback for pushing server errors to publisher + viewers */
+  private serverErrorCb: ServerErrorCallback | null = null;
+
   private startedAt: number = 0;
   private unsubControlBus: (() => void) | null = null;
 
@@ -239,6 +243,11 @@ export class GuidanceOrchestrator {
   /** Set the callback for persisting guidance events to R2 JSONL */
   setGuidancePersistFn(fn: GuidancePersistFn): void {
     this.guidancePersistFn = fn;
+  }
+
+  /** Set the callback for pushing server errors to publisher + viewers */
+  setServerErrorCallback(cb: ServerErrorCallback): void {
+    this.serverErrorCb = cb;
   }
 
   // --- Public API ---
@@ -1589,6 +1598,19 @@ export class GuidanceOrchestrator {
       const msg = { type: "guidance_event", event };
       for (const cb of subs) {
         try { cb(msg); } catch { /* subscriber error, skip */ }
+      }
+    }
+
+    // Push alerts to iOS publisher via server error callback
+    if (this.serverErrorCb && event.type === "guidance.alert") {
+      const severity = (event as any).severity as string | undefined;
+      if (severity === "warning" || severity === "critical") {
+        this.serverErrorCb(sessionId, {
+          source: "guidance",
+          severity: severity as "warning" | "critical",
+          message: (event as any).message ?? "AI guidance alert",
+          context: { appId: event.source },
+        });
       }
     }
   }

@@ -23,7 +23,7 @@ enum YOLOModelState: Sendable, Equatable {
     case idle
     case downloading(modelId: String, progress: Double)   // 0.0 - 1.0
     case compiling(modelId: String)
-    case ready(modelId: String)
+    case ready(modelId: String, resources: YOLOResourceInfo)
     case failed(modelId: String, error: String)
 
     var isLoading: Bool {
@@ -43,9 +43,29 @@ enum YOLOModelState: Sendable, Equatable {
         case .idle: return ""
         case .downloading(let id, let p): return "Downloading \(id)... \(Int(p * 100))%"
         case .compiling(let id): return "Compiling \(id)..."
-        case .ready(let id): return "\(id) ready"
+        case .ready(let id, let res): return "\(id) ready (\(String(format: "%.1f", res.diskSizeMB))MB)"
         case .failed(let id, let err): return "\(id) failed: \(err)"
         }
+    }
+}
+
+// MARK: - Resource Info
+
+struct YOLOResourceInfo: Sendable, Equatable {
+    let diskSizeMB: Double         // compiled .mlmodelc size on disk
+    let downloadSizeMB: Double     // original download size (ZIP/archive)
+    let classCount: Int            // number of class labels
+    let inputSize: Int             // model input resolution (e.g. 640)
+    let task: YOLOTask
+
+    func toDict() -> [String: Any] {
+        [
+            "diskSizeMB": String(format: "%.1f", diskSizeMB),
+            "downloadSizeMB": String(format: "%.1f", downloadSizeMB),
+            "classCount": classCount,
+            "inputSize": inputSize,
+            "task": task.rawValue,
+        ]
     }
 }
 

@@ -27,6 +27,7 @@ import "./jepa-modal-provider.js";
 import "./jepa-mobile-providers.js";
 
 import type { GuidanceEvent } from "./guidance-orchestrator.js";
+import type { ServerErrorCallback } from "./message-types.js";
 
 // --- Types ---
 
@@ -91,6 +92,9 @@ export class JEPAOrchestrator {
   /** Push JEPA events to flow trigger evaluation engine */
   private flowTriggerFn: JEPAFlowTriggerFn | null = null;
 
+  /** Callback for pushing server errors to publisher + viewers */
+  private serverErrorCb: ServerErrorCallback | null = null;
+
   // --- Setters for wiring ---
 
   setEventFanoutFn(fn: JEPAEventFanoutFn): void {
@@ -107,6 +111,10 @@ export class JEPAOrchestrator {
 
   setFlowTriggerFn(fn: JEPAFlowTriggerFn): void {
     this.flowTriggerFn = fn;
+  }
+
+  setServerErrorCallback(cb: ServerErrorCallback): void {
+    this.serverErrorCb = cb;
   }
 
   // --- Lifecycle ---
@@ -152,10 +160,31 @@ export class JEPAOrchestrator {
       },
       onError: (error) => {
         console.error(`[jepa-orchestrator] Session ${sessionId} error:`, error.message);
+        if (this.serverErrorCb) {
+          this.serverErrorCb(sessionId, {
+            source: "jepa",
+            severity: "warning",
+            message: error.message,
+          });
+        }
       },
     };
 
-    await service.connect(serviceConfig, callbacks);
+    try {
+      await service.connect(serviceConfig, callbacks);
+    } catch (err: any) {
+      const message = err?.message ?? "JEPA service connection failed";
+      console.error(`[jepa-orchestrator] Connect failed for ${sessionId}:`, message);
+      if (this.serverErrorCb) {
+        this.serverErrorCb(sessionId, {
+          source: "jepa",
+          severity: "critical",
+          message,
+          context: { model: config.model, provider: config.provider },
+        });
+      }
+      throw err;
+    }
 
     this.jepaState.set(sessionId, {
       service,

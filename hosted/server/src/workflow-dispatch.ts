@@ -159,6 +159,10 @@ export function dispatchWorkflowConfig(
     const gateNodes = nodes.filter(n => n.type && typeof n.type === "string" && (n.type.startsWith("gate-") || n.type.startsWith("cost-")));
     const gateNodeMap = new Map(gateNodes.map(n => [n.id, n]));
 
+    // Collect tracking-heatmap nodes (config-only, rides along with tracking_stage_config)
+    const heatMapNodes = nodes.filter(n => n.type === "tracking-heatmap");
+    const heatMapNodeMap = new Map(heatMapNodes.map(n => [n.id, n]));
+
     for (const i of trackingIdx) {
       const cfg = (nodes[i].config ?? {}) as Record<string, unknown>;
       const targetClasses = typeof cfg.targetClasses === "string" && (cfg.targetClasses as string).length > 0
@@ -200,6 +204,26 @@ export function dispatchWorkflowConfig(
         return true;
       });
 
+      // Collect heatmap config from tracking-heatmap nodes connected to this tracker
+      let heatmapConfig: Record<string, unknown> = { heatmapEnabled: false };
+      if (edges && edges.length > 0) {
+        // Find heatmap nodes that have an edge targeting this tracker
+        const connectedHeatMap = heatMapNodes.find(hn =>
+          edges.some(e => e.sourceNodeId === hn.id && e.targetNodeId === trackerNodeId)
+        );
+        if (connectedHeatMap) {
+          const hCfg = (connectedHeatMap.config ?? {}) as Record<string, unknown>;
+          heatmapConfig = {
+            heatmapEnabled: true,
+            heatmapResolution: (hCfg.heatmapResolution as number) ?? 40,
+            heatmapDecayRate: (hCfg.heatmapDecayRate as number) ?? 0.97,
+            heatmapOpacity: (hCfg.heatmapOpacity as number) ?? 0.4,
+            heatmapGaussianRadius: (hCfg.heatmapGaussianRadius as number) ?? 1,
+            heatmapMode: (hCfg.heatmapMode as string) ?? "detection",
+          };
+        }
+      }
+
       ws.send(JSON.stringify({
         type: "tracking_stage_config",
         enabled: true,
@@ -219,6 +243,7 @@ export function dispatchWorkflowConfig(
         useByte: (cfg.useByte as boolean) ?? false,
         gates: pureGates,
         costFunction,
+        ...heatmapConfig,
       }));
     }
     console.log(`[relay] Replayed tracking config (${trackingIdx.length} nodes) session=${sid}`);

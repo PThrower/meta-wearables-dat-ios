@@ -52,15 +52,24 @@ struct BoundingBoxOverlayView: View {
   /// When non-nil, renders dwell time, traffic counts, and speed on zone labels.
   var zoneAnalytics: RegistrySnapshot? = nil
 
+  /// Heat map grid snapshot from ObjectTrackingStage (nil when disabled).
+  var heatMap: HeatMapSnapshot? = nil
+
   var body: some View {
     let hasBoxes = showOverlay && (!boxes.isEmpty || !visionDetections.isEmpty || !trackedItems.isEmpty || !yoloDetections.isEmpty || sceneLabel != nil)
     let hasTranscription = transcription != nil
     let hasZones = !zones.isEmpty
-    if hasBoxes || hasTranscription || hasZones {
+    let hasHeatMap = heatMap != nil
+    if hasBoxes || hasTranscription || hasZones || hasHeatMap {
       GeometryReader { geometry in
         ZStack {
           // Zone overlay (background layer — rendered first, behind detections)
           zoneOverlay(zones: zones, size: geometry.size)
+
+          // Heat map density overlay (between zones and bounding boxes)
+          if let hm = heatMap {
+            heatMapOverlay(snapshot: hm, size: geometry.size)
+          }
 
           // Server AI bounding boxes (existing)
           if showOverlay {
@@ -347,6 +356,35 @@ struct BoundingBoxOverlayView: View {
   }
 
   // MARK: - Zone Overlay
+
+  /// Render heat map grid as colored cells overlay.
+  /// Extracted from body to reduce SwiftUI type-checker complexity.
+  @ViewBuilder
+  private func heatMapOverlay(snapshot: HeatMapSnapshot, size: CGSize) -> some View {
+    let cellW = size.width / CGFloat(snapshot.width)
+    let cellH = size.height / CGFloat(snapshot.height)
+    Canvas { context, _ in
+      for gy in 0..<snapshot.height {
+        for gx in 0..<snapshot.width {
+          let val = snapshot.values[gy * snapshot.width + gx]
+          let normalized = snapshot.maxValue > 0 ? val / snapshot.maxValue : 0
+          guard normalized > 0.01 else { continue }  // Skip empty cells
+          let (r, g, b, _) = HeatMapColor.color(for: normalized)
+          let rect = CGRect(
+            x: CGFloat(gx) * cellW,
+            y: CGFloat(gy) * cellH,
+            width: cellW,
+            height: cellH
+          )
+          context.fill(
+            Path(rect),
+            with: .color(.init(red: r, green: g, blue: b, opacity: snapshot.opacity))
+          )
+        }
+      }
+    }
+    .allowsHitTesting(false)
+  }
 
   /// Render zones as semi-transparent colored rectangles with dashed borders.
   /// When zoneAnalytics is provided, also renders dwell time, occupancy count, and speed.

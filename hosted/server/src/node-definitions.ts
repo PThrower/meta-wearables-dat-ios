@@ -99,7 +99,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Camera",
     subtitle: "${codec} ${visionFps}fps",
     color: { fill: "#0d3d38", header: "#14b8a6", stroke: "#14b8a6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "gate-mahalanobis", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "yolo-detect", "yolo-segment", "yolo-pose", "local-tts", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-thumbnails", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "gate-mahalanobis", "vision-tool-measure", "sensor-sound", "sensor-location", "sensor-location-significant", "sensor-location-visits", "sensor-location-geofence", "enhance-brightness", "enhance-sharpen", "enhance-white-balance", "enhance-noise-reduce", "enhance-edge-detect", "enhance-night-mode", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "yolo-detect", "yolo-segment", "yolo-pose", "local-tts", "tracking-heatmap", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "source",
     activationMode: null,
     binding: null,
@@ -477,7 +477,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "Person Detect",
     subtitle: "${maxPersons} persons | ${confidence}",
     color: { fill: "#1a0d3d", header: "#8b5cf6", stroke: "#8b5cf6" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "vision-thumbnails", "tracking-ocsort", "gate-mahalanobis", "gate-iou", "gate-bhattacharyya", "gate-reid", "cost-iou", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "vision",
     binding: "vision-person-detect",
@@ -628,8 +628,9 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "osnet-x10", label: "OSNet x1.0 (accurate)" },
       ] },
       { kind: "range", key: "gallerySize", label: "Gallery size (frames kept per track)", min: 1, max: 50, step: 1 },
+      { kind: "toggle", key: "useOnDevice", label: "On-device Embedding", description: "Extract OSNet-x0.25 embeddings on iOS (no server roundtrip)" },
     ],
-    defaultConfig: { embedDistance: 0.5, model: "osnet-x05", gallerySize: 10 },
+    defaultConfig: { embedDistance: 0.5, model: "osnet-x05", gallerySize: 10, useOnDevice: false },
     defaultLabel: "ReID Gate",
     runtime: ["mobile", "server"],
   },
@@ -656,7 +657,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     label: "OC-SORT Tracker",
     subtitle: "iou: ${iouThreshold} | maxAge: ${maxAge} | minHits: ${minHits}",
     color: { fill: "#0d2d1a", header: "#10b981", stroke: "#10b981" },
-    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "local-tts", "overlays", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "vision-face-detect", "vision-barcode-scan", "vision-ocr", "vision-scene-classify", "vision-person-detect", "vision-body-pose", "local-tts", "overlays", "palantir-ontology", "palantir-aip", "palantir-dataset", "palantir-llm", "palantir-action", "tracking-heatmap", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
     role: "processor",
     activationMode: "tracking",
     binding: "tracking-ocsort",
@@ -684,6 +685,31 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
     ],
     defaultConfig: { targetClasses: "", confidence: 0.5, iouThreshold: 0.3, maxTracks: 0, maxAge: 30, minHits: 3, targetFPS: 10, smoothingAlpha: 0.3, deltaT: 3, inertia: 0.2, detThresh: 0.5, useByte: false, forecastSteps: 0, zones: [], reconciliationEnabled: false, reconciliationMaxGap: 60, reconciliationThreshold: 0.4, reconciliationSpatialWeight: 0.3 },
     defaultLabel: "OC-SORT Tracker",
+    runtime: ["mobile"],
+  },
+  {
+    type: "tracking-heatmap",
+    label: "Heat Map",
+    subtitle: "${heatmapMode} | res: ${heatmapResolution}",
+    color: { fill: "#2d0a2d", header: "#ec4899", stroke: "#ec4899" },
+    allowedTargets: ["s2s-live", "s2s-rest", "s2s-e4b", "jepa-vision", "local-tts", "overlays", "tracking-ocsort", TARGET_ROLE_SINK, TARGET_ROLE_TRIGGER],
+    role: "processor",
+    activationMode: null,
+    binding: null,
+    defaultModel: null,
+    configSchema: [
+      { kind: "select", key: "heatmapMode", label: "Accumulation Mode", options: [
+        { value: "detection", label: "Detection (raw count hot spots)" },
+        { value: "dwell", label: "Dwell (time-weighted density)" },
+        { value: "traffic", label: "Traffic (transition counts)" },
+      ]},
+      { kind: "range", key: "heatmapResolution", label: "Grid Resolution (width in cells)", min: 10, max: 100, step: 5 },
+      { kind: "range", key: "heatmapDecayRate", label: "Decay Rate (per-frame fade)", min: 0.9, max: 0.999, step: 0.001 },
+      { kind: "range", key: "heatmapOpacity", label: "Overlay Opacity", min: 0.1, max: 0.8, step: 0.05 },
+      { kind: "number", key: "heatmapGaussianRadius", label: "Splat Radius (1=3x3, 2=5x5)", min: 1, max: 5, step: 1 },
+    ],
+    defaultConfig: { heatmapMode: "detection", heatmapResolution: 40, heatmapDecayRate: 0.97, heatmapOpacity: 0.4, heatmapGaussianRadius: 1 },
+    defaultLabel: "Heat Map",
     runtime: ["mobile"],
   },
   // --- Frame Enhancement nodes (on-device CIFilter transforms) ---
@@ -1238,7 +1264,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
       { kind: "textarea", key: "whereTemplate", label: "Where Template", rows: 3, placeholder: '{"type":"eq","field":"name","value":"${triggerText}"}' },
       { kind: "text", key: "selectFields", label: "Select Fields (comma-separated)", placeholder: "name,email,department" },
     ],
-    defaultConfig: { stackUrl: "", ontologyApiName: "", objectTypeId: "", operation: "search", whereTemplate: "", selectFields: "", transitionObjectTypeId: "", zoneObjectTypeId: "" },
+    defaultConfig: { stackUrl: "https://nshackathon.palantirfoundry.com", ontologyApiName: "ontology-57308d1b-c039-44ef-9dbe-196eb41a717c", objectTypeId: "ExamplePlatform", operation: "tracking_sync", whereTemplate: "", selectFields: "", transitionObjectTypeId: "ExampleCaskGpsPosition", zoneObjectTypeId: "ExampleGeoFeatures" },
     defaultLabel: "Palantir Ontology",
     runtime: ["server"],
   },
@@ -1357,6 +1383,7 @@ export const NODE_DEFINITIONS: NodeDefinition[] = [
         { value: "yolo11n", label: "YOLO11n (fast)" },
         { value: "yolo11s", label: "YOLO11s (balanced)" },
         { value: "yolo11m", label: "YOLO11m (accurate)" },
+        { value: "YOLO11PokerInt8LUT", label: "Poker Cards (52 classes)" },
         { value: "custom", label: "Custom (URL below)" },
       ]},
       { kind: "text", key: "modelUrl", label: "Custom Model URL", placeholder: "https://github.com/.../releases/download/.../model.mlpackage.zip" },
@@ -1440,6 +1467,24 @@ const TRIGGER_TYPES = NODE_DEFINITIONS.filter(d => d.role === "trigger").map(d =
 
 /** All current source type identifiers (derived from definitions) */
 const SOURCE_TYPES = NODE_DEFINITIONS.filter(d => d.role === "source").map(d => d.type);
+
+/** Build allowed sources map (reverse of allowedEdgeMap — which types can connect TO each node).
+ *  Currently no node definitions specify allowedSources, so this returns an empty map.
+ *  When nodes need to restrict incoming connections, add allowedSources to NodeDefinition. */
+export function buildAllowedSourcesMap(): Map<string, Set<string>> {
+  return new Map();
+}
+
+/** Resolve effective config schema, evaluating conditional fields against the workflow graph.
+ *  For now returns the node's full configSchema (no conditional filtering). */
+export function resolveEffectiveConfigSchema(
+  def: NodeDefinition,
+  _nodeId: string,
+  _nodes: unknown[],
+  _edges: unknown[],
+): ConfigFieldSchema[] {
+  return def.configSchema;
+}
 
 /** Build the allowed edge map from definitions (for validateEdges) */
 export function buildAllowedEdgeMap(): Map<string, Set<string>> {

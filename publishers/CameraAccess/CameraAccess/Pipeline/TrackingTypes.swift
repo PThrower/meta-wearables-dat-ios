@@ -98,6 +98,21 @@ struct TrackingStageConfig: Codable, Sendable {
     /// 0 = all appearance, 1 = all spatial distance.
     let reconciliationSpatialWeight: Double
 
+    // MARK: Heat Map Overlay
+
+    /// Enable heat map density overlay. Default false.
+    let heatmapEnabled: Bool
+    /// Grid resolution (width in cells, height derived from 4:3 aspect). Default 40.
+    let heatmapResolution: Int
+    /// Per-frame exponential decay rate. Default 0.97 (slow fade).
+    let heatmapDecayRate: Double
+    /// Gaussian splat kernel radius (1 = 3x3). Default 1.
+    let heatmapGaussianRadius: Int
+    /// Overlay opacity (0.1-0.8). Default 0.4.
+    let heatmapOpacity: Double
+    /// Accumulation mode: "dwell" | "traffic" | "detection". Default "detection".
+    let heatmapMode: String
+
     enum CodingKeys: String, CodingKey {
         case targetClasses, confidence, iouThreshold
         case maxAge, minHits, maxTracks, targetFPS
@@ -106,6 +121,8 @@ struct TrackingStageConfig: Codable, Sendable {
         case gates, costFunction, forecastSteps
         case reconciliationEnabled, reconciliationMaxGap
         case reconciliationThreshold, reconciliationSpatialWeight
+        case heatmapEnabled, heatmapResolution, heatmapDecayRate
+        case heatmapGaussianRadius, heatmapOpacity, heatmapMode
     }
 
     init(
@@ -128,7 +145,13 @@ struct TrackingStageConfig: Codable, Sendable {
         reconciliationEnabled: Bool = false,
         reconciliationMaxGap: Int = 60,
         reconciliationThreshold: Double = 0.4,
-        reconciliationSpatialWeight: Double = 0.3
+        reconciliationSpatialWeight: Double = 0.3,
+        heatmapEnabled: Bool = false,
+        heatmapResolution: Int = 40,
+        heatmapDecayRate: Double = 0.97,
+        heatmapGaussianRadius: Int = 1,
+        heatmapOpacity: Double = 0.4,
+        heatmapMode: String = "detection"
     ) {
         self.targetClasses = targetClasses
         self.confidence = confidence
@@ -150,6 +173,12 @@ struct TrackingStageConfig: Codable, Sendable {
         self.reconciliationMaxGap = reconciliationMaxGap
         self.reconciliationThreshold = reconciliationThreshold
         self.reconciliationSpatialWeight = reconciliationSpatialWeight
+        self.heatmapEnabled = heatmapEnabled
+        self.heatmapResolution = heatmapResolution
+        self.heatmapDecayRate = heatmapDecayRate
+        self.heatmapGaussianRadius = heatmapGaussianRadius
+        self.heatmapOpacity = heatmapOpacity
+        self.heatmapMode = heatmapMode
     }
 
     init(from decoder: Decoder) throws {
@@ -174,6 +203,12 @@ struct TrackingStageConfig: Codable, Sendable {
         self.reconciliationMaxGap = try c.decodeIfPresent(Int.self, forKey: .reconciliationMaxGap) ?? 60
         self.reconciliationThreshold = try c.decodeIfPresent(Double.self, forKey: .reconciliationThreshold) ?? 0.4
         self.reconciliationSpatialWeight = try c.decodeIfPresent(Double.self, forKey: .reconciliationSpatialWeight) ?? 0.3
+        self.heatmapEnabled = try c.decodeIfPresent(Bool.self, forKey: .heatmapEnabled) ?? false
+        self.heatmapResolution = try c.decodeIfPresent(Int.self, forKey: .heatmapResolution) ?? 40
+        self.heatmapDecayRate = try c.decodeIfPresent(Double.self, forKey: .heatmapDecayRate) ?? 0.97
+        self.heatmapGaussianRadius = try c.decodeIfPresent(Int.self, forKey: .heatmapGaussianRadius) ?? 1
+        self.heatmapOpacity = try c.decodeIfPresent(Double.self, forKey: .heatmapOpacity) ?? 0.4
+        self.heatmapMode = try c.decodeIfPresent(String.self, forKey: .heatmapMode) ?? "detection"
     }
 }
 
@@ -471,6 +506,8 @@ struct TrackingFrameResult: Sendable {
     let timestamp: Double
     /// Zone breaches predicted from trajectory forecasts (empty when forecast disabled).
     let predictedZoneBreaches: [ZoneTransition]
+    /// Heat map grid snapshot (nil when heatmap disabled).
+    let heatMap: HeatMapSnapshot?
 
     func jsonDict() -> [String: Any] {
         return [

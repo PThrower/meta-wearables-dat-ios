@@ -11,6 +11,7 @@ import { getContainer, getWorkflow, getSelectedNodeId, getViewBox } from "./stat
 import { getNodeDef } from "./node-defs.js";
 import { evaluateCondition } from "./shared-config.js";
 import type { GraphContext } from "./shared-config.js";
+import { evaluateCondition, type GraphContext } from "./shared-config.js";
 import { wireSVGEvents } from "./interactions.js";
 import { isTouchDevice } from "./interactions.js";
 import { detectFlows, DEFAULT_EDGE_COLOR } from "./flow-detection.js";

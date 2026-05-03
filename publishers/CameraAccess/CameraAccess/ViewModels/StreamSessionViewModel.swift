@@ -124,6 +124,8 @@ class StreamSessionViewModel: ObservableObject {
   @Published var trackingTracks: [Track] = []
   /// Latest registry snapshot with zone analytics (dwell times, traffic, speeds).
   @Published var trackingSnapshot: RegistrySnapshot? = nil
+  /// Heat map grid snapshot from tracking stage (nil when disabled).
+  @Published var heatMap: HeatMapSnapshot? = nil
 
   /// Zone definitions from the active tracking config (for overlay rendering).
   var activeZones: [ZoneDefinition] {
@@ -844,7 +846,7 @@ class StreamSessionViewModel: ObservableObject {
     let stage = VisionStage(config: visionConfig)
 
     // Wire result callback to update overlay AND relay to server
-    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?, histograms: [(Int, [Double])]) in
+    await stage.setOnResult { [weak self] (result: VisionFrameResult, thumbnails: [(Int, String)]?, histograms: [(Int, [Double])], embeddings: [(Int, [Double])]) in
       await MainActor.run {
         // When tracking is active, suppress raw vision boxes —
         // the tracker will emit tracked items with persistent IDs instead.
@@ -867,21 +869,25 @@ class StreamSessionViewModel: ObservableObject {
       }
       // Feed detections into tracking stage if active
       if let trackingStage = await self?.trackingStage {
-        // Build histogram lookup from VisionStage extraction
+        // Build histogram + embedding lookups from VisionStage extraction
         let histMap = Dictionary(uniqueKeysWithValues: histograms)
+        let embedMap = Dictionary(uniqueKeysWithValues: embeddings)
+        let hasOnDeviceEmbedding = !embedMap.isEmpty
         let trackDets: [TrackDetection] = result.detections.enumerated().compactMap { (i, det) in
           guard let bbox = det.boundingBox else { return nil }
           return TrackDetection(
             bbox: bbox,
             confidence: det.confidence,
             classLabel: det.displayLabel,
-            histogram: histMap[i]
+            histogram: histMap[i],
+            embedding: embedMap[i]
           )
         }
         if !trackDets.isEmpty {
           await trackingStage.feedDetections(trackDets, timestamp: CFAbsoluteTimeGetCurrent())
         }
-        // Send ReID crops when gate-reid is in tracking config
+        // Send ReID crops to server only when gate-reid is present AND on-device extraction is NOT active.
+        // When EmbeddingExtractor is wired, embeddings arrive directly in TrackDetection — no roundtrip needed.
         let hasReID: Bool
         if let self = self {
           hasReID = await self.trackingConfig?.gates.contains(where: { $0.gateType == "gate-reid" }) ?? false
@@ -891,6 +897,7 @@ class StreamSessionViewModel: ObservableObject {
         if let self,
            await self.trackingStage != nil,
            hasReID,
+           !hasOnDeviceEmbedding,
            let thumbnails {
           let reidCrops = thumbnails.filter { (i, _) in
             result.detections[i].boundingBox != nil
@@ -921,7 +928,7 @@ class StreamSessionViewModel: ObservableObject {
   // MARK: - YOLO Stage
 
   /// Configure YOLO CoreML on-device inference stage from server-sent config.
-  private func configureYOLOStage(config: [String: Any]) async {
+  private func configureYOLOStage(config: [String: Any]) async throws {
     // Unregister existing YOLO stage if any
     if let existing = yoloStage {
       await existing.stop()
@@ -1174,6 +1181,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingConfig = nil
       trackingTracks = []
       trackingSnapshot = nil
+      heatMap = nil
     }
 
     let trackingConfig = TrackingStageConfig(
@@ -1208,7 +1216,13 @@ class StreamSessionViewModel: ObservableObject {
         )
       } ?? [],
       costFunction: config["costFunction"] as? String,
-      forecastSteps: config["forecastSteps"] as? Int ?? 0
+      forecastSteps: config["forecastSteps"] as? Int ?? 0,
+      heatmapEnabled: config["heatmapEnabled"] as? Bool ?? false,
+      heatmapResolution: config["heatmapResolution"] as? Int ?? 40,
+      heatmapDecayRate: config["heatmapDecayRate"] as? Double ?? 0.97,
+      heatmapGaussianRadius: config["heatmapGaussianRadius"] as? Int ?? 1,
+      heatmapOpacity: config["heatmapOpacity"] as? Double ?? 0.4,
+      heatmapMode: config["heatmapMode"] as? String ?? "detection"
     )
 
     let stage = ObjectTrackingStage(config: trackingConfig)
@@ -1220,11 +1234,29 @@ class StreamSessionViewModel: ObservableObject {
       await visionStage.setExtractHistograms(hasBhattacharyya)
     }
 
+    // Enable on-device OSNet embedding extraction when ReID gate has useOnDevice=true.
+    // Bypasses server reid_crops roundtrip — embeddings arrive directly in TrackDetection.
+    let reidGate = trackingConfig.gates.first(where: { $0.gateType == "gate-reid" })
+    let useOnDeviceReID = reidGate?.params["useOnDevice"] == 1.0
+    if useOnDeviceReID, let visionStage {
+      do {
+        let extractor = try EmbeddingExtractor.createFromBundle()
+        await visionStage.setEmbeddingExtractor(extractor)
+        NSLog("[StreamSession] On-device ReID enabled: OSNet-x0.25 embedding extraction active")
+      } catch {
+        NSLog("[StreamSession] Failed to load on-device ReID model: \(error.localizedDescription)")
+        await visionStage.setEmbeddingExtractor(nil)
+      }
+    } else if let visionStage {
+      await visionStage.setEmbeddingExtractor(nil)
+    }
+
     // Wire result callback to update overlay AND relay to server
     await stage.setOnResult { [weak self] result in
       await MainActor.run {
         self?.trackingTracks = result.tracks
         self?.trackingSnapshot = result.registry
+        self?.heatMap = result.heatMap
       }
       // Relay tracking result JSON to server
       await self?.relayStage.sendJson(result.jsonDict())
@@ -1315,6 +1347,7 @@ class StreamSessionViewModel: ObservableObject {
       if msgType == "app_status" {
         let status = msg["status"] as? String
         let appId = msg["appId"] as? String
+        let errorMsg = msg["error"] as? String
         Task { @MainActor [weak self] in
           if status == "active" {
             self?.activeAppId = appId
@@ -1326,7 +1359,50 @@ class StreamSessionViewModel: ObservableObject {
             // The server should also send individual *_stage_config enabled:false
             // messages, but this handles edge cases (missed WS, server restart).
             await self?.stopAllPipelineStages()
+            if status == "error", let err = errorMsg {
+              let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+              self?.errorLog.append("[\(ts)] App error (\(appId ?? "unknown")): \(err)")
+              if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+              self?.errorMessage = "App error: \(err)"
+              self?.showError = true
+            }
           }
+        }
+      }
+
+      // Workflow activation errors from server
+      if msgType == "workflow_error", let error = msg["error"] as? String {
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] Workflow error: \(error)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+          self?.errorMessage = "Workflow error: \(error)"
+          self?.showError = true
+        }
+      }
+
+      // Server-originated operational errors (guidance, JEPA, ReID failures)
+      if msgType == "server_error", let message = msg["message"] as? String {
+        let source = msg["source"] as? String ?? "unknown"
+        let severity = msg["severity"] as? String ?? "warning"
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] [\(source)/\(severity)] \(message)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
+          if severity == "critical" {
+            self?.errorMessage = "[\(source)] \(message)"
+            self?.showError = true
+          }
+        }
+      }
+
+      // ReID crop processing failure (transient — log only)
+      if msgType == "reid_error", let error = msg["error"] as? String {
+        let cropCount = msg["cropCount"] as? Int ?? 0
+        Task { @MainActor [weak self] in
+          let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+          self?.errorLog.append("[\(ts)] ReID error (\(cropCount) crops): \(error)")
+          if let count = self?.errorLog.count, count > 50 { self?.errorLog.removeFirst(count - 50) }
         }
       }
 
@@ -1496,6 +1572,7 @@ class StreamSessionViewModel: ObservableObject {
             trackingStage = nil
             trackingTracks = []
       trackingSnapshot = nil
+      heatMap = nil
             NSLog("[StreamSession] ObjectTrackingStage disabled by server")
           }
         } else {
@@ -1558,7 +1635,12 @@ class StreamSessionViewModel: ObservableObject {
         } else {
           Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.configureYOLOStage(config: msg)
+            do {
+              try await self.configureYOLOStage(config: msg)
+            } catch {
+              NSLog("[StreamSession] YOLO configuration failed: \(error.localizedDescription)")
+              yoloModelState = .failed(modelId: msg["modelId"] as? String ?? "unknown", error: error.localizedDescription)
+            }
           }
         }
       }
@@ -1789,6 +1871,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
     }
     trackingTracks = []
+    heatMap = nil
     // Measure
     if let m = measureStage {
       await m.stop()
@@ -1835,6 +1918,7 @@ class StreamSessionViewModel: ObservableObject {
       trackingStage = nil
     }
     trackingTracks = []
+    heatMap = nil
 
     // Stop tool measurement stage
     if let mStage = measureStage {

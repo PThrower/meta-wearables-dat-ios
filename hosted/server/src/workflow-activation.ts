@@ -696,6 +696,22 @@ export async function handleWorkflowActivation(
         trackingConfig.reconciliationThreshold = (rawConfig.reconciliationThreshold as number) ?? 0.4;
         trackingConfig.reconciliationSpatialWeight = (rawConfig.reconciliationSpatialWeight as number) ?? 0.3;
       }
+      // Collect heatmap config from tracking-heatmap nodes connected to this tracker
+      const heatMapNode = processableNodes.find(n =>
+        n.type === "tracking-heatmap" &&
+        edges.some(e => e.sourceNodeId === n.id && e.targetNodeId === rawNode.id)
+      );
+      if (heatMapNode) {
+        const hCfg = (heatMapNode.config ?? {}) as Record<string, unknown>;
+        trackingConfig.heatmapEnabled = true;
+        trackingConfig.heatmapResolution = (hCfg.heatmapResolution as number) ?? 40;
+        trackingConfig.heatmapDecayRate = (hCfg.heatmapDecayRate as number) ?? 0.97;
+        trackingConfig.heatmapOpacity = (hCfg.heatmapOpacity as number) ?? 0.4;
+        trackingConfig.heatmapGaussianRadius = (hCfg.heatmapGaussianRadius as number) ?? 1;
+        trackingConfig.heatmapMode = (hCfg.heatmapMode as string) ?? "detection";
+      } else {
+        trackingConfig.heatmapEnabled = false;
+      }
       if (session.publisher?.ws?.readyState === WebSocket.OPEN) {
         session.publisher.ws.send(JSON.stringify(trackingConfig));
       }

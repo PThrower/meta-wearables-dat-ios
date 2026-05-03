@@ -100,15 +100,27 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     private var previewBus: PreviewBus?
     private let previewSource = PreviewSource(stageId: "vision", label: "Vision")
 
-    // Callback for relaying results to server (includes optional thumbnails + histograms)
-    private var onResult: (@Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])]) async -> Void)?
+    // Callback for relaying results to server (includes optional thumbnails + histograms + embeddings)
+    private var onResult: (@Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])], [(Int, [Double])]) async -> Void)?
 
     /// Whether to extract HSV histograms for Bhattacharyya gate.
     var extractHistograms: Bool = false
 
+    /// Whether to extract OSNet embeddings for ReID gate (on-device, bypasses server roundtrip).
+    var extractEmbeddings: Bool = false
+
+    /// On-device OSNet embedding extractor (loaded by ViewModel when gate-reid + useOnDevice).
+    var embeddingExtractor: EmbeddingExtractor?
+
     /// Setter for extractHistograms callable from outside the actor.
     func setExtractHistograms(_ value: Bool) {
         extractHistograms = value
+    }
+
+    /// Setter for embedding extraction and extractor callable from outside the actor.
+    func setEmbeddingExtractor(_ extractor: EmbeddingExtractor?) {
+        embeddingExtractor = extractor
+        extractEmbeddings = extractor != nil
     }
 
     init(config: VisionStageConfig = .default) {
@@ -122,7 +134,7 @@ actor VisionStage: @preconcurrency FramePipelineStage {
         self.previewBus = bus
     }
 
-    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])]) async -> Void) {
+    func setOnResult(_ handler: @escaping @Sendable (VisionFrameResult, [(Int, String)]?, [(Int, [Double])], [(Int, [Double])]) async -> Void) {
         self.onResult = handler
     }
 
@@ -323,14 +335,25 @@ actor VisionStage: @preconcurrency FramePipelineStage {
             }
         }
 
+        // Extract OSNet embeddings for ReID gate (on-device, <10ms per crop)
+        var embeddings: [(Int, [Double])] = []
+        if extractEmbeddings, let snapshotBuffer, let extractor = embeddingExtractor {
+            for (i, detection) in detections.enumerated() {
+                guard let bbox = detection.boundingBox else { continue }
+                if let embed = extractor.extract(from: snapshotBuffer, bbox: bbox) {
+                    embeddings.append((i, embed))
+                }
+            }
+        }
+
         // Publish to PreviewBus for overlay rendering
         if let previewBus {
             Task { await previewBus.publish(.json(source: previewSource, value: result.jsonDict(thumbnails: nil))) }
         }
 
-        // Relay to server via callback (includes thumbnails + histograms)
+        // Relay to server via callback (includes thumbnails + histograms + embeddings)
         if let onResult {
-            Task { await onResult(result, thumbnails, histograms) }
+            Task { await onResult(result, thumbnails, histograms, embeddings) }
         }
     }
 

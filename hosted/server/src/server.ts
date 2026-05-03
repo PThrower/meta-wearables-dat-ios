@@ -77,6 +77,7 @@ import * as q from "./db/queries.js";
 import { isApnsConfigured, sendSilentWake, sendVisibleWake } from "./apns.js";
 import { handleWorkflowActivation, validateEdges, type ActivationDeps } from "./workflow-activation.js";
 import { dispatchWorkflowConfig } from "./workflow-dispatch.js";
+import type { ServerErrorCallback } from "./message-types.js";
 import { handleWsMessage, broadcastToViewers, buildSessionInfo, type WsMessageDeps } from "./ws-message-handler.js";
 
 // --- Auto-detect WiFi IP ---
@@ -340,6 +341,22 @@ jepaOrchestrator.setPersistFn((sessionId: string, event) => {
 jepaOrchestrator.setFlowTriggerFn((sessionId: string, event) => {
   orchestrator.checkFlowTriggers(sessionId, "jepa", { event });
 });
+
+// --- Shared server error callback ---
+// All three orchestrators push errors to iOS publisher + viewers via this single callback.
+const pushServerError: ServerErrorCallback = (sessionId, report) => {
+  registry.sendJsonToPublisher(sessionId, {
+    type: "server_error",
+    ...report,
+    context: { ...report.context, sessionId },
+  });
+  // Also broadcast to viewers for web platform error display
+  const session = registry.get(sessionId);
+  if (session) broadcastToViewers(session, { type: "server_error", ...report, context: { ...report.context, sessionId } });
+};
+orchestrator.setServerErrorCallback(pushServerError);
+jepaOrchestrator.setServerErrorCallback(pushServerError);
+reidOrchestrator.setServerErrorCallback(pushServerError);
 
 // --- WASM Loading ---
 // Load the FrameRelay class constructor once, instantiate per-session (lazy)

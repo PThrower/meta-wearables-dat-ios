@@ -67,3 +67,15 @@ export function isVisionResult(msg: unknown): msg is VisionResultMessage {
 export function isSensorResult(msg: unknown): msg is SensorResultMessage {
   return typeof msg === "object" && msg !== null && (msg as Record<string, unknown>).type === "sensor_result";
 }
+
+// --- Server Error Report ---
+
+export interface ServerErrorReport {
+  source: string;     // "guidance" | "jepa" | "reid" | "activation" | "session"
+  severity: "info" | "warning" | "critical";
+  message: string;
+  context?: Record<string, string>;
+}
+
+/** Shared callback type for pushing server errors to publisher + viewers */
+export type ServerErrorCallback = (sessionId: string, report: ServerErrorReport) => void;
