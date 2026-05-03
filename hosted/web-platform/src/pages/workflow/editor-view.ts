@@ -166,7 +166,7 @@ const PALETTE_CATEGORIES: PaletteCategory[] = [
       { label: "Recognition", match: d => ["vision-barcode-scan", "vision-ocr", "vision-scene-classify"].includes(d.type) },
       { label: "Utility",     match: d => d.type === "vision-thumbnails" },
     ] },
-  { label: "Tracking",     accent: "#10b981", match: d => d.activationMode === "tracking" },
+  { label: "Tracking",     accent: "#10b981", match: d => d.activationMode === "tracking" || d.type === "tracking-heatmap" },
   { label: "Gating",       accent: "#06b6d4", match: d => d.role === "gating" || d.type === "cost-iou" },
   { label: "Measurement",  accent: "#a78bfa", match: d => d.activationMode === "measure" },
   { label: "Enhance",      accent: "#84cc16", match: d => d.activationMode === "enhance" },
