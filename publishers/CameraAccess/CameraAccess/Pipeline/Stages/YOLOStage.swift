@@ -90,30 +90,9 @@ actor YOLOStage: @preconcurrency FramePipelineStage {
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
-        // Downscaled snapshot preserving aspect ratio (960 max dimension = ~2MB for 16:9).
-        // Full frame would be 8MB (1920x1080); downscaling to 960x540 saves ~6MB/frame.
+        // Medium-quality snapshot (960 max, ~2MB) — saves ~6MB/frame vs full resolution.
         // VNImageRequestHandler returns normalized coords regardless of input resolution.
-        var snapshotBuffer: CVPixelBuffer?
-        if let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) {
-            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
-            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
-            // Downscale: cap longest dimension at 960, preserve aspect ratio
-            let maxDim = 960
-            let scale = min(Double(maxDim) / Double(bufWidth), Double(maxDim) / Double(bufHeight), 1.0)
-            let snapWidth = max(1, Int(Double(bufWidth) * scale))
-            let snapHeight = max(1, Int(Double(bufHeight) * scale))
-            let attrs: [String: Any] = [
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
-            ]
-            if bufWidth > 0, bufHeight > 0,
-               CVPixelBufferCreate(kCFAllocatorDefault, snapWidth, snapHeight,
-                                    kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
-               let snap = snapshotBuffer {
-                PipelineCIContext.shared.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
-                             bounds: CGRect(x: 0, y: 0, width: snapWidth, height: snapHeight),
-                             colorSpace: CGColorSpaceCreateDeviceRGB())
-            }
-        }
+        let snapshotBuffer = SnapshotConfig.medium.createSnapshot(from: packet.sampleBuffer)
         await processFrameInternal(packet, pixelBuffer: snapshotBuffer)
     }
 

@@ -150,27 +150,9 @@ actor VisionStage: @preconcurrency FramePipelineStage {
     }
 
     nonisolated func processFrame(_ packet: FramePacket) async {
-        // Snapshot pixel buffer SYNCHRONOUSLY before actor hop.
-        // Task.detached in FramePipelineManager introduces a scheduling delay —
-        // by the time the actor runs, the SDK may have recycled the IOSurface.
-        // Capturing here (still synchronous, still on the calling thread) ensures
-        // the snapshot matches the frame that produced the detections.
-        var snapshotBuffer: CVPixelBuffer?
-        if let pixelBuffer = CMSampleBufferGetImageBuffer(packet.sampleBuffer) {
-            let bufWidth = CVPixelBufferGetWidth(pixelBuffer)
-            let bufHeight = CVPixelBufferGetHeight(pixelBuffer)
-            let attrs: [String: Any] = [
-                kCVPixelBufferIOSurfacePropertiesKey as String: [:] as [String: Any]
-            ]
-            if bufWidth > 0, bufHeight > 0,
-               CVPixelBufferCreate(kCFAllocatorDefault, bufWidth, bufHeight,
-                                    kCVPixelFormatType_32BGRA, attrs as CFDictionary, &snapshotBuffer) == kCVReturnSuccess,
-               let snap = snapshotBuffer {
-                PipelineCIContext.shared.render(CIImage(cvPixelBuffer: pixelBuffer), to: snap,
-                             bounds: CGRect(x: 0, y: 0, width: bufWidth, height: bufHeight),
-                             colorSpace: CGColorSpaceCreateDeviceRGB())
-            }
-        }
+        // Full-resolution snapshot — VisionStage needs pixel-perfect data for
+        // thumbnail extraction, histogram analysis, and embedding computation.
+        let snapshotBuffer = SnapshotConfig.full.createSnapshot(from: packet.sampleBuffer)
         await processFrameInternal(packet, snapshotBuffer: snapshotBuffer)
     }
 
